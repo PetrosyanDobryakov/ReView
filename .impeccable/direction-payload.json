@@ -1,0 +1,75 @@
+{
+  "title": "Choose the visual world",
+  "question": "Layout stays. Violet chrome goes. Chrome skins and canvas paper stay separate. Pick the world the chrome is made of.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Lab enamel caseboard",
+      "kicker": "THE ROLL",
+      "lineage": "Hospital / lab baked-enamel status boards, clip strips, magnetic tabs",
+      "thesis": "Chrome is a baked enamel instrument panel around the paper, not a SaaS dashboard.",
+      "palette": ["#d7e2dc", "#1f4a4a", "#c45c26", "#f4efe4", "#1c1f1d"],
+      "materials": ["baked enamel", "magnetic status tabs", "dry-erase clip rail"],
+      "viewport": "Same skeleton: top bar, left tool rail, canvas, status. Enamel field, teal header strip, one ochre tab as the live tool, paper in the middle is independent.",
+      "risk": "Clinic teal can read ‘medical app’ if tabs become badges and the board stops looking like a work surface.",
+      "sketch": ".impeccable/sketches/assigned.webp"
+    },
+    {
+      "id": "challenger-ticket-wallet",
+      "label": "Jet-age ticket wallet",
+      "kicker": "CHALLENGER",
+      "lineage": "Airline coupon books, carbon copies, baggage stubs",
+      "thesis": "Chrome is coupon stock and stamped legs; the board is the remaining journey.",
+      "palette": ["#0b1f3a", "#c4122f", "#f6f4ee", "#5c4a7a"],
+      "materials": ["coupon stock", "carbon strike", "hairline fare boxes"],
+      "viewport": "Same layout. Navy top coupon, red validated stamps on sync/save, hairline fields for zoom and tools, canvas as the unused coupon.",
+      "risk": "Carbon purple and airline red can resurrect accent-slop if they flood the rail.",
+      "case": "Audience ID weaker (airport, not desk). Product clarity decent for status stamps; fuses poorly if VOID/carbon becomes another purple brand.",
+      "sketch": ".impeccable/sketches/challenger-ticket-wallet.webp",
+      "hero": "https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet.webp"
+    },
+    {
+      "id": "challenger-drum-machine",
+      "label": "Rhythm-machine panel",
+      "kicker": "CHALLENGER",
+      "lineage": "Early-80s step-row drum machines",
+      "thesis": "The tool rail is a silkscreened key row; chrome themes are pattern banks.",
+      "palette": ["#2a2a28", "#e23b2e", "#f0a020", "#f3e27a", "#efefea"],
+      "materials": ["charcoal panel", "candy step keys", "LED chase, silkscreen caps"],
+      "viewport": "Same layout. Charcoal chrome, tools as squat keys in four color quarters, status as a segmented tempo readout, canvas untouched.",
+      "risk": "Reads as a synth plugin; candy keys can toy the board.",
+      "case": "Audience ID mixed (musician). Product clarity strong for theme banks as pattern banks; fuses poorly if chase-light motion fights a still canvas.",
+      "sketch": ".impeccable/sketches/challenger-drum-machine.webp",
+      "hero": "https://impeccable.style/worlds/cards/signals-instruments-drum-machine-step-row-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/signals-instruments-drum-machine-step-row.webp"
+    },
+    {
+      "id": "challenger-miura",
+      "label": "Miura orbit sheet",
+      "kicker": "CHALLENGER",
+      "lineage": "Deployable Miura-fold solar sails and map packets",
+      "thesis": "Chrome is the gold packet; the canvas is the deployed crease field.",
+      "palette": ["#f7f4ee", "#c4a35a", "#8aa4b8", "#6b6b66", "#1a1a18"],
+      "materials": ["matte sheet", "gold foil packet", "mountain/valley scores"],
+      "viewport": "Same layout. Compact gold chrome, pale sheet canvas with scored grid independent of chrome, tools as crease-cell toggles.",
+      "risk": "Aerospace spec can feel like a NASA microsite instead of a desk board.",
+      "case": "Audience ID niche. Product clarity good for independent paper vs packet; fuses poorly if tessellation redraws the skeleton we must keep.",
+      "sketch": ".impeccable/sketches/challenger-miura.webp",
+      "hero": "https://impeccable.style/worlds/cards/paper-folds-pleats-deployable-miura-orbit-sheet-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/paper-folds-pleats-deployable-miura-orbit-sheet.webp"
+    }
+  ],
+  "reroll": true,
+  "steer": true,
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "A serious infinite-canvas editor: dark or light chrome, one accent, tool rail, properties in the top bar. FigJam / Excalidraw / Miro craft, no irony.",
+    "viewport": "The current skeleton executed at competitor fidelity: Inter-class UI, quiet gray, one accent, no enamel, no coupons.",
+    "palette": ["#111318", "#2b3040", "#5b67d8", "#f4f4f5"],
+    "materials": ["flat UI panels", "1px hairlines", "soft rounded controls"],
+    "risk": "This is the violet dashboard again if the accent stays purple.",
+    "sketch": ".impeccable/sketches/canon.webp"
+  }
+}

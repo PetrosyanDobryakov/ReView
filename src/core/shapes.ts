@@ -27,15 +27,15 @@ export interface ShapeBox {
 }
 
 export const COLORS = {
-  background: '#161922',
-  grid: 'rgba(255,255,255,0.055)',
-  stroke: '#7c8cff',
+  background: '#1c1c1a',
+  grid: 'rgba(236,234,228,0.055)',
+  stroke: '#6b6b66',
   fill: '#ffffff',
   sticky: '#ffe27a',
   stickyStroke: '#d9b64d',
-  pen: '#f2f5ff',
-  text: '#e8ecf5',
-  selection: '#7c8cff',
+  pen: '#eceae4',
+  text: '#eceae4',
+  selection: '#c4b8a8',
 } as const;
 
 export const PEN_STROKE = 3;
@@ -63,8 +63,8 @@ export function themeFor(bg: string): BoardTheme {
   const b = parseInt(bg.slice(5, 7), 16);
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return lum > 0.5
-    ? { text: '#1f2430', grid: 'rgba(0,0,0,0.07)' }
-    : { text: '#e8ecf5', grid: 'rgba(255,255,255,0.055)' };
+    ? { text: '#1c1c1a', grid: 'rgba(28, 28, 26, 0.07)' }
+    : { text: '#eceae4', grid: 'rgba(236, 234, 228, 0.055)' };
 }
 
 export function intersects(a: ShapeBox, b: ShapeBox): boolean {
@@ -245,9 +245,9 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
       if (img && img.complete && img.naturalWidth > 0) {
         ctx.drawImage(img, v.x, v.y, v.w, v.h);
       } else {
-        ctx.fillStyle = '#2b3040';
+        ctx.fillStyle = '#2e2e2b';
         ctx.fillRect(v.x, v.y, v.w, v.h);
-        ctx.strokeStyle = '#4a5268';
+        ctx.strokeStyle = '#454540';
         ctx.lineWidth = 1;
         ctx.strokeRect(v.x, v.y, v.w, v.h);
       }

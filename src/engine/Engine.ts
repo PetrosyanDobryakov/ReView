@@ -178,6 +178,15 @@ export class Engine {
     this.events.onSelection?.([...this.selection]);
   }
 
+  selectedViews(): ShapeView[] {
+    const out: ShapeView[] = [];
+    for (const id of this.selection) {
+      const v = this.views.get(id);
+      if (v) out.push(v);
+    }
+    return out;
+  }
+
   hitTest(x: number, y: number): string | null {
     const box = { x: x - 1, y: y - 1, w: 2, h: 2 };
     const candidates = this.grid.query(box);

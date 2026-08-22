@@ -39,6 +39,12 @@ export function moveOrderToBack(ids: string[]): void {
   });
 }
 
+const PAPER_MIGRATE: Record<string, string> = {
+  '#161922': '#1c1c1a',
+  '#0d0f16': '#121110',
+  '#2b3040': '#2c2a26',
+};
+
 export function setMeta(patch: Record<string, unknown>): void {
   transact(() => {
     for (const [key, value] of Object.entries(patch)) meta.set(key, value);
@@ -46,7 +52,16 @@ export function setMeta(patch: Record<string, unknown>): void {
 }
 
 export function metaBg(): string {
-  return (meta.get('bg') as string) ?? COLORS.background;
+  const raw = meta.get('bg');
+  const bg = typeof raw === 'string' ? raw : COLORS.background;
+  return PAPER_MIGRATE[bg] ?? bg;
+}
+
+export function migratePaper(): void {
+  const raw = meta.get('bg');
+  if (typeof raw !== 'string') return;
+  const next = PAPER_MIGRATE[raw];
+  if (next) setMeta({ bg: next });
 }
 
 export function metaGrid(): boolean {
@@ -60,8 +75,10 @@ export const undoManager = new Y.UndoManager([board, order], {
 
 export const persistence = new IndexeddbPersistence('doska-v1', doc);
 
+if (persistence.synced) migratePaper();
 persistence.on('synced', () => {
   ensureOrder();
+  migratePaper();
 });
 
 const SYNC_URL = `ws://${typeof location !== 'undefined' ? location.hostname : 'localhost'}:1234`;

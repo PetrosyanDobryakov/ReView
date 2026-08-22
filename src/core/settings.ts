@@ -25,16 +25,16 @@ export interface EraserSettings {
 
 export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSettings; eraser: EraserSettings } = {
   pen: {
-    color: '#f2f5ff',
+    color: '#eceae4',
     size: 3,
     style: 'marker',
   },
   shape: {
     fill: '#ffffff',
-    stroke: '#7c8cff',
+    stroke: '#6b6b66',
   },
   text: {
-    color: '#f2f5ff',
+    color: '#eceae4',
     size: 18,
   },
   eraser: {
