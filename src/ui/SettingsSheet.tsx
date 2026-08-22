@@ -1,5 +1,6 @@
 import { CHROME_THEME_IDS, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
+import type { SyncStatus } from '../core/store';
 import { Icon } from './icons';
 import { BG_PRESETS, CHROME_LABEL, t } from './i18n';
 
@@ -9,6 +10,8 @@ export function SettingsSheet({
   chromeTheme,
   bg,
   gridOn,
+  sync,
+  saved,
   onLocale,
   onChromeTheme,
   onBg,
@@ -20,6 +23,8 @@ export function SettingsSheet({
   chromeTheme: ChromeThemeId;
   bg: string;
   gridOn: boolean;
+  sync: SyncStatus;
+  saved: boolean;
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
   onBg: (value: string) => void;
@@ -38,6 +43,23 @@ export function SettingsSheet({
             <Icon name="close" size={16} />
           </button>
         </header>
+
+        <section className="sheet-section">
+          <h3>{t(locale, 'connection')}</h3>
+          <p className="sheet-hint">{t(locale, 'syncHint')}</p>
+          <ul className="sheet-keys">
+            <li>
+              <span className={`status-line${sync.online ? ' on' : ''}`}>
+                {sync.online ? t(locale, 'online') : t(locale, 'offline')}
+              </span>
+              <span>{sync.online ? sync.users : '—'}</span>
+            </li>
+            <li>
+              <span className={`status-line${saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
+              <span>{saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
+            </li>
+          </ul>
+        </section>
 
         <section className="sheet-section">
           <h3>{t(locale, 'language')}</h3>

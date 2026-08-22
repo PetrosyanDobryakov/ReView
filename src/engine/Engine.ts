@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
+import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
@@ -680,7 +680,7 @@ export class Engine {
   }
 
   measureText(text: string, fontSize: number): { w: number; h: number } {
-    this.ctx.font = `${fontSize}px 'Segoe UI', system-ui, sans-serif`;
+    this.ctx.font = `${fontSize}px ${BOARD_TYPEFACE}`;
     const lines = text.split('\n');
     let maxW = 0;
     for (const line of lines) {

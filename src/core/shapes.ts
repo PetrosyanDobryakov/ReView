@@ -26,6 +26,8 @@ export interface ShapeBox {
   h: number;
 }
 
+export const BOARD_TYPEFACE = '"Space Grotesk", Onest, "Segoe UI", system-ui, sans-serif';
+
 export const COLORS = {
   background: '#1c1c1a',
   grid: 'rgba(236,234,228,0.055)',
@@ -170,7 +172,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 }
 
 export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string = COLORS.text): void {
-  const font = `${v.fontSize ?? TEXT_FONT}px 'Segoe UI', system-ui, sans-serif`;
+  const font = `${v.fontSize ?? TEXT_FONT}px ${BOARD_TYPEFACE}`;
   switch (v.type) {
     case 'rect': {
       ctx.fillStyle = v.fill;
@@ -319,7 +321,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   }
   ctx.clip();
   ctx.fillStyle = v.textColor ?? textColor;
-  ctx.font = `${size}px 'Segoe UI', system-ui, sans-serif`;
+  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const lineHeight = size * 1.25;

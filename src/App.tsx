@@ -5,6 +5,7 @@ import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
+import { Presence } from './ui/Presence';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { Icon } from './ui/icons';
@@ -218,10 +219,8 @@ export default function App() {
               {t(locale, 'error')}: {error}
             </button>
           )}
-          <div className={`sync-badge${sync.online ? ' online' : ''}`} title={t(locale, 'syncHint')}>
-            {sync.online ? `${t(locale, 'online')} · ${sync.users}` : t(locale, 'offline')}
-          </div>
-          <div className={`save-badge${saved ? ' saved' : ''}`}>{saved ? t(locale, 'saved') : t(locale, 'loading')}</div>
+          <Presence locale={locale} online={sync.online} />
+          <div className="island-sep" />
           <button className="icon-btn" title={t(locale, 'settings')} onClick={() => setSettingsOpen(true)}>
             <Icon name="settings" />
           </button>
@@ -274,6 +273,8 @@ export default function App() {
         chromeTheme={chromeTheme}
         bg={bg}
         gridOn={gridOn}
+        sync={sync}
+        saved={saved}
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}
         onBg={(value) => setMeta({ bg: value })}

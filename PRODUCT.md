@@ -20,7 +20,7 @@ Runs on the user’s machine (Vite + local websocket), persists in IndexedDB, op
 
 ## Operating Context
 
-Desktop browser first. Chrome floats over a full-bleed canvas: file island (name, undo/redo, zoom) top-left; status and settings top-right; grouped toolbelt bottom-center; a style island above the belt for the live tool or the selection. No full-width top bar, left tool rail, or status bar. Settings is an inset sheet. Main developer owns product identity.
+Desktop browser first. Chrome floats over a full-bleed canvas: file island (name, undo/redo, zoom) top-left; presence stack and settings top-right; grouped toolbelt bottom-center; a style island above the belt for the live tool or the selection. Sync and persist copy live in the settings sheet, not as labeled status pills. No full-width top bar, left tool rail, or status bar. Settings is an inset sheet. Main developer owns product identity.
 
 ## Capabilities and Constraints
 
