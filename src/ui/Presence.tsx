@@ -8,7 +8,7 @@ export function Presence({ locale, online }: { locale: LocaleId; online: boolean
   return (
     <div className={`presence${online ? ' online' : ''}`} title={t(locale, 'syncHint')} role="status" aria-label={label}>
       <span className="presence-face">
-        <Icon name="person" size={12} />
+        <Icon name="person" size={14} />
       </span>
     </div>
   );

@@ -224,7 +224,7 @@ Paper fills the canvas through board settings, independent of `data-chrome-theme
 The spatial model is a full-bleed canvas with four chrome slots, not a page grid.
 
 - **File island:** 12px from the top-left. Brand, undo/redo, zoom, fit.
-- **Meta island:** 12px from the top-right. Presence (`role="status"`, not a control), a 1px island-sep, then the settings gear. Error chip can sit inside this island. Sync and persist copy live in the settings sheet.
+- **Meta island:** 12px from the top-right. Presence (`role="status"`, not a control), a 1px island-sep, then settings (sliders glyph). Error chip can sit inside this island. Sync and persist copy live in the settings sheet.
 - **Toolbelt:** Bottom-center, 16px from the bottom. Navigation group, create group, then actions, separated by 1px soft dividers. Inner padding 6px; tool buttons 34px pills with 2px gaps.
 - **Style island:** Centered above the belt (bottom 76px desktop). Appears only when the live tool or the selection needs style.
 - **Settings sheet:** Inset from the top-right (12px), width `min(360px, 100% − 24px)`, not a full-screen takeover. Backdrop dim `rgba(8, 8, 8, 0.42)`. First section is Connection. While open, file bar, toolbelt, and style island drop to 0.35 opacity and ignore pointer events.
@@ -233,7 +233,7 @@ The spatial model is a full-bleed canvas with four chrome slots, not a page grid
 
 **The Island Slot Rule.** New chrome occupies an existing island or a new floating island. Do not add a full-width top bar, left tool rail, or bottom status bar.
 
-**The Presence Status Rule.** Presence reports; it does not open settings. Only the gear in the meta island opens the sheet.
+**The Presence Status Rule.** Presence reports; it does not open settings. Only the sliders control in the meta island opens the sheet.
 
 ## Elevation & Depth
 
@@ -243,7 +243,7 @@ Depth is a single ambient island shadow plus a 1px border. Active tools use an i
 - **Island** (`box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32)`): File, meta, toolbelt, style, sheet, context menu, info. Packet, Archive, Ink.
 - **Island on Studio** (`box-shadow: 0 8px 28px rgba(28, 28, 26, 0.14)`): Same silhouette, lower opacity on light chrome.
 - **Active tool ring** (`box-shadow: inset 0 0 0 1.5px` using the skin’s active-ring token): Selected tool only.
-- **Theme selected** (`box-shadow: inset 0 0 0 2px` using accent-strong): Selected chrome-skin card.
+- **Theme selected** (`box-shadow: inset 0 0 0 2px` using accent-strong): Selected chrome-skin card and selected board-paper card.
 - **Online face** (`box-shadow: 0 0 0 1.5px` using success): First presence face when connected.
 
 ### Named Rules
@@ -265,7 +265,7 @@ Focus-visible is a 2px accent outline with 1px offset on buttons, selects, theme
 - **Motion:** `cubic-bezier(0.22, 1, 0.36, 1)`. Island enter 180ms; sheet 220ms from 16px; backdrop 160ms. Honor `prefers-reduced-motion`.
 
 ### Presence
-One 22px face, bone fill, stroke `person` glyph on ink `#1c1c1a`, 2px island-color ring. Online: success ring. No user count in chrome. Status only (`role="status"`): not a button, does not open settings. Same 32×32 slot as the settings gear. Offline: the same face at 0.42 opacity. Connection count lives in the settings sheet.
+One 22px face, bone fill, stroke `person` glyph on ink `#1c1c1a`, 2px island-color ring. Online: success ring. No user count in chrome. Status only (`role="status"`): not a button, does not open settings. Same 32×32 slot as the settings control. Offline: the same face at 0.42 opacity. Connection count lives in the settings sheet.
 
 ### Chips
 - **Locale chips:** Reuse style chips (RU / EN / ZH).
@@ -283,7 +283,7 @@ One 22px face, bone fill, stroke `person` glyph on ink `#1c1c1a`, 2px island-col
 - **Text overlay (on-board):** Transparent field, same `BOARD_TYPEFACE` stack as chrome and canvas, line-height 1.3, caret in the skin accent. Not a chrome island.
 
 ### Navigation
-Toolbelt is the primary nav. Groups: select / lasso / pan, then drawing tools, then edit actions. Stroke icons at 18px, 2px stroke, currentColor. The settings gear in the meta island is the only control that opens the sheet.
+Toolbelt is the primary nav. Groups: select / lasso / pan, then drawing tools, then edit actions. Stroke icons at 22px in the 34px pills (file and meta islands stay 18px). 2px stroke, currentColor, round caps. Pointer has no click-line; pan is the open four-finger palm with a wrapping thumb at 1.5px stroke; lasso is a dashed loop with a handle; eraser is a chalkboard block; crop is two L-brackets; settings is three sliders, not a toothed gear. The settings control in the meta island is the only control that opens the sheet.
 
 ### Signature: Style island
 A second island that appears only when needed, 8–10px padding, 8px gaps, enter animation 6px up. Holds swatches, style chips, and size controls for the live tool or the selection. Do not pin a permanent inspector rail.
