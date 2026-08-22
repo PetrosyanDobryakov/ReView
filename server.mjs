@@ -1,0 +1,20 @@
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import { setupWSConnection } from 'y-websocket/bin/utils';
+
+const PORT = 1234;
+
+const server = createServer((_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Доска — сервер синхронизации');
+});
+
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (conn, req) => {
+  setupWSConnection(conn, req, { gc: true });
+});
+
+server.listen(PORT, () => {
+  console.log(`[doska] sync server: ws://localhost:${PORT}`);
+});
