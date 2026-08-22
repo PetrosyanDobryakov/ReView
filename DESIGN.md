@@ -24,6 +24,10 @@ colors:
   studio-panel: "#f4f1ea"
   studio-text: "#1c1c1a"
   studio-accent: "#5c5a54"
+  white-bg: "#f4f4f5"
+  white-panel: "#ffffff"
+  white-text: "#1a1a1c"
+  white-accent: "#4a4a50"
   ink-bg: "#0e0e0e"
   ink-accent: "#c8c8c4"
   paper-dark: "#1c1c1a"
@@ -156,7 +160,7 @@ components:
 
 Доска is an editor, not a site. The canvas is the product; chrome is a set of solid floating islands in the FigJam / Figma UI3 grammar: file island top-left, presence and settings top-right, grouped toolbelt bottom-center, style island above the belt when a tool or selection needs it. Islands are opaque panel fills with a 1px border and a single ambient drop shadow. They never span the viewport as a window frame, top bar, left tool rail, or status strip.
 
-The default skin is Packet: warm charcoal panels, paper-warm type, one bone (hue-less parchment) accent taken from the skin. Three other chrome skins (Archive brass, Studio umber, Ink) swap the same token roles. Board paper is a separate choice. Copy ships in Russian, English, and Chinese; the product name stays Доска. There is no marketing surface, no logo lockup, and no violet or steel-blue SaaS accent.
+The default skin is Packet: warm charcoal panels, paper-warm type, one bone (hue-less parchment) accent taken from the skin. Four other chrome skins (Archive brass, Studio umber, White slate, Ink) swap the same token roles. Board paper is a separate choice. Copy ships in Russian, English, and Chinese; the product name stays Доска. There is no marketing surface, no logo lockup, and no violet or steel-blue SaaS accent.
 
 **Key Characteristics:**
 - Full-bleed board; chrome floats as discrete islands
@@ -190,10 +194,11 @@ Chrome is a charcoal-to-paper set of skins. Packet is the default (`:root` and `
 ### Chrome skins (same roles, different values)
 - **Archive**: Warm brown panels; brass accent. Theme-color `{colors.archive-bg}`.
 - **Studio**: Light paper chrome; umber accent; darker, softer shadow. Theme-color `{colors.studio-bg}`.
+- **White**: Cool white panels on `#f4f4f5`; slate accent; same soft shadow family as Studio. Theme-color `{colors.white-bg}`. Not Studio — no cream or umber.
 - **Ink**: Near-black panels; pale metal accent and white strong. Theme-color `{colors.ink-bg}`.
 
 ### Board paper (not chrome)
-Paper fills the canvas through board settings, independent of `data-chrome-theme`: warm charcoal, near-black, stone, light, cream. Dark papers are olive-black, never navy.
+Paper fills the canvas through board settings, independent of `data-chrome-theme`. Picker slots line up with chrome as starting pairs (Charcoal/Dark, Warm/Graphite, Ink/Near black, Paper/Cream, White/Light). Mix freely. Dark papers are olive-black, never navy.
 
 **The Independent Skin Rule.** Chrome theme and board paper are two controls. Never fold them into one “skin,” and never tint island chrome from the paper fill.
 
@@ -241,13 +246,30 @@ Depth is a single ambient island shadow plus a 1px border. Active tools use an i
 
 ### Shadow Vocabulary
 - **Island** (`box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32)`): File, meta, toolbelt, style, sheet, context menu, info. Packet, Archive, Ink.
-- **Island on Studio** (`box-shadow: 0 8px 28px rgba(28, 28, 26, 0.14)`): Same silhouette, lower opacity on light chrome.
+- **Island on Studio / White** (`box-shadow: 0 8px 28px rgba(28, 28, 26, 0.14)` / `rgba(26, 26, 28, 0.12)`): Same silhouette, lower opacity on light chrome.
 - **Active tool ring** (`box-shadow: inset 0 0 0 1.5px` using the skin’s active-ring token): Selected tool only.
-- **Theme selected** (`box-shadow: inset 0 0 0 2px` using accent-strong): Selected chrome-skin card and selected board-paper card.
+- **Theme selected** (`box-shadow: inset 0 0 0 2px`): Chrome-skin cards use accent-strong. Board-paper cards use `#f4f4f5` on dark papers and `#8a8a86` on light/cream papers, taken from the paper itself, not from chrome.
 - **Online face** (`box-shadow: 0 0 0 1.5px` using success): First presence face when connected.
 
 ### Named Rules
 **The One Shadow Rule.** Floating chrome uses the island shadow. Hover does not lift. Active state is a wash plus an inset ring.
+
+## Motion
+
+Chrome motion is feedback and continuity, not a show. The authored moment is the toolbelt (and locale) **sliding pill**: an absolutely positioned thumb that translates between hits in 220ms. Everything else is press, enter, or exit.
+
+### Timing
+- **Ease:** `cubic-bezier(0.22, 1, 0.36, 1)` (`--chrome-ease`).
+- **Press:** 100ms scale `0.94` on icon, tool, style, zoom, cards, menu rows.
+- **Color / wash:** 140ms.
+- **Island / menu enter:** 180ms. Style island rises 8px from the belt; inner body fades with a 5px blur. Exit is 140–180ms and faster than enter.
+- **Sheet:** 280ms from the top-right (`translate(10px, -6px) scale(0.98)`), origin on the settings control. Backdrop 140ms. Sections stagger 30–130ms, cap under 160ms extra. Close 180ms reverse.
+- **Theme swap:** Chrome-skin picker ring is a sliding thumb on the 2×2 grid, drawn above the opaque cards. Chrome fill, border, type, and page background tween 280ms. Board-paper picker uses the same sliding ring on the 2×2 paper grid. Paper fill on the canvas lerps 280ms (grid ink follows the mixed fill). No View Transition overlay.
+- **Locale swap:** Sheet titles and hints use a blur-and-slide morph (old line up and out, new line in from below, reversed when stepping RU←). Direction follows `--locale-dir`. Locale chips keep the sliding pill. Controls and status rows swap copy without a second layer.
+- **Presence:** one-shot success ring bloom when a session comes online. No idle loop.
+- **Honor `prefers-reduced-motion`:** animations and transitions off.
+
+**The Sliding Pill Rule.** Active tool, locale chip, and chrome-skin card are a moving thumb, not a flash of fill on the button. The glyph or label color still switches; the wash or inset ring lives on the thumb. Hover still does not lift.
 
 ## Shapes
 
@@ -259,10 +281,10 @@ Focus-visible is a 2px accent outline with 1px offset on buttons, selects, theme
 
 ### Buttons
 - **Icon (file/meta):** 32×32, 8px corners, transparent, dim glyph. Hover: panel-2 wash and full text color. Disabled: 0.35 opacity.
-- **Tool (belt):** 34×34 pill. Active: accent wash, strong accent glyph, inset ring. Same hover as icon when idle.
-- **Style chip:** 32px tall, 8px corners, 14px type, 12px horizontal padding. Active: accent wash and strong accent text (no inset ring).
+- **Tool (belt):** 34×34 pill. Active: sliding thumb (accent wash + inset ring) and strong accent glyph. Same hover as icon when idle.
+- **Style chip:** 32px tall, 8px corners, 14px type, 12px horizontal padding. Active: accent wash and strong accent text (no inset ring), except locale chips which use the sliding thumb.
 - **Focus:** 2px accent outline, 1px offset, 140ms ease on background and color.
-- **Motion:** `cubic-bezier(0.22, 1, 0.36, 1)`. Island enter 180ms; sheet 220ms from 16px; backdrop 160ms. Honor `prefers-reduced-motion`.
+- **Press:** scale 0.94 at 100ms. Open settings uses the active wash on the sliders control, no rotation.
 
 ### Presence
 One 22px face, bone fill, stroke `person` glyph on ink `#1c1c1a`, 2px island-color ring. Online: success ring. No user count in chrome. Status only (`role="status"`): not a button, does not open settings. Same 32×32 slot as the settings control. Offline: the same face at 0.42 opacity. Connection count lives in the settings sheet.
@@ -273,20 +295,20 @@ One 22px face, bone fill, stroke `person` glyph on ink `#1c1c1a`, 2px island-col
 
 ### Cards / Containers
 - **Island:** Panel fill, 1px border, 12px radius, island shadow, 6px padding, 4px item gap, min-height 44px on file/meta.
-- **Settings sheet:** Same material as islands; 20px padding (32px bottom); 2-column 8px grids for theme and paper cards (64px and 48px tall, 10px radius).
+- **Settings sheet:** Same material as islands; 20px padding (32px bottom). Each section is an inset well (`chrome-bg` fill, 1px soft border, 10px radius, 12px padding, 8px stack gap). 2-column 8px grids for theme and paper cards (64px and 48px tall, 10px radius). Grid switch sits under paper cards, split by a 1px hairline.
 - **Context menu / info:** Island material; menu items 8px / 14px type with 8px radius hover wash. Danger items use the danger color, not a filled button.
 
 ### Inputs / Fields
 - **Size select:** Panel-2 fill, soft border, 8px radius, 32px tall, 14px type.
 - **Range:** Native slider with `accent-color` set to the skin accent.
-- **Checkboxes:** Same accent.
+- **Switch:** 36×20 pill. Off: panel-2 track, dim thumb. On: skin accent track, panel thumb, 16px travel at 180ms. Grid is the only chrome switch; no native checkbox.
 - **Text overlay (on-board):** Transparent field, same `BOARD_TYPEFACE` stack as chrome and canvas, line-height 1.3, caret in the skin accent. Not a chrome island.
 
 ### Navigation
-Toolbelt is the primary nav. Groups: select / lasso / pan, then drawing tools, then edit actions. Stroke icons at 22px in the 34px pills (file and meta islands stay 18px). 2px stroke, currentColor, round caps. Pointer has no click-line; pan is the open four-finger palm with a wrapping thumb at 1.5px stroke; lasso is a dashed loop with a handle; eraser is a chalkboard block; crop is two L-brackets; settings is three sliders, not a toothed gear. The settings control in the meta island is the only control that opens the sheet.
+Toolbelt is the primary nav. Groups: select / lasso / pan, then drawing tools, then edit actions. Stroke icons at 22px in the 34px pills (file and meta islands stay 18px). Pen is optically scaled to 0.86 so the diagonal nib sits inside the pill. 2px stroke, currentColor, round caps. Pointer has no click-line; pan is the open four-finger palm with a wrapping thumb at 1.5px stroke; lasso is a dashed loop with a handle; eraser is a chalkboard block; crop is two L-brackets; settings is three sliders, not a toothed gear. The settings control in the meta island is the only control that opens the sheet.
 
 ### Signature: Style island
-A second island that appears only when needed, 8–10px padding, 8px gaps, enter animation 6px up. Holds swatches, style chips, and size controls for the live tool or the selection. Do not pin a permanent inspector rail.
+A second island that appears only when needed, 8–10px padding, 8px gaps, enter 8px up from the belt and a short blur on the inner row. Holds swatches, style chips, and size controls for the live tool or the selection. Do not pin a permanent inspector rail.
 
 ## Do's and Don'ts
 
@@ -297,6 +319,7 @@ A second island that appears only when needed, 8–10px padding, 8px gaps, enter
 - **Do** set copy and `lang` from `ru` / `en` / `zh`; keep the visible name Доска.
 - **Do** put new controls in the file island, meta island, toolbelt, style island, or settings sheet.
 - **Do** keep presence as status (faces + optional count); put connection and persist copy in the sheet.
+- **Do** move the tool, locale, and chrome-skin highlight as a sliding pill. Do not flash a new fill on each button.
 
 ### Don't:
 - **Don't** wrap the app in a 2015 window frame, full-width top bar, left tool rail, or status bar.
@@ -306,3 +329,4 @@ A second island that appears only when needed, 8–10px padding, 8px gaps, enter
 - **Don't** build a marketing landing inside this system; chrome exists only to serve the board.
 - **Don't** use Inter, or a 650 headline weight Space Grotesk does not have. Don't let Cyrillic fall through to Segoe UI.
 - **Don't** make presence a button or restore labeled sync/save pills in the meta island.
+- **Don't** add bounce, magnetic cursor chase, or looping chrome motion. Canvas drawing stays undamped.

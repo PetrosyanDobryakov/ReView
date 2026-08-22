@@ -15,6 +15,9 @@ import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
+import { MOTION, useExitPresence } from './ui/motion';
+
+type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,14 +39,18 @@ export default function App() {
   const [cropActive, setCropActive] = useState(false);
   const [canCrop, setCanCrop] = useState(false);
   const [sync, setSync] = useState<SyncStatus>({ online: false, users: 0 });
-  const [menu, setMenu] = useState<{ x: number; y: number; shapeId: string | null; type: string | null; locked: boolean } | null>(
-    null
-  );
+  const [menu, setMenu] = useState<BoardMenu | null>(null);
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const menuHold = useRef<BoardMenu | null>(null);
+  const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
+  const errorHold = useRef<string | null>(null);
+  if (menu) menuHold.current = menu;
+  if (info) infoHold.current = info;
+  if (error) errorHold.current = error;
 
   const refreshSelected = () => setSelected(engineRef.current?.selectedViews() ?? []);
 
@@ -124,40 +131,47 @@ export default function App() {
   }, [settingsOpen]);
 
   const closeMenu = () => setMenu(null);
-  const menuX = menu ? Math.min(menu.x, window.innerWidth - 240) : 0;
-  const menuY = menu ? Math.min(menu.y, window.innerHeight - 320) : 0;
+  const menuShown = useExitPresence(Boolean(menu), MOTION.overlay);
+  const infoShown = useExitPresence(Boolean(info), MOTION.overlay);
+  const errorShown = useExitPresence(Boolean(error), MOTION.enter);
+  const menuView = menu ?? (menuShown ? menuHold.current : null);
+  const infoView = info ?? (infoShown ? infoHold.current : null);
+  const errorView = error ?? (errorShown ? errorHold.current : null);
+  const menuX = menuView ? Math.min(menuView.x, window.innerWidth - 240) : 0;
+  const menuY = menuView ? Math.min(menuView.y, window.innerHeight - 320) : 0;
 
   const menuItems: Array<{ label: string; hint?: string; danger?: boolean; run: () => void }> = [];
-  if (menu) {
+  if (menuView) {
     const e = engine;
-    if (menu.shapeId) {
+    if (menuView.shapeId) {
+      const shapeId = menuView.shapeId;
       menuItems.push(
         { label: t(locale, 'ctxCopy'), hint: 'Ctrl+C', run: () => e?.copySelection() },
         { label: t(locale, 'ctxCopyImage'), hint: 'Ctrl+Shift+C', run: () => e?.copySelectionAsImage() },
         { label: t(locale, 'ctxDuplicate'), hint: 'Ctrl+D', run: () => e?.duplicateSelection() },
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
-      if (menu.type === 'image') {
+      if (menuView.type === 'image') {
         menuItems.push(
           { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() },
           { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
         );
       }
-      if (menu.type === 'pen') {
+      if (menuView.type === 'pen') {
         menuItems.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
       menuItems.push(
         { label: t(locale, 'ctxFront'), run: () => e?.bringFront() },
         { label: t(locale, 'ctxBack'), run: () => e?.sendBack() },
         {
-          label: menu.locked ? t(locale, 'ctxUnlock') : t(locale, 'ctxLock'),
+          label: menuView.locked ? t(locale, 'ctxUnlock') : t(locale, 'ctxLock'),
           hint: 'Ctrl+Shift+L',
           run: () => e?.toggleLockSelection(),
         },
         {
           label: t(locale, 'ctxInfo'),
           run: () => {
-            const i = e?.shapeInfo(menu.shapeId!);
+            const i = e?.shapeInfo(shapeId);
             e?.events.onInfo?.(i ?? null);
           },
         }
@@ -214,14 +228,22 @@ export default function App() {
           </button>
         </div>
         <div className="island meta-island">
-          {error && (
-            <button className="error-banner" onClick={() => setError(null)} title={t(locale, 'errorHint')}>
-              {t(locale, 'error')}: {error}
+          {errorShown && errorView && (
+            <button
+              className={`error-banner${error ? '' : ' is-leaving'}`}
+              onClick={() => setError(null)}
+              title={t(locale, 'errorHint')}
+            >
+              {t(locale, 'error')}: {errorView}
             </button>
           )}
           <Presence locale={locale} online={sync.online} />
           <div className="island-sep" />
-          <button className="icon-btn" title={t(locale, 'settings')} onClick={() => setSettingsOpen(true)}>
+          <button
+            className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
+            title={t(locale, 'settings')}
+            onClick={() => setSettingsOpen(true)}
+          >
             <Icon name="settings" />
           </button>
         </div>
@@ -282,12 +304,17 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
       />
 
-      {menu && (
-        <div className="ctx-menu" style={{ left: menuX, top: menuY }} onContextMenu={(e) => e.preventDefault()}>
-          {menuItems.map((item) => (
+      {menuShown && menuView && (
+        <div
+          className={`ctx-menu${menu ? '' : ' is-leaving'}`}
+          style={{ left: menuX, top: menuY }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {menuItems.map((item, index) => (
             <button
               key={item.label}
               className={`ctx-item${item.danger ? ' danger' : ''}`}
+              style={{ animationDelay: `${index * 18}ms` }}
               onClick={() => {
                 item.run();
                 closeMenu();
@@ -299,15 +326,15 @@ export default function App() {
           ))}
         </div>
       )}
-      {info && (
-        <div className="info-modal">
+      {infoShown && infoView && (
+        <div className={`info-modal${info ? '' : ' is-leaving'}`}>
           <div className="info-head">
-            <b>{info.title}</b>
+            <b>{infoView.title}</b>
             <button className="icon-btn" title={t(locale, 'close')} onClick={() => setInfo(null)}>
               <Icon name="close" />
             </button>
           </div>
-          {info.lines.map((line) => (
+          {infoView.lines.map((line) => (
             <div key={line} className="info-line">
               {line}
             </div>

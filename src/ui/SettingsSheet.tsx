@@ -3,6 +3,9 @@ import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import type { SyncStatus } from '../core/store';
 import { Icon } from './icons';
 import { BG_PRESETS, CHROME_LABEL, t } from './i18n';
+import { MOTION, useExitPresence } from './motion';
+import { SlideTrack } from './SlideTrack';
+import { SwapText } from './SwapText';
 
 export function SettingsSheet({
   open,
@@ -31,22 +34,29 @@ export function SettingsSheet({
   onGrid: (on: boolean) => void;
   onClose: () => void;
 }) {
-  if (!open) return null;
+  const mounted = useExitPresence(open, MOTION.sheetOut);
+  if (!mounted) return null;
 
   return (
-    <div className="sheet-root" role="presentation">
+    <div className={`sheet-root${open ? '' : ' is-leaving'}`} role="presentation">
       <button className="sheet-backdrop" aria-label={t(locale, 'closeSettings')} onClick={onClose} />
-      <aside className="sheet" role="dialog" aria-labelledby="settings-title">
+      <aside className="sheet" role="dialog" aria-labelledby="settings-title" aria-hidden={!open}>
         <header className="sheet-head">
-          <h2 id="settings-title">{t(locale, 'settings')}</h2>
+          <h2 id="settings-title">
+            <SwapText text={t(locale, 'settings')} />
+          </h2>
           <button className="icon-btn" title={t(locale, 'close')} onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </header>
 
         <section className="sheet-section">
-          <h3>{t(locale, 'connection')}</h3>
-          <p className="sheet-hint">{t(locale, 'syncHint')}</p>
+          <h3>
+            <SwapText text={t(locale, 'connection')} />
+          </h3>
+          <p className="sheet-hint">
+            <SwapText text={t(locale, 'syncHint')} />
+          </p>
           <ul className="sheet-keys">
             <li>
               <span className={`status-line${sync.online ? ' on' : ''}`}>
@@ -62,13 +72,19 @@ export function SettingsSheet({
         </section>
 
         <section className="sheet-section">
-          <h3>{t(locale, 'language')}</h3>
-          <div className="locale-row">
+          <h3>
+            <SwapText text={t(locale, 'language')} />
+          </h3>
+          <SlideTrack className="locale-row" active={locale}>
             {LOCALES.map((id) => (
               <button
                 key={id}
-                className={`style-btn${locale === id ? ' active' : ''}`}
+                className="style-btn"
+                data-slide-active={locale === id ? 'true' : undefined}
                 onClick={() => {
+                  if (id === locale) return;
+                  const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
+                  document.documentElement.style.setProperty('--locale-dir', dir);
                   writeLocale(id);
                   onLocale(id);
                 }}
@@ -76,19 +92,25 @@ export function SettingsSheet({
                 {id.toUpperCase()}
               </button>
             ))}
-          </div>
+          </SlideTrack>
         </section>
 
         <section className="sheet-section">
-          <h3>{t(locale, 'ui')}</h3>
-          <p className="sheet-hint">{t(locale, 'uiHint')}</p>
-          <div className="theme-grid">
+          <h3>
+            <SwapText text={t(locale, 'ui')} />
+          </h3>
+          <p className="sheet-hint">
+            <SwapText text={t(locale, 'uiHint')} />
+          </p>
+          <SlideTrack className="theme-grid" active={chromeTheme}>
             {CHROME_THEME_IDS.map((id) => (
               <button
                 key={id}
-                className={`theme-card${chromeTheme === id ? ' active' : ''}`}
+                className="theme-card"
                 data-theme-preview={id}
+                data-slide-active={chromeTheme === id ? 'true' : undefined}
                 onClick={() => {
+                  if (id === chromeTheme) return;
                   onChromeTheme(id);
                   writeChromeTheme(id);
                 }}
@@ -96,16 +118,19 @@ export function SettingsSheet({
                 {t(locale, CHROME_LABEL[id])}
               </button>
             ))}
-          </div>
+          </SlideTrack>
         </section>
 
         <section className="sheet-section">
-          <h3>{t(locale, 'board')}</h3>
-          <div className="bg-grid">
+          <h3>
+            <SwapText text={t(locale, 'board')} />
+          </h3>
+          <SlideTrack className="bg-grid" active={bg}>
             {BG_PRESETS.map((p) => (
               <button
                 key={p.value}
-                className={`bg-card${bg === p.value ? ' active' : ''}${p.value.startsWith('#f') ? ' light' : ''}`}
+                className={`bg-card${p.value.startsWith('#f') ? ' light' : ''}`}
+                data-slide-active={bg === p.value ? 'true' : undefined}
                 style={{ background: p.value }}
                 title={t(locale, p.label)}
                 onClick={() => onBg(p.value)}
@@ -113,15 +138,25 @@ export function SettingsSheet({
                 <span>{t(locale, p.label)}</span>
               </button>
             ))}
-          </div>
-          <label className="sheet-check">
-            <input type="checkbox" checked={gridOn} onChange={(e) => onGrid(e.target.checked)} />
-            {t(locale, 'grid')}
-          </label>
+          </SlideTrack>
+          <button
+            type="button"
+            className={`sheet-switch${gridOn ? ' on' : ''}`}
+            role="switch"
+            aria-checked={gridOn}
+            onClick={() => onGrid(!gridOn)}
+          >
+            <span>{t(locale, 'grid')}</span>
+            <span className="switch" aria-hidden="true">
+              <span className="switch-thumb" />
+            </span>
+          </button>
         </section>
 
         <section className="sheet-section">
-          <h3>{t(locale, 'gestures')}</h3>
+          <h3>
+            <SwapText text={t(locale, 'gestures')} />
+          </h3>
           <ul className="sheet-keys">
             <li>
               {t(locale, 'wheel')} <span>{t(locale, 'zoom')}</span>

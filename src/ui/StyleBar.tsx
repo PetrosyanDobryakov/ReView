@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView } from '../core/shapes';
 import {
@@ -13,6 +14,7 @@ import {
 import { patchShapes } from '../core/store';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
+import { MOTION, useExitPresence } from './motion';
 
 const PEN_COLORS = ['#eceae4', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#c4b8a8', '#ff9fd0'];
 const FILL_COLORS = ['#ffffff', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#e8e2d6', '#ff9fd0'];
@@ -88,7 +90,15 @@ export function StyleBar({
   const showText = showTextDraw || textTargets.length > 0;
   const showPenStyle = showPen || (penTargets.length > 0 && fillTargets.length === 0 && textTargets.length === 0);
 
-  if (!showEraser && !showFill && !showStroke && !showText && !showPenStyle) return null;
+  const want = showEraser || showFill || showStroke || showText || showPenStyle;
+  const shown = useExitPresence(want, MOTION.enter);
+  const flags = { showEraser, showFill, showStroke, showText, showPenStyle };
+  const hold = useRef(flags);
+  if (want) hold.current = flags;
+  const view = hold.current;
+  const mode = [view.showEraser, view.showPenStyle, view.showFill, view.showStroke, view.showText].map(Number).join('');
+
+  if (!shown) return null;
 
   const fillValue = fillTargets[0]?.fill ?? shape.fill;
   const strokeValue = strokeTargets[0]?.stroke ?? penTargets[0]?.stroke ?? (showPen ? pen.color : shape.stroke);
@@ -96,8 +106,9 @@ export function StyleBar({
   const textSize = textTargets[0]?.fontSize ?? text.size;
 
   return (
-    <div className="island style-island">
-      {showEraser && (
+    <div className={`island style-island${want ? '' : ' is-leaving'}`}>
+      <div className="style-island-body" key={mode}>
+      {view.showEraser && (
         <>
           <button
             className={`style-btn${eraser.mode === 'whole' ? ' active' : ''}`}
@@ -125,7 +136,7 @@ export function StyleBar({
           ))}
         </>
       )}
-      {showPenStyle && (
+      {view.showPenStyle && (
         <>
           <button
             className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
@@ -160,7 +171,7 @@ export function StyleBar({
           <span className="size-value">{pen.size}</span>
         </>
       )}
-      {showFill && (
+      {view.showFill && (
         <>
           <span className="panel-label">{t(locale, 'fill')}</span>
           <Swatches
@@ -176,7 +187,7 @@ export function StyleBar({
           />
         </>
       )}
-      {showStroke && (
+      {view.showStroke && (
         <>
           <span className="panel-label">{t(locale, 'stroke')}</span>
           <Swatches
@@ -196,7 +207,7 @@ export function StyleBar({
           />
         </>
       )}
-      {showText && (
+      {view.showText && (
         <>
           <Swatches
             colors={TEXT_COLORS}
@@ -231,6 +242,7 @@ export function StyleBar({
           </select>
         </>
       )}
+      </div>
     </div>
   );
 }

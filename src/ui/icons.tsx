@@ -33,6 +33,7 @@ export const TOOLBELT_ICON_SIZE = 22;
 
 const LASSO_HANDLE = 'M7.2 16.8c-1.3 2.2-2.9 3.8-3.6 3.8';
 const PAN_FIT = 'translate(12 12) scale(0.88) translate(-13 -12.5)';
+const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return (
@@ -51,6 +52,10 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       {name === 'pan' ? (
         <g transform={PAN_FIT}>
           <path d={ICON_PATHS.pan} />
+        </g>
+      ) : name === 'pen' ? (
+        <g transform={PEN_FIT}>
+          <path d={ICON_PATHS.pen} />
         </g>
       ) : (
         <>

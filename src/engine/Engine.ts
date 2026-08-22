@@ -43,6 +43,24 @@ const TOOL_KEYS: Record<string, ToolId> = {
   KeyE: 'eraser',
 };
 
+const PAPER_MS = 280;
+
+function parseHex(color: string): [number, number, number] | null {
+  const raw = color.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
+  return [parseInt(raw.slice(1, 3), 16), parseInt(raw.slice(3, 5), 16), parseInt(raw.slice(5, 7), 16)];
+}
+
+function mixHex(from: string, to: string, t: number): string {
+  const a = parseHex(from);
+  const b = parseHex(to);
+  if (!a || !b) return to;
+  const u = 1 - (1 - t) * (1 - t) * (1 - t);
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * u);
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(ch(a[0], b[0]))}${hex(ch(a[1], b[1]))}${hex(ch(a[2], b[2]))}`;
+}
+
 const HANDLE_POS: Record<HandleId, [number, number]> = {
   nw: [0, 0],
   n: [0.5, 0],
@@ -75,6 +93,10 @@ export class Engine {
   private lastT = 0;
   private lastCam = { x: 0, y: 0, z: 1 };
   private dirty = true;
+  private paperFrom = '';
+  private paperTo = '';
+  private paperFill = '';
+  private paperT0 = 0;
   private pointerDown = false;
   private panDrag = false;
   private lastStats = '';
@@ -1260,10 +1282,22 @@ export class Engine {
     if (store.order.length !== this.views.size) store.ensureOrder();
     const { ctx, dpr, w, h } = this;
     const { x: cx, y: cy, zoom: z } = this.camera;
-    const bg = store.metaBg();
-    const theme = themeFor(bg);
+    const target = store.metaBg();
+    if (!this.paperTo) {
+      this.paperFrom = target;
+      this.paperTo = target;
+      this.paperFill = target;
+    } else if (target !== this.paperTo) {
+      this.paperFrom = this.paperFill || this.paperTo;
+      this.paperTo = target;
+      this.paperT0 = performance.now();
+    }
+    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const u = reduce ? 1 : Math.min(1, (performance.now() - this.paperT0) / PAPER_MS);
+    this.paperFill = u >= 1 ? this.paperTo : mixHex(this.paperFrom, this.paperTo, u);
+    const theme = themeFor(this.paperFill);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = bg;
+    ctx.fillStyle = this.paperFill;
     ctx.fillRect(0, 0, w, h);
     ctx.save();
     ctx.translate(w / 2, h / 2);
@@ -1310,7 +1344,7 @@ export class Engine {
     if (this.crop) this.drawCropOverlay(ctx);
     ctx.restore();
     this.lastCam = { x: cx, y: cy, z };
-    this.dirty = false;
+    this.dirty = u < 1;
   }
 
   private drawGrid(ctx: CanvasRenderingContext2D, color: string): void {

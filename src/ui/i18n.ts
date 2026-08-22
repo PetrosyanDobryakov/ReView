@@ -68,6 +68,7 @@ const ru = {
   chromePacket: 'Уголь',
   chromeArchive: 'Тёплый',
   chromeStudio: 'Бумага',
+  chromeWhite: 'Белый',
   chromeInk: 'Чернила',
   bgDark: 'Тёмный',
   bgBlack: 'Почти чёрный',
@@ -156,6 +157,7 @@ const en: typeof ru = {
   chromePacket: 'Charcoal',
   chromeArchive: 'Warm',
   chromeStudio: 'Paper',
+  chromeWhite: 'White',
   chromeInk: 'Ink',
   bgDark: 'Dark',
   bgBlack: 'Near black',
@@ -244,6 +246,7 @@ const zh: typeof ru = {
   chromePacket: '木炭',
   chromeArchive: '暖色',
   chromeStudio: '纸张',
+  chromeWhite: '白色',
   chromeInk: '墨水',
   bgDark: '深色',
   bgBlack: '近黑',
@@ -277,13 +280,14 @@ export const CHROME_LABEL: Record<ChromeThemeId, MessageKey> = {
   packet: 'chromePacket',
   archive: 'chromeArchive',
   studio: 'chromeStudio',
+  white: 'chromeWhite',
   ink: 'chromeInk',
 };
 
 export const BG_PRESETS: Array<{ value: string; label: MessageKey }> = [
   { value: '#1c1c1a', label: 'bgDark' },
-  { value: '#121110', label: 'bgBlack' },
   { value: '#2c2a26', label: 'bgGraphite' },
-  { value: '#f4f4f5', label: 'bgLight' },
+  { value: '#121110', label: 'bgBlack' },
   { value: '#fffdf5', label: 'bgCream' },
+  { value: '#f4f4f5', label: 'bgLight' },
 ];

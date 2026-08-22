@@ -1,11 +1,19 @@
-export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'ink';
+export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'white' | 'ink';
 
-export const CHROME_THEME_IDS: ChromeThemeId[] = ['packet', 'archive', 'studio', 'ink'];
+export const CHROME_THEME_IDS: ChromeThemeId[] = ['packet', 'archive', 'ink', 'studio', 'white'];
 
 const STORAGE_KEY = 'doska-chrome-theme';
 
+const THEME_COLORS: Record<ChromeThemeId, string> = {
+  packet: '#242422',
+  archive: '#2a2622',
+  studio: '#d8d4cc',
+  white: '#f4f4f5',
+  ink: '#0e0e0e',
+};
+
 function isChromeThemeId(value: string): value is ChromeThemeId {
-  return value === 'packet' || value === 'archive' || value === 'studio' || value === 'ink';
+  return CHROME_THEME_IDS.some((id) => id === value);
 }
 
 export function readChromeTheme(): ChromeThemeId {
@@ -30,11 +38,5 @@ export function writeChromeTheme(id: ChromeThemeId): void {
 export function applyChromeTheme(id: ChromeThemeId): void {
   document.documentElement.dataset.chromeTheme = id;
   const meta = document.querySelector('meta[name="theme-color"]');
-  const colors: Record<ChromeThemeId, string> = {
-    packet: '#242422',
-    archive: '#2a2622',
-    studio: '#d8d4cc',
-    ink: '#0e0e0e',
-  };
-  if (meta) meta.setAttribute('content', colors[id]);
+  if (meta) meta.setAttribute('content', THEME_COLORS[id]);
 }
