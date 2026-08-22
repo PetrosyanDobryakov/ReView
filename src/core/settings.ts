@@ -43,6 +43,34 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
   },
 };
 
+const STORAGE_KEY = 'doska-tool-settings';
+
+function persist(): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    /* ignore */
+  }
+}
+
+function restore(): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+    const bag = parsed as Record<string, unknown>;
+    if (bag.pen && typeof bag.pen === 'object') Object.assign(settings.pen, bag.pen);
+    if (bag.shape && typeof bag.shape === 'object') Object.assign(settings.shape, bag.shape);
+    if (bag.text && typeof bag.text === 'object') Object.assign(settings.text, bag.text);
+    if (bag.eraser && typeof bag.eraser === 'object') Object.assign(settings.eraser, bag.eraser);
+  } catch {
+    /* ignore */
+  }
+}
+
+restore();
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
@@ -52,21 +80,25 @@ function emit(): void {
 
 export function updatePenSettings(patch: Partial<PenSettings>): void {
   Object.assign(settings.pen, patch);
+  persist();
   emit();
 }
 
 export function updateShapeSettings(patch: Partial<ShapeSettings>): void {
   Object.assign(settings.shape, patch);
+  persist();
   emit();
 }
 
 export function updateTextSettings(patch: Partial<TextSettings>): void {
   Object.assign(settings.text, patch);
+  persist();
   emit();
 }
 
 export function updateEraserSettings(patch: Partial<EraserSettings>): void {
   Object.assign(settings.eraser, patch);
+  persist();
   emit();
 }
 

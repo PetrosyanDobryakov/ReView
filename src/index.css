@@ -326,6 +326,7 @@ body {
   border-radius: 8px;
   cursor: pointer;
   font-size: var(--chrome-type-label);
+  font-variant-numeric: tabular-nums;
   transition:
     background-color var(--chrome-dur-fast) var(--chrome-ease),
     transform var(--chrome-dur-press) var(--chrome-ease);

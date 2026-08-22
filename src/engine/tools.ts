@@ -75,7 +75,9 @@ export class SelectTool extends Tool {
     if (hit) {
       if (p.shift && engine.selection.has(hit)) {
         engine.setSelection([...engine.selection].filter((id) => id !== hit));
-      } else if (!p.shift && !engine.selection.has(hit)) {
+      } else if (p.shift) {
+        engine.setSelection([...engine.selection, hit]);
+      } else if (!engine.selection.has(hit)) {
         engine.setSelection([hit]);
       }
       for (const id of engine.selection) {
@@ -588,7 +590,7 @@ export class EraserTool extends Tool {
     const box = { x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 };
     for (const id of engine.grid.query(box)) {
       const v = engine.views.get(id);
-      if (!v) continue;
+      if (!v || v.locked) continue;
       if (partial && v.type === 'pen' && v.points) {
         let idx = this.partialHits.get(id);
         if (!idx) {

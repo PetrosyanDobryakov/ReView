@@ -116,10 +116,11 @@ export class Engine {
     origBox: ShapeBox;
   } | null = null;
   private panStart = { x: 0, y: 0 };
+  private reduceMotion = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d')!;
+    this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.resize();
     this.resizer = new ResizeObserver(this.resize);
     this.resizer.observe(canvas);
@@ -149,6 +150,13 @@ export class Engine {
       this.attachShape(key, m);
     }
     this.dragTool = this.tool;
+    if (typeof matchMedia === 'function') {
+      const mq = matchMedia('(prefers-reduced-motion: reduce)');
+      this.reduceMotion = mq.matches;
+      mq.addEventListener('change', (e) => {
+        this.reduceMotion = e.matches;
+      });
+    }
     this.rafId = requestAnimationFrame(this.loop);
   }
 
@@ -271,9 +279,14 @@ export class Engine {
     store.patchShapes(patches);
   }
 
+  private unlockedIds(): string[] {
+    return [...this.selection].filter((id) => !this.views.get(id)?.locked);
+  }
+
   deleteSelection(): void {
-    if (!this.selection.size) return;
-    store.removeShapes([...this.selection]);
+    const ids = this.unlockedIds();
+    if (!ids.length) return;
+    store.removeShapes(ids);
   }
 
   private clipboard: ShapeView[] = [];
@@ -554,14 +567,16 @@ export class Engine {
   }
 
   hasImageSelection(): boolean {
-    return this.selection.size === 1 && this.views.get([...this.selection][0])?.type === 'image';
+    if (this.selection.size !== 1) return false;
+    const v = this.views.get([...this.selection][0]);
+    return Boolean(v && v.type === 'image' && !v.locked);
   }
 
   startCropSelected(): void {
     if (this.selection.size !== 1) return;
     const id = [...this.selection][0];
     const v = this.views.get(id);
-    if (!v || v.type !== 'image') return;
+    if (!v || v.type !== 'image' || v.locked) return;
     this.crop = {
       id,
       box: { x: v.x, y: v.y, w: v.w, h: v.h },
@@ -667,7 +682,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.type === 'pen' || v.type === 'arrow') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
     this.editing = true;
     this.events.onEditText?.({
       id,
@@ -678,7 +693,7 @@ export class Engine {
       text: v.text ?? '',
       fontSize:
         v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
-      color: v.textColor ?? themeFor(store.metaBg()).text,
+      color: v.type === 'sticky' ? (v.textColor ?? '#3a2f00') : (v.textColor ?? themeFor(store.metaBg()).text),
     });
   }
 
@@ -721,13 +736,12 @@ export class Engine {
         this.setSelection([]);
         return;
       }
-      const patch: Partial<ShapeView> = { text };
+      const patch: Partial<ShapeView> = { text, textColor: target.color };
       if (v.type === 'text') {
         const size = this.measureText(text, v.fontSize ?? TEXT_FONT);
         patch.w = size.w;
         patch.h = size.h;
       }
-      if (v.type !== 'sticky') patch.textColor = target.color;
       store.patchShape(id, patch);
     }
     this.dirty = true;
@@ -1193,7 +1207,7 @@ export class Engine {
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
     }
-    if (document.querySelector('.sheet-root:not(.is-leaving)')) return;
+    if (document.querySelector('.sheet-root:not(.is-leaving), .ctx-menu, .info-modal')) return;
     if (this.crop) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -1207,6 +1221,7 @@ export class Engine {
     if (this.editing) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === ' ') {
+      if (target instanceof HTMLElement && target.closest('button, [role="switch"]')) return;
       e.preventDefault();
       if (!this.override) {
         this.override = 'pan';
@@ -1334,7 +1349,7 @@ export class Engine {
       this.paperTo = target;
       this.paperT0 = performance.now();
     }
-    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduce = this.reduceMotion;
     const u = reduce ? 1 : Math.min(1, (performance.now() - this.paperT0) / PAPER_MS);
     this.paperFill = u >= 1 ? this.paperTo : mixHex(this.paperFrom, this.paperTo, u);
     const theme = themeFor(this.paperFill);

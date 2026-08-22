@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView } from '../core/shapes';
 import {
+  effectivePen,
   updateEraserSettings,
   updatePenSettings,
   updateShapeSettings,
@@ -23,7 +24,7 @@ const TEXT_COLORS = ['#ffe27a', '#4cd964', '#ff6b6b', '#1c1c1a', '#eceae4', '#c4
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const ERASER_SIZES = [16, 32, 64];
 const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'arrow']);
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky']);
 const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen']);
 const TEXT_TYPES = new Set(['text', 'sticky']);
 
@@ -152,7 +153,14 @@ export function StyleBar({
             className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
             title={t(locale, 'markerHint')}
             aria-pressed={pen.style === 'marker'}
-            onClick={() => updatePenSettings({ style: 'marker' })}
+            onClick={() => {
+              updatePenSettings({ style: 'marker' });
+              const next = effectivePen();
+              if (penTargets.length) {
+                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
+                onPatched();
+              }
+            }}
           >
             {t(locale, 'marker')}
           </button>
@@ -161,7 +169,14 @@ export function StyleBar({
             className={`style-btn${pen.style === 'highlighter' ? ' active' : ''}`}
             title={t(locale, 'highlighterHint')}
             aria-pressed={pen.style === 'highlighter'}
-            onClick={() => updatePenSettings({ style: 'highlighter' })}
+            onClick={() => {
+              updatePenSettings({ style: 'highlighter' });
+              const next = effectivePen();
+              if (penTargets.length) {
+                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
+                onPatched();
+              }
+            }}
           >
             {t(locale, 'highlighter')}
           </button>

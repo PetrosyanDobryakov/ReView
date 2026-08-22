@@ -9,8 +9,8 @@ import { Presence } from './ui/Presence';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { Icon } from './ui/icons';
-import { t } from './ui/i18n';
-import { meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
+import { modKey, t } from './ui/i18n';
+import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
@@ -44,6 +44,8 @@ export default function App() {
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
@@ -94,13 +96,25 @@ export default function App() {
     };
     meta.observe(onMeta);
     const offSync = onSyncStatus(setSync);
+    const syncUndo = () => {
+      setCanUndo(undoManager.undoStack.length > 0);
+      setCanRedo(undoManager.redoStack.length > 0);
+    };
+    syncUndo();
+    undoManager.on('stack-item-added', syncUndo);
+    undoManager.on('stack-item-popped', syncUndo);
+    undoManager.on('stack-cleared', syncUndo);
     return () => {
       persistence.off('synced', onSynced);
       offSettings();
       meta.unobserve(onMeta);
       offSync();
+      undoManager.off('stack-item-added', syncUndo);
+      undoManager.off('stack-item-popped', syncUndo);
+      undoManager.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
+      destroyProvider();
     };
   }, []);
 
@@ -122,13 +136,21 @@ export default function App() {
   }, [menu]);
 
   useEffect(() => {
-    if (!settingsOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSettingsOpen(false);
+      if (e.key !== 'Escape') return;
+      if (menu) {
+        setMenu(null);
+        return;
+      }
+      if (info) {
+        setInfo(null);
+        return;
+      }
+      if (settingsOpen) setSettingsOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [settingsOpen]);
+  }, [menu, info, settingsOpen]);
 
   const closeMenu = () => setMenu(null);
   const menuShown = useExitPresence(Boolean(menu), MOTION.overlay);
@@ -146,9 +168,9 @@ export default function App() {
     if (menuView.shapeId) {
       const shapeId = menuView.shapeId;
       menuItems.push(
-        { label: t(locale, 'ctxCopy'), hint: 'Ctrl+C', run: () => e?.copySelection() },
-        { label: t(locale, 'ctxCopyImage'), hint: 'Ctrl+Shift+C', run: () => e?.copySelectionAsImage() },
-        { label: t(locale, 'ctxDuplicate'), hint: 'Ctrl+D', run: () => e?.duplicateSelection() },
+        { label: t(locale, 'ctxCopy'), hint: `${modKey()}+C`, run: () => e?.copySelection() },
+        { label: t(locale, 'ctxCopyImage'), hint: `${modKey()}+Shift+C`, run: () => e?.copySelectionAsImage() },
+        { label: t(locale, 'ctxDuplicate'), hint: `${modKey()}+D`, run: () => e?.duplicateSelection() },
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
       if (menuView.type === 'image') {
@@ -165,7 +187,7 @@ export default function App() {
         { label: t(locale, 'ctxBack'), run: () => e?.sendBack() },
         {
           label: menuView.locked ? t(locale, 'ctxUnlock') : t(locale, 'ctxLock'),
-          hint: 'Ctrl+Shift+L',
+          hint: `${modKey()}+Shift+L`,
           run: () => e?.toggleLockSelection(),
         },
         {
@@ -204,13 +226,13 @@ export default function App() {
       <header className="file-bar">
         <div className="island file-island">
           <div className="brand">
-            {t(locale, 'brand')} <span className="brand-sub">{shapeCount}</span>
+            {t(locale, 'brand')} <span className="brand-sub" aria-label={`${shapeCount}`}>{shapeCount}</span>
           </div>
           <div className="island-sep" />
-          <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} onClick={() => undoManager.undo()}>
+          <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} disabled={!canUndo} onClick={() => undoManager.undo()}>
             <Icon name="undo" />
           </button>
-          <button type="button" className="icon-btn" title={t(locale, 'redo')} aria-label={t(locale, 'redo')} onClick={() => undoManager.redo()}>
+          <button type="button" className="icon-btn" title={t(locale, 'redo')} aria-label={t(locale, 'redo')} disabled={!canRedo} onClick={() => undoManager.redo()}>
             <Icon name="redo" />
           </button>
           <div className="island-sep" />

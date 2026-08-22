@@ -226,5 +226,47 @@ const shiftPts = shiftPen.get('points').toArray();
 assert.equal(shiftPts.length, 4, 'shift stroke is a 2-point straight line');
 assert.equal(shiftPts[2], 200, 'shift stroke ends at release point');
 
+engine.setTool('select');
+const addA = store.addShape({
+  type: 'rect',
+  x: -200,
+  y: -200,
+  w: 40,
+  h: 40,
+  fill: '#ffffff',
+  stroke: '#6b6b66',
+  strokeWidth: 2,
+});
+const addB = store.addShape({
+  type: 'rect',
+  x: -100,
+  y: -200,
+  w: 40,
+  h: 40,
+  fill: '#ffffff',
+  stroke: '#6b6b66',
+  strokeWidth: 2,
+});
+engine.setSelection([addA]);
+engine.onPointerDown({ clientX: 420, clientY: 170, button: 0, pointerId: 40, shiftKey: true });
+engine.onPointerUp({ clientX: 420, clientY: 170, button: 0, pointerId: 40, shiftKey: true });
+assert.equal(engine.selection.has(addA), true, 'shift-click keeps first shape');
+assert.equal(engine.selection.has(addB), true, 'shift-click adds second shape');
+
+const lockedDel = store.addShape({
+  type: 'rect',
+  x: 800,
+  y: 800,
+  w: 40,
+  h: 40,
+  fill: '#ffffff',
+  stroke: '#6b6b66',
+  strokeWidth: 2,
+});
+store.patchShape(lockedDel, { locked: true });
+engine.setSelection([lockedDel]);
+engine.deleteSelection();
+assert.equal(store.board.has(lockedDel), true, 'locked shape is not deleted');
+
 console.log('engine-move-test: all checks passed');
 process.exit(0);

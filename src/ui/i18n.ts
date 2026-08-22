@@ -315,7 +315,14 @@ export const MESSAGES: Record<LocaleId, typeof ru> = { ru, en, zh };
 export type MessageKey = keyof typeof ru;
 
 export function t(locale: LocaleId, key: MessageKey): string {
-  return MESSAGES[locale][key];
+  return MESSAGES[locale][key].replaceAll('Ctrl', modKey());
+}
+
+export function modKey(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl';
+  const platform = navigator.platform || '';
+  if (/Mac|iPhone|iPad|iPod/.test(platform)) return '⌘';
+  return 'Ctrl';
 }
 
 export const CHROME_LABEL: Record<ChromeThemeId, MessageKey> = {

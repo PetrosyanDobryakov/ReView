@@ -212,7 +212,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
         ctx.beginPath();
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
         ctx.clip();
-        ctx.fillStyle = '#3a2f00';
+        ctx.fillStyle = v.textColor ?? '#3a2f00';
         ctx.font = font;
         ctx.textBaseline = 'top';
         const lineHeight = (v.fontSize ?? STICKY_FONT) * 1.25;
@@ -272,7 +272,7 @@ export function onImageLoad(cb: (src: string) => void): () => void {
 }
 
 export function getImage(src: string): HTMLImageElement | null {
-  if (!src) return null;
+  if (!src.startsWith('data:image/') && !src.startsWith('blob:')) return null;
   const hit = imageCache.get(src);
   if (hit) return hit;
   const img = new Image();

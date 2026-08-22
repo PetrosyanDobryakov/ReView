@@ -2,7 +2,7 @@ import { CHROME_THEME_IDS, writeChromeTheme, type ChromeThemeId } from '../core/
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import type { SyncStatus } from '../core/store';
 import { Icon } from './icons';
-import { BG_PRESETS, CHROME_LABEL, t } from './i18n';
+import { BG_PRESETS, CHROME_LABEL, modKey, t } from './i18n';
 import { MOTION, useExitPresence } from './motion';
 import { SlideTrack } from './SlideTrack';
 import { SwapText } from './SwapText';
@@ -172,10 +172,10 @@ export function SettingsSheet({
               {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
             </li>
             <li>
-              Ctrl+Z <span>{t(locale, 'undo').split(' (')[0]}</span>
+              {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
             </li>
             <li>
-              Ctrl+D <span>{t(locale, 'ctxDuplicate')}</span>
+              {modKey()}+D <span>{t(locale, 'ctxDuplicate')}</span>
             </li>
           </ul>
         </section>

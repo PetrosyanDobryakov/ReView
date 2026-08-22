@@ -12,10 +12,21 @@ export const meta = doc.getMap('meta');
 export const order = doc.getArray<string>('order');
 
 export function ensureOrder(): void {
-  if (order.length === board.size) return;
+  const ids = new Set(board.keys());
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const id of order.toArray()) {
+    if (!ids.has(id) || seen.has(id)) continue;
+    next.push(id);
+    seen.add(id);
+  }
+  for (const id of board.keys()) {
+    if (!seen.has(id)) next.push(id);
+  }
+  if (next.length === order.length && next.every((id, i) => order.get(i) === id)) return;
   transact(() => {
     order.delete(0, order.length);
-    order.push([...board.keys()]);
+    if (next.length) order.push(next);
   });
 }
 
@@ -81,7 +92,9 @@ persistence.on('synced', () => {
   migratePaper();
 });
 
-const SYNC_URL = `ws://${typeof location !== 'undefined' ? location.hostname : 'localhost'}:1234`;
+const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
+const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
+const SYNC_URL = `${proto}://${host}:1234`;
 
 let provider: WebsocketProvider | null = null;
 
