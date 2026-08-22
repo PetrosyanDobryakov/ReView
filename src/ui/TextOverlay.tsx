@@ -44,6 +44,8 @@ export function TextOverlay({
       ref={ref}
       className="text-overlay"
       contentEditable
+      role="textbox"
+      aria-multiline="true"
       suppressContentEditableWarning
       spellCheck={false}
       style={{
@@ -67,7 +69,11 @@ export function TextOverlay({
       onPaste={(e) => {
         e.preventDefault();
         const text = e.clipboardData.getData('text/plain');
-        document.execCommand('insertText', false, text);
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+        sel.deleteFromDocument();
+        sel.getRangeAt(0).insertNode(document.createTextNode(text));
+        sel.collapseToEnd();
       }}
       onBlur={() => finish(true)}
     />

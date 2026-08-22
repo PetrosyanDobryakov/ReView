@@ -45,7 +45,7 @@ export function SettingsSheet({
           <h2 id="settings-title">
             <SwapText text={t(locale, 'settings')} />
           </h2>
-          <button className="icon-btn" title={t(locale, 'close')} onClick={onClose}>
+          <button type="button" className="icon-btn" title={t(locale, 'close')} aria-label={t(locale, 'close')} onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </header>
@@ -78,9 +78,11 @@ export function SettingsSheet({
           <SlideTrack className="locale-row" active={locale}>
             {LOCALES.map((id) => (
               <button
+                type="button"
                 key={id}
                 className="style-btn"
                 data-slide-active={locale === id ? 'true' : undefined}
+                aria-pressed={locale === id}
                 onClick={() => {
                   if (id === locale) return;
                   const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
@@ -105,10 +107,12 @@ export function SettingsSheet({
           <SlideTrack className="theme-grid" active={chromeTheme}>
             {CHROME_THEME_IDS.map((id) => (
               <button
+                type="button"
                 key={id}
                 className="theme-card"
                 data-theme-preview={id}
                 data-slide-active={chromeTheme === id ? 'true' : undefined}
+                aria-pressed={chromeTheme === id}
                 onClick={() => {
                   if (id === chromeTheme) return;
                   onChromeTheme(id);
@@ -128,11 +132,14 @@ export function SettingsSheet({
           <SlideTrack className="bg-grid" active={bg}>
             {BG_PRESETS.map((p) => (
               <button
+                type="button"
                 key={p.value}
                 className={`bg-card${p.value.startsWith('#f') ? ' light' : ''}`}
                 data-slide-active={bg === p.value ? 'true' : undefined}
                 style={{ background: p.value }}
                 title={t(locale, p.label)}
+                aria-label={t(locale, p.label)}
+                aria-pressed={bg === p.value}
                 onClick={() => onBg(p.value)}
               >
                 <span>{t(locale, p.label)}</span>

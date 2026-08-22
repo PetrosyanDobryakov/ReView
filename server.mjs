@@ -15,6 +15,17 @@ wss.on('connection', (conn, req) => {
   setupWSConnection(conn, req, { gc: true });
 });
 
+function onListenError(err) {
+  if (err && typeof err === 'object' && 'code' in err && err.code === 'EADDRINUSE') {
+    console.log(`[doska] sync already running on :${PORT}`);
+    process.exit(0);
+  }
+  throw err;
+}
+
+server.on('error', onListenError);
+wss.on('error', onListenError);
+
 server.listen(PORT, () => {
   console.log(`[doska] sync server: ws://localhost:${PORT}`);
 });

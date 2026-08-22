@@ -38,7 +38,7 @@ Name: Доска. Incumbent UI language: Russian. GitHub repo name ReView is not
 
 ## Evidence on Hand
 
-Runnable app: `src/App.tsx`, `src/index.css`, canvas engine under `src/engine/`. No marketing site, no logo lockup, no DESIGN.md yet. Do not invent testimonials or cloud claims.
+Runnable app: `src/App.tsx`, `src/index.css`, canvas engine under `src/engine/`. Design system lives in `DESIGN.md`. GitHub name is ReView; on-screen name stays Доска. No marketing site and no cloud claims.
 
 ## Product Principles
 

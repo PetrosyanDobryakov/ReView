@@ -184,7 +184,7 @@ export default function App() {
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
       <div className="canvas-wrap">
-        <canvas ref={canvasRef} />
+        <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
           <TextOverlay
             target={editTarget}
@@ -207,32 +207,34 @@ export default function App() {
             {t(locale, 'brand')} <span className="brand-sub">{shapeCount}</span>
           </div>
           <div className="island-sep" />
-          <button className="icon-btn" title={t(locale, 'undo')} onClick={() => undoManager.undo()}>
+          <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} onClick={() => undoManager.undo()}>
             <Icon name="undo" />
           </button>
-          <button className="icon-btn" title={t(locale, 'redo')} onClick={() => undoManager.redo()}>
+          <button type="button" className="icon-btn" title={t(locale, 'redo')} aria-label={t(locale, 'redo')} onClick={() => undoManager.redo()}>
             <Icon name="redo" />
           </button>
           <div className="island-sep" />
-          <button className="icon-btn" title={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
+          <button type="button" className="icon-btn" title={t(locale, 'zoomOut')} aria-label={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
             <Icon name="minus" />
           </button>
-          <button className="zoom-value" title={t(locale, 'zoomReset')} onClick={() => engine?.resetZoom()}>
+          <button type="button" className="zoom-value" title={t(locale, 'zoomReset')} aria-label={t(locale, 'zoomReset')} onClick={() => engine?.resetZoom()}>
             {zoom}%
           </button>
-          <button className="icon-btn" title={t(locale, 'zoomIn')} onClick={() => engine?.zoomBy(1.2)}>
+          <button type="button" className="icon-btn" title={t(locale, 'zoomIn')} aria-label={t(locale, 'zoomIn')} onClick={() => engine?.zoomBy(1.2)}>
             <Icon name="plus" />
           </button>
-          <button className="icon-btn" title={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
+          <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
             <Icon name="fit" />
           </button>
         </div>
         <div className="island meta-island">
           {errorShown && errorView && (
             <button
+              type="button"
               className={`error-banner${error ? '' : ' is-leaving'}`}
               onClick={() => setError(null)}
               title={t(locale, 'errorHint')}
+              aria-label={t(locale, 'errorHint')}
             >
               {t(locale, 'error')}: {errorView}
             </button>
@@ -240,8 +242,11 @@ export default function App() {
           <Presence locale={locale} online={sync.online} />
           <div className="island-sep" />
           <button
+            type="button"
             className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
             title={t(locale, 'settings')}
+            aria-label={t(locale, 'settings')}
+            aria-expanded={settingsOpen}
             onClick={() => setSettingsOpen(true)}
           >
             <Icon name="settings" />
@@ -312,6 +317,7 @@ export default function App() {
         >
           {menuItems.map((item, index) => (
             <button
+              type="button"
               key={item.label}
               className={`ctx-item${item.danger ? ' danger' : ''}`}
               style={{ animationDelay: `${index * 18}ms` }}
@@ -330,7 +336,7 @@ export default function App() {
         <div className={`info-modal${info ? '' : ' is-leaving'}`}>
           <div className="info-head">
             <b>{infoView.title}</b>
-            <button className="icon-btn" title={t(locale, 'close')} onClick={() => setInfo(null)}>
+            <button type="button" className="icon-btn" title={t(locale, 'close')} aria-label={t(locale, 'close')} onClick={() => setInfo(null)}>
               <Icon name="close" />
             </button>
           </div>

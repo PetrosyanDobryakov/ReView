@@ -124,6 +124,9 @@ export function onSyncStatus(cb: (status: SyncStatus) => void): () => void {
 
 let uid = 0;
 export function makeId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
   uid += 1;
   return Date.now().toString(36) + '-' + uid.toString(36) + '-' + Math.random().toString(36).slice(2, 6);
 }

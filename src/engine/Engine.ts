@@ -3,7 +3,9 @@ import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
 import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
-import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor } from '../core/shapes';
+import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, releaseImage, themeFor } from '../core/shapes';
+import { t } from '../ui/i18n';
+import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
@@ -135,6 +137,7 @@ export class Engine {
     window.addEventListener('drop', this.onDrop);
     store.board.observe(this.onStore);
     store.meta.observe(this.onMeta);
+    store.order.observe(this.onOrder);
     store.ensureOrder();
     this.offImageLoad = onImageLoad(() => {
       this.dirty = true;
@@ -166,6 +169,7 @@ export class Engine {
     window.removeEventListener('drop', this.onDrop);
     store.board.unobserve(this.onStore);
     store.meta.unobserve(this.onMeta);
+    store.order.unobserve(this.onOrder);
     this.offImageLoad();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
@@ -333,11 +337,13 @@ export class Engine {
   bringFront(): void {
     if (!this.selection.size) return;
     store.moveOrderToFront([...this.selection]);
+    this.dirty = true;
   }
 
   sendBack(): void {
     if (!this.selection.size) return;
     store.moveOrderToBack([...this.selection]);
+    this.dirty = true;
   }
 
   toggleLockSelection(): void {
@@ -464,28 +470,31 @@ export class Engine {
   shapeInfo(id: string): { title: string; lines: string[] } | null {
     const v = this.views.get(id);
     if (!v) return null;
-    const typeNames: Record<string, string> = {
-      rect: 'Прямоугольник',
-      ellipse: 'Эллипс',
-      sticky: 'Стикер',
-      text: 'Текст',
-      pen: 'Линия',
-      arrow: 'Стрелка',
-      image: 'Картинка',
-    };
+    const locale = readLocale();
+    const typeKey = (
+      {
+        rect: 'infoRect',
+        ellipse: 'infoEllipse',
+        sticky: 'infoSticky',
+        text: 'infoText',
+        pen: 'infoPen',
+        arrow: 'infoArrow',
+        image: 'infoImage',
+      } as const
+    )[v.type];
     const lines = [
-      `Размер: ${Math.round(v.w)} × ${Math.round(v.h)}`,
-      `Позиция: ${Math.round(v.x)}, ${Math.round(v.y)}`,
+      `${t(locale, 'infoSize')}: ${Math.round(v.w)} × ${Math.round(v.h)}`,
+      `${t(locale, 'infoPos')}: ${Math.round(v.x)}, ${Math.round(v.y)}`,
     ];
-    if (v.points) lines.push(`Точек: ${v.points.length / 2}`);
+    if (v.points) lines.push(`${t(locale, 'infoPoints')}: ${v.points.length / 2}`);
     if (v.type === 'image') {
       const img = getImage(v.src ?? '');
       if (img && img.complete && img.naturalWidth) {
-        lines.push(`Пиксели: ${img.naturalWidth} × ${img.naturalHeight}`);
+        lines.push(`${t(locale, 'infoPixels')}: ${img.naturalWidth} × ${img.naturalHeight}`);
       }
     }
-    if (v.locked) lines.push('Заблокировано');
-    return { title: typeNames[v.type] ?? v.type, lines };
+    if (v.locked) lines.push(t(locale, 'infoLocked'));
+    return { title: t(locale, typeKey), lines };
   }
 
   zoomBy(factor: number): void {
@@ -493,15 +502,37 @@ export class Engine {
   }
 
   insertImageFile(file: File, at?: { x: number; y: number }): void {
+    const locale = readLocale();
+    if (!file.type.startsWith('image/')) {
+      this.events.onError?.(t(locale, 'imageFailed'));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      this.events.onError?.(t(locale, 'imageTooLarge'));
+      return;
+    }
     const reader = new FileReader();
+    reader.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
     reader.onload = () => {
-      const src = String(reader.result);
       const img = new Image();
+      img.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
       img.onload = () => {
-        const max = 600;
-        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-        const w = Math.max(1, img.naturalWidth * scale);
-        const h = Math.max(1, img.naturalHeight * scale);
+        const maxStore = 1600;
+        const storeScale = Math.min(1, maxStore / Math.max(img.naturalWidth, img.naturalHeight));
+        const sw = Math.max(1, Math.round(img.naturalWidth * storeScale));
+        const sh = Math.max(1, Math.round(img.naturalHeight * storeScale));
+        const scratch = document.createElement('canvas');
+        scratch.width = sw;
+        scratch.height = sh;
+        const sctx = scratch.getContext('2d');
+        if (!sctx) return;
+        sctx.drawImage(img, 0, 0, sw, sh);
+        const jpeg = file.type === 'image/jpeg' || file.type === 'image/jpg' || file.type === 'image/webp';
+        const src = jpeg ? scratch.toDataURL('image/jpeg', 0.85) : scratch.toDataURL('image/png');
+        const maxShow = 600;
+        const showScale = Math.min(1, maxShow / Math.max(sw, sh));
+        const w = Math.max(1, sw * showScale);
+        const h = Math.max(1, sh * showScale);
         const pos =
           at ?? this.camera.screenToWorld(this.w / 2, this.h / 2, this.w / 2, this.h / 2);
         const id = store.addShape({
@@ -517,7 +548,7 @@ export class Engine {
         });
         this.setSelection([id]);
       };
-      img.src = src;
+      img.src = String(reader.result);
     };
     reader.readAsDataURL(file);
   }
@@ -566,6 +597,7 @@ export class Engine {
     if (!cctx) return;
     cctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const url = canvas.toDataURL('image/png');
+    if (v.src) releaseImage(v.src);
     store.patchShape(c.id, { src: url, x: c.box.x, y: c.box.y, w: c.box.w, h: c.box.h });
     this.crop = null;
     this.events.onCrop?.(false);
@@ -715,6 +747,10 @@ export class Engine {
     this.dirty = true;
   };
 
+  private onOrder = (): void => {
+    this.dirty = true;
+  };
+
   private onStore = (ev: Y.YMapEvent<Y.Map<unknown>>): void => {
     ev.changes.keys.forEach((change, key) => {
       if (change.action === 'delete') {
@@ -845,7 +881,7 @@ export class Engine {
       console.error('[doska] pointermove error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
-    this.dirty = true;
+    if (this.pointerDown || this.panDrag || this.crop || this.gesture) this.dirty = true;
   };
 
   private onPointerUp = (e: PointerEvent): void => {
@@ -1152,6 +1188,12 @@ export class Engine {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+    }
+    if (document.querySelector('.sheet-root:not(.is-leaving)')) return;
     if (this.crop) {
       if (e.key === 'Escape') {
         e.preventDefault();

@@ -88,6 +88,20 @@ const ru = {
   ctxLock: 'Заблокировать',
   ctxInfo: 'Инфо',
   ctxPaste: 'Вставить',
+  infoRect: 'Прямоугольник',
+  infoEllipse: 'Эллипс',
+  infoSticky: 'Стикер',
+  infoText: 'Текст',
+  infoPen: 'Линия',
+  infoArrow: 'Стрелка',
+  infoImage: 'Картинка',
+  infoSize: 'Размер',
+  infoPos: 'Позиция',
+  infoPoints: 'Точек',
+  infoPixels: 'Пиксели',
+  infoLocked: 'Заблокировано',
+  imageTooLarge: 'Картинка больше 8 МБ',
+  imageFailed: 'Не удалось прочитать картинку',
 };
 
 const en: typeof ru = {
@@ -177,6 +191,20 @@ const en: typeof ru = {
   ctxLock: 'Lock',
   ctxInfo: 'Info',
   ctxPaste: 'Paste',
+  infoRect: 'Rectangle',
+  infoEllipse: 'Ellipse',
+  infoSticky: 'Sticky',
+  infoText: 'Text',
+  infoPen: 'Stroke',
+  infoArrow: 'Arrow',
+  infoImage: 'Image',
+  infoSize: 'Size',
+  infoPos: 'Position',
+  infoPoints: 'Points',
+  infoPixels: 'Pixels',
+  infoLocked: 'Locked',
+  imageTooLarge: 'Image is larger than 8 MB',
+  imageFailed: 'Could not read the image',
 };
 
 const zh: typeof ru = {
@@ -266,6 +294,20 @@ const zh: typeof ru = {
   ctxLock: '锁定',
   ctxInfo: '信息',
   ctxPaste: '粘贴',
+  infoRect: '矩形',
+  infoEllipse: '椭圆',
+  infoSticky: '便利贴',
+  infoText: '文字',
+  infoPen: '线条',
+  infoArrow: '箭头',
+  infoImage: '图片',
+  infoSize: '尺寸',
+  infoPos: '位置',
+  infoPoints: '点数',
+  infoPixels: '像素',
+  infoLocked: '已锁定',
+  imageTooLarge: '图片超过 8 MB',
+  imageFailed: '无法读取图片',
 };
 
 export const MESSAGES: Record<LocaleId, typeof ru> = { ru, en, zh };

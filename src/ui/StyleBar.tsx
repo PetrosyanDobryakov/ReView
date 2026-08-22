@@ -42,10 +42,13 @@ function Swatches({
     <div className="swatches">
       {colors.map((c) => (
         <button
+          type="button"
           key={c}
           className={`swatch${value === c ? ' active' : ''}`}
           style={{ background: c }}
           title={c}
+          aria-label={c}
+          aria-pressed={value === c}
           onClick={() => onPick(c)}
         />
       ))}
@@ -111,24 +114,30 @@ export function StyleBar({
       {view.showEraser && (
         <>
           <button
+            type="button"
             className={`style-btn${eraser.mode === 'whole' ? ' active' : ''}`}
             title={t(locale, 'eraserWholeHint')}
+            aria-pressed={eraser.mode === 'whole'}
             onClick={() => updateEraserSettings({ mode: 'whole' })}
           >
             {t(locale, 'eraserWhole')}
           </button>
           <button
+            type="button"
             className={`style-btn${eraser.mode === 'partial' ? ' active' : ''}`}
             title={t(locale, 'eraserPartialHint')}
+            aria-pressed={eraser.mode === 'partial'}
             onClick={() => updateEraserSettings({ mode: 'partial' })}
           >
             {t(locale, 'eraserPartial')}
           </button>
           {ERASER_SIZES.map((s) => (
             <button
+              type="button"
               key={s}
               className={`style-btn${eraser.size === s ? ' active' : ''}`}
               title={`${s}`}
+              aria-pressed={eraser.size === s}
               onClick={() => updateEraserSettings({ size: s })}
             >
               <span className="eraser-dot" style={{ width: s / 2.5, height: s / 2.5 }} />
@@ -139,15 +148,19 @@ export function StyleBar({
       {view.showPenStyle && (
         <>
           <button
+            type="button"
             className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
             title={t(locale, 'markerHint')}
+            aria-pressed={pen.style === 'marker'}
             onClick={() => updatePenSettings({ style: 'marker' })}
           >
             {t(locale, 'marker')}
           </button>
           <button
+            type="button"
             className={`style-btn${pen.style === 'highlighter' ? ' active' : ''}`}
             title={t(locale, 'highlighterHint')}
+            aria-pressed={pen.style === 'highlighter'}
             onClick={() => updatePenSettings({ style: 'highlighter' })}
           >
             {t(locale, 'highlighter')}

@@ -60,6 +60,9 @@ export interface BoardTheme {
 }
 
 export function themeFor(bg: string): BoardTheme {
+  if (!/^#[0-9a-fA-F]{6}$/.test(bg)) {
+    return { text: COLORS.text, grid: COLORS.grid };
+  }
   const r = parseInt(bg.slice(1, 3), 16);
   const g = parseInt(bg.slice(3, 5), 16);
   const b = parseInt(bg.slice(5, 7), 16);
@@ -276,12 +279,20 @@ export function getImage(src: string): HTMLImageElement | null {
   img.onload = () => {
     for (const l of imageListeners) l(src);
   };
+  img.onerror = () => {
+    imageCache.delete(src);
+  };
   img.src = src;
   imageCache.set(src, img);
   return img;
 }
 
-export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView): void {  const pts = v.points ?? [];
+export function releaseImage(src: string): void {
+  if (src) imageCache.delete(src);
+}
+
+export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView): void {
+  const pts = v.points ?? [];
   if (pts.length < 4) return;
   const ax = pts[0];
   const ay = pts[1];

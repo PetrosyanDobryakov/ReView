@@ -1,2 +1,7 @@
 node_modules
 dist
+.impeccable
+scripts/engine-bundle.mjs
+*.log
+.DS_Store
+Thumbs.db

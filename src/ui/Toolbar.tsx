@@ -39,10 +39,13 @@ function ToolButtons({
     <SlideTrack className="tool-group" active={ids.includes(tool) ? tool : null}>
       {ids.map((id) => (
         <button
+          type="button"
           key={id}
           className="tool-btn"
           data-slide-active={tool === id ? 'true' : undefined}
           title={t(locale, id)}
+          aria-label={t(locale, id)}
+          aria-pressed={tool === id}
           onClick={() => onTool(id)}
         >
           <Icon name={id} size={TOOLBELT_ICON_SIZE} />
@@ -75,16 +78,16 @@ export function Toolbar({
       <ToolButtons ids={CREATE} tool={tool} locale={locale} onTool={onTool} />
       <div className="toolbelt-sep" />
       <div className="tool-group">
-        <button className="tool-btn" title={t(locale, 'delete')} disabled={!selectionCount} onClick={onDelete}>
+        <button type="button" className="tool-btn" title={t(locale, 'delete')} aria-label={t(locale, 'delete')} disabled={!selectionCount} onClick={onDelete}>
           <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
         </button>
-        <button className="tool-btn" title={t(locale, 'copy')} disabled={!selectionCount} onClick={onCopy}>
+        <button type="button" className="tool-btn" title={t(locale, 'copy')} aria-label={t(locale, 'copy')} disabled={!selectionCount} onClick={onCopy}>
           <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
         </button>
-        <button className="tool-btn" title={t(locale, 'paste')} onClick={onPaste}>
+        <button type="button" className="tool-btn" title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
           <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
         </button>
-        <button className="tool-btn" title={t(locale, 'duplicate')} disabled={!selectionCount} onClick={onDuplicate}>
+        <button type="button" className="tool-btn" title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} disabled={!selectionCount} onClick={onDuplicate}>
           <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
         </button>
       </div>
@@ -92,19 +95,19 @@ export function Toolbar({
       <div className="tool-group">
         {cropActive ? (
           <>
-            <button key="apply" className="tool-btn crop-apply tool-pop" title={t(locale, 'cropApply')} onClick={onApplyCrop}>
+            <button key="apply" type="button" className="tool-btn crop-apply tool-pop" title={t(locale, 'cropApply')} aria-label={t(locale, 'cropApply')} onClick={onApplyCrop}>
               <Icon name="check" size={TOOLBELT_ICON_SIZE} />
             </button>
-            <button key="cancel" className="tool-btn tool-pop" title={t(locale, 'cropCancel')} onClick={onCancelCrop}>
+            <button key="cancel" type="button" className="tool-btn tool-pop" title={t(locale, 'cropCancel')} aria-label={t(locale, 'cropCancel')} onClick={onCancelCrop}>
               <Icon name="close" size={TOOLBELT_ICON_SIZE} />
             </button>
           </>
         ) : (
           <>
-            <button key="image" className="tool-btn" title={t(locale, 'insertImage')} onClick={onInsertImage}>
+            <button key="image" type="button" className="tool-btn" title={t(locale, 'insertImage')} aria-label={t(locale, 'insertImage')} onClick={onInsertImage}>
               <Icon name="image" size={TOOLBELT_ICON_SIZE} />
             </button>
-            <button key="crop" className="tool-btn" title={t(locale, 'crop')} disabled={!canCrop} onClick={onCrop}>
+            <button key="crop" type="button" className="tool-btn" title={t(locale, 'crop')} aria-label={t(locale, 'crop')} disabled={!canCrop} onClick={onCrop}>
               <Icon name="crop" size={TOOLBELT_ICON_SIZE} />
             </button>
           </>
