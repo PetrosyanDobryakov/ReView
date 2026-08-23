@@ -17,6 +17,10 @@ export interface ShapeView {
   textColor?: string;
   src?: string;
   locked?: boolean;
+  cropX?: number;
+  cropY?: number;
+  cropW?: number;
+  cropH?: number;
 }
 
 export interface ShapeBox {
@@ -248,7 +252,15 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
     case 'image': {
       const img = getImage(v.src ?? '');
       if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, v.x, v.y, v.w, v.h);
+        if (v.cropX !== undefined || v.cropY !== undefined || v.cropW !== undefined || v.cropH !== undefined) {
+          const sx = (v.cropX ?? 0) * img.naturalWidth;
+          const sy = (v.cropY ?? 0) * img.naturalHeight;
+          const sw = (v.cropW ?? 1) * img.naturalWidth;
+          const sh = (v.cropH ?? 1) * img.naturalHeight;
+          ctx.drawImage(img, sx, sy, sw, sh, v.x, v.y, v.w, v.h);
+        } else {
+          ctx.drawImage(img, v.x, v.y, v.w, v.h);
+        }
       } else {
         ctx.fillStyle = '#2e2e2b';
         ctx.fillRect(v.x, v.y, v.w, v.h);
