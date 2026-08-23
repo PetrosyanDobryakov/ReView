@@ -84,7 +84,7 @@ export const undoManager = new Y.UndoManager([board, order], {
   captureTimeout: 200,
 });
 
-export const persistence = new IndexeddbPersistence('doska-v1', doc);
+export const persistence = new IndexeddbPersistence('review-v1', doc);
 
 if (persistence.synced) migratePaper();
 persistence.on('synced', () => {
@@ -100,7 +100,7 @@ let provider: WebsocketProvider | null = null;
 
 export function getProvider(): WebsocketProvider {
   if (!provider) {
-    provider = new WebsocketProvider(SYNC_URL, 'doska', doc);
+    provider = new WebsocketProvider(SYNC_URL, 'review', doc);
   }
   return provider;
 }
@@ -167,6 +167,10 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
     locked: m.get('locked') as boolean | undefined,
+    cropX: m.get('cropX') as number | undefined,
+    cropY: m.get('cropY') as number | undefined,
+    cropW: m.get('cropW') as number | undefined,
+    cropH: m.get('cropH') as number | undefined,
     points: points instanceof Y.Array ? points.toArray() : undefined,
   };
 }
@@ -198,6 +202,12 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
   if (v.locked) m.set('locked', true);
+  if (v.cropW !== undefined || v.cropH !== undefined) {
+    m.set('cropX', v.cropX ?? 0);
+    m.set('cropY', v.cropY ?? 0);
+    m.set('cropW', v.cropW ?? 1);
+    m.set('cropH', v.cropH ?? 1);
+  }
   return m;
 }
 
@@ -247,5 +257,13 @@ export function removeShapes(ids: string[]): void {
       const idx = order.toArray().indexOf(id);
       if (idx >= 0) order.delete(idx, 1);
     }
+  });
+}
+
+export function clearShapeKeys(id: string, keys: string[]): void {
+  transact(() => {
+    const m = board.get(id);
+    if (!m) return;
+    for (const key of keys) m.delete(key);
   });
 }

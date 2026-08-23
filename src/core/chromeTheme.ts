@@ -2,7 +2,7 @@ export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'white' | 'ink';
 
 export const CHROME_THEME_IDS: ChromeThemeId[] = ['packet', 'archive', 'ink', 'studio', 'white'];
 
-const STORAGE_KEY = 'doska-chrome-theme';
+const STORAGE_KEY = 'review-chrome-theme';
 
 const THEME_COLORS: Record<ChromeThemeId, string> = {
   packet: '#242422',
