@@ -11,6 +11,8 @@
 - Right-click no longer collapses a multi-selection; copy/delete/duplicate act on the whole selection.
 - Ctrl+V prefers the board clipboard; system clipboard is used when the board buffer is empty.
 - Pasted groups land centered in the current view instead of off-screen.
+- Text scales by dragging its frame edges like an image — font size follows the handles.
+- Crop frame is now visually distinct: white dashed border with rule-of-thirds guides.
 
 ### Image crop rework
 - Crop is non-destructive: the original image is kept, crop is stored as a display window.

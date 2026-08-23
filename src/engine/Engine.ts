@@ -1263,10 +1263,22 @@ export class Engine {
     ctx.fillRect(c.full.x, c.box.y + c.box.h, c.full.w, c.full.y + c.full.h - c.box.y - c.box.h);
     ctx.fillRect(c.full.x, c.box.y, c.box.x - c.full.x, c.box.h);
     ctx.fillRect(c.box.x + c.box.w, c.box.y, c.full.x + c.full.w - c.box.x - c.box.w, c.box.h);
-    ctx.strokeStyle = COLORS.selection;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    for (let i = 1; i <= 2; i++) {
+      ctx.moveTo(c.box.x + (c.box.w * i) / 3, c.box.y);
+      ctx.lineTo(c.box.x + (c.box.w * i) / 3, c.box.y + c.box.h);
+      ctx.moveTo(c.box.x, c.box.y + (c.box.h * i) / 3);
+      ctx.lineTo(c.box.x + c.box.w, c.box.y + (c.box.h * i) / 3);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2 * s;
+    ctx.setLineDash([10 * s, 7 * s]);
     ctx.strokeRect(c.box.x, c.box.y, c.box.w, c.box.h);
-    ctx.fillStyle = COLORS.selection;
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffffff';
     for (const [fx, fy] of Object.values(HANDLE_POS)) {
       ctx.fillRect(c.box.x + fx * c.box.w - 4.5 * s, c.box.y + fy * c.box.h - 4.5 * s, 9 * s, 9 * s);
     }
