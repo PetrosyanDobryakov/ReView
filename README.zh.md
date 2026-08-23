@@ -1,6 +1,6 @@
-# Доска
+# 画板（Доска）
 
-[English](README.md) · [Русский](README.ru.md) · [中文](README.zh.md)
+[English](README.md) · [Русский](README.ru.md) · 中文
 
 本地无限画板。马克笔、便利贴、文字、图片。断网也能用。可选的实时同步是本机（或局域网）上的 websocket，不是云账号。
 
@@ -32,7 +32,7 @@ npm run dev
 
 Vite 应用在 [http://localhost:5173](http://localhost:5173)，同步服务在 `ws://localhost:1234`。打开页面，画几笔，刷新后画板还在。
 
-同步是可选的。只跑 websocket 用 `npm run server`。同一台机器上的两个浏览器，或局域网里另一台设备用主机 IP 而不是 `localhost`，会进入房间 `doska`。
+同步是可选的。只跑 websocket 用 `npm run server`。同一台机器上的两个浏览器，或局域网里另一台设备用主机 IP 而不是 `localhost`，会进入房间 `doska`。同步服务没有鉴权。局域网里任何能连上 `:1234` 的人都可以加入该房间。
 
 `localhost` 和 `127.0.0.1` 是不同 origin。IndexedDB 不会跟着你换地址。选定一个用到底。
 

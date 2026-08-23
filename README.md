@@ -1,6 +1,6 @@
-# Доска
+# Doska (Доска)
 
-[English](README.md) · [Русский](README.ru.md) · [中文](README.zh.md)
+English · [Русский](README.ru.md) · [中文](README.zh.md)
 
 Local-first infinite board. Draw, drop stickies, type, paste images. It keeps working with the network unplugged. Optional realtime sync is a websocket on your machine (or LAN), not a cloud account.
 
@@ -17,7 +17,7 @@ The GitHub repo is named ReView. The product on screen is **Доска**.
 - IndexedDB persistence (`doska-v1`)
 - Optional Yjs room `doska` on `ws://<host>:1234`
 - UI in Russian (default), English, Chinese
-- Chrome skins and board paper are separate settings
+- UI themes and board paper are separate settings
 
 ![Drawing](docs/screenshots/drawing.png)
 
@@ -32,7 +32,7 @@ npm run dev
 
 That starts the Vite app at [http://localhost:5173](http://localhost:5173) and the sync server at `ws://localhost:1234`. Open the page. Draw. Refresh: the board is still there.
 
-Sync is optional. `npm run server` is enough if you only want the websocket. Two browsers on the same machine, or another device on the LAN using your host IP instead of `localhost`, share room `doska`.
+Sync is optional. `npm run server` is enough if you only want the websocket. Two browsers on the same machine, or another device on the LAN using your host IP instead of `localhost`, share room `doska`. The sync server has no auth. Anyone on the network who can reach `:1234` can join that room.
 
 `localhost` and `127.0.0.1` are different origins. IndexedDB will not follow you between them. Pick one and stay there.
 
