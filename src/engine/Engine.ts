@@ -9,6 +9,17 @@ import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
+
+const CROP_CURSORS: Record<HandleId, string> = {
+  nw: 'nwse-resize',
+  se: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize',
+};
 import { settings } from '../core/settings';
 
 export interface EditTarget {
@@ -959,6 +970,21 @@ export class Engine {
     }
     if (this.crop) {
       this.cropPointerMove(e);
+      if (!this.pointerDown) {
+        const p = this.pointerInfo(e);
+        const h = this.cropHitHandle(p.screen.x, p.screen.y);
+        if (h) {
+          this.setCursor(CROP_CURSORS[h]);
+        } else {
+          const c = this.crop;
+          const inside =
+            p.world.x >= c.box.x &&
+            p.world.x <= c.box.x + c.box.w &&
+            p.world.y >= c.box.y &&
+            p.world.y <= c.box.y + c.box.h;
+          this.setCursor(inside ? 'move' : 'default');
+        }
+      }
       return;
     }
     if (this.panDrag) {
@@ -1229,13 +1255,33 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
+    let best: HandleId | null = null;
+    let bestD = Infinity;
     for (const handle of HANDLES) {
       const [fx, fy] = HANDLE_POS[handle];
       const hx = (c.box.x + fx * c.box.w) * z + ox;
       const hy = (c.box.y + fy * c.box.h) * z + oy;
-      if (Math.abs(hx - sx) <= 8 && Math.abs(hy - sy) <= 8) return handle;
+      const d = Math.hypot(hx - sx, hy - sy);
+      if (d < bestD) {
+        bestD = d;
+        best = handle;
+      }
     }
-    return null;
+    if (bestD <= 22) return best;
+    const bx = c.box.x * z + ox;
+    const by = c.box.y * z + oy;
+    const bw = c.box.w * z;
+    const bh = c.box.h * z;
+    const nearL = Math.abs(sx - bx) <= 16;
+    const nearR = Math.abs(sx - (bx + bw)) <= 16;
+    const nearT = Math.abs(sy - by) <= 16;
+    const nearB = Math.abs(sy - (by + bh)) <= 16;
+    let h = '';
+    if (nearT) h += 'n';
+    else if (nearB) h += 's';
+    if (nearL) h += 'w';
+    else if (nearR) h += 'e';
+    return (h || null) as HandleId | null;
   }
 
   private drawCropOverlay(ctx: CanvasRenderingContext2D): void {
@@ -1279,8 +1325,15 @@ export class Engine {
     ctx.strokeRect(c.box.x, c.box.y, c.box.w, c.box.h);
     ctx.setLineDash([]);
     ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 1.5 * s;
     for (const [fx, fy] of Object.values(HANDLE_POS)) {
-      ctx.fillRect(c.box.x + fx * c.box.w - 4.5 * s, c.box.y + fy * c.box.h - 4.5 * s, 9 * s, 9 * s);
+      const hx = c.box.x + fx * c.box.w;
+      const hy = c.box.y + fy * c.box.h;
+      ctx.beginPath();
+      ctx.rect(hx - 5.5 * s, hy - 5.5 * s, 11 * s, 11 * s);
+      ctx.fill();
+      ctx.stroke();
     }
     ctx.restore();
   }
