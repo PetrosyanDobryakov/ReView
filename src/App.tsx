@@ -13,6 +13,7 @@ import { modKey, t } from './ui/i18n';
 import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
+import { DEFAULT_BOARD_NAME, getBoardName, onBoardNameChange, writeBoardName } from './core/boardName';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { MOTION, useExitPresence } from './ui/motion';
@@ -46,6 +47,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [boardTitle, setBoardTitle] = useState(getBoardName);
+  const [editingName, setEditingName] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
@@ -58,8 +61,10 @@ export default function App() {
 
   useEffect(() => {
     applyLocale(locale);
-    document.title = t(locale, 'title');
-  }, [locale]);
+    document.title = boardTitle === DEFAULT_BOARD_NAME ? t(locale, 'title') : boardTitle;
+  }, [locale, boardTitle]);
+
+  useEffect(() => onBoardNameChange(setBoardTitle), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -174,10 +179,25 @@ export default function App() {
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
       if (menuView.type === 'image') {
+        const view = engine?.views.get(shapeId);
+        const cropped = Boolean(view && (view.cropW !== undefined || view.cropH !== undefined));
         menuItems.push(
           { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() },
+          {
+            label: t(locale, 'crop'),
+            run: () => {
+              e?.setSelection([shapeId]);
+              e?.startCropSelected();
+            },
+          },
           { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
         );
+        if (cropped) {
+          menuItems.push({
+            label: t(locale, 'ctxResetCrop'),
+            run: () => e?.resetCropSelected(),
+          });
+        }
       }
       if (menuView.type === 'pen') {
         menuItems.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
@@ -225,9 +245,41 @@ export default function App() {
 
       <header className="file-bar">
         <div className="island file-island">
-          <div className="brand">
-            {t(locale, 'brand')} <span className="brand-sub" aria-label={`${shapeCount}`}>{shapeCount}</span>
-          </div>
+          {editingName ? (
+            <input
+              className="brand-edit"
+              value={boardTitle}
+              autoFocus
+              maxLength={40}
+              aria-label={t(locale, 'renameBoard')}
+              onChange={(e) => setBoardTitle(e.target.value)}
+              onBlur={() => {
+                writeBoardName(boardTitle);
+                setEditingName(false);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  writeBoardName(boardTitle);
+                  setEditingName(false);
+                }
+                if (e.key === 'Escape') {
+                  setBoardTitle(getBoardName());
+                  setEditingName(false);
+                }
+              }}
+              onKeyUp={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <button
+              type="button"
+              className="brand"
+              title={t(locale, 'renameBoard')}
+              onClick={() => setEditingName(true)}
+            >
+              {boardTitle}
+            </button>
+          )}
           <div className="island-sep" />
           <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} disabled={!canUndo} onClick={() => undoManager.undo()}>
             <Icon name="undo" />
@@ -261,6 +313,9 @@ export default function App() {
               {t(locale, 'error')}: {errorView}
             </button>
           )}
+          <span className="shape-count" title={t(locale, 'objectsCount')} aria-label={`${shapeCount}`}>
+            {shapeCount}
+          </span>
           <Presence locale={locale} online={sync.online} />
           <div className="island-sep" />
           <button

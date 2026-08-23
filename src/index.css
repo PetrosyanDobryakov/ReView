@@ -234,12 +234,50 @@ body {
   white-space: nowrap;
 }
 
+button.brand {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: text;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.brand-edit {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--chrome-text-dim);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--chrome-type-title);
+  letter-spacing: -0.01em;
+  padding: 0 8px;
+  margin: 0 2px;
+  width: 11em;
+  min-width: 6em;
+  outline: none;
+}
+
+.brand-edit:focus {
+  border-bottom-color: currentColor;
+}
+
 .brand-sub {
   color: var(--chrome-text-dim);
   font-weight: 500;
   font-size: var(--chrome-type-label);
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
+}
+
+.shape-count {
+  color: var(--chrome-text-dim);
+  font-weight: 500;
+  font-size: var(--chrome-type-label);
+  font-variant-numeric: tabular-nums;
 }
 
 .icon-btn,

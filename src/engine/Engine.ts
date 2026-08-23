@@ -3,7 +3,7 @@ import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
 import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
-import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, releaseImage, themeFor } from '../core/shapes';
+import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor } from '../core/shapes';
 import { t } from '../ui/i18n';
 import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
@@ -111,6 +111,7 @@ export class Engine {
   private crop: {
     id: string;
     box: ShapeBox;
+    full: ShapeBox;
     mode: 'idle' | 'move' | HandleId;
     start: { x: number; y: number };
     origBox: ShapeBox;
@@ -309,16 +310,30 @@ export class Engine {
   pasteSelection(): void {
     if (!this.clipboard.length) return;
     this.pasteN += 1;
-    const off = (40 / this.camera.zoom) * this.pasteN;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const v of this.clipboard) {
+      minX = Math.min(minX, v.x);
+      minY = Math.min(minY, v.y);
+      maxX = Math.max(maxX, v.x + v.w);
+      maxY = Math.max(maxY, v.y + v.h);
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const drift = (((this.pasteN - 1) % 8) * 24) / this.camera.zoom;
+    const dx = this.camera.x - cx + drift;
+    const dy = this.camera.y - cy + drift;
     const ids: string[] = [];
     for (const v of this.clipboard) {
       ids.push(
         store.addShape({
           ...v,
           id: undefined,
-          x: v.x + off,
-          y: v.y + off,
-          points: v.points ? v.points.map((p) => p + off) : undefined,
+          x: v.x + dx,
+          y: v.y + dy,
+          points: v.points ? v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) : undefined,
         })
       );
     }
@@ -393,6 +408,8 @@ export class Engine {
     canvas.height = Math.max(1, Math.round(box.h + pad * 2));
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
+    ctx.fillStyle = store.metaBg();
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(-box.x + pad, -box.y + pad);
     const theme = themeFor(store.metaBg());
     for (const id of ids) {
@@ -406,7 +423,7 @@ export class Engine {
     let dataUrl: string | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      if (v && v.type === 'image' && v.src) dataUrl = v.src;
+      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined) dataUrl = v.src;
     }
     if (!dataUrl) {
       const canvas = this.selectionCanvas(ids);
@@ -419,7 +436,7 @@ export class Engine {
     } catch {
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = 'doska.png';
+      a.download = 'review.png';
       a.click();
     }
   }
@@ -436,7 +453,7 @@ export class Engine {
     if (ids.length === 1 && v?.type === 'image' && v.src) {
       const a = document.createElement('a');
       a.href = v.src;
-      a.download = 'doska-image.png';
+      a.download = 'review-image.png';
       a.click();
       return;
     }
@@ -444,7 +461,7 @@ export class Engine {
     if (!canvas) return;
     const a = document.createElement('a');
     a.href = canvas.toDataURL('image/png');
-    a.download = 'doska.png';
+    a.download = 'review.png';
     a.click();
   }
 
@@ -475,7 +492,7 @@ export class Engine {
     const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'doska-stroke.csv';
+    a.download = 'review-stroke.csv';
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -577,19 +594,27 @@ export class Engine {
     const id = [...this.selection][0];
     const v = this.views.get(id);
     if (!v || v.type !== 'image' || v.locked) return;
+    const f = { x: v.cropX ?? 0, y: v.cropY ?? 0, w: v.cropW ?? 1, h: v.cropH ?? 1 };
+    const fullW = v.w / f.w;
+    const fullH = v.h / f.h;
+    const fullX = v.x - (f.x / f.w) * v.w;
+    const fullY = v.y - (f.y / f.h) * v.h;
     this.crop = {
       id,
       box: { x: v.x, y: v.y, w: v.w, h: v.h },
+      full: { x: fullX, y: fullY, w: fullW, h: fullH },
       mode: 'idle',
       start: { x: 0, y: 0 },
       origBox: { x: v.x, y: v.y, w: v.w, h: v.h },
     };
+    this.setCursor('default');
     this.events.onCrop?.(true);
     this.dirty = true;
   }
 
   cancelCrop(): void {
     this.crop = null;
+    this.setCursor(this.tool.cursor);
     this.events.onCrop?.(false);
     this.dirty = true;
   }
@@ -597,25 +622,44 @@ export class Engine {
   applyCrop(): void {
     const c = this.crop;
     if (!c) return;
-    const v = this.views.get(c.id);
-    if (!v) return;
-    const img = getImage(v.src ?? '');
-    if (!img || !img.complete || !img.naturalWidth) return;
-    const sx = ((c.box.x - v.x) / v.w) * img.naturalWidth;
-    const sy = ((c.box.y - v.y) / v.h) * img.naturalHeight;
-    const sw = (c.box.w / v.w) * img.naturalWidth;
-    const sh = (c.box.h / v.h) * img.naturalHeight;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(sw));
-    canvas.height = Math.max(1, Math.round(sh));
-    const cctx = canvas.getContext('2d');
-    if (!cctx) return;
-    cctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    const url = canvas.toDataURL('image/png');
-    if (v.src) releaseImage(v.src);
-    store.patchShape(c.id, { src: url, x: c.box.x, y: c.box.y, w: c.box.w, h: c.box.h });
+    if (c.box.w < 1 || c.box.h < 1) {
+      this.cancelCrop();
+      return;
+    }
+    const cropX = (c.box.x - c.full.x) / c.full.w;
+    const cropY = (c.box.y - c.full.y) / c.full.h;
+    const cropW = c.box.w / c.full.w;
+    const cropH = c.box.h / c.full.h;
+    store.patchShape(c.id, {
+      x: c.box.x,
+      y: c.box.y,
+      w: c.box.w,
+      h: c.box.h,
+      cropX,
+      cropY,
+      cropW,
+      cropH,
+    });
     this.crop = null;
+    this.setCursor(this.tool.cursor);
     this.events.onCrop?.(false);
+    this.dirty = true;
+  }
+
+  resetCropSelected(): void {
+    if (!this.selection.size) return;
+    for (const id of this.selection) {
+      const v = this.views.get(id);
+      if (!v || v.type !== 'image' || v.locked) continue;
+      if (v.cropW === undefined && v.cropH === undefined) continue;
+      const f = { x: v.cropX ?? 0, y: v.cropY ?? 0, w: v.cropW ?? 1, h: v.cropH ?? 1 };
+      const w = v.w / f.w;
+      const h = v.h / f.h;
+      const x = v.x - (f.x / f.w) * v.w;
+      const y = v.y - (f.y / f.h) * v.h;
+      store.patchShape(id, { x, y, w, h });
+      store.clearShapeKeys(id, ['cropX', 'cropY', 'cropW', 'cropH']);
+    }
     this.dirty = true;
   }
 
@@ -637,6 +681,32 @@ export class Engine {
     e.preventDefault();
     this.pasteSelection();
   };
+
+  private async pasteFromClipboard(): Promise<void> {
+    if (this.clipboard.length) {
+      this.pasteSelection();
+      return;
+    }
+    try {
+      const items = await Promise.race([
+        navigator.clipboard.read(),
+        new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 150)),
+      ]);
+      if (items) {
+        for (const item of items) {
+          const type = item.types.find((t) => t.startsWith('image/'));
+          if (type) {
+            const blob = await item.getType(type);
+            this.insertImageFile(new File([blob], 'clipboard.png', { type }));
+            return;
+          }
+        }
+      }
+    } catch {
+      /* no permission or not a secure context — use internal buffer */
+    }
+    this.pasteSelection();
+  }
 
   private onDragOver = (e: DragEvent): void => {
     e.preventDefault();
@@ -841,6 +911,15 @@ export class Engine {
     }
     this.pointerDown = true;
     if (this.crop) {
+      const p = this.pointerInfo(e);
+      const f = this.crop.full;
+      const outside =
+        e.button === 0 &&
+        (p.world.x < f.x || p.world.x > f.x + f.w || p.world.y < f.y || p.world.y > f.y + f.h);
+      if (outside) {
+        this.applyCrop();
+        return;
+      }
       this.cropPointerDown(e);
       return;
     }
@@ -862,7 +941,7 @@ export class Engine {
       this.dragTool = target;
       target.onDown(this, info);
     } catch (err) {
-      console.error('[doska] pointerdown error:', err);
+      console.error('[review] pointerdown error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
     this.dirty = true;
@@ -892,7 +971,7 @@ export class Engine {
       if (this.pointerDown) this.dragTool.onMove(this, p);
       else this.tool.onHover(this, p);
     } catch (err) {
-      console.error('[doska] pointermove error:', err);
+      console.error('[review] pointermove error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
     if (this.pointerDown || this.panDrag || this.crop || this.gesture) this.dirty = true;
@@ -923,7 +1002,7 @@ export class Engine {
     try {
       this.dragTool.onUp(this, this.pointerInfo(e));
     } catch (err) {
-      console.error('[doska] pointerup error:', err);
+      console.error('[review] pointerup error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
     this.dirty = true;
@@ -943,6 +1022,11 @@ export class Engine {
     const p = this.pointerInfo(e);
     const id = this.hitTest(p.world.x, p.world.y);
     if (id) {
+      if (this.views.get(id)?.type === 'image') {
+        this.setSelection([id]);
+        this.startCropSelected();
+        return;
+      }
       this.openTextEditor(id);
       return;
     }
@@ -1089,13 +1173,11 @@ export class Engine {
   private cropPointerMove(e: PointerEvent): void {
     const c = this.crop;
     if (!c || c.mode === 'idle') return;
-    const v = this.views.get(c.id);
-    if (!v) return;
     const p = this.pointerInfo(e);
-    const minX = v.x;
-    const minY = v.y;
-    const maxX = v.x + v.w;
-    const maxY = v.y + v.h;
+    const minX = c.full.x;
+    const minY = c.full.y;
+    const maxX = c.full.x + c.full.w;
+    const maxY = c.full.y + c.full.h;
     const minSize = 8 / this.camera.zoom;
     if (c.mode === 'move') {
       const dx = p.world.x - c.start.x;
@@ -1163,11 +1245,24 @@ export class Engine {
     if (!v) return;
     const s = 1 / this.camera.zoom;
     ctx.save();
+    const img = getImage(v.src ?? '');
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.globalAlpha = 0.35;
+      ctx.drawImage(img, c.full.x, c.full.y, c.full.w, c.full.h);
+      ctx.globalAlpha = 1;
+      const fx = ((v.x - c.full.x) / c.full.w) * img.naturalWidth;
+      const fy = ((v.y - c.full.y) / c.full.h) * img.naturalHeight;
+      const fw = (v.w / c.full.w) * img.naturalWidth;
+      const fh = (v.h / c.full.h) * img.naturalHeight;
+      if (fw > 0 && fh > 0) {
+        ctx.drawImage(img, fx, fy, fw, fh, v.x, v.y, v.w, v.h);
+      }
+    }
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(v.x, v.y, v.w, c.box.y - v.y);
-    ctx.fillRect(v.x, c.box.y + c.box.h, v.w, v.y + v.h - c.box.y - c.box.h);
-    ctx.fillRect(v.x, c.box.y, c.box.x - v.x, c.box.h);
-    ctx.fillRect(c.box.x + c.box.w, c.box.y, v.x + v.w - c.box.x - c.box.w, c.box.h);
+    ctx.fillRect(c.full.x, c.full.y, c.full.w, c.box.y - c.full.y);
+    ctx.fillRect(c.full.x, c.box.y + c.box.h, c.full.w, c.full.y + c.full.h - c.box.y - c.box.h);
+    ctx.fillRect(c.full.x, c.box.y, c.box.x - c.full.x, c.box.h);
+    ctx.fillRect(c.box.x + c.box.w, c.box.y, c.full.x + c.full.w - c.box.x - c.box.w, c.box.h);
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 2 * s;
     ctx.strokeRect(c.box.x, c.box.y, c.box.w, c.box.h);
@@ -1187,7 +1282,7 @@ export class Engine {
     const id = this.hitTest(p.world.x, p.world.y);
     const sp = this.worldToScreen(p.world.x, p.world.y);
     if (id) {
-      this.setSelection([id]);
+      if (!this.selection.has(id)) this.setSelection([id]);
       const v = this.views.get(id);
       this.events.onContextMenu?.({
         x: sp.x,
@@ -1253,6 +1348,11 @@ export class Engine {
       e.preventDefault();
       if (e.shiftKey) this.copySelectionAsImage();
       else this.copySelection();
+      return;
+    }
+    if (mod && e.code === 'KeyV') {
+      e.preventDefault();
+      void this.pasteFromClipboard();
       return;
     }
     if (mod && e.shiftKey && e.code === 'KeyL') {
@@ -1329,7 +1429,7 @@ export class Engine {
       if (moved || this.dirty) this.render();
       this.emitStats();
     } catch (err) {
-      console.error('[doska] render loop error:', err);
+      console.error('[review] render loop error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
     this.rafId = requestAnimationFrame(this.loop);

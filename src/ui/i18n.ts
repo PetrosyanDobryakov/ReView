@@ -2,8 +2,10 @@ import type { LocaleId } from '../core/locale';
 import type { ChromeThemeId } from '../core/chromeTheme';
 
 const ru = {
-  title: 'Доска — локальная онлайн-доска',
-  brand: 'Доска',
+  title: 'ReView — локальная онлайн-доска',
+  brand: 'ReView',
+  renameBoard: 'Переименовать (кликни)',
+  objectsCount: 'Объектов на доске',
   undo: 'Отменить (Ctrl+Z)',
   redo: 'Повторить (Ctrl+Y)',
   zoomOut: 'Отдалить',
@@ -80,6 +82,7 @@ const ru = {
   ctxDuplicate: 'Дублировать',
   ctxDelete: 'Удалить',
   ctxDownload: 'Скачать',
+  ctxResetCrop: 'Сбросить обрезку',
   ctxOriginal: 'Исходный размер',
   ctxCsv: 'Экспорт в CSV (Excel)',
   ctxFront: 'На передний план',
@@ -105,8 +108,10 @@ const ru = {
 };
 
 const en: typeof ru = {
-  title: 'Doska — local board',
-  brand: 'Доска',
+  title: 'ReView — local board',
+  brand: 'ReView',
+  renameBoard: 'Rename (click)',
+  objectsCount: 'Objects on the board',
   undo: 'Undo (Ctrl+Z)',
   redo: 'Redo (Ctrl+Y)',
   zoomOut: 'Zoom out',
@@ -183,6 +188,7 @@ const en: typeof ru = {
   ctxDuplicate: 'Duplicate',
   ctxDelete: 'Delete',
   ctxDownload: 'Download',
+  ctxResetCrop: 'Reset crop',
   ctxOriginal: 'Original size',
   ctxCsv: 'Export CSV (Excel)',
   ctxFront: 'Bring to front',
@@ -208,8 +214,10 @@ const en: typeof ru = {
 };
 
 const zh: typeof ru = {
-  title: 'Доска — 本地画板',
-  brand: 'Доска',
+  title: 'ReView — 本地画板',
+  brand: 'ReView',
+  renameBoard: '重命名（点击）',
+  objectsCount: '画板对象数',
   undo: '撤销 (Ctrl+Z)',
   redo: '重做 (Ctrl+Y)',
   zoomOut: '缩小',
@@ -286,6 +294,7 @@ const zh: typeof ru = {
   ctxDuplicate: '复制副本',
   ctxDelete: '删除',
   ctxDownload: '下载',
+  ctxResetCrop: '重置裁剪',
   ctxOriginal: '原始尺寸',
   ctxCsv: '导出 CSV (Excel)',
   ctxFront: '置于顶层',
