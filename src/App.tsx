@@ -16,10 +16,10 @@ import type { ExportSource } from './ui/ExportDialog';
 import type { ShapeBox } from './core/shapes';
 import { Icon } from './ui/icons';
 import { modKey, t } from './ui/i18n';
-import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard } from './core/store';
+import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
-import { getBoard, renameBoard } from './core/boards';
+import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
@@ -63,11 +63,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const boardMeta = getBoard(boardId);
-  const [boardTitle, setBoardTitle] = useState(() => boardMeta?.name ?? 'Доска');
+  const [boardTitle, setBoardTitle] = useState(() => boardMeta?.name ?? 'ReView');
   const [editingName, setEditingName] = useState(false);
+  const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
   useEffect(() => {
     const m = getBoard(boardId);
     if (m) setBoardTitle(m.name);
+    setEphemeral(!isBoardPersistedLocally(m));
   }, [boardId]);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
@@ -145,8 +147,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     const curMeta = meta;
     const curUndo = undoManager;
     const onSynced = () => setSaved(true);
-    if (curPersist && (curPersist as unknown as { synced: boolean }).synced) setSaved(true);
-    else curPersist?.on('synced', onSynced);
+    if (!curPersist) {
+      setSaved(false);
+    } else if ((curPersist as unknown as { synced: boolean }).synced) {
+      setSaved(true);
+    } else {
+      curPersist.on('synced', onSynced);
+    }
     const offSettings = onSettingsChange(() => {
       setPen({ ...settings.pen });
       setShape({ ...settings.shape });
@@ -338,7 +345,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               aria-label={t(locale, 'renameBoard')}
               onChange={(e) => setBoardTitle(e.target.value)}
               onBlur={() => {
-                const v = boardTitle.trim().slice(0, 40) || 'Доска';
+                const v = boardTitle.trim().slice(0, 40) || 'ReView';
                 renameBoard(boardId, v);
                 setBoardTitle(v);
                 setEditingName(false);
@@ -346,13 +353,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === 'Enter') {
-                  const v = boardTitle.trim().slice(0, 40) || 'Доска';
+                  const v = boardTitle.trim().slice(0, 40) || 'ReView';
                   renameBoard(boardId, v);
                   setBoardTitle(v);
                   setEditingName(false);
                 }
                 if (e.key === 'Escape') {
-                  setBoardTitle(getBoard(boardId)?.name ?? 'Доска');
+                  setBoardTitle(getBoard(boardId)?.name ?? 'ReView');
                   setEditingName(false);
                 }
               }}
@@ -388,6 +395,25 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
             <Icon name="fit" />
           </button>
+          {ephemeral && (
+            <>
+              <div className="island-sep" />
+              <button
+                type="button"
+                className="style-btn active save-board-btn"
+                title={t(locale, 'saveBoardHint')}
+                aria-label={t(locale, 'saveBoard')}
+                onClick={() => {
+                  saveBoardLocally(boardId);
+                  enableBoardPersistence();
+                  setEphemeral(false);
+                  setSaved(true);
+                }}
+              >
+                {t(locale, 'saveBoard')}
+              </button>
+            </>
+          )}
         </div>
         <div className="island meta-island">
           {errorShown && errorView && (
@@ -483,6 +509,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         sync={sync}
         saved={saved}
         nick={nick}
+        ephemeral={ephemeral}
         onNick={(value) => saveUser(value)}
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}

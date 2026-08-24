@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with optional Yjs sync on your machine or LAN",
   "type": "module",
@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "bundle:engine": "node scripts/bundle-engine.mjs",
-    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs"
+    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/board-size-test.mjs"
   },
   "dependencies": {
     "@fontsource/onest": "^5.3.0",

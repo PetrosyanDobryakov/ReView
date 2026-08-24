@@ -1,3 +1,6 @@
+import { readPrefs } from './prefs';
+import { deleteBoardDatabase } from './boardSize';
+
 export interface Team {
   id: string;
   name: string;
@@ -13,6 +16,8 @@ export interface BoardMeta {
   createdAt: number;
   updatedAt: number;
   status: BoardStatus;
+  /** Explicit local keep for a remote board (save board). */
+  savedLocally?: boolean;
 }
 
 const TEAMS_KEY = 'review-teams';
@@ -130,10 +135,38 @@ export function deleteBoard(id: string): void {
   const boards = readBoards().filter((b) => b.id !== id);
   writeBoards(boards);
   try {
-    // also clean per-board page pointer
     localStorage.removeItem(`review-page-${id}`);
   } catch {}
-  // NOTE: IndexedDB review-v1-${id} is left for manual recovery; could delete via indexedDB.deleteDatabase
+  // IndexedDB cleanup is async; fire-and-forget from callers that can await deleteBoardData
+}
+
+export async function deleteBoardData(id: string): Promise<void> {
+  deleteBoard(id);
+  await deleteBoardDatabase(id);
+}
+
+/** Mark a remote board as kept on this device (local copy). */
+export function saveBoardLocally(id: string): BoardMeta | undefined {
+  const boards = readBoards();
+  const idx = boards.findIndex((b) => b.id === id);
+  if (idx < 0) return undefined;
+  const prev = boards[idx];
+  const next: BoardMeta = {
+    ...prev,
+    savedLocally: true,
+    status: prev.status === 'remote' ? 'local' : prev.status,
+    updatedAt: Date.now(),
+  };
+  boards[idx] = next;
+  writeBoards(boards);
+  return next;
+}
+
+export function isBoardPersistedLocally(meta: BoardMeta | undefined): boolean {
+  if (!meta) return true;
+  if (meta.status !== 'remote') return true;
+  if (meta.savedLocally) return true;
+  return readPrefs().saveRemoteBoards;
 }
 
 export function moveBoard(id: string, teamId: string): void {
