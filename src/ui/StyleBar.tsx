@@ -23,10 +23,10 @@ const STROKE_COLORS = ['#6b6b66', '#1c1c1a', '#ffffff', '#ff6b6b', '#4cd964', '#
 const TEXT_COLORS = ['#ffe27a', '#4cd964', '#ff6b6b', '#1c1c1a', '#eceae4', '#c4a35a', '#6b6b66', '#ffa94d'];
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const ERASER_SIZES = [16, 32, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen']);
-const TEXT_TYPES = new Set(['text', 'sticky']);
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'];
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const TEXT_TYPES = new Set(['text', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
 function Swatches({
   colors,

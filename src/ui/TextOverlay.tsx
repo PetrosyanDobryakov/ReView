@@ -18,6 +18,7 @@ export function TextOverlay({
   const zoom = engine.camera.zoom;
   const pos = engine.worldToScreen(target.x, target.y);
   const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
+  const isCentered = target.centered;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -41,14 +42,20 @@ export function TextOverlay({
       const size = Math.max(12, Math.round(target.fontSize * z));
       el.style.left = `${p.x}px`;
       el.style.top = `${p.y}px`;
-      el.style.width = `${Math.max(120, target.w * z)}px`;
+      el.style.width = `${Math.max(isCentered ? 20 : 120, target.w * z)}px`;
       el.style.fontSize = `${size}px`;
-      el.style.minHeight = `${size * 1.3}px`;
+      if (isCentered) {
+        el.style.height = `${target.h * z}px`;
+        el.style.minHeight = `${target.h * z}px`;
+      } else {
+        el.style.minHeight = `${size * 1.3}px`;
+        el.style.height = 'auto';
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [engine, target]);
+  }, [engine, target, isCentered]);
 
   const finish = (commit: boolean) => {
     if (doneRef.current) return;
@@ -69,10 +76,17 @@ export function TextOverlay({
       style={{
         left: pos.x,
         top: pos.y,
-        width: Math.max(120, target.w * zoom),
-        minHeight: fontPx * 1.3,
+        width: Math.max(isCentered ? 20 : 120, target.w * zoom),
+        height: isCentered ? target.h * zoom : undefined,
+        minHeight: isCentered ? target.h * zoom : fontPx * 1.3,
         fontSize: fontPx,
         color: target.color,
+        display: isCentered ? 'flex' : 'block',
+        alignItems: isCentered ? 'center' : undefined,
+        justifyContent: isCentered ? 'center' : undefined,
+        textAlign: isCentered ? 'center' : 'left',
+        padding: isCentered ? '0 8px' : '0',
+        overflow: isCentered ? 'hidden' : undefined,
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
