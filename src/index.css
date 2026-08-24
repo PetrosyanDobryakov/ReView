@@ -884,13 +884,14 @@ button.brand {
   bottom: 12px;
   height: auto;
   width: min(360px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
   background: var(--chrome-panel);
   border: 1px solid var(--chrome-border);
   border-radius: var(--chrome-radius);
   box-shadow: var(--chrome-shadow);
-  padding: 20px 20px 32px;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  padding: 0;
+  overflow: hidden;
   transform-origin: top right;
   animation: sheet-in var(--chrome-dur-sheet) var(--chrome-ease);
   transition:
@@ -900,16 +901,24 @@ button.brand {
     color var(--chrome-dur-sheet) var(--chrome-ease);
 }
 
-/* Bottom fade: signals more settings below when the sheet scrolls. */
-.sheet::after {
-  content: '';
-  position: sticky;
-  bottom: -32px;
-  display: block;
-  height: 36px;
-  margin: -36px -20px 0;
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 20px 36px;
+  scrollbar-gutter: stable;
+}
+
+/* Bottom fade stays pinned to the sheet frame (does not scroll away). */
+.sheet-fade {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 40px;
   pointer-events: none;
-  background: linear-gradient(to top, var(--chrome-panel) 18%, transparent);
+  border-radius: 0 0 calc(var(--chrome-radius) - 1px) calc(var(--chrome-radius) - 1px);
+  background: linear-gradient(to top, var(--chrome-panel) 12%, transparent);
   z-index: 2;
 }
 
