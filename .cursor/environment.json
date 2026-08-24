@@ -1,0 +1,16 @@
+{
+  "snapshot": "bld-20260823-9a69619a-d2bd-4142-ac81-b903ebedee15",
+  "install": "npm ci",
+  "start": "true",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev",
+      "description": "Vite app on :5173 and Yjs sync server on ws://localhost:1234"
+    }
+  ],
+  "ports": [
+    { "name": "app", "port": 5173 },
+    { "name": "sync", "port": 1234 }
+  ]
+}
