@@ -18,6 +18,8 @@ export function TextOverlay({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
+  /** Ignore blur until the opening pointer gesture / first paint has settled. */
+  const armedRef = useRef(false);
   const zoom = engine.camera.zoom;
   const pos = engine.worldToScreen(target.x, target.y);
   const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
@@ -27,6 +29,8 @@ export function TextOverlay({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    armedRef.current = false;
+    doneRef.current = false;
     el.innerText = target.text;
     el.focus();
     const sel = window.getSelection();
@@ -34,7 +38,36 @@ export function TextOverlay({
       sel.selectAllChildren(el);
       sel.collapseToEnd();
     }
-  }, [target]);
+    const cs = getComputedStyle(el);
+    // #region agent log
+    agentLog('E', 'TextOverlay.tsx:mount', 'overlay focused', {
+      displayColor,
+      computedColor: cs.color,
+      computedCaret: cs.caretColor,
+      activeTag: document.activeElement instanceof HTMLElement ? document.activeElement.tagName : null,
+      activeClass:
+        document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
+      isCE: document.activeElement instanceof HTMLElement ? document.activeElement.isContentEditable : false,
+      textLen: el.innerText.length,
+    });
+    // #endregion
+    const arm = () => {
+      armedRef.current = true;
+      // #region agent log
+      agentLog('F', 'TextOverlay.tsx:arm', 'blur commits armed', {
+        activeIsSelf: document.activeElement === el,
+      });
+      // #endregion
+    };
+    // Opened from pointerup / keyboard: arm on next frame. Also arm on next pointerup
+    // in case a trailing click from the same gesture still arrives.
+    const raf = requestAnimationFrame(arm);
+    window.addEventListener('pointerup', arm, { once: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointerup', arm);
+    };
+  }, [target, displayColor]);
 
   useEffect(() => {
     const el = ref.current;
@@ -61,19 +94,21 @@ export function TextOverlay({
     return () => cancelAnimationFrame(raf);
   }, [engine, target, isCentered]);
 
-  const finish = (commit: boolean) => {
+  const finish = (commit: boolean, reason: string) => {
     if (doneRef.current) return;
     doneRef.current = true;
     const raw = ref.current?.innerText ?? '';
     // #region agent log
     agentLog(commit ? 'A' : 'B', 'TextOverlay.tsx:finish', commit ? 'overlay commit' : 'overlay cancel', {
       commit,
+      reason,
       rawLen: raw.length,
       rawPreview: raw.slice(0, 80),
       trimmedLen: raw.trim().length,
       targetType: target.type,
       targetId: target.id,
       hasEl: !!ref.current,
+      armed: armedRef.current,
     });
     // #endregion
     if (commit) onDone(raw);
@@ -107,13 +142,34 @@ export function TextOverlay({
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
+        // #region agent log
+        agentLog('D', 'TextOverlay.tsx:keydown', 'overlay keydown', {
+          key: e.key,
+          targetTag: e.target instanceof HTMLElement ? e.target.tagName : null,
+          targetCE: e.target instanceof HTMLElement ? e.target.isContentEditable : false,
+          activeCE:
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement.isContentEditable
+              : false,
+          innerLen: ref.current?.innerText.length ?? -1,
+          displayColor,
+        });
+        // #endregion
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          finish(true);
+          finish(true, 'enter');
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          finish(false);
+          finish(false, 'escape');
         }
+      }}
+      onInput={() => {
+        // #region agent log
+        agentLog('D', 'TextOverlay.tsx:input', 'overlay input', {
+          innerLen: ref.current?.innerText.length ?? -1,
+          preview: (ref.current?.innerText ?? '').slice(0, 40),
+        });
+        // #endregion
       }}
       onPaste={(e) => {
         e.preventDefault();
@@ -124,7 +180,28 @@ export function TextOverlay({
         sel.getRangeAt(0).insertNode(document.createTextNode(text));
         sel.collapseToEnd();
       }}
-      onBlur={() => finish(true)}
+      onBlur={(e) => {
+        // #region agent log
+        const rel = e.relatedTarget;
+        agentLog('F', 'TextOverlay.tsx:blur', 'overlay blur', {
+          armed: armedRef.current,
+          done: doneRef.current,
+          relatedTag: rel instanceof HTMLElement ? rel.tagName : null,
+          relatedClass: rel instanceof HTMLElement ? rel.className : null,
+          activeTag:
+            document.activeElement instanceof HTMLElement ? document.activeElement.tagName : null,
+          innerLen: ref.current?.innerText.length ?? -1,
+        });
+        // #endregion
+        if (!armedRef.current) {
+          // Premature blur from the opening click — reclaim focus.
+          requestAnimationFrame(() => {
+            if (!doneRef.current) ref.current?.focus();
+          });
+          return;
+        }
+        finish(true, 'blur');
+      }}
     />
   );
 }
