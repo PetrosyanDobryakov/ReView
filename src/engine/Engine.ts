@@ -17,7 +17,6 @@ import {
 import { measureMixedLine } from '../core/shapes';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
-import { agentLog } from '../debugAgentLog';
 import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
@@ -1095,9 +1094,6 @@ export class Engine {
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
     const bg = store.metaBg();
     const readable = readableTextOn(color, bg);
-    // #region agent log
-    agentLog('E', 'Engine.ts:openTextEditorAt', 'open free-text editor', { x, y, fontSize, color, readable, bg });
-    // #endregion
     this.editing = true;
     this.events.onEditText?.({
       id: null,
@@ -1149,34 +1145,10 @@ export class Engine {
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
     const bg = store.metaBg();
-    // #region agent log
-    let color = target.color;
-    try {
-      color = target.type === 'text' ? readableTextOn(target.color, bg) : target.color;
-    } catch (err) {
-      agentLog('E', 'Engine.ts:commitText', 'readableTextOn threw', { err: String(err), targetColor: target.color, bg });
-      color = target.color;
-    }
-    agentLog('A', 'Engine.ts:commitText:entry', 'commitText called', {
-      id,
-      textLen: text.length,
-      textPreview: text.slice(0, 80),
-      trimmedLen: text.trim().length,
-      targetType: target.type,
-      tx: target.x,
-      ty: target.y,
-      color,
-      bg,
-    });
-    // #endregion
+    const color = target.type === 'text' ? readableTextOn(target.color, bg) : target.color;
     if (id === null) {
       const trimmed = text.trim();
-      if (!trimmed) {
-        // #region agent log
-        agentLog('A', 'Engine.ts:commitText:empty', 'skip addShape empty trim', { textLen: text.length });
-        // #endregion
-        return;
-      }
+      if (!trimmed) return;
       const newId = store.addShape({
         type: 'text',
         x: target.x,
@@ -1192,25 +1164,6 @@ export class Engine {
       });
       const size = this.measureText(trimmed, target.fontSize);
       store.patchShape(newId, { w: size.w, h: size.h });
-      // #region agent log
-      const view = this.views.get(newId);
-      const page = store.currentPageId();
-      const onPage = store.isOnActivePage(newId);
-      const inGrid = this.grid.query({ x: target.x - 1, y: target.y - 1, w: Math.max(size.w, 2) + 2, h: Math.max(size.h, 2) + 2 }).has(newId);
-      agentLog('C', 'Engine.ts:commitText:created', 'free-text shape created', {
-        newId,
-        size,
-        viewW: view?.w,
-        viewH: view?.h,
-        viewText: view?.text?.slice(0, 80),
-        viewColor: view?.textColor,
-        page,
-        onPage,
-        inViews: !!view,
-        inGrid,
-        cam: { x: this.camera.x, y: this.camera.y, z: this.camera.zoom },
-      });
-      // #endregion
       this.setSelection([]);
       this.setTool('select');
     } else {
@@ -2130,29 +2083,6 @@ export class Engine {
     if (store.metaGrid()) this.drawGrid(ctx, theme.grid);
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
-    // #region agent log
-    for (const v of this.views.values()) {
-      if (v.type !== 'text') continue;
-      const key = 'vis:' + v.id;
-      if (!(globalThis as { __ftVis?: Set<string> }).__ftVis) {
-        (globalThis as { __ftVis?: Set<string> }).__ftVis = new Set();
-      }
-      const seen = (globalThis as { __ftVis: Set<string> }).__ftVis;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      agentLog('F', 'Engine.ts:render:textVis', 'text shape visibility', {
-        id: v.id,
-        text: (v.text ?? '').slice(0, 40),
-        inVisible: visible.has(v.id),
-        onPage: store.isOnActivePage(v.id),
-        x: v.x,
-        y: v.y,
-        w: v.w,
-        h: v.h,
-        vis,
-      });
-    }
-    // #endregion
     const draw = (v: ShapeView) => {
       const partial = this.partialErase.get(v.id);
       if (partial && partial.size) {
