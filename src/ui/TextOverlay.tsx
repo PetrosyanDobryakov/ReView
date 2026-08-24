@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
+import { readableTextOn } from '../core/shapes';
+import { metaBg } from '../core/store';
 
 export function TextOverlay({
   target,
@@ -15,14 +17,19 @@ export function TextOverlay({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
+  /** Ignore blur until the opening pointer gesture / first paint has settled. */
+  const armedRef = useRef(false);
   const zoom = engine.camera.zoom;
   const pos = engine.worldToScreen(target.x, target.y);
   const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
   const isCentered = target.centered;
+  const displayColor = target.type === 'text' ? readableTextOn(target.color, metaBg()) : target.color;
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    armedRef.current = false;
+    doneRef.current = false;
     el.innerText = target.text;
     el.focus();
     const sel = window.getSelection();
@@ -30,7 +37,18 @@ export function TextOverlay({
       sel.selectAllChildren(el);
       sel.collapseToEnd();
     }
-  }, [target]);
+    const arm = () => {
+      armedRef.current = true;
+    };
+    // Opened from pointerup / keyboard: arm on next frame. Also arm on next pointerup
+    // in case a trailing click from the same gesture still arrives.
+    const raf = requestAnimationFrame(arm);
+    window.addEventListener('pointerup', arm, { once: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointerup', arm);
+    };
+  }, [target, displayColor]);
 
   useEffect(() => {
     const el = ref.current;
@@ -60,7 +78,8 @@ export function TextOverlay({
   const finish = (commit: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    if (commit) onDone(ref.current?.innerText ?? '');
+    const raw = ref.current?.innerText ?? '';
+    if (commit) onDone(raw);
     else onCancel();
   };
 
@@ -80,7 +99,8 @@ export function TextOverlay({
         height: isCentered ? target.h * zoom : undefined,
         minHeight: isCentered ? target.h * zoom : fontPx * 1.3,
         fontSize: fontPx,
-        color: target.color,
+        color: displayColor,
+        caretColor: displayColor,
         display: isCentered ? 'flex' : 'block',
         alignItems: isCentered ? 'center' : undefined,
         justifyContent: isCentered ? 'center' : undefined,
@@ -107,7 +127,16 @@ export function TextOverlay({
         sel.getRangeAt(0).insertNode(document.createTextNode(text));
         sel.collapseToEnd();
       }}
-      onBlur={() => finish(true)}
+      onBlur={() => {
+        if (!armedRef.current) {
+          // Premature blur from the opening click — reclaim focus.
+          requestAnimationFrame(() => {
+            if (!doneRef.current) ref.current?.focus();
+          });
+          return;
+        }
+        finish(true);
+      }}
     />
   );
 }

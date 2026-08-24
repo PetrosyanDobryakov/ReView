@@ -6,7 +6,7 @@ const PORT = 1234;
 
 const server = createServer((_req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('Доска — сервер синхронизации');
+  res.end('ReView — sync server');
 });
 
 const wss = new WebSocketServer({ server });

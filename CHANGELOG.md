@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 — unreleased
+
+### Persistence
+- Home toggle «Save others’ boards» (default off): remote boards stay session-only and are not written to IndexedDB until you save.
+- Explicit «Save locally» on home and on the board chrome for remote boards.
+- Home board list shows approximate local weight (KB/MB) from IndexedDB `review-v1-<id>`.
+- Deleting a board also removes its IndexedDB database.
+- Settings sheet reports «Session only» when the open board is not persisted.
+
+### Polish
+- Home uses locale strings (RU/EN/ZH); settings open from home.
+- Theme `color-scheme` for native controls; nick input and error banner follow chrome tokens.
+- Deploy notes in `docs/DEPLOY.md`; optional `VITE_SYNC_URL` for the websocket.
+
 ## 0.11.0 — unreleased
 
 ### Theming

@@ -1,14 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listBoards, listTeams, createBoard, deleteBoard, renameBoard, createTeam, deleteTeam, renameTeam, boardUrl, getBoard, setBoardStatus } from '../core/boards';
+import {
+  listBoards,
+  listTeams,
+  createBoard,
+  deleteBoardData,
+  renameBoard,
+  createTeam,
+  deleteTeam,
+  renameTeam,
+  boardUrl,
+  getBoard,
+  setBoardStatus,
+  ensureBoardWithId,
+  saveBoardLocally,
+  isBoardPersistedLocally,
+} from '../core/boards';
 import type { BoardMeta, Team, BoardStatus } from '../core/boards';
+import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
+import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
 import { readLocale } from '../core/locale';
+import { SettingsSheet } from './SettingsSheet';
+import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
+import { writeLocale } from '../core/locale';
+import { loadUser, saveUser } from '../core/user';
 
-export function Home({ locale }: { locale: LocaleId }) {
+export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
+  const [locale, setLocale] = useState<LocaleId>(localeProp);
+  const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nick, setNick] = useState(() => loadUser().name);
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
   const [boards, setBoards] = useState<BoardMeta[]>(() => listBoards());
   const [activeTeam, setActiveTeam] = useState<string>('default');
@@ -17,14 +42,33 @@ export function Home({ locale }: { locale: LocaleId }) {
   const [editingBoard, setEditingBoard] = useState<string | null>(null);
   const [boardName, setBoardName] = useState('');
   const [joinLink, setJoinLink] = useState('');
+  const [saveRemote, setSaveRemote] = useState(() => readPrefs().saveRemoteBoards);
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [weightsReady, setWeightsReady] = useState(false);
+  const weightsGen = useRef(0);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     setTeams(listTeams());
     setBoards(listBoards());
-  };
+  }, []);
+
+  const refreshWeights = useCallback(async (list: BoardMeta[]) => {
+    const gen = ++weightsGen.current;
+    setWeightsReady(false);
+    const entries = await Promise.all(
+      list.map(async (b) => {
+        const bytes = await estimateBoardBytes(b.id);
+        return [b.id, bytes] as const;
+      })
+    );
+    if (gen !== weightsGen.current) return;
+    const next: Record<string, number> = {};
+    for (const [id, bytes] of entries) next[id] = bytes;
+    setWeights(next);
+    setWeightsReady(true);
+  }, []);
 
   useEffect(() => {
-    // ensure default board exists
     if (!boards.length) {
       const first = listBoards();
       if (!first.length) {
@@ -36,58 +80,74 @@ export function Home({ locale }: { locale: LocaleId }) {
     }
   }, []);
 
+  useEffect(() => {
+    void refreshWeights(boards);
+  }, [boards, refreshWeights]);
+
+  useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
+
   const filtered = boards.filter((b) => b.teamId === activeTeam).sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleCreateBoard = () => {
-    const b = createBoard('Новая доска', activeTeam);
+    const b = createBoard(t(locale, 'newBoard'), activeTeam);
     navigate(boardUrl(b.id));
   };
 
   const handleCreateTeam = () => {
-    const t = createTeam('Новая команда');
+    const created = createTeam(locale === 'zh' ? '新团队' : locale === 'en' ? 'New team' : 'Новая команда');
     refresh();
-    setActiveTeam(t.id);
+    setActiveTeam(created.id);
   };
 
   const handleCopyLink = async (id: string) => {
     const url = `${window.location.origin}${boardUrl(id)}`;
-    try { await navigator.clipboard.writeText(url); } catch { prompt('Скопируй ссылку', url); }
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      prompt(t(locale, 'copyLink'), url);
+    }
   };
 
   const handleJoin = () => {
     const v = joinLink.trim();
     if (!v) return;
+    let id = v;
     try {
       const u = new URL(v, window.location.origin);
       const m = u.pathname.match(/\/board\/([^/]+)/);
-      const id = m ? m[1] : v.trim();
-      if (!id) return;
-      if (!getBoard(id)) {
-        // чужую доску добавляем как гостевую
-        const teams = listTeams();
-        const def = teams[0]?.id ?? 'default';
-        // create entry if not exists
-        const exists = listBoards().find((b) => b.id === id);
-        if (!exists) {
-          // we don't have name, so create placeholder then navigate
-          const b = createBoard('Чужая доска', def);
-          // override id to match link? we need to keep original id
-          // instead, just navigate to that id; boards.ts will create on demand
-          // For now, create with that id via direct storage hack
-          const all = listBoards();
-          const idx = all.findIndex((x) => x.id === b.id);
-          if (idx >= 0) {
-            all[idx].id = id;
-            localStorage.setItem('review-boards', JSON.stringify(all));
-          }
-        }
-      }
-      navigate(boardUrl(id));
+      if (m) id = m[1];
     } catch {
-      const id = v;
-      navigate(boardUrl(id));
+      /* use raw */
     }
+    id = id.trim();
+    if (!id) return;
+    if (!getBoard(id)) {
+      const curTeams = listTeams();
+      const def = curTeams[0]?.id ?? 'default';
+      ensureBoardWithId(id, t(locale, 'remoteBoardName'), def, 'remote');
+    }
+    navigate(boardUrl(id));
   };
+
+  const handleSaveBoard = (id: string) => {
+    saveBoardLocally(id);
+    refresh();
+    void refreshWeights(listBoards());
+  };
+
+  const handleDeleteBoard = async (id: string) => {
+    if (!confirm(t(locale, 'deleteBoardConfirm'))) return;
+    await deleteBoardData(id);
+    refresh();
+  };
+
+  const toggleSaveRemote = () => {
+    const next = !saveRemote;
+    writePrefs({ saveRemoteBoards: next });
+    setSaveRemote(next);
+  };
+
+  const localeTag = readLocale();
 
   return (
     <div className="home-root">
@@ -95,26 +155,36 @@ export function Home({ locale }: { locale: LocaleId }) {
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
           <div className="island-sep" />
-          <span className="home-title">{t(locale, 'home' as any) || 'Дом'}</span>
+          <span className="home-title">{t(locale, 'home')}</span>
         </div>
         <div className="island meta-island">
-          <button type="button" className="icon-btn" title={t(locale, 'settings')} onClick={() => navigate('/')}> <Icon name="settings" /> </button>
+          <button
+            type="button"
+            className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
+            title={t(locale, 'settings')}
+            aria-label={t(locale, 'settings')}
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Icon name="settings" />
+          </button>
         </div>
       </header>
 
       <div className="home-body">
         <div className="island home-side">
           <div className="home-side-head">
-            <span className="panel-label">{t(locale, 'teams' as any) || 'Команды'}</span>
-            <button type="button" className="icon-btn" title="+" onClick={handleCreateTeam}><Icon name="plus" size={16} /></button>
+            <span className="panel-label">{t(locale, 'teams')}</span>
+            <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>
+              <Icon name="plus" size={16} />
+            </button>
           </div>
           <div className="home-teams">
             {teams.map((team) => (
               <button
                 key={team.id}
                 type="button"
-                className={`sheet-switch ${activeTeam === team.id ? 'on' : ''}`}
-                style={{ padding: '8px 10px', borderRadius: 8, background: activeTeam === team.id ? 'var(--chrome-active-bg)' : 'transparent', width: '100%', textAlign: 'left' }}
+                className={`home-team-btn${activeTeam === team.id ? ' on' : ''}`}
                 onClick={() => setActiveTeam(team.id)}
               >
                 {editingTeam === team.id ? (
@@ -122,93 +192,263 @@ export function Home({ locale }: { locale: LocaleId }) {
                     autoFocus
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
-                    onBlur={() => { renameTeam(team.id, teamName); setEditingTeam(null); refresh(); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { renameTeam(team.id, teamName); setEditingTeam(null); refresh(); } if (e.key === 'Escape') setEditingTeam(null); }}
+                    onBlur={() => {
+                      renameTeam(team.id, teamName);
+                      setEditingTeam(null);
+                      refresh();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        renameTeam(team.id, teamName);
+                        setEditingTeam(null);
+                        refresh();
+                      }
+                      if (e.key === 'Escape') setEditingTeam(null);
+                    }}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ flex: 1, background: 'var(--chrome-panel-2)', border: '1px solid var(--chrome-border)', borderRadius: 6, padding: '4px 6px', color: 'inherit' }}
+                    className="home-inline-input"
                   />
                 ) : (
-                  <span style={{ flex: 1 }}>{team.name}</span>
+                  <span className="home-team-name">{team.name}</span>
                 )}
-                <span style={{ display: 'flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                  <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} onClick={() => { setEditingTeam(team.id); setTeamName(team.name); }}><Icon name="pen" size={14} /></button>
-                  {team.id !== 'default' && <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} onClick={() => { if (confirm('Удалить команду?')) { deleteTeam(team.id); setActiveTeam('default'); refresh(); } }}><Icon name="trash" size={14} /></button>}
+                <span className="home-team-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    style={{ width: 24, height: 24 }}
+                    title={t(locale, 'rename')}
+                    aria-label={t(locale, 'rename')}
+                    onClick={() => {
+                      setEditingTeam(team.id);
+                      setTeamName(team.name);
+                    }}
+                  >
+                    <Icon name="pen" size={14} />
+                  </button>
+                  {team.id !== 'default' && (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      style={{ width: 24, height: 24 }}
+                      title={t(locale, 'ctxDelete')}
+                      aria-label={t(locale, 'ctxDelete')}
+                      onClick={() => {
+                        if (confirm(t(locale, 'deleteTeamConfirm'))) {
+                          deleteTeam(team.id);
+                          setActiveTeam('default');
+                          refresh();
+                        }
+                      }}
+                    >
+                      <Icon name="trash" size={14} />
+                    </button>
+                  )}
                 </span>
               </button>
             ))}
           </div>
-          <div className="sheet-section" style={{ marginTop: 12 }}>
-            <h3>{t(locale, 'join' as any) || 'Подключиться'}</h3>
-            <p className="sheet-hint">Вставь ссылку на доску</p>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input value={joinLink} onChange={(e) => setJoinLink(e.target.value)} placeholder="https://.../board/abc" style={{ flex: 1, background: 'var(--chrome-panel-2)', border: '1px solid var(--chrome-border-soft)', borderRadius: 8, padding: '6px 8px', color: 'inherit' }} />
-              <button type="button" className="style-btn active" onClick={handleJoin}>→</button>
+
+          <div className="sheet-section home-storage">
+            <h3>{t(locale, 'storage')}</h3>
+            <p className="sheet-hint">{t(locale, 'saveRemoteBoardsHint')}</p>
+            <button
+              type="button"
+              className={`sheet-switch${saveRemote ? ' on' : ''}`}
+              role="switch"
+              aria-checked={saveRemote}
+              onClick={toggleSaveRemote}
+            >
+              <span>{t(locale, 'saveRemoteBoards')}</span>
+              <span className="switch" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+            </button>
+          </div>
+
+          <div className="sheet-section">
+            <h3>{t(locale, 'join')}</h3>
+            <p className="sheet-hint">{t(locale, 'joinHint')}</p>
+            <div className="home-join-row">
+              <input
+                value={joinLink}
+                onChange={(e) => setJoinLink(e.target.value)}
+                placeholder="https://…/board/…"
+                className="home-inline-input home-join-input"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleJoin();
+                }}
+              />
+              <button type="button" className="style-btn active" onClick={handleJoin} aria-label={t(locale, 'join')}>
+                →
+              </button>
             </div>
           </div>
         </div>
 
         <div className="island home-main">
           <div className="home-main-head">
-            <h2>{teams.find((t) => t.id === activeTeam)?.name ?? ''}</h2>
-            <button type="button" className="style-btn active" onClick={handleCreateBoard}><Icon name="plus" size={14} /> {t(locale, 'newBoard' as any) || 'Новая доска'}</button>
+            <h2>{teams.find((tm) => tm.id === activeTeam)?.name ?? ''}</h2>
+            <button type="button" className="style-btn active" onClick={handleCreateBoard}>
+              <Icon name="plus" size={14} /> {t(locale, 'newBoard')}
+            </button>
           </div>
           <div className="home-list">
             <div className="board-row board-row-head">
               <span className="board-col-idx">#</span>
-              <span className="board-col-name">Название</span>
-              <span className="board-col-team">Команда</span>
-              <span className="board-col-status">Статус</span>
-              <span className="board-col-date">Обновлена</span>
-              <span className="board-col-actions">Действия</span>
+              <span className="board-col-name">{t(locale, 'boardNameCol')}</span>
+              <span className="board-col-team">{t(locale, 'boardTeamCol')}</span>
+              <span className="board-col-status">{t(locale, 'boardStatusCol')}</span>
+              <span className="board-col-weight">{t(locale, 'boardWeightCol')}</span>
+              <span className="board-col-date">{t(locale, 'boardDateCol')}</span>
+              <span className="board-col-actions">{t(locale, 'boardActionsCol')}</span>
             </div>
             {filtered.length ? (
-              filtered.map((b, idx) => (
-                <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
-                  <span className="board-col-idx">{idx + 1}</span>
-                  <span className="board-col-name">
-                    {editingBoard === b.id ? (
-                      <input
-                        autoFocus
-                        value={boardName}
-                        onChange={(e) => setBoardName(e.target.value)}
-                        onBlur={() => { renameBoard(b.id, boardName); setEditingBoard(null); refresh(); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { renameBoard(b.id, boardName); setEditingBoard(null); refresh(); } if (e.key === 'Escape') setEditingBoard(null); }}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ flex: 1, background: 'var(--chrome-panel-2)', border: '1px solid var(--chrome-border)', borderRadius: 6, padding: '4px 6px', color: 'inherit', minWidth: 120 }}
-                      />
-                    ) : (
-                      <b style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</b>
-                    )}
-                    <span className="panel-label" style={{ fontSize: 11, display: 'block' }}>{b.id}</span>
-                  </span>
-                  <span className="board-col-team panel-label">{teams.find((t) => t.id === b.teamId)?.name ?? b.teamId}</span>
-                  <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
-                    <select
-                      value={b.status}
-                      onChange={(e) => { setBoardStatus(b.id, e.target.value as BoardStatus); refresh(); }}
-                      className="size-select"
-                      style={{ height: 28, fontSize: 12 }}
+              filtered.map((b, idx) => {
+                const known = weightsReady && Object.prototype.hasOwnProperty.call(weights, b.id);
+                const bytes = known ? weights[b.id]! : undefined;
+                const weightLabel =
+                  bytes === undefined
+                    ? t(locale, 'boardWeightLoading')
+                    : formatBoardWeight(bytes, localeTag);
+                const needsSave = b.status === 'remote' && !isBoardPersistedLocally(b);
+                return (
+                  <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
+                    <span className="board-col-idx">{idx + 1}</span>
+                    <span className="board-col-name">
+                      {editingBoard === b.id ? (
+                        <input
+                          autoFocus
+                          value={boardName}
+                          onChange={(e) => setBoardName(e.target.value)}
+                          onBlur={() => {
+                            renameBoard(b.id, boardName);
+                            setEditingBoard(null);
+                            refresh();
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              renameBoard(b.id, boardName);
+                              setEditingBoard(null);
+                              refresh();
+                            }
+                            if (e.key === 'Escape') setEditingBoard(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="home-inline-input"
+                          style={{ minWidth: 120 }}
+                        />
+                      ) : (
+                        <b className="board-name-text">{b.name}</b>
+                      )}
+                      <span className="panel-label board-id-label">{b.id}</span>
+                    </span>
+                    <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
+                    <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={b.status}
+                        onChange={(e) => {
+                          setBoardStatus(b.id, e.target.value as BoardStatus);
+                          refresh();
+                        }}
+                        className="size-select home-status-select"
+                        aria-label={t(locale, 'boardStatusCol')}
+                      >
+                        <option value="local">{t(locale, 'statusLocal')}</option>
+                        <option value="shared">{t(locale, 'statusShared')}</option>
+                        <option value="remote">{t(locale, 'statusRemote')}</option>
+                      </select>
+                    </span>
+                    <span
+                      className="board-col-weight panel-label"
+                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
                     >
-                      <option value="local">Локальная</option>
-                      <option value="shared">Общая</option>
-                      <option value="remote">Чужая</option>
-                    </select>
-                  </span>
-                  <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(readLocale() as string)}</span>
-                  <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="style-btn" onClick={() => navigate(boardUrl(b.id))}>Открыть</button>
-                    <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title="Копировать ссылку" onClick={() => handleCopyLink(b.id)}><Icon name="copy" size={14} /></button>
-                    <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title="Переименовать" onClick={() => { setEditingBoard(b.id); setBoardName(b.name); }}><Icon name="pen" size={14} /></button>
-                    <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title="Удалить" onClick={() => { if (confirm('Удалить доску?')) { deleteBoard(b.id); refresh(); } }}><Icon name="trash" size={14} /></button>
-                  </span>
-                </div>
-              ))
+                      {weightLabel}
+                    </span>
+                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
+                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
+                      {needsSave && (
+                        <button
+                          type="button"
+                          className="style-btn"
+                          title={t(locale, 'saveBoardHint')}
+                          onClick={() => handleSaveBoard(b.id)}
+                        >
+                          {t(locale, 'saveBoard')}
+                        </button>
+                      )}
+                      <button type="button" className="style-btn" onClick={() => navigate(boardUrl(b.id))}>
+                        {t(locale, 'openBoard')}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{ width: 28, height: 28 }}
+                        title={t(locale, 'copyLink')}
+                        aria-label={t(locale, 'copyLink')}
+                        onClick={() => handleCopyLink(b.id)}
+                      >
+                        <Icon name="copy" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{ width: 28, height: 28 }}
+                        title={t(locale, 'rename')}
+                        aria-label={t(locale, 'rename')}
+                        onClick={() => {
+                          setEditingBoard(b.id);
+                          setBoardName(b.name);
+                        }}
+                      >
+                        <Icon name="pen" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{ width: 28, height: 28 }}
+                        title={t(locale, 'ctxDelete')}
+                        aria-label={t(locale, 'ctxDelete')}
+                        onClick={() => void handleDeleteBoard(b.id)}
+                      >
+                        <Icon name="trash" size={14} />
+                      </button>
+                    </span>
+                  </div>
+                );
+              })
             ) : (
-              <div className="sheet-hint">Нет досок в этой команде — создай первую.</div>
+              <div className="sheet-hint home-empty">{t(locale, 'noBoards')}</div>
             )}
           </div>
         </div>
       </div>
+
+      <SettingsSheet
+        open={settingsOpen}
+        locale={locale}
+        chromeTheme={chromeTheme}
+        bg="#1c1c1a"
+        gridOn
+        sync={{ online: false, users: 0 }}
+        saved
+        nick={nick}
+        hideBoardSection
+        onNick={(value) => {
+          saveUser(value);
+          setNick(value);
+        }}
+        onLocale={(id) => {
+          writeLocale(id);
+          setLocale(id);
+        }}
+        onChromeTheme={(id) => {
+          writeChromeTheme(id);
+          setChromeTheme(id);
+        }}
+        onBg={() => {}}
+        onGrid={() => {}}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }
