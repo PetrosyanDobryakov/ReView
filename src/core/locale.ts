@@ -2,7 +2,7 @@ export type LocaleId = 'ru' | 'en' | 'zh';
 
 export const LOCALES: LocaleId[] = ['ru', 'en', 'zh'];
 
-const STORAGE_KEY = 'doska-locale';
+const STORAGE_KEY = 'review-locale';
 
 export function isLocaleId(value: string): value is LocaleId {
   return value === 'ru' || value === 'en' || value === 'zh';

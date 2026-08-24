@@ -43,7 +43,7 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
   },
 };
 
-const STORAGE_KEY = 'doska-tool-settings';
+const STORAGE_KEY = 'review-tool-settings';
 
 function persist(): void {
   try {
