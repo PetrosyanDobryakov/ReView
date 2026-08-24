@@ -4,6 +4,7 @@ import { WebsocketProvider } from 'y-websocket';
 import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import type { UserInfo } from '../core/user';
+import { getBoard, isBoardPersistedLocally } from '../core/boards';
 
 export const LOCAL_ORIGIN = 'local';
 
@@ -17,7 +18,7 @@ export let undoManager = new Y.UndoManager([board, order], {
   trackedOrigins: new Set([LOCAL_ORIGIN]),
   captureTimeout: 200,
 });
-export let persistence: IndexeddbPersistence | null = new IndexeddbPersistence('review-v1', doc);
+export let persistence: IndexeddbPersistence | null = null;
 
 function boardPersistenceKey(id: string): string {
   return `review-v1-${id}`;
@@ -31,6 +32,29 @@ function pageKey(id: string | null): string {
 
 export function getCurrentBoardId(): string | null {
   return currentBoardId;
+}
+
+function shouldPersist(boardId: string): boolean {
+  return isBoardPersistedLocally(getBoard(boardId));
+}
+
+function attachPersistence(boardId: string): void {
+  persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
+  if ((persistence as unknown as { synced: boolean }).synced) {
+    ensurePages();
+    migratePaper();
+  }
+  persistence.on('synced', () => {
+    ensurePages();
+    ensureOrder();
+    migratePaper();
+  });
+}
+
+/** Enable IndexedDB for the current board (after explicit Save). */
+export function enableBoardPersistence(): void {
+  if (!currentBoardId || persistence) return;
+  attachPersistence(currentBoardId);
 }
 
 export function initBoard(boardId: string): void {
@@ -62,39 +86,35 @@ export function initBoard(boardId: string): void {
     captureTimeout: 200,
   });
   currentBoardId = boardId;
-  persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
-  // migrate old single-board data if new board empty and old exists
-  const maybeMigrate = async () => {
-    // if new board has no data, try to copy from old review-v1
-    if (board.size === 0 && order.length === 0) {
-      try {
-        const oldDoc = new Y.Doc();
-        const oldPersist = new IndexeddbPersistence('review-v1', oldDoc);
-        await new Promise<void>((res) => {
-          if ((oldPersist as unknown as { synced: boolean }).synced) res();
-          else oldPersist.on('synced', () => res());
-          setTimeout(() => res(), 1200);
-        });
-        const oldBoard = oldDoc.getMap('shapes');
-        if (oldBoard.size > 0) {
-          const update = Y.encodeStateAsUpdate(oldDoc);
-          Y.applyUpdate(doc, update);
-        }
-        oldPersist.destroy();
-        oldDoc.destroy();
-      } catch {}
-    }
-  };
-  maybeMigrate();
-  if ((persistence as unknown as { synced: boolean }).synced) {
+  persistence = null;
+  if (shouldPersist(boardId)) {
+    attachPersistence(boardId);
+    // migrate old single-board data if new board empty and old exists
+    const maybeMigrate = async () => {
+      if (board.size === 0 && order.length === 0) {
+        try {
+          const oldDoc = new Y.Doc();
+          const oldPersist = new IndexeddbPersistence('review-v1', oldDoc);
+          await new Promise<void>((res) => {
+            if ((oldPersist as unknown as { synced: boolean }).synced) res();
+            else oldPersist.on('synced', () => res());
+            setTimeout(() => res(), 1200);
+          });
+          const oldBoard = oldDoc.getMap('shapes');
+          if (oldBoard.size > 0) {
+            const update = Y.encodeStateAsUpdate(oldDoc);
+            Y.applyUpdate(doc, update);
+          }
+          oldPersist.destroy();
+          oldDoc.destroy();
+        } catch {}
+      }
+    };
+    maybeMigrate();
+  } else {
+    // ephemeral session — still need pages
     ensurePages();
-    migratePaper();
   }
-  persistence.on('synced', () => {
-    ensurePages();
-    ensureOrder();
-    migratePaper();
-  });
 }
 
 export function ensureOrder(): void {
@@ -174,19 +194,11 @@ function ensurePages(): void {
   }
 }
 
-if ((persistence as unknown as { synced: boolean }).synced) {
-  ensurePages();
-  migratePaper();
-}
-(persistence as unknown as { on: (e: string, cb: () => void) => void }).on('synced', () => {
-  ensurePages();
-  ensureOrder();
-  migratePaper();
-});
-
 const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
 const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
-const SYNC_URL = `${proto}://${host}:1234`;
+const SYNC_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SYNC_URL) ||
+  `${proto}://${host}:1234`;
 
 let provider: WebsocketProvider | null = null;
 

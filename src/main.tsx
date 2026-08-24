@@ -38,11 +38,15 @@ function BoardRoute() {
   return <App boardId={boardId} onBack={() => navigate('/')} />;
 }
 
+function HomeRoute() {
+  return <Home locale={readLocale()} />;
+}
+
 try {
   createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home locale={locale} />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/board/:boardId" element={<BoardRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

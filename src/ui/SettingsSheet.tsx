@@ -31,6 +31,8 @@ export function SettingsSheet({
   sync,
   saved,
   nick,
+  hideBoardSection = false,
+  ephemeral = false,
   onNick,
   onLocale,
   onChromeTheme,
@@ -46,6 +48,8 @@ export function SettingsSheet({
   sync: SyncStatus;
   saved: boolean;
   nick: string;
+  hideBoardSection?: boolean;
+  ephemeral?: boolean;
   onNick: (value: string) => void;
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
@@ -110,8 +114,8 @@ export function SettingsSheet({
               <span>{sync.online ? sync.users : '—'}</span>
             </li>
             <li>
-              <span className={`status-line${saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
-              <span>{saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
+              <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
+              <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
             </li>
           </ul>
         </section>
@@ -188,6 +192,7 @@ export function SettingsSheet({
           )}
         </section>
 
+        {!hideBoardSection && (
         <section className="sheet-section">
           <h3>
             <SwapText text={t(locale, 'board')} />
@@ -222,6 +227,7 @@ export function SettingsSheet({
             </span>
           </button>
         </section>
+        )}
 
         <section className="sheet-section">
           <h3>
