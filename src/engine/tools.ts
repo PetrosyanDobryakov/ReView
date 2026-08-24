@@ -5,12 +5,24 @@ import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/s
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings } from '../core/settings';
 
-export type ToolId = 'select' | 'lasso' | 'pan' | 'pen' | 'rect' | 'ellipse' | 'sticky' | 'text' | 'arrow' | 'eraser';
+export type ToolId =
+  | 'select'
+  | 'lasso'
+  | 'pan'
+  | 'pen'
+  | 'rect'
+  | 'ellipse'
+  | 'sticky'
+  | 'text'
+  | 'arrow'
+  | 'eraser'
+  | 'graph';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
   world: { x: number; y: number };
   shift: boolean;
+  alt?: boolean;
 }
 
 export abstract class Tool {
@@ -97,8 +109,18 @@ export class SelectTool extends Tool {
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
     if (this.mode === 'move') {
-      const dx = p.world.x - this.start.x;
-      const dy = p.world.y - this.start.y;
+      let dx = p.world.x - this.start.x;
+      let dy = p.world.y - this.start.y;
+      let guides: import('../core/align').AlignGuide[] = [];
+      if (!p.alt) {
+        const snapped = engine.computeSnapForMove(this.originals, dx, dy);
+        dx = snapped.dx;
+        dy = snapped.dy;
+        guides = snapped.guides;
+        engine.setSnapGuides(guides);
+      } else {
+        engine.clearSnapGuides();
+      }
       const patches: Array<[string, Partial<ShapeView>]> = [];
       for (const [id, o] of this.originals) {
         if (o.locked) continue;
@@ -120,6 +142,7 @@ export class SelectTool extends Tool {
       if (this.moved > 3) {
         const ids: string[] = [];
         for (const id of engine.grid.query(this.marquee)) {
+          if (!store.isOnActivePage(id)) continue;
           const v = engine.views.get(id);
           if (v && intersects(v, this.marquee)) ids.push(id);
         }
@@ -132,13 +155,15 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    engine.clearSnapGuides();
   }
 
-  cancel(_engine: Engine): void {
+  cancel(engine: Engine): void {
     this.mode = 'idle';
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    engine.clearSnapGuides();
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -348,7 +373,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -398,6 +423,7 @@ abstract class BoxTool extends Tool {
     this.start = null;
     this.cur = null;
     if (this.shapeType === 'sticky') engine.openTextEditor(id);
+    if (this.shapeType === 'graph') engine.openGraphEditor(id);
     engine.setTool('select');
   }
 
@@ -446,6 +472,13 @@ export class StickyTool extends BoxTool {
   readonly shapeType = 'sticky';
   readonly defaultW = 180;
   readonly defaultH = 120;
+}
+
+export class GraphTool extends BoxTool {
+  readonly id = 'graph';
+  readonly shapeType = 'graph';
+  readonly defaultW = 380;
+  readonly defaultH = 280;
 }
 
 export class ArrowTool extends Tool {
@@ -605,6 +638,7 @@ export class EraserTool extends Tool {
     const partial = settings.eraser.mode === 'partial';
     const box = { x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 };
     for (const id of engine.grid.query(box)) {
+      if (!store.isOnActivePage(id)) continue;
       const v = engine.views.get(id);
       if (!v || v.locked) continue;
       if (partial && v.type === 'pen' && v.points) {
@@ -694,6 +728,7 @@ export class Tools {
   readonly rect = new RectTool();
   readonly ellipse = new EllipseTool();
   readonly sticky = new StickyTool();
+  readonly graph = new GraphTool();
   readonly text = new TextTool();
   readonly arrow = new ArrowTool();
   readonly eraser = new EraserTool();

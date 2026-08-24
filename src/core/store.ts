@@ -3,6 +3,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { WebsocketProvider } from 'y-websocket';
 import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from './shapes';
 import type { ShapeView, ShapeType } from './shapes';
+import type { UserInfo } from './user';
 
 export const LOCAL_ORIGIN = 'local';
 
@@ -84,10 +85,23 @@ export const undoManager = new Y.UndoManager([board, order], {
   captureTimeout: 200,
 });
 
+function ensurePages(): void {
+  const a = pagesArray();
+  if (a.length === 0) {
+    transact(() => {
+      if (a.length === 0) a.push(['main']);
+    });
+  }
+}
+
 export const persistence = new IndexeddbPersistence('review-v1', doc);
 
-if (persistence.synced) migratePaper();
+if ((persistence as unknown as { synced: boolean }).synced) {
+  ensurePages();
+  migratePaper();
+}
 persistence.on('synced', () => {
+  ensurePages();
   ensureOrder();
   migratePaper();
 });
@@ -171,6 +185,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     cropY: m.get('cropY') as number | undefined,
     cropW: m.get('cropW') as number | undefined,
     cropH: m.get('cropH') as number | undefined,
+    expr: m.get('expr') as string | undefined,
     points: points instanceof Y.Array ? points.toArray() : undefined,
   };
 }
@@ -208,18 +223,20 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('cropW', v.cropW ?? 1);
     m.set('cropH', v.cropH ?? 1);
   }
+  if (v.type === 'graph') m.set('expr', v.expr ?? 'sin(x)');
   return m;
 }
 
 export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
   const id = v.id ?? makeId();
   const m = createShapeYMap({ ...v, id } as ShapeView);
+  const key = currentPagePrefix() + id;
   transact(() => {
     ensureOrder();
-    board.set(id, m);
-    order.push([id]);
+    board.set(key, m);
+    order.push([key]);
   });
-  return id;
+  return key;
 }
 
 function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
@@ -266,4 +283,175 @@ export function clearShapeKeys(id: string, keys: string[]): void {
     if (!m) return;
     for (const key of keys) m.delete(key);
   });
+}
+
+export function publishPresence(user: UserInfo): void {
+  getProvider().awareness.setLocalStateField('user', user);
+}
+
+let lastCursorSent = 0;
+
+export function sendCursor(pos: { x: number; y: number } | null): void {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (pos && now - lastCursorSent < 40) return;
+  lastCursorSent = now;
+  try {
+    getProvider().awareness.setLocalStateField('cursor', pos);
+  } catch {
+    /* no provider in tests */
+  }
+}
+
+export interface PeerCursor {
+  id: number;
+  name: string;
+  color: string;
+  x: number | null;
+  y: number | null;
+}
+
+export function onPageChange(cb: () => void): () => void {
+  pageListeners.add(cb);
+  return () => {
+    pageListeners.delete(cb);
+  };
+}
+
+const PAGE_KEY = 'review-page';
+let pagesArr: Y.Array<string> | null = null;
+const pageListeners = new Set<() => void>();
+
+function emitPages(): void {
+  for (const l of [...pageListeners]) l();
+}
+
+function pagesArray(): Y.Array<string> {
+  if (!pagesArr) {
+    pagesArr = doc.getArray<string>('pages');
+    pagesArr.observe(() => {
+      emitPages();
+    });
+  }
+  return pagesArr;
+}
+
+export function listPages(): string[] {
+  const a = pagesArray();
+  if (a.length === 0) {
+    return ['main'];
+  }
+  const arr = a.toArray();
+  // dedup repair for duplicate 'main' race (virtual push + persisted load)
+  const seen = new Set<string>();
+  const uniq: string[] = [];
+  let dup = false;
+  for (const id of arr) {
+    if (seen.has(id)) dup = true;
+    else {
+      seen.add(id);
+      uniq.push(id);
+    }
+  }
+  if (dup) {
+    queueMicrotask(() => {
+      transact(() => {
+        const cur = a.toArray();
+        const s = new Set<string>();
+        const u: string[] = [];
+        for (const id of cur) if (!s.has(id)) { s.add(id); u.push(id); }
+        if (u.length !== cur.length) {
+          a.delete(0, a.length);
+          if (u.length) a.push(u);
+        }
+      });
+    });
+    return uniq;
+  }
+  return arr;
+}
+
+export function currentPageId(): string {
+  const list = listPages();
+  let cur = '';
+  try {
+    cur = localStorage.getItem(PAGE_KEY) ?? '';
+  } catch {
+    /* ignore */
+  }
+  if (!list.includes(cur)) cur = list[0] ?? 'main';
+  return cur;
+}
+
+export function currentPagePrefix(): string {
+  const id = currentPageId();
+  return id === 'main' ? '' : id + ':';
+}
+
+export function isOnActivePage(key: string): boolean {
+  const prefix = currentPagePrefix();
+  if (prefix === '') return !key.includes(':');
+  return key.startsWith(prefix);
+}
+
+export function setCurrentPage(id: string): void {
+  try {
+    localStorage.setItem(PAGE_KEY, id);
+  } catch {
+    /* ignore */
+  }
+  emitPages();
+}
+
+export function addPage(): void {
+  ensurePages();
+  const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  transact(() => pagesArray().push([id]));
+  setCurrentPage(id);
+}
+
+export function deletePage(id: string): void {
+  const a = pagesArray();
+  if (a.length <= 1) return;
+  const isMain = id === 'main';
+  transact(() => {
+    for (const key of [...board.keys()]) {
+      const del = isMain ? !key.includes(':') : key.startsWith(id + ':');
+      if (del) board.delete(key);
+    }
+    const kept = order.toArray().filter((k) => {
+      const del = isMain ? !k.includes(':') : k.startsWith(id + ':');
+      return !del;
+    });
+    order.delete(0, order.length);
+    if (kept.length) order.push(kept);
+  });
+  const idx = a.toArray().indexOf(id);
+  if (idx >= 0) transact(() => a.delete(idx, 1));
+  if (currentPageId() === id) setCurrentPage(a.toArray()[0] ?? 'main');
+  else emitPages();
+}
+
+export function pageOfKey(key: string): string {
+  const idx = key.indexOf(':');
+  return idx === -1 ? 'main' : key.slice(0, idx);
+}
+
+export function onPeers(cb: (peers: PeerCursor[]) => void): () => void {
+  const p = getProvider();
+  const emit = () => {
+    const peers: PeerCursor[] = [];
+    for (const [id, state] of p.awareness.getStates()) {
+      if (id === p.awareness.clientID) continue;
+      const user = state.user as UserInfo | undefined;
+      if (!user || !user.name) continue;
+      const cur = state.cursor as { x: number; y: number } | null | undefined;
+      peers.push({ id, name: user.name, color: user.color, x: cur?.x ?? null, y: cur?.y ?? null });
+    }
+    cb(peers);
+  };
+  p.awareness.on('change', emit);
+  emit();
+  return () => {
+    p.awareness.off('change', emit);
+  };
 }

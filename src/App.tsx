@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine';
-import type { EditTarget } from './engine/Engine';
+import type { EditTarget, GraphEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { Presence } from './ui/Presence';
 import { StyleBar } from './ui/StyleBar';
+import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
+import { GraphEditor } from './ui/GraphEditor';
+import { PageBar } from './ui/PageBar';
+import { ExportDialog } from './ui/ExportDialog';
+import type { ExportSource } from './ui/ExportDialog';
+import type { ShapeBox } from './core/shapes';
 import { Icon } from './ui/icons';
 import { modKey, t } from './ui/i18n';
 import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
@@ -16,6 +22,9 @@ import { onSettingsChange, settings } from './core/settings';
 import { DEFAULT_BOARD_NAME, getBoardName, onBoardNameChange, writeBoardName } from './core/boardName';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
+import { loadUser, onUserChange, saveUser } from './core/user';
+import { getProvider, onPeers, publishPresence, onPageChange } from './core/store';
+import type { PeerCursor } from './core/store';
 import { MOTION, useExitPresence } from './ui/motion';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
@@ -30,6 +39,8 @@ export default function App() {
   const [shapeCount, setShapeCount] = useState(0);
   const [saved, setSaved] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
+  const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pen, setPen] = useState({ ...settings.pen });
   const [shape, setShape] = useState({ ...settings.shape });
@@ -44,6 +55,8 @@ export default function App() {
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
+  const [nick, setNick] = useState(() => loadUser().name);
+  const [peers, setPeers] = useState<PeerCursor[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -67,6 +80,42 @@ export default function App() {
   useEffect(() => onBoardNameChange(setBoardTitle), []);
 
   useEffect(() => {
+    const user = loadUser();
+    publishPresence(user);
+    const offUser = onUserChange((u) => {
+      setNick(u.name);
+      publishPresence(u);
+    });
+    const p = getProvider();
+    const onStatus = (st: { status: string }) => {
+      if (st.status === 'connected') publishPresence(loadUser());
+    };
+    p.on('status', onStatus);
+    return () => {
+      offUser();
+      p.off('status', onStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    return onPeers((list) => {
+      setPeers(list);
+      engineRef.current?.setPeers(list);
+    });
+  }, []);
+
+  useEffect(() => onPageChange(() => engineRef.current?.resetToPage()), []);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.events.onExportRegion = (rect) => {
+      if (!rect) return;
+      setExportState({ source: 'region', rect });
+    };
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = new Engine(canvas);
@@ -85,6 +134,7 @@ export default function App() {
     };
     engine.events.onTool = (id) => setTool(id);
     engine.events.onEditText = (target) => setEditTarget(target);
+  engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
     const onSynced = () => setSaved(true);
     if (persistence.synced) setSaved(true);
@@ -227,6 +277,7 @@ export default function App() {
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
+        <PageBar locale={locale} />
         {editTarget && engine && (
           <TextOverlay
             target={editTarget}
@@ -239,6 +290,27 @@ export default function App() {
               engine.cancelTextEdit();
               setEditTarget(null);
             }}
+          />
+        )}
+        {editGraph && engine && (
+          <GraphEditor
+            target={editGraph}
+            engine={engine}
+            onDone={() => setEditGraph(null)}
+          />
+        )}
+        {exportState && engine && (
+          <ExportDialog
+            locale={locale}
+            engine={engine}
+            initialSource={exportState.source}
+            rect={exportState.rect}
+            hasSelection={selectionCount > 0}
+            onPickAgain={() => {
+              setExportState(null);
+              engineRef.current?.beginExportPick();
+            }}
+            onClose={() => setExportState(null)}
           />
         )}
       </div>
@@ -316,7 +388,7 @@ export default function App() {
           <span className="shape-count" title={t(locale, 'objectsCount')} aria-label={`${shapeCount}`}>
             {shapeCount}
           </span>
-          <Presence locale={locale} online={sync.online} />
+          <Presence locale={locale} online={sync.online} names={peers.map((p) => p.name)} />
           <div className="island-sep" />
           <button
             type="button"
@@ -341,6 +413,7 @@ export default function App() {
         eraser={eraser}
         onPatched={refreshSelected}
       />
+      <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
 
       <input
         ref={fileRef}
@@ -369,6 +442,15 @@ export default function App() {
         onCrop={() => engine?.startCropSelected()}
         onApplyCrop={() => engine?.applyCrop()}
         onCancelCrop={() => engine?.cancelCrop()}
+        onExport={() => {
+          const e = engineRef.current;
+          if (!e) return;
+          if (selectionCount > 0 && e.selectionBounds()) {
+            setExportState({ source: 'selection', rect: null });
+          } else {
+            e.beginExportPick();
+          }
+        }}
       />
 
       <SettingsSheet
@@ -379,6 +461,8 @@ export default function App() {
         gridOn={gridOn}
         sync={sync}
         saved={saved}
+        nick={nick}
+        onNick={(value) => saveUser(value)}
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}
         onBg={(value) => setMeta({ bg: value })}

@@ -7,6 +7,26 @@
     <meta name="description" content="ReView — local-first whiteboard. Draw, shapes, stickies, text, images. Optional Yjs sync on your LAN." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>ReView — локальная онлайн-доска</title>
+    <script>
+      (function () {
+        function show(msg) {
+          function paint() {
+            var b = document.createElement('pre');
+            b.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#7a0d0d;color:#fff;padding:14px;font-size:13px;white-space:pre-wrap;overflow:auto;margin:0';
+            b.textContent = msg;
+            document.body.appendChild(b);
+          }
+          if (document.body) paint();
+          else document.addEventListener('DOMContentLoaded', paint);
+        }
+        window.addEventListener('error', function (e) {
+          show('[error] ' + ((e.error && e.error.stack) || e.message) + '\n@' + (e.filename || '') + ':' + (e.lineno || ''));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          show('[promise] ' + ((e.reason && (e.reason.stack || e.reason.message)) || String(e.reason)));
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

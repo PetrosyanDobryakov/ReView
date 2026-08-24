@@ -3,12 +3,16 @@ import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
 import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
-import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor } from '../core/shapes';
+import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor, intersects, normalizeBox } from '../core/shapes';
+import { measureMixedLine } from '../core/shapes';
+import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
 import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
+import type { PeerCursor } from '../core/store';
+import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
 
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
@@ -33,15 +37,26 @@ export interface EditTarget {
   color: string;
 }
 
+export interface GraphEditTarget {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  expr: string;
+}
+
 export interface EngineEvents {
   onSelection?: (ids: string[]) => void;
   onStats?: (stats: { zoom: number; shapes: number }) => void;
   onEditText?: (target: EditTarget) => void;
+  onEditGraph?: (target: GraphEditTarget) => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
   onCrop?: (active: boolean) => void;
   onContextMenu?: (menu: { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean }) => void;
   onInfo?: (info: { title: string; lines: string[] } | null) => void;
+  onExportRegion?: (rect: ShapeBox | null) => void;
 }
 
 const TOOL_KEYS: Record<string, ToolId> = {
@@ -52,6 +67,7 @@ const TOOL_KEYS: Record<string, ToolId> = {
   KeyO: 'ellipse',
   KeyL: 'arrow',
   KeyS: 'sticky',
+  KeyG: 'graph',
   KeyT: 'text',
   KeyE: 'eraser',
 };
@@ -93,6 +109,12 @@ export class Engine {
   readonly selection = new Set<string>();
   events: EngineEvents = {};
   editing = false;
+  remotePeers: PeerCursor[] = [];
+
+  setPeers(peers: PeerCursor[]): void {
+    this.remotePeers = peers;
+    this.dirty = true;
+  }
 
   private active: ToolId = 'select';
   private override: ToolId | null = null;
@@ -115,6 +137,7 @@ export class Engine {
   private lastStats = '';
   private dragTool: Tool;
   private offImageLoad: () => void = () => {};
+  private offFormulaLoad: () => void = () => {};
   private erasing = new Set<string>();
   private partialErase = new Map<string, Set<number>>();
   private pointers = new Map<number, { x: number; y: number }>();
@@ -129,6 +152,10 @@ export class Engine {
   } | null = null;
   private panStart = { x: 0, y: 0 };
   private reduceMotion = false;
+  private exportPick = false;
+  private exportRect: ShapeBox | null = null;
+  private exportAnchor: { x: number; y: number } | null = null;
+  private snapGuides: AlignGuide[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -142,6 +169,7 @@ export class Engine {
     this.canvas.addEventListener('pointercancel', this.onPointerUp);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
     this.canvas.addEventListener('dblclick', this.onDblClick);
+    this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
@@ -155,12 +183,10 @@ export class Engine {
     this.offImageLoad = onImageLoad(() => {
       this.dirty = true;
     });
-    for (const [key, m] of store.board) {
-      const v = store.readShape(m);
-      this.views.set(key, v);
-      this.grid.upsert(key, v);
-      this.attachShape(key, m);
-    }
+    this.offFormulaLoad = onFormulaLoad(() => {
+      this.dirty = true;
+    });
+    this.loadActivePage();
     this.dragTool = this.tool;
     if (typeof matchMedia === 'function') {
       const mq = matchMedia('(prefers-reduced-motion: reduce)');
@@ -172,6 +198,115 @@ export class Engine {
     this.rafId = requestAnimationFrame(this.loop);
   }
 
+  private loadActivePage(): void {
+    store.ensureOrder();
+    for (const [key, m] of store.board) {
+      if (!store.isOnActivePage(key)) continue;
+      const v = { ...store.readShape(m), id: key };
+      this.views.set(key, v);
+      this.grid.upsert(key, v);
+      this.attachShape(key, m);
+    }
+  }
+
+  resetToPage(): void {
+    for (const un of this.shapeObs.values()) un.un();
+    this.shapeObs.clear();
+    this.views.clear();
+    this.grid.rebuild([]);
+    this.selection.clear();
+    this.erasing.clear();
+    this.partialErase.clear();
+    this.snapGuides = [];
+    this.events.onSelection?.([]);
+    this.loadActivePage();
+    this.dirty = true;
+  }
+
+  contentBox(): ShapeBox | null {
+    return this.boundsOf([...this.views.keys()]);
+  }
+
+  selectionBounds(): ShapeBox | null {
+    return this.boundsOf([...this.selection]);
+  }
+
+  private boundsOf(ids: string[]): ShapeBox | null {
+    let box: ShapeBox | null = null;
+    for (const id of ids) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      box = box
+        ? {
+            x: Math.min(box.x, v.x),
+            y: Math.min(box.y, v.y),
+            w: Math.max(box.x + box.w, v.x + v.w) - Math.min(box.x, v.x),
+            h: Math.max(box.y + box.h, v.y + v.h) - Math.min(box.y, v.y),
+          }
+        : { x: v.x, y: v.y, w: v.w, h: v.h };
+    }
+    return box;
+  }
+
+  beginExportPick(): void {
+    this.exportPick = true;
+    this.exportRect = null;
+    this.exportAnchor = null;
+    this.setCursor('crosshair');
+    this.dirty = true;
+  }
+
+  cancelExportPick(): void {
+    this.exportPick = false;
+    this.exportRect = null;
+    this.exportAnchor = null;
+    this.setCursor(this.tool.cursor);
+    this.dirty = true;
+  }
+
+  exportCanvas(
+    box: ShapeBox,
+    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null }
+  ): HTMLCanvasElement | null {
+    if (box.w <= 0 || box.h <= 0) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(box.w * opts.scale));
+    canvas.height = Math.max(1, Math.round(box.h * opts.scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(opts.scale, 0, 0, opts.scale, -box.x * opts.scale, -box.y * opts.scale);
+    const theme = themeFor(store.metaBg());
+    if (opts.background) {
+      ctx.fillStyle = opts.background;
+      ctx.fillRect(box.x, box.y, box.w, box.h);
+    }
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      const id = ord.get(i);
+      if (!store.isOnActivePage(id)) continue;
+      const v = this.views.get(id);
+      if (!v || !intersects(v, box)) continue;
+      drawShape(ctx, v, theme.text);
+    }
+    return canvas;
+  }
+
+  exportBlob(
+    box: ShapeBox,
+    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null }
+  ): Promise<{ blob: Blob; width: number; height: number } | null> {
+    const canvas = this.exportCanvas(box, opts);
+    if (!canvas) return Promise.resolve(null);
+    const mime = opts.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    return new Promise((resolve) => {
+      canvas.toBlob(
+        (blob) => resolve(blob ? { blob, width: canvas.width, height: canvas.height } : null),
+        mime,
+        opts.quality
+      );
+    });
+  }
+
   destroy(): void {
     cancelAnimationFrame(this.rafId);
     this.resizer.disconnect();
@@ -181,6 +316,7 @@ export class Engine {
     this.canvas.removeEventListener('pointercancel', this.onPointerUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('dblclick', this.onDblClick);
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
@@ -191,6 +327,7 @@ export class Engine {
     store.meta.unobserve(this.onMeta);
     store.order.unobserve(this.onOrder);
     this.offImageLoad();
+    this.offFormulaLoad();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
   }
@@ -240,6 +377,7 @@ export class Engine {
     for (let i = ord.length - 1; i >= 0; i--) {
       const id = ord.get(i);
       if (!candidates.has(id)) continue;
+      if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (v && pointInShape(v, x, y)) return id;
     }
@@ -289,6 +427,65 @@ export class Engine {
       }
     }
     store.patchShapes(patches);
+  }
+
+  clearSnapGuides(): void {
+    if (this.snapGuides.length) {
+      this.snapGuides = [];
+      this.dirty = true;
+    }
+  }
+
+  computeSnapForMove(
+    originals: Map<string, ShapeView>,
+    dx: number,
+    dy: number
+  ): { dx: number; dy: number; guides: AlignGuide[] } {
+    const movingViews: ShapeView[] = [];
+    for (const v of originals.values()) {
+      if (v.locked) continue;
+      movingViews.push(v);
+    }
+    const box = groupBox(movingViews);
+    if (!box) return { dx, dy, guides: [] };
+    const movedBox: ShapeBox = { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
+    const otherBoxes: ShapeBox[] = [];
+    for (const [id, v] of this.views) {
+      if (originals.has(id)) continue;
+      otherBoxes.push({ x: v.x, y: v.y, w: v.w, h: v.h });
+    }
+    const threshold = 8 / this.camera.zoom;
+    const res = computeSnap(movedBox, otherBoxes, threshold);
+    // res.dx is delta to add to movedBox to snap, so final dx = dx + res.dx
+    return { dx: dx + res.dx, dy: dy + res.dy, guides: res.guides };
+  }
+
+  setSnapGuides(guides: AlignGuide[]): void {
+    this.snapGuides = guides;
+    this.dirty = true;
+  }
+
+  alignSelection(kind: AlignKind): void {
+    if (!this.selection.size) return;
+    const selected = [...this.selection].map((id) => this.views.get(id)).filter(Boolean) as ShapeView[];
+    const unlocked = selected.filter((v) => !v.locked);
+    if (!unlocked.length) return;
+    // others = all views not in selection, or if single selection and kind aligns to others' union, use others
+    // if multiple selection and align to each other, others = [] means align within group? But spec says "относительно других объектов"
+    // So for single or multi, align to union of unselected shapes
+    const others = [...this.views.values()].filter((v) => !this.selection.has(v.id));
+    let patches: Array<[string, Partial<ShapeView>]> = [];
+    if (kind === 'centerH' || kind === 'centerV' || kind === 'left' || kind === 'right' || kind === 'top' || kind === 'bottom') {
+      if (others.length) {
+        patches = alignViews(unlocked, others, kind);
+      } else {
+        // no others — align within selection? do nothing
+        return;
+      }
+    } else if (kind === 'distributeH' || kind === 'distributeV') {
+      patches = alignViews(unlocked, [], kind);
+    }
+    if (patches.length) store.patchShapes(patches);
   }
 
   private unlockedIds(): string[] {
@@ -521,6 +718,7 @@ export class Engine {
         pen: 'infoPen',
         arrow: 'infoArrow',
         image: 'infoImage',
+        graph: 'infoGraph',
       } as const
     )[v.type];
     const lines = [
@@ -787,6 +985,35 @@ export class Engine {
     this.editing = false;
   }
 
+  openGraphEditor(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'graph') return;
+    this.editing = true;
+    this.events.onEditGraph?.({
+      id,
+      x: v.x,
+      y: v.y,
+      w: v.w,
+      h: v.h,
+      expr: v.expr ?? 'sin(x)',
+    });
+  }
+
+  commitGraph(id: string, expr: string): void {
+    this.editing = false;
+    store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    this.dirty = true;
+  }
+
+  commitGraphPreview(id: string, expr: string): void {
+    store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    this.dirty = true;
+  }
+
+  cancelGraphEditor(): void {
+    this.editing = false;
+  }
+
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
     if (id === null) {
@@ -833,7 +1060,7 @@ export class Engine {
     const lines = text.split('\n');
     let maxW = 0;
     for (const line of lines) {
-      maxW = Math.max(maxW, this.ctx.measureText(line).width);
+      maxW = Math.max(maxW, measureMixedLine(this.ctx, line, fontSize));
     }
     return { w: maxW + 4, h: lines.length * fontSize * 1.3 };
   }
@@ -853,10 +1080,10 @@ export class Engine {
         this.views.delete(key);
         this.grid.remove(key);
         if (this.selection.delete(key)) this.events.onSelection?.([...this.selection]);
-      } else {
+      } else if (store.isOnActivePage(key)) {
         const m = store.board.get(key);
         if (m) {
-          const v = store.readShape(m);
+          const v = { ...store.readShape(m), id: key };
           this.views.set(key, v);
           this.grid.upsert(key, v);
           this.attachShape(key, m);
@@ -873,7 +1100,7 @@ export class Engine {
     if (existing && existing.m === m) return;
     this.detachShape(key);
     const cb = () => {
-      const v = store.readShape(m);
+      const v = { ...store.readShape(m), id: key };
       this.views.set(key, v);
       this.grid.upsert(key, v);
       this.dirty = true;
@@ -908,6 +1135,7 @@ export class Engine {
       screen: { x: sx, y: sy },
       world: this.camera.screenToWorld(sx, sy, this.w / 2, this.h / 2),
       shift: e.shiftKey,
+      alt: (e as PointerEvent).altKey ?? (e as MouseEvent).altKey ?? false,
     };
   }
 
@@ -921,13 +1149,23 @@ export class Engine {
       return;
     }
     this.pointerDown = true;
+    if (this.exportPick) {
+      if (e.button === 0) {
+        const p = this.pointerInfo(e);
+        this.exportAnchor = p.world;
+        this.exportRect = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
+      }
+      return;
+    }
     if (this.crop) {
       const p = this.pointerInfo(e);
+      const grabbed = this.cropHitHandle(p.screen.x, p.screen.y);
       const f = this.crop.full;
-      const outside =
+      const farOutside =
+        !grabbed &&
         e.button === 0 &&
         (p.world.x < f.x || p.world.x > f.x + f.w || p.world.y < f.y || p.world.y > f.y + f.h);
-      if (outside) {
+      if (farOutside) {
         this.applyCrop();
         return;
       }
@@ -958,6 +1196,10 @@ export class Engine {
     this.dirty = true;
   };
 
+  private onPointerLeave = (): void => {
+    store.sendCursor(null);
+  };
+
   private onPointerMove = (e: PointerEvent): void => {
     const p = this.pointers.get(e.pointerId);
     if (p) {
@@ -966,6 +1208,15 @@ export class Engine {
     }
     if (this.pointers.size >= 2 && this.gesture) {
       this.updateGesture();
+      return;
+    }
+    store.sendCursor(this.pointerInfo(e).world);
+    if (this.exportPick) {
+      if (this.exportAnchor) {
+        const p = this.pointerInfo(e);
+        this.exportRect = normalizeBox(this.exportAnchor, p.world);
+        this.dirty = true;
+      }
       return;
     }
     if (this.crop) {
@@ -1007,6 +1258,20 @@ export class Engine {
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.gesture = null;
     this.pointerDown = false;
+    if (this.exportPick) {
+      const rect = this.exportRect;
+      const min = 6 / this.camera.zoom;
+      this.exportAnchor = null;
+      if (rect && (rect.w < min || rect.h < min)) {
+        this.cancelExportPick();
+        return;
+      }
+      this.exportPick = false;
+      this.setCursor(this.tool.cursor);
+      this.dirty = true;
+      this.events.onExportRegion?.(rect);
+      return;
+    }
     if (this.crop) {
       this.cropPointerUp();
       return;
@@ -1048,9 +1313,14 @@ export class Engine {
     const p = this.pointerInfo(e);
     const id = this.hitTest(p.world.x, p.world.y);
     if (id) {
-      if (this.views.get(id)?.type === 'image') {
+      const type = this.views.get(id)?.type;
+      if (type === 'image') {
         this.setSelection([id]);
         this.startCropSelected();
+        return;
+      }
+      if (type === 'graph') {
+        this.openGraphEditor(id);
         return;
       }
       this.openTextEditor(id);
@@ -1173,6 +1443,7 @@ export class Engine {
     }
     const ids: string[] = [];
     for (const id of this.grid.query({ x: minX, y: minY, w: maxX - minX, h: maxY - minY })) {
+      if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (v && pointInPolygon(v.x + v.w / 2, v.y + v.h / 2, pts)) ids.push(id);
     }
@@ -1501,7 +1772,8 @@ export class Engine {
   };
 
   private render(): void {
-    if (store.order.length !== this.views.size) store.ensureOrder();
+    // order is global across pages, views is per-page — don't auto-ensure here
+    // ensureOrder is handled on sync/board events; avoid spurious resize
     const { ctx, dpr, w, h } = this;
     const { x: cx, y: cy, zoom: z } = this.camera;
     const target = store.metaBg();
@@ -1541,8 +1813,17 @@ export class Engine {
       }
       if (this.erasing.has(v.id)) {
         ctx.save();
-        ctx.globalAlpha = 0.25;
+        ctx.globalAlpha = 0.32;
         drawShape(ctx, v, theme.text);
+        ctx.restore();
+        // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
+        ctx.save();
+        ctx.strokeStyle = '#c96a62';
+        ctx.lineWidth = 2.2 * (1 / this.camera.zoom);
+        ctx.setLineDash([7 / this.camera.zoom, 5 / this.camera.zoom]);
+        ctx.strokeRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
+        ctx.fillStyle = 'rgba(201,106,98,0.14)';
+        ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
         drawShape(ctx, v, theme.text);
@@ -1551,22 +1832,69 @@ export class Engine {
     const ord = store.order;
     for (let i = 0; i < ord.length; i++) {
       const id = ord.get(i);
-      if (!visible.has(id)) continue;
+      if (!visible.has(id) || !store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (v && v.alpha !== undefined && v.alpha < 1) draw(v);
     }
     for (let i = 0; i < ord.length; i++) {
       const id = ord.get(i);
-      if (!visible.has(id)) continue;
+      if (!visible.has(id) || !store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (v && (v.alpha === undefined || v.alpha >= 1)) draw(v);
     }
     this.drawSelection(ctx);
+    this.drawAlignGuides(ctx);
     this.tool.render(this, ctx);
+    this.drawPeers(ctx);
     if (this.crop) this.drawCropOverlay(ctx);
+    if (this.exportPick && this.exportRect) {
+      const s = 1 / this.camera.zoom;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      const r = this.exportRect;
+      const BIG = 1e6;
+      ctx.fillRect(r.x - BIG, r.y - BIG, BIG, r.h + 2 * BIG);
+      ctx.fillRect(r.x + r.w, r.y - BIG, BIG, r.h + 2 * BIG);
+      ctx.fillRect(r.x - BIG, r.y - BIG, r.w + 2 * BIG, BIG);
+      ctx.fillRect(r.x - BIG, r.y + r.h, r.w + 2 * BIG, BIG);
+      ctx.strokeStyle = COLORS.selection;
+      ctx.lineWidth = 2 * s;
+      ctx.setLineDash([8 * s, 6 * s]);
+      ctx.strokeRect(this.exportRect.x, this.exportRect.y, this.exportRect.w, this.exportRect.h);
+      ctx.restore();
+    }
     ctx.restore();
     this.lastCam = { x: cx, y: cy, z };
     this.dirty = u < 1;
+  }
+
+  private drawPeers(ctx: CanvasRenderingContext2D): void {
+    if (!this.remotePeers.length) return;
+    const s = 1 / this.camera.zoom;
+    for (const peer of this.remotePeers) {
+      if (peer.x === null || peer.y === null) continue;
+      ctx.save();
+      ctx.fillStyle = peer.color;
+      ctx.beginPath();
+      ctx.moveTo(peer.x, peer.y);
+      ctx.lineTo(peer.x + 13 * s, peer.y + 4.5 * s);
+      ctx.lineTo(peer.x + 7.5 * s, peer.y + 7.5 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = 1 * s;
+      ctx.stroke();
+      ctx.font = `${13 * s}px 'Segoe UI', system-ui, sans-serif`;
+      const label = peer.name;
+      const tw = ctx.measureText(label).width;
+      ctx.beginPath();
+      ctx.roundRect(peer.x + 14 * s, peer.y - 22 * s, tw + 12 * s, 19 * s, 5 * s);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, peer.x + 20 * s, peer.y - 12 * s);
+      ctx.restore();
+    }
   }
 
   private drawGrid(ctx: CanvasRenderingContext2D, color: string): void {
@@ -1609,6 +1937,41 @@ export class Engine {
           ctx.fillRect(v.x + fx * v.w - 4.5 * s, v.y + fy * v.h - 4.5 * s, 9 * s, 9 * s);
         }
       }
+    }
+    ctx.restore();
+  }
+
+  private drawAlignGuides(ctx: CanvasRenderingContext2D): void {
+    if (!this.snapGuides.length) return;
+    const s = 1 / this.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = '#7c8cff';
+    ctx.lineWidth = 1 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    for (const g of this.snapGuides) {
+      ctx.beginPath();
+      if (g.orientation === 'v') {
+        ctx.moveTo(g.pos, g.a0);
+        ctx.lineTo(g.pos, g.a1);
+      } else {
+        ctx.moveTo(g.a0, g.pos);
+        ctx.lineTo(g.a1, g.pos);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // small dots at ends
+    ctx.fillStyle = '#7c8cff';
+    for (const g of this.snapGuides) {
+      ctx.beginPath();
+      if (g.orientation === 'v') {
+        ctx.arc(g.pos, g.a0, 2 * s, 0, Math.PI * 2);
+        ctx.arc(g.pos, g.a1, 2 * s, 0, Math.PI * 2);
+      } else {
+        ctx.arc(g.a0, g.pos, 2 * s, 0, Math.PI * 2);
+        ctx.arc(g.a1, g.pos, 2 * s, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
     ctx.restore();
   }

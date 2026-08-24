@@ -1,4 +1,7 @@
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image';
+import { formulaImage, renderFormula } from './formula';
+import { compileGraph } from './graphEval';
+
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph';
 
 export interface ShapeView {
   id: string;
@@ -21,6 +24,7 @@ export interface ShapeView {
   cropY?: number;
   cropW?: number;
   cropH?: number;
+  expr?: string;
 }
 
 export interface ShapeBox {
@@ -31,7 +35,6 @@ export interface ShapeBox {
 }
 
 export const BOARD_TYPEFACE = '"Space Grotesk", Onest, "Segoe UI", system-ui, sans-serif';
-
 export const COLORS = {
   background: '#1c1c1a',
   grid: 'rgba(236,234,228,0.055)',
@@ -178,6 +181,72 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
+export interface TextRun {
+  kind: 'text' | 'formula';
+  value: string;
+  w: number;
+  h: number;
+  img: HTMLImageElement | null;
+}
+
+export function layoutMixedLine(ctx: CanvasRenderingContext2D, text: string, fontSize: number): TextRun[] {
+  const runs: TextRun[] = [];
+  const re = /\$([^$]+)\$/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const pushText = (t: string) => {
+    if (t) runs.push({ kind: 'text', value: t, w: ctx.measureText(t).width, h: fontSize, img: null });
+  };
+  while ((m = re.exec(text))) {
+    pushText(text.slice(last, m.index));
+    const latex = m[1];
+    const metrics = renderFormula(latex);
+    if (metrics.valid) {
+      const img = formulaImage(latex, fontSize);
+      runs.push({ kind: 'formula', value: latex, w: img.w + 4, h: img.h, img: img.img });
+    } else {
+      pushText(m[0]);
+    }
+    last = m.index + m[0].length;
+  }
+  pushText(text.slice(last));
+  return runs;
+}
+
+export function measureMixedLine(ctx: CanvasRenderingContext2D, text: string, fontSize: number): number {
+  let total = 0;
+  for (const run of layoutMixedLine(ctx, text, fontSize)) total += run.w;
+  return total;
+}
+
+function drawMixedLine(
+  ctx: CanvasRenderingContext2D,
+  line: string,
+  x: number,
+  lineY: number,
+  lineHeight: number,
+  size: number
+): void {
+  const runs = layoutMixedLine(ctx, line, size);
+  const centerY = lineY + lineHeight / 2;
+  let cursor = x;
+  for (const run of runs) {
+    if (run.kind === 'text') {
+      ctx.fillText(run.value, cursor, lineY);
+      cursor += run.w;
+    } else {
+      if (run.img) ctx.drawImage(run.img, cursor + 2, centerY - run.h / 2, run.w - 4, run.h);
+      else {
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillText(`$${run.value}$`, cursor, lineY);
+        ctx.restore();
+      }
+      cursor += run.w;
+    }
+  }
+}
+
 export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string = COLORS.text): void {
   const font = `${v.fontSize ?? TEXT_FONT}px ${BOARD_TYPEFACE}`;
   switch (v.type) {
@@ -235,10 +304,11 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
       ctx.fillStyle = v.textColor ?? textColor;
       ctx.font = font;
       ctx.textBaseline = 'top';
-      const lineHeight = (v.fontSize ?? TEXT_FONT) * 1.3;
+      const size = v.fontSize ?? TEXT_FONT;
+      const lineHeight = size * 1.3;
       let lineY = v.y;
       for (const line of v.text.split('\n')) {
-        ctx.fillText(line, v.x, lineY);
+        drawMixedLine(ctx, line, v.x, lineY, lineHeight, size);
         lineY += lineHeight;
       }
       break;
@@ -270,7 +340,159 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
       }
       break;
     }
+    case 'graph':
+      drawGraph(ctx, v);
+      break;
   }
+}
+
+const GRAPH_X_RANGE = 10;
+
+function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView): void {
+  const size = Math.max(11, (v.fontSize ?? TEXT_FONT) * 0.8);
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(v.x, v.y, v.w, v.h, 10);
+  ctx.fillStyle = '#15171f';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.clip();
+
+  const compiled = compileGraph(v.expr ?? '');
+  const toPxX = (t: number) => v.x + ((t + GRAPH_X_RANGE) / (2 * GRAPH_X_RANGE)) * v.w;
+  const toT = (px: number) => ((px - v.x) / v.w) * 2 * GRAPH_X_RANGE - GRAPH_X_RANGE;
+
+  if (compiled.error !== undefined || !v.expr?.trim()) {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `${size}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      compiled.error ? `⚠ ${compiled.error}` : 'y = f(x)',
+      v.x + v.w / 2,
+      v.y + v.h / 2
+    );
+    ctx.textAlign = 'left';
+    ctx.restore();
+    return;
+  }
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  const N = Math.max(80, Math.min(400, Math.round(v.w)));
+  const ts: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i <= N; i++) {
+    const t = toT(v.x + (i / N) * v.w);
+    const y = compiled.fn(t);
+    ts.push(t);
+    ys.push(y);
+    if (isFinite(y)) {
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+    }
+  }
+  if (!isFinite(lo) || !isFinite(hi)) {
+    lo = -5;
+    hi = 5;
+  }
+  if (hi - lo < 1e-6) {
+    lo -= 1;
+    hi += 1;
+  } else {
+    const pad = (hi - lo) * 0.12;
+    lo -= pad;
+    hi += pad;
+  }
+  const toPxY = (val: number) => v.y + (1 - (val - lo) / (hi - lo)) * v.h;
+
+  // grid + axes with tick labels
+  const step = niceStep(Math.max(GRAPH_X_RANGE / 6, (hi - lo) / 8));
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let gx = Math.ceil(-GRAPH_X_RANGE / step) * step; gx <= GRAPH_X_RANGE; gx += step) {
+    if (Math.abs(gx) < 1e-9) continue;
+    const px = toPxX(gx);
+    ctx.moveTo(px, v.y);
+    ctx.lineTo(px, v.y + v.h);
+  }
+  for (let gy = Math.ceil(lo / step) * step; gy <= hi; gy += step) {
+    if (Math.abs(gy) < 1e-9) continue;
+    const py = toPxY(gy);
+    if (py < v.y - 1 || py > v.y + v.h + 1) continue;
+    ctx.moveTo(v.x, py);
+    ctx.lineTo(v.x + v.w, py);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.beginPath();
+  const ax = toPxX(0);
+  if (ax >= v.x && ax <= v.x + v.w) {
+    ctx.moveTo(ax, v.y);
+    ctx.lineTo(ax, v.y + v.h);
+  }
+  const ay = toPxY(0);
+  if (ay >= v.y && ay <= v.y + v.h) {
+    ctx.moveTo(v.x, ay);
+    ctx.lineTo(v.x + v.w, ay);
+  }
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let gx = Math.ceil(-GRAPH_X_RANGE / step) * step; gx <= GRAPH_X_RANGE; gx += step) {
+    if (Math.abs(gx) < 1e-9) continue;
+    const px = toPxX(gx);
+    if (px < v.x + 12 || px > v.x + v.w - 12) continue;
+    const labelY = Math.max(v.y + 3, Math.min(v.y + v.h - size - 4, ay));
+    ctx.fillText(String(+gx.toFixed(4)), px, labelY + 2);
+  }
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (let gy = Math.ceil(lo / step) * step; gy <= hi; gy += step) {
+    if (Math.abs(gy) < 1e-9) continue;
+    const py = toPxY(gy);
+    if (py < v.y + size || py > v.y + v.h - size) continue;
+    ctx.fillText(String(+gy.toFixed(4)), ax + 4, py);
+  }
+
+  // curve
+  ctx.strokeStyle = '#7c8cff';
+  ctx.lineWidth = 2.25;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  let started = false;
+  let prevPy = 0;
+  for (let i = 0; i <= N; i++) {
+    const y = ys[i];
+    if (!isFinite(y)) {
+      started = false;
+      continue;
+    }
+    const py = toPxY(y);
+    if (started && Math.abs(py - prevPy) > v.h * 2) started = false;
+    if (!started) {
+      ctx.moveTo(toPxX(ts[i]), py);
+      started = true;
+    } else {
+      ctx.lineTo(toPxX(ts[i]), py);
+    }
+    prevPy = py;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function niceStep(raw: number): number {
+  const pow = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9))));
+  const norm = raw / pow;
+  const nice = norm >= 5 ? 5 : norm >= 2 ? 2 : 1;
+  return nice * pow;
 }
 
 const imageCache = new Map<string, HTMLImageElement>();

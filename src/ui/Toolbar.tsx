@@ -5,7 +5,7 @@ import { t } from './i18n';
 import { SlideTrack } from './SlideTrack';
 
 const NAV: ToolId[] = ['select', 'lasso', 'pan'];
-const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
+const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text', 'graph'];
 
 export interface ToolbarProps {
   locale: LocaleId;
@@ -22,6 +22,7 @@ export interface ToolbarProps {
   onCrop: () => void;
   onApplyCrop: () => void;
   onCancelCrop: () => void;
+  onExport: () => void;
 }
 
 function ToolButtons({
@@ -70,6 +71,7 @@ export function Toolbar({
   onCrop,
   onApplyCrop,
   onCancelCrop,
+  onExport,
 }: ToolbarProps) {
   return (
     <div className="toolbelt" role="toolbar" aria-label={t(locale, 'tools')}>
@@ -93,6 +95,9 @@ export function Toolbar({
       </div>
       <div className="toolbelt-sep" />
       <div className="tool-group">
+        <button type="button" className="tool-btn" title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
+          <Icon name="download" size={TOOLBELT_ICON_SIZE} />
+        </button>
         {cropActive ? (
           <>
             <button key="apply" type="button" className="tool-btn crop-apply tool-pop" title={t(locale, 'cropApply')} aria-label={t(locale, 'cropApply')} onClick={onApplyCrop}>

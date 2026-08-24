@@ -15,6 +15,8 @@ export function SettingsSheet({
   gridOn,
   sync,
   saved,
+  nick,
+  onNick,
   onLocale,
   onChromeTheme,
   onBg,
@@ -28,6 +30,8 @@ export function SettingsSheet({
   gridOn: boolean;
   sync: SyncStatus;
   saved: boolean;
+  nick: string;
+  onNick: (value: string) => void;
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
   onBg: (value: string) => void;
@@ -49,6 +53,23 @@ export function SettingsSheet({
             <Icon name="close" size={16} />
           </button>
         </header>
+
+        <section className="sheet-section">
+          <h3>
+            <SwapText text={t(locale, 'profile')} />
+          </h3>
+          <label className="nick-row">
+            <span>{t(locale, 'nickname')}</span>
+            <input
+              type="text"
+              className="nick-input"
+              value={nick}
+              maxLength={24}
+              placeholder={t(locale, 'nicknameHint')}
+              onChange={(e) => onNick(e.target.value)}
+            />
+          </label>
+        </section>
 
         <section className="sheet-section">
           <h3>

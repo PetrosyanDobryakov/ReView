@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.0 — unreleased
+
+### Collaboration
+- Nickname setting in the sheet; default guest name with stable color.
+- Remote cursors: colored pointer + name label for every online participant.
+- Presence badge lists participant names.
+
+### Learning tools
+- Equations: `$...$` LaTeX inside text objects renders as formulas (MathJax SVG).
+- Function graphs: new «graph» object — axes, grid and the curve of `y = f(x)`;
+  double-click opens an expression row under the plot (`x^2-3`, `sin(x)/x`, `1/x`, ...).
+- Pages: multiple pages per board, synced to everyone; per-device current page.
+  Bottom-left bar: prev/next, add page, delete page.
+
+### Export
+- Export dialog: whole board / selection / picked region; scale ×1–×3;
+  PNG or JPEG (with quality slider); PNG transparency option.
+- Exact output dimensions and file size shown before download.
+
 ## 0.10.0 — 2026-08-23
 
 ### Rebrand

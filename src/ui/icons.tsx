@@ -6,6 +6,7 @@ export const ICON_PATHS = {
   ellipse: 'M12 5a7 7 0 1 0 0 14 7 7 0 1 0 0-14z',
   sticky: 'M5 4h10l5 5v11H5zM15 4v5h5M8 13h8M8 17h5',
   text: 'M5 6h14M12 6v13',
+  graph: 'M3 20c2.5-1 4-6.5 6-9s3 5 5 2 3.5-7 7-8M4 20h17',
   arrow: 'M5 12h14M13 6l6 6-6 6',
   eraser: 'M3 16.5l5.5 5.5 13-13-5.5-5.5zM10 22h11',
   lasso: 'M12 5c4.2 0 7.5 2.8 7.5 6.2S16.2 17.4 12 17.4 4.5 14.6 4.5 11.2 7.8 5 12 5z',
@@ -23,8 +24,17 @@ export const ICON_PATHS = {
   crop: 'M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2',
   check: 'M5 12l5 5L20 7',
   close: 'M18 6L6 18M6 6l12 12',
-  person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
+   person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4',
+  alignLeft: 'M3 4v16M7 8h13M7 12h10M7 16h13',
+  alignCenterH: 'M12 4v16M6 8h12M5 12h14M6 16h12',
+  alignRight: 'M21 4v16M4 8h13M7 12h10M4 16h13',
+  alignTop: 'M4 3h16M8 7v11M12 7v8M16 7v11',
+  alignCenterV: 'M4 12h16M8 6v7M12 5v14M16 6v7',
+  alignBottom: 'M4 21h16M8 10v7M12 8v11M16 10v7',
+  distributeH: 'M3 4v16M7 8h3v8H7zM14 8h3v8h-3zM3 12h16',
+  distributeV: 'M4 3h16M8 7v3h8V7zM8 14v3h8v-3zM12 3v16',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
