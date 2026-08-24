@@ -13,6 +13,7 @@
   --chrome-accent-strong: #f0ebe3;
   --chrome-active-bg: rgba(236, 234, 228, 0.12);
   --chrome-active-ring: rgba(240, 235, 227, 0.42);
+  --chrome-selection: #d4cfc4;
   --chrome-success: #6fae7a;
   --chrome-success-dim: rgba(111, 174, 122, 0.35);
   --chrome-warn: #c9a84a;
@@ -48,6 +49,7 @@
   --chrome-accent-strong: #d4b088;
   --chrome-active-bg: rgba(184, 149, 106, 0.16);
   --chrome-active-ring: rgba(212, 176, 136, 0.42);
+  --chrome-selection: #b8956a;
   --chrome-success: #7a9a62;
   --chrome-success-dim: rgba(122, 154, 98, 0.35);
   --chrome-warn: #c9a84a;
@@ -68,6 +70,7 @@
   --chrome-accent-strong: #1c1c1a;
   --chrome-active-bg: rgba(28, 28, 26, 0.08);
   --chrome-active-ring: rgba(28, 28, 26, 0.28);
+  --chrome-selection: #8a7a5c;
   --chrome-success: #4a7a52;
   --chrome-success-dim: rgba(74, 122, 82, 0.28);
   --chrome-warn: #9a7a2a;
@@ -89,6 +92,7 @@
   --chrome-accent-strong: #111114;
   --chrome-active-bg: rgba(26, 26, 28, 0.08);
   --chrome-active-ring: rgba(26, 26, 28, 0.28);
+  --chrome-selection: #6a6aa0;
   --chrome-success: #3d7a48;
   --chrome-success-dim: rgba(61, 122, 72, 0.28);
   --chrome-warn: #9a7a2a;
@@ -110,12 +114,86 @@
   --chrome-accent-strong: #ffffff;
   --chrome-active-bg: rgba(200, 200, 196, 0.1);
   --chrome-active-ring: rgba(255, 255, 255, 0.28);
+  --chrome-selection: #c8c8c4;
   --chrome-success: #8a9a8a;
   --chrome-success-dim: rgba(138, 154, 138, 0.3);
   --chrome-warn: #b8a848;
   --chrome-danger: #c87870;
   --chrome-danger-bg: #2a1816;
   --chrome-danger-border: #5a3028;
+}
+
+[data-chrome-theme='ocean'] {
+  --chrome-bg: #16202b;
+  --chrome-panel: #1d2b3a;
+  --chrome-panel-2: #26374a;
+  --chrome-border: #33475e;
+  --chrome-border-soft: #2a3d52;
+  --chrome-text: #dce8f2;
+  --chrome-text-dim: #8aa0b5;
+  --chrome-accent: #5ba8d4;
+  --chrome-accent-strong: #9fd0ee;
+  --chrome-active-bg: rgba(91, 168, 212, 0.14);
+  --chrome-active-ring: rgba(159, 208, 238, 0.42);
+  --chrome-selection: #5ba8d4;
+  --chrome-success: #6fae7a;
+  --chrome-success-dim: rgba(111, 174, 122, 0.35);
+  --chrome-warn: #c9a84a;
+  --chrome-danger: #c96a62;
+  --chrome-danger-bg: #4a2826;
+  --chrome-danger-border: #7a4038;
+}
+
+[data-chrome-theme='forest'] {
+  --chrome-bg: #17201a;
+  --chrome-panel: #1f2b22;
+  --chrome-panel-2: #29382d;
+  --chrome-border: #36493b;
+  --chrome-border-soft: #2d4033;
+  --chrome-text: #e2ecdf;
+  --chrome-text-dim: #97ab94;
+  --chrome-accent: #7fb069;
+  --chrome-accent-strong: #aad49a;
+  --chrome-active-bg: rgba(127, 176, 105, 0.15);
+  --chrome-active-ring: rgba(170, 212, 154, 0.42);
+  --chrome-selection: #7fb069;
+  --chrome-success: #6fae7a;
+  --chrome-success-dim: rgba(111, 174, 122, 0.35);
+  --chrome-warn: #c9a84a;
+  --chrome-danger: #c96a62;
+  --chrome-danger-bg: #4a2826;
+  --chrome-danger-border: #7a4038;
+}
+
+[data-chrome-theme='sunset'] {
+  --chrome-bg: #241a20;
+  --chrome-panel: #2f2229;
+  --chrome-panel-2: #3b2b34;
+  --chrome-border: #4d3843;
+  --chrome-border-soft: #40303a;
+  --chrome-text: #f2e6ea;
+  --chrome-text-dim: #b098a3;
+  --chrome-accent: #e08e79;
+  --chrome-accent-strong: #f4b8a5;
+  --chrome-active-bg: rgba(224, 142, 121, 0.15);
+  --chrome-active-ring: rgba(244, 184, 165, 0.42);
+  --chrome-selection: #e08e79;
+  --chrome-success: #6fae7a;
+  --chrome-success-dim: rgba(111, 174, 122, 0.35);
+  --chrome-warn: #c9a84a;
+  --chrome-danger: #c96a62;
+  --chrome-danger-bg: #4a2826;
+  --chrome-danger-border: #7a4038;
+}
+
+/* Baseline fallbacks for the custom theme; key colors are set inline from JS. */
+[data-chrome-theme='custom'] {
+  --chrome-success: #6fae7a;
+  --chrome-success-dim: rgba(111, 174, 122, 0.35);
+  --chrome-warn: #c9a84a;
+  --chrome-danger: #c96a62;
+  --chrome-danger-bg: #4a2826;
+  --chrome-danger-border: #7a4038;
 }
 
 * {
@@ -976,6 +1054,62 @@ button.brand {
 .theme-card[data-theme-preview='ink'] {
   background: #0e0e0e;
   color: #f0f0ec;
+}
+
+.theme-card[data-theme-preview='ocean'] {
+  background: #16202b;
+  color: #9fd0ee;
+}
+
+.theme-card[data-theme-preview='forest'] {
+  background: #17201a;
+  color: #aad49a;
+}
+
+.theme-card[data-theme-preview='sunset'] {
+  background: #241a20;
+  color: #f4b8a5;
+}
+
+.custom-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.custom-theme-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-color {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--chrome-border);
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform var(--chrome-dur-fast) var(--chrome-ease);
+}
+
+.custom-color:hover {
+  transform: scale(1.12);
+}
+
+.custom-color input[type='color'] {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  border: none;
+  padding: 0;
+  cursor: pointer;
 }
 
 .bg-grid {

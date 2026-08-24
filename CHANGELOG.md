@@ -2,6 +2,12 @@
 
 ## 0.11.0 — unreleased
 
+### Theming
+- Object selection on the board now follows the active UI theme color.
+- New chrome themes: Ocean, Forest, Sunset.
+- Custom theme builder: pick background, panel, text and accent colors; derived
+  shades (borders, dim text, active states) are computed automatically.
+
 ### Collaboration
 - Nickname setting in the sheet; default guest name with stable color.
 - Remote cursors: colored pointer + name label for every online participant.

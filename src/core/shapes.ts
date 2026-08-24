@@ -88,8 +88,9 @@ export const COLORS = {
   stickyStroke: '#d9b64d',
   pen: '#eceae4',
   text: '#eceae4',
+  /** Overridden at runtime by the active chrome theme (see chromeTheme.syncSelectionColor). */
   selection: '#c4b8a8',
-} as const;
+};
 
 export const PEN_STROKE = 3;
 export const STICKY_FONT = 16;

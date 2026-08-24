@@ -1,4 +1,12 @@
-import { CHROME_THEME_IDS, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
+import { useState } from 'react';
+import {
+  CHROME_THEME_IDS,
+  readCustomColors,
+  writeChromeTheme,
+  writeCustomColors,
+  type ChromeThemeId,
+  type CustomChromeColors,
+} from '../core/chromeTheme';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import type { SyncStatus } from '../core/store';
 import { Icon } from './icons';
@@ -6,6 +14,13 @@ import { BG_PRESETS, CHROME_LABEL, modKey, t } from './i18n';
 import { MOTION, useExitPresence } from './motion';
 import { SlideTrack } from './SlideTrack';
 import { SwapText } from './SwapText';
+
+const CUSTOM_COLOR_FIELDS: Array<{ key: keyof CustomChromeColors; label: 'customBg' | 'customPanel' | 'customText' | 'customAccent' }> = [
+  { key: 'bg', label: 'customBg' },
+  { key: 'panel', label: 'customPanel' },
+  { key: 'text', label: 'customText' },
+  { key: 'accent', label: 'customAccent' },
+];
 
 export function SettingsSheet({
   open,
@@ -39,7 +54,16 @@ export function SettingsSheet({
   onClose: () => void;
 }) {
   const mounted = useExitPresence(open, MOTION.sheetOut);
+  const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   if (!mounted) return null;
+
+  const applyCustomColor = (key: keyof CustomChromeColors, value: string) => {
+    const next = { ...customColors, [key]: value };
+    setCustomColors(next);
+    writeCustomColors(next);
+    writeChromeTheme('custom');
+    onChromeTheme('custom');
+  };
 
   return (
     <div className={`sheet-root${open ? '' : ' is-leaving'}`} role="presentation">
@@ -134,6 +158,11 @@ export function SettingsSheet({
                 data-theme-preview={id}
                 data-slide-active={chromeTheme === id ? 'true' : undefined}
                 aria-pressed={chromeTheme === id}
+                style={
+                  id === 'custom'
+                    ? { background: customColors.bg, color: customColors.accent }
+                    : undefined
+                }
                 onClick={() => {
                   if (id === chromeTheme) return;
                   onChromeTheme(id);
@@ -144,6 +173,19 @@ export function SettingsSheet({
               </button>
             ))}
           </SlideTrack>
+          {chromeTheme === 'custom' && (
+            <div className="custom-theme-row">
+              {CUSTOM_COLOR_FIELDS.map(({ key, label }) => (
+                <label key={key} className="custom-color" title={t(locale, label)} aria-label={t(locale, label)}>
+                  <input
+                    type="color"
+                    value={customColors[key]}
+                    onChange={(e) => applyCustomColor(key, e.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="sheet-section">
