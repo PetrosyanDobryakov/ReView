@@ -3,7 +3,6 @@ import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
 import { readableTextOn } from '../core/shapes';
 import { metaBg } from '../core/store';
-import { agentLog } from '../debugAgentLog';
 
 export function TextOverlay({
   target,
@@ -38,26 +37,8 @@ export function TextOverlay({
       sel.selectAllChildren(el);
       sel.collapseToEnd();
     }
-    const cs = getComputedStyle(el);
-    // #region agent log
-    agentLog('E', 'TextOverlay.tsx:mount', 'overlay focused', {
-      displayColor,
-      computedColor: cs.color,
-      computedCaret: cs.caretColor,
-      activeTag: document.activeElement instanceof HTMLElement ? document.activeElement.tagName : null,
-      activeClass:
-        document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
-      isCE: document.activeElement instanceof HTMLElement ? document.activeElement.isContentEditable : false,
-      textLen: el.innerText.length,
-    });
-    // #endregion
     const arm = () => {
       armedRef.current = true;
-      // #region agent log
-      agentLog('F', 'TextOverlay.tsx:arm', 'blur commits armed', {
-        activeIsSelf: document.activeElement === el,
-      });
-      // #endregion
     };
     // Opened from pointerup / keyboard: arm on next frame. Also arm on next pointerup
     // in case a trailing click from the same gesture still arrives.
@@ -94,23 +75,10 @@ export function TextOverlay({
     return () => cancelAnimationFrame(raf);
   }, [engine, target, isCentered]);
 
-  const finish = (commit: boolean, reason: string) => {
+  const finish = (commit: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
     const raw = ref.current?.innerText ?? '';
-    // #region agent log
-    agentLog(commit ? 'A' : 'B', 'TextOverlay.tsx:finish', commit ? 'overlay commit' : 'overlay cancel', {
-      commit,
-      reason,
-      rawLen: raw.length,
-      rawPreview: raw.slice(0, 80),
-      trimmedLen: raw.trim().length,
-      targetType: target.type,
-      targetId: target.id,
-      hasEl: !!ref.current,
-      armed: armedRef.current,
-    });
-    // #endregion
     if (commit) onDone(raw);
     else onCancel();
   };
@@ -142,34 +110,13 @@ export function TextOverlay({
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
-        // #region agent log
-        agentLog('D', 'TextOverlay.tsx:keydown', 'overlay keydown', {
-          key: e.key,
-          targetTag: e.target instanceof HTMLElement ? e.target.tagName : null,
-          targetCE: e.target instanceof HTMLElement ? e.target.isContentEditable : false,
-          activeCE:
-            document.activeElement instanceof HTMLElement
-              ? document.activeElement.isContentEditable
-              : false,
-          innerLen: ref.current?.innerText.length ?? -1,
-          displayColor,
-        });
-        // #endregion
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          finish(true, 'enter');
+          finish(true);
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          finish(false, 'escape');
+          finish(false);
         }
-      }}
-      onInput={() => {
-        // #region agent log
-        agentLog('D', 'TextOverlay.tsx:input', 'overlay input', {
-          innerLen: ref.current?.innerText.length ?? -1,
-          preview: (ref.current?.innerText ?? '').slice(0, 40),
-        });
-        // #endregion
       }}
       onPaste={(e) => {
         e.preventDefault();
@@ -180,19 +127,7 @@ export function TextOverlay({
         sel.getRangeAt(0).insertNode(document.createTextNode(text));
         sel.collapseToEnd();
       }}
-      onBlur={(e) => {
-        // #region agent log
-        const rel = e.relatedTarget;
-        agentLog('F', 'TextOverlay.tsx:blur', 'overlay blur', {
-          armed: armedRef.current,
-          done: doneRef.current,
-          relatedTag: rel instanceof HTMLElement ? rel.tagName : null,
-          relatedClass: rel instanceof HTMLElement ? rel.className : null,
-          activeTag:
-            document.activeElement instanceof HTMLElement ? document.activeElement.tagName : null,
-          innerLen: ref.current?.innerText.length ?? -1,
-        });
-        // #endregion
+      onBlur={() => {
         if (!armedRef.current) {
           // Premature blur from the opening click — reclaim focus.
           requestAnimationFrame(() => {
@@ -200,7 +135,7 @@ export function TextOverlay({
           });
           return;
         }
-        finish(true, 'blur');
+        finish(true);
       }}
     />
   );
