@@ -1,16 +1,101 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { WebsocketProvider } from 'y-websocket';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from './shapes';
-import type { ShapeView, ShapeType } from './shapes';
-import type { UserInfo } from './user';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
+import type { ShapeView, ShapeType } from '../core/shapes';
+import type { UserInfo } from '../core/user';
 
 export const LOCAL_ORIGIN = 'local';
 
-export const doc = new Y.Doc();
-export const board = doc.getMap<Y.Map<unknown>>('shapes');
-export const meta = doc.getMap('meta');
-export const order = doc.getArray<string>('order');
+// --- per-board state ---
+let currentBoardId: string | null = null;
+export let doc = new Y.Doc();
+export let board = doc.getMap<Y.Map<unknown>>('shapes');
+export let meta = doc.getMap('meta');
+export let order = doc.getArray<string>('order');
+export let undoManager = new Y.UndoManager([board, order], {
+  trackedOrigins: new Set([LOCAL_ORIGIN]),
+  captureTimeout: 200,
+});
+export let persistence: IndexeddbPersistence | null = new IndexeddbPersistence('review-v1', doc);
+
+function boardPersistenceKey(id: string): string {
+  return `review-v1-${id}`;
+}
+function boardRoom(id: string): string {
+  return `review-${id}`;
+}
+function pageKey(id: string | null): string {
+  return id ? `review-page-${id}` : 'review-page';
+}
+
+export function getCurrentBoardId(): string | null {
+  return currentBoardId;
+}
+
+export function initBoard(boardId: string): void {
+  if (currentBoardId === boardId) return;
+  // destroy old
+  try {
+    provider?.destroy();
+  } catch {}
+  provider = null;
+  try {
+    (persistence as unknown as { destroy?: () => void })?.destroy?.();
+  } catch {}
+  try {
+    persistence?.destroy();
+  } catch {}
+  // clear old observers
+  pagesArr = null;
+  pageListeners.clear();
+  // new doc
+  try {
+    doc.destroy();
+  } catch {}
+  doc = new Y.Doc();
+  board = doc.getMap<Y.Map<unknown>>('shapes');
+  meta = doc.getMap('meta');
+  order = doc.getArray<string>('order');
+  undoManager = new Y.UndoManager([board, order], {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: 200,
+  });
+  currentBoardId = boardId;
+  persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
+  // migrate old single-board data if new board empty and old exists
+  const maybeMigrate = async () => {
+    // if new board has no data, try to copy from old review-v1
+    if (board.size === 0 && order.length === 0) {
+      try {
+        const oldDoc = new Y.Doc();
+        const oldPersist = new IndexeddbPersistence('review-v1', oldDoc);
+        await new Promise<void>((res) => {
+          if ((oldPersist as unknown as { synced: boolean }).synced) res();
+          else oldPersist.on('synced', () => res());
+          setTimeout(() => res(), 1200);
+        });
+        const oldBoard = oldDoc.getMap('shapes');
+        if (oldBoard.size > 0) {
+          const update = Y.encodeStateAsUpdate(oldDoc);
+          Y.applyUpdate(doc, update);
+        }
+        oldPersist.destroy();
+        oldDoc.destroy();
+      } catch {}
+    }
+  };
+  maybeMigrate();
+  if ((persistence as unknown as { synced: boolean }).synced) {
+    ensurePages();
+    migratePaper();
+  }
+  persistence.on('synced', () => {
+    ensurePages();
+    ensureOrder();
+    migratePaper();
+  });
+}
 
 export function ensureOrder(): void {
   const ids = new Set(board.keys());
@@ -80,11 +165,6 @@ export function metaGrid(): boolean {
   return (meta.get('grid') as boolean) ?? true;
 }
 
-export const undoManager = new Y.UndoManager([board, order], {
-  trackedOrigins: new Set([LOCAL_ORIGIN]),
-  captureTimeout: 200,
-});
-
 function ensurePages(): void {
   const a = pagesArray();
   if (a.length === 0) {
@@ -94,13 +174,11 @@ function ensurePages(): void {
   }
 }
 
-export const persistence = new IndexeddbPersistence('review-v1', doc);
-
 if ((persistence as unknown as { synced: boolean }).synced) {
   ensurePages();
   migratePaper();
 }
-persistence.on('synced', () => {
+(persistence as unknown as { on: (e: string, cb: () => void) => void }).on('synced', () => {
   ensurePages();
   ensureOrder();
   migratePaper();
@@ -113,15 +191,23 @@ const SYNC_URL = `${proto}://${host}:1234`;
 let provider: WebsocketProvider | null = null;
 
 export function getProvider(): WebsocketProvider {
+  const room = currentBoardId ? boardRoom(currentBoardId) : 'review';
   if (!provider) {
-    provider = new WebsocketProvider(SYNC_URL, 'review', doc);
+    provider = new WebsocketProvider(SYNC_URL, room, doc);
+  } else {
+    // if room changed, recreate
+    const curRoom = (provider as unknown as { roomname?: string }).roomname;
+    if (curRoom !== room) {
+      try { provider.destroy(); } catch {}
+      provider = new WebsocketProvider(SYNC_URL, room, doc);
+    }
   }
   return provider;
 }
 
 export function destroyProvider(): void {
   if (provider) {
-    provider.destroy();
+    try { provider.destroy(); } catch {}
     provider = null;
   }
 }
@@ -245,6 +331,20 @@ export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
     board.set(key, m);
     order.push([key]);
   });
+  // bump board updated
+  try {
+    if (currentBoardId) {
+      const raw = localStorage.getItem('review-boards');
+      if (raw) {
+        const arr = JSON.parse(raw) as Array<{ id: string; updatedAt: number }>;
+        const idx = arr.findIndex((b) => b.id === currentBoardId);
+        if (idx >= 0) {
+          arr[idx].updatedAt = Date.now();
+          localStorage.setItem('review-boards', JSON.stringify(arr));
+        }
+      }
+    }
+  } catch {}
   return key;
 }
 
@@ -326,7 +426,6 @@ export function onPageChange(cb: () => void): () => void {
   };
 }
 
-const PAGE_KEY = 'review-page';
 let pagesArr: Y.Array<string> | null = null;
 const pageListeners = new Set<() => void>();
 
@@ -350,7 +449,6 @@ export function listPages(): string[] {
     return ['main'];
   }
   const arr = a.toArray();
-  // dedup repair for duplicate 'main' race (virtual push + persisted load)
   const seen = new Set<string>();
   const uniq: string[] = [];
   let dup = false;
@@ -383,7 +481,7 @@ export function currentPageId(): string {
   const list = listPages();
   let cur = '';
   try {
-    cur = localStorage.getItem(PAGE_KEY) ?? '';
+    cur = localStorage.getItem(pageKey(currentBoardId)) ?? '';
   } catch {
     /* ignore */
   }
@@ -404,7 +502,7 @@ export function isOnActivePage(key: string): boolean {
 
 export function setCurrentPage(id: string): void {
   try {
-    localStorage.setItem(PAGE_KEY, id);
+    localStorage.setItem(pageKey(currentBoardId), id);
   } catch {
     /* ignore */
   }
@@ -412,10 +510,15 @@ export function setCurrentPage(id: string): void {
 }
 
 export function addPage(): void {
-  ensurePages();
-  const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  transact(() => pagesArray().push([id]));
-  setCurrentPage(id);
+  const a = pagesArray();
+  if (a.length === 0) {
+    transact(() => {
+      if (a.length === 0) a.push(['main']);
+    });
+  }
+  const pid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  transact(() => pagesArray().push([pid]));
+  setCurrentPage(pid);
 }
 
 export function deletePage(id: string): void {

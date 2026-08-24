@@ -36,7 +36,7 @@ export const ICON_PATHS = {
   distributeH: 'M3 4v16M7 8h3v8H7zM14 8h3v8h-3zM3 12h16',
   distributeV: 'M4 3h16M8 7v3h8V7zM8 14v3h8v-3zM12 3v16',
   diamond: 'M12 3l9 9-9 9-9-9z',
-  frame: 'M3 3h18v18H3zM3 8h18M9 16h6M9 12h6',
+  frame: 'M10 3h4v4h-4z M6 10h4v4H6z M14 10h4v4h-4z M3 17h4v4H3z M10 17h4v4h-4z M17 17h4v4h-4z M12 7v3 M8 12l2 2 M16 12l-2 2 M6 14v3 M11 14l-1 1 M17 14l-1 1',
   triangle: 'M12 3l10 17H2z',
   parallelogram: 'M7 5h12l-4 14H2z',
   hexagon: 'M8 3h8l6 9-6 9H8l-6-9z',
@@ -44,7 +44,7 @@ export const ICON_PATHS = {
   terminator: 'M6 8h12a6 6 0 0 1 0 12H6a6 6 0 0 1 0-12z',
   subroutine: 'M3 5h18v14H3zM7 5v14M17 5v14',
   display: 'M3 5h11l5 7-5 7H3z',
-  more: 'M6 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0zM10 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0zM14 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0z',
+  more: 'M12 2l8 4-8 4-8-4z M4 11l8 4 8-4 M4 15l8 4 8-4 M12 14v6 M9 17h6',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

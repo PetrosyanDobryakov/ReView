@@ -16,10 +16,10 @@ import type { ExportSource } from './ui/ExportDialog';
 import type { ShapeBox } from './core/shapes';
 import { Icon } from './ui/icons';
 import { modKey, t } from './ui/i18n';
-import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
+import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
-import { DEFAULT_BOARD_NAME, getBoardName, onBoardNameChange, writeBoardName } from './core/boardName';
+import { getBoard, renameBoard } from './core/boards';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
@@ -29,7 +29,9 @@ import { MOTION, useExitPresence } from './ui/motion';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
-export default function App() {
+export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
+  // init per-board store synchronously before any hooks that use it
+  initBoard(boardId);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [tool, setTool] = useState<ToolId>('select');
@@ -60,8 +62,13 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [boardTitle, setBoardTitle] = useState(getBoardName);
+  const boardMeta = getBoard(boardId);
+  const [boardTitle, setBoardTitle] = useState(() => boardMeta?.name ?? 'Доска');
   const [editingName, setEditingName] = useState(false);
+  useEffect(() => {
+    const m = getBoard(boardId);
+    if (m) setBoardTitle(m.name);
+  }, [boardId]);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
@@ -74,10 +81,8 @@ export default function App() {
 
   useEffect(() => {
     applyLocale(locale);
-    document.title = boardTitle === DEFAULT_BOARD_NAME ? t(locale, 'title') : boardTitle;
+    document.title = boardTitle ? `${boardTitle} — ReView` : t(locale, 'title');
   }, [locale, boardTitle]);
-
-  useEffect(() => onBoardNameChange(setBoardTitle), []);
 
   useEffect(() => {
     const user = loadUser();
@@ -102,9 +107,9 @@ export default function App() {
       setPeers(list);
       engineRef.current?.setPeers(list);
     });
-  }, []);
+  }, [boardId]);
 
-  useEffect(() => onPageChange(() => engineRef.current?.resetToPage()), []);
+  useEffect(() => onPageChange(() => engineRef.current?.resetToPage()), [boardId]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -136,9 +141,12 @@ export default function App() {
     engine.events.onEditText = (target) => setEditTarget(target);
   engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
+    const curPersist = persistence;
+    const curMeta = meta;
+    const curUndo = undoManager;
     const onSynced = () => setSaved(true);
-    if (persistence.synced) setSaved(true);
-    else persistence.on('synced', onSynced);
+    if (curPersist && (curPersist as unknown as { synced: boolean }).synced) setSaved(true);
+    else curPersist?.on('synced', onSynced);
     const offSettings = onSettingsChange(() => {
       setPen({ ...settings.pen });
       setShape({ ...settings.shape });
@@ -149,29 +157,29 @@ export default function App() {
       setBg(metaBg());
       setGridOn(metaGrid());
     };
-    meta.observe(onMeta);
+    curMeta.observe(onMeta);
     const offSync = onSyncStatus(setSync);
     const syncUndo = () => {
-      setCanUndo(undoManager.undoStack.length > 0);
-      setCanRedo(undoManager.redoStack.length > 0);
+      setCanUndo(curUndo.undoStack.length > 0);
+      setCanRedo(curUndo.redoStack.length > 0);
     };
     syncUndo();
-    undoManager.on('stack-item-added', syncUndo);
-    undoManager.on('stack-item-popped', syncUndo);
-    undoManager.on('stack-cleared', syncUndo);
+    curUndo.on('stack-item-added', syncUndo);
+    curUndo.on('stack-item-popped', syncUndo);
+    curUndo.on('stack-cleared', syncUndo);
     return () => {
-      persistence.off('synced', onSynced);
+      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
       offSettings();
-      meta.unobserve(onMeta);
+      try { curMeta.unobserve(onMeta); } catch {}
       offSync();
-      undoManager.off('stack-item-added', syncUndo);
-      undoManager.off('stack-item-popped', syncUndo);
-      undoManager.off('stack-cleared', syncUndo);
+      curUndo.off('stack-item-added', syncUndo);
+      curUndo.off('stack-item-popped', syncUndo);
+      curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
       destroyProvider();
     };
-  }, []);
+  }, [boardId]);
 
   useEffect(() => {
     engineRef.current?.setTool(tool);
@@ -317,6 +325,10 @@ export default function App() {
 
       <header className="file-bar">
         <div className="island file-island">
+          <button type="button" className="icon-btn" title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>⌂</span>
+          </button>
+          <div className="island-sep" />
           {editingName ? (
             <input
               className="brand-edit"
@@ -326,17 +338,21 @@ export default function App() {
               aria-label={t(locale, 'renameBoard')}
               onChange={(e) => setBoardTitle(e.target.value)}
               onBlur={() => {
-                writeBoardName(boardTitle);
+                const v = boardTitle.trim().slice(0, 40) || 'Доска';
+                renameBoard(boardId, v);
+                setBoardTitle(v);
                 setEditingName(false);
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === 'Enter') {
-                  writeBoardName(boardTitle);
+                  const v = boardTitle.trim().slice(0, 40) || 'Доска';
+                  renameBoard(boardId, v);
+                  setBoardTitle(v);
                   setEditingName(false);
                 }
                 if (e.key === 'Escape') {
-                  setBoardTitle(getBoardName());
+                  setBoardTitle(getBoard(boardId)?.name ?? 'Доска');
                   setEditingName(false);
                 }
               }}

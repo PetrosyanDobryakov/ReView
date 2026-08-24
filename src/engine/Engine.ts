@@ -14,6 +14,8 @@ import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../core/store';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
 import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
+import { getToolBinds, getColorBinds } from '../core/keybindings';
+import { updatePenSettings, updateShapeSettings } from '../core/settings';
 
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
@@ -62,7 +64,7 @@ export interface EngineEvents {
   onExportRegion?: (rect: ShapeBox | null) => void;
 }
 
-const TOOL_KEYS: Record<string, ToolId> = {
+const TOOL_KEYS_FALLBACK: Record<string, ToolId> = {
   KeyV: 'select',
   KeyH: 'pan',
   KeyP: 'pen',
@@ -412,7 +414,7 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    // check selected first, then any visible
+    const off = 8 / z;
     const candidates: string[] = [...this.selection, ...[...this.views.keys()].filter((k) => !this.selection.has(k))];
     let best: { shapeId: string; port: PortId; dist: number } | null = null;
     for (const id of candidates) {
@@ -420,7 +422,7 @@ export class Engine {
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
       for (const port of PORTS) {
-        const p = portPos(v, port, 0);
+        const p = portPos(v, port, off);
         const hx = p.x * z + ox;
         const hy = p.y * z + oy;
         const d = Math.hypot(hx - sx, hy - sy);
@@ -433,10 +435,11 @@ export class Engine {
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
     const v = this.views.get(shapeId);
     if (!v) return null;
-    return portPos(v, port, 0);
+    return portPos(v, port, 8 / this.camera.zoom);
   }
 
   updateConnectedArrows(movedIds: Set<string>): void {
+    const off = 8 / this.camera.zoom;
     const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const [id, v] of this.views) {
       if (v.type !== 'arrow' || !v.fromId || !v.toId) continue;
@@ -446,8 +449,8 @@ export class Engine {
       if (!from || !to) continue;
       const fromPort = (v.fromPort as PortId) || 'e';
       const toPort = (v.toPort as PortId) || 'w';
-      const a = portPos(from, fromPort, 0);
-      const b = portPos(to, toPort, 0);
+      const a = portPos(from, fromPort, off);
+      const b = portPos(to, toPort, off);
       const pad = 6;
       const minX = Math.min(a.x, b.x) - pad;
       const minY = Math.min(a.y, b.y) - pad;
@@ -1957,9 +1960,38 @@ export class Engine {
       this.translateSelection(dx, dy);
       return;
     }
-    if (!mod && !e.altKey && e.code.startsWith('Key')) {
-      const t = TOOL_KEYS[e.code];
-      if (t) this.setTool(t);
+    if (!mod && !e.altKey) {
+      const toolBinds = getToolBinds();
+      for (const [tool, bind] of Object.entries(toolBinds) as Array<[ToolId, string]>) {
+        if (bind === e.code) {
+          this.setTool(tool);
+          return;
+        }
+      }
+      const t = TOOL_KEYS_FALLBACK[e.code];
+      if (t) {
+        this.setTool(t);
+        return;
+      }
+      // color binds — 1..8 etc
+      const colorBinds = getColorBinds();
+      for (const [color, bind] of Object.entries(colorBinds)) {
+        if (bind === e.code) {
+          updatePenSettings({ color });
+          updateShapeSettings({ stroke: color, fill: color });
+          // also patch selected shapes
+          const patches: Array<[string, Partial<import('../core/shapes').ShapeView>]> = [];
+          for (const id of this.selection) {
+            const v = this.views.get(id);
+            if (!v || v.locked) continue;
+            if (v.type === 'pen') patches.push([id, { stroke: color }]);
+            else if (['rect','ellipse','diamond','frame','triangle','parallelogram','hexagon','cylinder','terminator','subroutine','display'].includes(v.type)) patches.push([id, { fill: color, stroke: color }]);
+            else if (v.type === 'sticky') patches.push([id, { fill: color }]);
+          }
+          if (patches.length) store.patchShapes(patches);
+          return;
+        }
+      }
     }
   };
 
