@@ -105,34 +105,51 @@ export async function estimateBoardBytes(boardId: string): Promise<number> {
   const name = boardPersistenceDbName(boardId);
   const exists = await databaseExists(name);
   if (!exists) return 0;
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open(name);
-      req.onsuccess = async () => {
-        const db = req.result;
-        try {
-          const names = Array.from(db.objectStoreNames);
-          let total = 0;
-          for (const storeName of names) {
-            total += await sumStore(db, storeName);
-          }
-          db.close();
-          resolve(total);
-        } catch {
+
+  const openAndSum = (): Promise<number> =>
+    new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(name);
+        req.onsuccess = async () => {
+          const db = req.result;
           try {
+            const names = Array.from(db.objectStoreNames);
+            let total = 0;
+            for (const storeName of names) {
+              total += await sumStore(db, storeName);
+            }
             db.close();
+            resolve(total);
           } catch {
-            /* ignore */
+            try {
+              db.close();
+            } catch {
+              /* ignore */
+            }
+            resolve(0);
           }
-          resolve(0);
-        }
-      };
-      req.onerror = () => resolve(0);
-      req.onblocked = () => resolve(0);
-    } catch {
-      resolve(0);
-    }
-  });
+        };
+        req.onerror = () => resolve(0);
+        // Blocked means another connection is upgrading — retry rather than treat as empty.
+        req.onblocked = () => {
+          /* resolved by retry loop */
+        };
+      } catch {
+        resolve(0);
+      }
+    });
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const size = await Promise.race([
+      openAndSum(),
+      new Promise<number>((resolve) => {
+        globalThis.setTimeout(() => resolve(-1), 400 + attempt * 200);
+      }),
+    ]);
+    if (size >= 0) return size;
+    await new Promise((r) => globalThis.setTimeout(r, 120 + attempt * 80));
+  }
+  return 0;
 }
 
 export async function deleteBoardDatabase(boardId: string): Promise<void> {

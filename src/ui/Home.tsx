@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   listBoards,
@@ -44,6 +44,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [joinLink, setJoinLink] = useState('');
   const [saveRemote, setSaveRemote] = useState(() => readPrefs().saveRemoteBoards);
   const [weights, setWeights] = useState<Record<string, number>>({});
+  const [weightsReady, setWeightsReady] = useState(false);
+  const weightsGen = useRef(0);
 
   const refresh = useCallback(() => {
     setTeams(listTeams());
@@ -51,15 +53,19 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   }, []);
 
   const refreshWeights = useCallback(async (list: BoardMeta[]) => {
+    const gen = ++weightsGen.current;
+    setWeightsReady(false);
     const entries = await Promise.all(
       list.map(async (b) => {
         const bytes = await estimateBoardBytes(b.id);
         return [b.id, bytes] as const;
       })
     );
+    if (gen !== weightsGen.current) return;
     const next: Record<string, number> = {};
     for (const [id, bytes] of entries) next[id] = bytes;
     setWeights(next);
+    setWeightsReady(true);
   }, []);
 
   useEffect(() => {
@@ -298,8 +304,12 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             </div>
             {filtered.length ? (
               filtered.map((b, idx) => {
-                const bytes = weights[b.id] ?? 0;
-                const weightLabel = formatBoardWeight(bytes, localeTag);
+                const known = weightsReady && Object.prototype.hasOwnProperty.call(weights, b.id);
+                const bytes = known ? weights[b.id]! : undefined;
+                const weightLabel =
+                  bytes === undefined
+                    ? t(locale, 'boardWeightLoading')
+                    : formatBoardWeight(bytes, localeTag);
                 const needsSave = b.status === 'remote' && !isBoardPersistedLocally(b);
                 return (
                   <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
@@ -350,7 +360,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     </span>
                     <span
                       className="board-col-weight panel-label"
-                      title={bytes > 0 ? weightLabel : t(locale, 'boardWeightEmpty')}
+                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
                     >
                       {weightLabel}
                     </span>

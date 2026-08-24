@@ -1,9 +1,9 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, withAlpha, type PortId } from '../core/shapes';
+import { COLORS, portPos, readableTextOn, withAlpha, type PortId } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
-import { effectivePen, settings } from '../core/settings';
+import { effectivePen, settings, updateTextSettings } from '../core/settings';
 
 export type ToolId =
   | 'select'
@@ -507,6 +507,52 @@ export class StickyTool extends BoxTool {
   readonly shapeType = 'sticky';
   readonly defaultW = 180;
   readonly defaultH = 120;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = {
+        x: p.world.x - this.defaultW / 2,
+        y: p.world.y - this.defaultH / 2,
+        w: this.defaultW,
+        h: this.defaultH,
+      };
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
+    const stroke = settings.shape.stroke === COLORS.stroke ? COLORS.stickyStroke : settings.shape.stroke;
+    const id = store.addShape({
+      type: 'sticky',
+      ...box,
+      fill,
+      stroke,
+      strokeWidth: 2,
+      textColor: '#3a2f00',
+    });
+    this.start = null;
+    this.cur = null;
+    engine.openTextEditor(id);
+    engine.setTool('select');
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom;
+    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = fill + '55';
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 export class GraphTool extends BoxTool {
@@ -808,7 +854,10 @@ export class TextTool extends Tool {
   cursor = 'text';
 
   onDown(engine: Engine, p: PointerInfo): void {
-    engine.openTextEditorAt(p.world.x, p.world.y, settings.text.size, settings.text.color);
+    const bg = store.metaBg();
+    const color = readableTextOn(settings.text.color, bg);
+    if (color !== settings.text.color) updateTextSettings({ color });
+    engine.openTextEditorAt(p.world.x, p.world.y, settings.text.size, color);
   }
 }
 

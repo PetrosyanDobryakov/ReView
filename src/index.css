@@ -277,7 +277,7 @@ body {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   background: var(--chrome-panel);
   border: 1px solid var(--chrome-border);
   border-radius: var(--chrome-radius);
@@ -299,7 +299,7 @@ body {
 .toolbelt-sep {
   width: 1px;
   align-self: stretch;
-  margin: 6px 4px;
+  margin: 6px 5px;
   background: var(--chrome-border-soft);
   transition: background-color var(--chrome-dur-move) var(--chrome-ease);
 }
@@ -384,8 +384,8 @@ button.brand {
 }
 
 .tool-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
 }
 
@@ -527,14 +527,14 @@ button.brand {
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
-  padding: 6px;
+  padding: 7px 8px;
 }
 
 .tool-group,
 .locale-row {
   position: relative;
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .locale-row {
@@ -890,6 +890,7 @@ button.brand {
   box-shadow: var(--chrome-shadow);
   padding: 20px 20px 32px;
   overflow: auto;
+  scrollbar-gutter: stable;
   transform-origin: top right;
   animation: sheet-in var(--chrome-dur-sheet) var(--chrome-ease);
   transition:
@@ -897,6 +898,19 @@ button.brand {
     border-color var(--chrome-dur-sheet) var(--chrome-ease),
     box-shadow var(--chrome-dur-sheet) var(--chrome-ease),
     color var(--chrome-dur-sheet) var(--chrome-ease);
+}
+
+/* Bottom fade: signals more settings below when the sheet scrolls. */
+.sheet::after {
+  content: '';
+  position: sticky;
+  bottom: -32px;
+  display: block;
+  height: 36px;
+  margin: -36px -20px 0;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--chrome-panel) 18%, transparent);
+  z-index: 2;
 }
 
 .sheet-root.is-leaving .sheet {

@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
+import { readableTextOn } from '../core/shapes';
+import { metaBg } from '../core/store';
 
 export function TextOverlay({
   target,
@@ -19,6 +21,7 @@ export function TextOverlay({
   const pos = engine.worldToScreen(target.x, target.y);
   const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
   const isCentered = target.centered;
+  const displayColor = target.type === 'text' ? readableTextOn(target.color, metaBg()) : target.color;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -80,7 +83,8 @@ export function TextOverlay({
         height: isCentered ? target.h * zoom : undefined,
         minHeight: isCentered ? target.h * zoom : fontPx * 1.3,
         fontSize: fontPx,
-        color: target.color,
+        color: displayColor,
+        caretColor: displayColor,
         display: isCentered ? 'flex' : 'block',
         alignItems: isCentered ? 'center' : undefined,
         justifyContent: isCentered ? 'center' : undefined,
