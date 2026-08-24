@@ -853,21 +853,38 @@ export class ArrowTool extends Tool {
 export class TextTool extends Tool {
   readonly id = 'text';
   cursor = 'text';
+  private down: { x: number; y: number } | null = null;
 
-  onDown(engine: Engine, p: PointerInfo): void {
+  onDown(_engine: Engine, p: PointerInfo): void {
+    this.down = p.world;
+    // #region agent log
+    agentLog('F', 'tools.ts:TextTool.onDown', 'TextTool pointer down (defer open)', {
+      world: p.world,
+    });
+    // #endregion
+  }
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    const at = this.down ?? p.world;
+    this.down = null;
     const bg = store.metaBg();
     const color = readableTextOn(settings.text.color, bg);
     // #region agent log
-    agentLog('E', 'tools.ts:TextTool.onDown', 'TextTool pointer down', {
-      world: p.world,
+    agentLog('F', 'tools.ts:TextTool.onUp', 'TextTool pointer up → open editor', {
+      world: at,
       settingsColor: settings.text.color,
       color,
       size: settings.text.size,
       bg,
+      editing: engine.editing,
     });
     // #endregion
     if (color !== settings.text.color) updateTextSettings({ color });
-    engine.openTextEditorAt(p.world.x, p.world.y, settings.text.size, color);
+    engine.openTextEditorAt(at.x, at.y, settings.text.size, color);
+  }
+
+  cancel(_engine: Engine): void {
+    this.down = null;
   }
 }
 
