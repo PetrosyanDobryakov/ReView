@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView } from '../core/shapes';
+import { readableTextOn } from '../core/shapes';
 import {
   effectivePen,
   updateEraserSettings,
@@ -12,7 +13,7 @@ import {
   type ShapeSettings,
   type TextSettings,
 } from '../core/settings';
-import { patchShapes } from '../core/store';
+import { metaBg, patchShapes } from '../core/store';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
 import { MOTION, useExitPresence } from './motion';
@@ -20,13 +21,14 @@ import { MOTION, useExitPresence } from './motion';
 const PEN_COLORS = ['#eceae4', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#c4b8a8', '#ff9fd0'];
 const FILL_COLORS = ['#ffffff', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#e8e2d6', '#ff9fd0'];
 const STROKE_COLORS = ['#6b6b66', '#1c1c1a', '#ffffff', '#ff6b6b', '#4cd964', '#ffa94d', '#c4b8a8', '#ff9fd0'];
-const TEXT_COLORS = ['#ffe27a', '#4cd964', '#ff6b6b', '#1c1c1a', '#eceae4', '#c4a35a', '#6b6b66', '#ffa94d'];
+/** Free-text + sticky palette. Dark swatches are for stickies / light boards; free text auto-contrasts on dark boards. */
+const TEXT_COLORS = ['#eceae4', '#ffe27a', '#4cd964', '#ff6b6b', '#ffa94d', '#c4a35a', '#6b6b66', '#1c1c1a'];
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const ERASER_SIZES = [16, 32, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen']);
-const TEXT_TYPES = new Set(['text', 'sticky']);
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'];
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const TEXT_TYPES = new Set(['text', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
 function Swatches({
   colors,
@@ -242,9 +244,18 @@ export function StyleBar({
             value={textValue}
             custom
             onPick={(c) => {
-              updateTextSettings({ color: c });
+              // Free-text tool: bump low-contrast picks to board-readable color. Sticky / shape labels keep the pick.
+              const onlyFreeText =
+                showTextDraw || (textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
+              const next = onlyFreeText ? readableTextOn(c, metaBg()) : c;
+              updateTextSettings({ color: next });
               if (textTargets.length) {
-                patchShapes(textTargets.map((v) => [v.id, { textColor: c }]));
+                patchShapes(
+                  textTargets.map((v) => [
+                    v.id,
+                    { textColor: v.type === 'text' ? readableTextOn(c, metaBg()) : c },
+                  ])
+                );
                 onPatched();
               }
             }}

@@ -6,7 +6,7 @@ const PORT = 1234;
 
 const server = createServer((_req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('Доска — сервер синхронизации');
+  res.end('ReView — sync server');
 });
 
 const wss = new WebSocketServer({ server });
@@ -17,7 +17,7 @@ wss.on('connection', (conn, req) => {
 
 function onListenError(err) {
   if (err && typeof err === 'object' && 'code' in err && err.code === 'EADDRINUSE') {
-    console.log(`[doska] sync already running on :${PORT}`);
+    console.log(`[review] sync already running on :${PORT}`);
     process.exit(0);
   }
   throw err;
@@ -27,5 +27,5 @@ server.on('error', onListenError);
 wss.on('error', onListenError);
 
 server.listen(PORT, () => {
-  console.log(`[doska] sync server: ws://localhost:${PORT}`);
+  console.log(`[review] sync server: ws://localhost:${PORT}`);
 });

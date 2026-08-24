@@ -1,16 +1,37 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS } from '../core/shapes';
+import { COLORS, portPos, readableTextOn, withAlpha, type PortId } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
-import { effectivePen, settings } from '../core/settings';
+import { effectivePen, settings, updateTextSettings } from '../core/settings';
 
-export type ToolId = 'select' | 'lasso' | 'pan' | 'pen' | 'rect' | 'ellipse' | 'sticky' | 'text' | 'arrow' | 'eraser';
+export type ToolId =
+  | 'select'
+  | 'lasso'
+  | 'pan'
+  | 'pen'
+  | 'rect'
+  | 'ellipse'
+  | 'sticky'
+  | 'text'
+  | 'arrow'
+  | 'eraser'
+  | 'graph'
+  | 'diamond'
+  | 'frame'
+  | 'triangle'
+  | 'parallelogram'
+  | 'hexagon'
+  | 'cylinder'
+  | 'terminator'
+  | 'subroutine'
+  | 'display';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
   world: { x: number; y: number };
   shift: boolean;
+  alt?: boolean;
 }
 
 export abstract class Tool {
@@ -97,8 +118,18 @@ export class SelectTool extends Tool {
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
     if (this.mode === 'move') {
-      const dx = p.world.x - this.start.x;
-      const dy = p.world.y - this.start.y;
+      let dx = p.world.x - this.start.x;
+      let dy = p.world.y - this.start.y;
+      let guides: import('../core/align').AlignGuide[] = [];
+      if (!p.alt) {
+        const snapped = engine.computeSnapForMove(this.originals, dx, dy);
+        dx = snapped.dx;
+        dy = snapped.dy;
+        guides = snapped.guides;
+        engine.setSnapGuides(guides);
+      } else {
+        engine.clearSnapGuides();
+      }
       const patches: Array<[string, Partial<ShapeView>]> = [];
       for (const [id, o] of this.originals) {
         if (o.locked) continue;
@@ -107,6 +138,32 @@ export class SelectTool extends Tool {
         } else {
           patches.push([id, { x: o.x + dx, y: o.y + dy }]);
         }
+      }
+      // also move connected arrows
+      const movedIds = new Set(patches.map(([id]) => id));
+      for (const [aid, av] of engine.views) {
+        if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
+        if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
+        if (movedIds.has(aid)) continue;
+        const from = engine.views.get(av.fromId);
+        const to = engine.views.get(av.toId);
+        if (!from || !to) continue;
+        const fromOrig = this.originals.get(av.fromId);
+        const toOrig = this.originals.get(av.toId);
+        const fx = fromOrig ? fromOrig.x + dx : from.x;
+        const fy = fromOrig ? fromOrig.y + dy : from.y;
+        const tx = toOrig ? toOrig.x + dx : to.x;
+        const ty = toOrig ? toOrig.y + dy : to.y;
+        const fromBox = { ...from, x: fx, y: fy } as ShapeView;
+        const toBox = { ...to, x: tx, y: ty } as ShapeView;
+        const a = portPos(fromBox, (av.fromPort as PortId) || 'e', 0);
+        const b = portPos(toBox, (av.toPort as PortId) || 'w', 0);
+        const pad = 6;
+        const minX = Math.min(a.x, b.x) - pad;
+        const minY = Math.min(a.y, b.y) - pad;
+        const maxX = Math.max(a.x, b.x) + pad;
+        const maxY = Math.max(a.y, b.y) + pad;
+        patches.push([aid, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
       }
       if (patches.length) store.patchShapes(patches);
     } else if (this.mode === 'marquee' && this.marquee) {
@@ -120,6 +177,7 @@ export class SelectTool extends Tool {
       if (this.moved > 3) {
         const ids: string[] = [];
         for (const id of engine.grid.query(this.marquee)) {
+          if (!store.isOnActivePage(id)) continue;
           const v = engine.views.get(id);
           if (v && intersects(v, this.marquee)) ids.push(id);
         }
@@ -132,20 +190,22 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    engine.clearSnapGuides();
   }
 
-  cancel(_engine: Engine): void {
+  cancel(engine: Engine): void {
     this.mode = 'idle';
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    engine.clearSnapGuides();
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.marquee) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
-    ctx.fillStyle = 'rgba(124, 140, 255, 0.12)';
+    ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1.5 * s;
     ctx.beginPath();
@@ -183,6 +243,22 @@ export class SelectTool extends Tool {
         h = w / (orig.w / orig.h);
         if (r.handle.includes('n')) y = orig.y + orig.h - h;
       }
+    }
+    if (orig.type === 'text') {
+      const base = orig.fontSize ?? 18;
+      const sx = orig.w > 0 ? w / orig.w : 1;
+      const sy = orig.h > 0 ? h / orig.h : sx;
+      const s = Math.max(0.15, Math.min(10, (sx + sy) / 2));
+      const fontSize = Math.max(4, Math.round(base * s));
+      const applied = base > 0 ? fontSize / base : s;
+      let nx = orig.x;
+      let ny = orig.y;
+      const nw = orig.w * applied;
+      const nh = orig.h * applied;
+      if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
+      if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
+      store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+      return;
     }
     if (orig.points) {
       const sx = orig.w > 0 ? w / orig.w : 1;
@@ -332,7 +408,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -382,6 +458,7 @@ abstract class BoxTool extends Tool {
     this.start = null;
     this.cur = null;
     if (this.shapeType === 'sticky') engine.openTextEditor(id);
+    if (this.shapeType === 'graph') engine.openGraphEditor(id);
     engine.setTool('select');
   }
 
@@ -430,6 +507,248 @@ export class StickyTool extends BoxTool {
   readonly shapeType = 'sticky';
   readonly defaultW = 180;
   readonly defaultH = 120;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = {
+        x: p.world.x - this.defaultW / 2,
+        y: p.world.y - this.defaultH / 2,
+        w: this.defaultW,
+        h: this.defaultH,
+      };
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
+    const stroke = settings.shape.stroke === COLORS.stroke ? COLORS.stickyStroke : settings.shape.stroke;
+    const id = store.addShape({
+      type: 'sticky',
+      ...box,
+      fill,
+      stroke,
+      strokeWidth: 2,
+      textColor: '#3a2f00',
+    });
+    this.start = null;
+    this.cur = null;
+    engine.openTextEditor(id);
+    engine.setTool('select');
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom;
+    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = fill + '55';
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class GraphTool extends BoxTool {
+  readonly id = 'graph';
+  readonly shapeType = 'graph';
+  readonly defaultW = 380;
+  readonly defaultH = 280;
+}
+
+export class DiamondTool extends BoxTool {
+  readonly id = 'diamond';
+  readonly shapeType = 'diamond';
+  readonly defaultW = 140;
+  readonly defaultH = 100;
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
+    this.start = null;
+    this.cur = null;
+    engine.openTextEditor(id);
+    engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom;
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = settings.shape.fill + '22';
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.moveTo(cx, box.y);
+    ctx.lineTo(box.x + box.w, cy);
+    ctx.lineTo(cx, box.y + box.h);
+    ctx.lineTo(box.x, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class FrameTool extends BoxTool {
+  readonly id = 'frame';
+  readonly shapeType = 'frame';
+  readonly defaultW = 420;
+  readonly defaultH = 300;
+  cancel(_engine: Engine): void {
+    this.start = null;
+    this.cur = null;
+  }
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const id = store.addShape({ type: this.shapeType, ...box, fill: 'rgba(255,255,255,0.06)', stroke: settings.shape.stroke, strokeWidth: 2, text: 'Схема' });
+    this.start = null;
+    this.cur = null;
+    engine.openTextEditor(id);
+    engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([8 * s, 6 * s]);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    // header hint
+    ctx.fillStyle = 'rgba(236,234,228,0.09)';
+    ctx.fillRect(box.x, box.y, box.w, 18);
+    ctx.restore();
+  }
+}
+
+export class TriangleTool extends BoxTool {
+  readonly id = 'triangle';
+  readonly shapeType = 'triangle';
+  readonly defaultW = 140;
+  readonly defaultH = 110;
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    else box = normalizeBox(this.start, this.cur);
+    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
+    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom;
+    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5 * s; ctx.setLineDash([4*s,4*s]);
+    ctx.beginPath(); ctx.moveTo(box.x+box.w/2, box.y); ctx.lineTo(box.x, box.y+box.h); ctx.lineTo(box.x+box.w, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+}
+
+export class ParallelogramTool extends BoxTool {
+  readonly id = 'parallelogram';
+  readonly shapeType = 'parallelogram';
+  readonly defaultW = 160;
+  readonly defaultH = 90;
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    else box = normalizeBox(this.start, this.cur);
+    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
+    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom; const skew = box.w*0.2;
+    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
+    ctx.beginPath(); ctx.moveTo(box.x+skew, box.y); ctx.lineTo(box.x+box.w, box.y); ctx.lineTo(box.x+box.w-skew, box.y+box.h); ctx.lineTo(box.x, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+}
+
+export class HexagonTool extends BoxTool {
+  readonly id = 'hexagon';
+  readonly shapeType = 'hexagon';
+  readonly defaultW = 150;
+  readonly defaultH = 100;
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    else box = normalizeBox(this.start, this.cur);
+    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
+    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom; const cy = box.y+box.h/2;
+    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
+    ctx.beginPath(); ctx.moveTo(box.x+box.w*0.25, box.y); ctx.lineTo(box.x+box.w*0.75, box.y); ctx.lineTo(box.x+box.w, cy); ctx.lineTo(box.x+box.w*0.75, box.y+box.h); ctx.lineTo(box.x+box.w*0.25, box.y+box.h); ctx.lineTo(box.x, cy); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+}
+
+export class CylinderTool extends BoxTool {
+  readonly id = 'cylinder';
+  readonly shapeType = 'cylinder';
+  readonly defaultW = 120;
+  readonly defaultH = 140;
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    else box = normalizeBox(this.start, this.cur);
+    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
+    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+  }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    if (!this.start || !this.cur) return;
+    const box = normalizeBox(this.start, this.cur);
+    const s = 1 / engine.camera.zoom; const ry = Math.min(box.h*0.15, 18); const rx = box.w/2, cx = box.x+rx;
+    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
+    ctx.beginPath(); ctx.moveTo(box.x, box.y+ry); ctx.lineTo(box.x, box.y+box.h-ry); ctx.ellipse(cx, box.y+box.h-ry, rx, ry, 0,0,Math.PI); ctx.lineTo(box.x+box.w, box.y+ry); ctx.ellipse(cx, box.y+ry, rx, ry, 0,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(cx, box.y+ry, rx, ry, 0,0,Math.PI*2); ctx.stroke(); ctx.restore();
+  }
+}
+
+export class TerminatorTool extends BoxTool {
+  readonly id = 'terminator'; readonly shapeType = 'terminator'; readonly defaultW = 140; readonly defaultH = 60;
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; const r=box.h/2; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, r); ctx.fill(); ctx.stroke(); ctx.restore(); }
+}
+export class SubroutineTool extends BoxTool {
+  readonly id = 'subroutine'; readonly shapeType = 'subroutine'; readonly defaultW = 160; readonly defaultH = 80;
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(box.x+8, box.y); ctx.lineTo(box.x+8, box.y+box.h); ctx.moveTo(box.x+box.w-8, box.y); ctx.lineTo(box.x+box.w-8, box.y+box.h); ctx.stroke(); ctx.restore(); }
+}
+export class DisplayTool extends BoxTool {
+  readonly id = 'display'; readonly shapeType = 'display'; readonly defaultW = 150; readonly defaultH = 80;
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.moveTo(box.x, box.y); ctx.lineTo(box.x+box.w*0.85, box.y); ctx.lineTo(box.x+box.w, box.y+box.h/2); ctx.lineTo(box.x+box.w*0.85, box.y+box.h); ctx.lineTo(box.x, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
 }
 
 export class ArrowTool extends Tool {
@@ -489,22 +808,36 @@ export class ArrowTool extends Tool {
   render(_engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
     const end = this.snappedEnd();
+    const ax = this.start.x, ay = this.start.y, bx = end.x, by = end.y;
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const bend = Math.min(30, len * 0.15);
+    const cx = mx + nx * bend * 0.5, cy = my + ny * bend * 0.5;
+    const ang = Math.atan2(by - cy, bx - cx);
     ctx.save();
     ctx.strokeStyle = settings.shape.stroke;
-    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = settings.shape.stroke;
+    ctx.globalAlpha = 0.85;
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    ctx.shadowBlur = 4;
     ctx.beginPath();
-    ctx.moveTo(this.start.x, this.start.y);
-    ctx.lineTo(end.x, end.y);
+    ctx.moveTo(ax, ay);
+    ctx.quadraticCurveTo(cx, cy, bx, by);
     ctx.stroke();
-    const angle = Math.atan2(end.y - this.start.y, end.x - this.start.x);
+    ctx.shadowColor = 'transparent';
     const head = 10;
+    const hx1 = bx - head * Math.cos(ang - 0.42), hy1 = by - head * Math.sin(ang - 0.42);
+    const hx2 = bx - head * Math.cos(ang + 0.42), hy2 = by - head * Math.sin(ang + 0.42);
     ctx.beginPath();
-    ctx.moveTo(end.x, end.y);
-    ctx.lineTo(end.x - head * Math.cos(angle - 0.42), end.y - head * Math.sin(angle - 0.42));
-    ctx.moveTo(end.x, end.y);
-    ctx.lineTo(end.x - head * Math.cos(angle + 0.42), end.y - head * Math.sin(angle + 0.42));
+    ctx.moveTo(bx, by);
+    ctx.lineTo(hx1, hy1);
+    ctx.lineTo(hx2, hy2);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
@@ -519,9 +852,23 @@ export class ArrowTool extends Tool {
 export class TextTool extends Tool {
   readonly id = 'text';
   cursor = 'text';
+  private down: { x: number; y: number } | null = null;
 
-  onDown(engine: Engine, p: PointerInfo): void {
-    engine.openTextEditorAt(p.world.x, p.world.y, settings.text.size, settings.text.color);
+  onDown(_engine: Engine, p: PointerInfo): void {
+    this.down = p.world;
+  }
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    const at = this.down ?? p.world;
+    this.down = null;
+    const bg = store.metaBg();
+    const color = readableTextOn(settings.text.color, bg);
+    if (color !== settings.text.color) updateTextSettings({ color });
+    engine.openTextEditorAt(at.x, at.y, settings.text.size, color);
+  }
+
+  cancel(_engine: Engine): void {
+    this.down = null;
   }
 }
 
@@ -589,6 +936,7 @@ export class EraserTool extends Tool {
     const partial = settings.eraser.mode === 'partial';
     const box = { x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 };
     for (const id of engine.grid.query(box)) {
+      if (!store.isOnActivePage(id)) continue;
       const v = engine.views.get(id);
       if (!v || v.locked) continue;
       if (partial && v.type === 'pen' && v.points) {
@@ -657,7 +1005,7 @@ export class LassoTool extends Tool {
     if (!this.active || this.pts.length < 2) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
-    ctx.fillStyle = 'rgba(124, 140, 255, 0.12)';
+    ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1.5 * s;
     ctx.beginPath();
@@ -678,6 +1026,16 @@ export class Tools {
   readonly rect = new RectTool();
   readonly ellipse = new EllipseTool();
   readonly sticky = new StickyTool();
+  readonly graph = new GraphTool();
+  readonly diamond = new DiamondTool();
+  readonly frame = new FrameTool();
+  readonly triangle = new TriangleTool();
+  readonly parallelogram = new ParallelogramTool();
+  readonly hexagon = new HexagonTool();
+  readonly cylinder = new CylinderTool();
+  readonly terminator = new TerminatorTool();
+  readonly subroutine = new SubroutineTool();
+  readonly display = new DisplayTool();
   readonly text = new TextTool();
   readonly arrow = new ArrowTool();
   readonly eraser = new EraserTool();

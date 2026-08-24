@@ -1,25 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { Engine } from './engine/Engine';
-import type { EditTarget } from './engine/Engine';
+import type { EditTarget, GraphEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { Presence } from './ui/Presence';
 import { StyleBar } from './ui/StyleBar';
+import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
+import { GraphEditor } from './ui/GraphEditor';
+import { PageBar } from './ui/PageBar';
+import { ExportDialog } from './ui/ExportDialog';
+import type { ExportSource } from './ui/ExportDialog';
+import type { ShapeBox } from './core/shapes';
 import { Icon } from './ui/icons';
 import { modKey, t } from './ui/i18n';
-import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager } from './core/store';
+import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
+import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
+import { loadUser, onUserChange, saveUser } from './core/user';
+import { getProvider, onPeers, publishPresence, onPageChange } from './core/store';
+import type { PeerCursor } from './core/store';
 import { MOTION, useExitPresence } from './ui/motion';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
-export default function App() {
+export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
+  // init per-board store synchronously before any hooks that use it
+  initBoard(boardId);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [tool, setTool] = useState<ToolId>('select');
@@ -29,6 +41,8 @@ export default function App() {
   const [shapeCount, setShapeCount] = useState(0);
   const [saved, setSaved] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
+  const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pen, setPen] = useState({ ...settings.pen });
   const [shape, setShape] = useState({ ...settings.shape });
@@ -43,9 +57,20 @@ export default function App() {
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
+  const [nick, setNick] = useState(() => loadUser().name);
+  const [peers, setPeers] = useState<PeerCursor[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const boardMeta = getBoard(boardId);
+  const [boardTitle, setBoardTitle] = useState(() => boardMeta?.name ?? 'ReView');
+  const [editingName, setEditingName] = useState(false);
+  const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
+  useEffect(() => {
+    const m = getBoard(boardId);
+    if (m) setBoardTitle(m.name);
+    setEphemeral(!isBoardPersistedLocally(m));
+  }, [boardId]);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
@@ -58,8 +83,44 @@ export default function App() {
 
   useEffect(() => {
     applyLocale(locale);
-    document.title = t(locale, 'title');
-  }, [locale]);
+    document.title = boardTitle ? `${boardTitle} — ReView` : t(locale, 'title');
+  }, [locale, boardTitle]);
+
+  useEffect(() => {
+    const user = loadUser();
+    publishPresence(user);
+    const offUser = onUserChange((u) => {
+      setNick(u.name);
+      publishPresence(u);
+    });
+    const p = getProvider();
+    const onStatus = (st: { status: string }) => {
+      if (st.status === 'connected') publishPresence(loadUser());
+    };
+    p.on('status', onStatus);
+    return () => {
+      offUser();
+      p.off('status', onStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    return onPeers((list) => {
+      setPeers(list);
+      engineRef.current?.setPeers(list);
+    });
+  }, [boardId]);
+
+  useEffect(() => onPageChange(() => engineRef.current?.resetToPage()), [boardId]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.events.onExportRegion = (rect) => {
+      if (!rect) return;
+      setExportState({ source: 'region', rect });
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -80,10 +141,19 @@ export default function App() {
     };
     engine.events.onTool = (id) => setTool(id);
     engine.events.onEditText = (target) => setEditTarget(target);
+  engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
+    const curPersist = persistence;
+    const curMeta = meta;
+    const curUndo = undoManager;
     const onSynced = () => setSaved(true);
-    if (persistence.synced) setSaved(true);
-    else persistence.on('synced', onSynced);
+    if (!curPersist) {
+      setSaved(false);
+    } else if ((curPersist as unknown as { synced: boolean }).synced) {
+      setSaved(true);
+    } else {
+      curPersist.on('synced', onSynced);
+    }
     const offSettings = onSettingsChange(() => {
       setPen({ ...settings.pen });
       setShape({ ...settings.shape });
@@ -94,29 +164,29 @@ export default function App() {
       setBg(metaBg());
       setGridOn(metaGrid());
     };
-    meta.observe(onMeta);
+    curMeta.observe(onMeta);
     const offSync = onSyncStatus(setSync);
     const syncUndo = () => {
-      setCanUndo(undoManager.undoStack.length > 0);
-      setCanRedo(undoManager.redoStack.length > 0);
+      setCanUndo(curUndo.undoStack.length > 0);
+      setCanRedo(curUndo.redoStack.length > 0);
     };
     syncUndo();
-    undoManager.on('stack-item-added', syncUndo);
-    undoManager.on('stack-item-popped', syncUndo);
-    undoManager.on('stack-cleared', syncUndo);
+    curUndo.on('stack-item-added', syncUndo);
+    curUndo.on('stack-item-popped', syncUndo);
+    curUndo.on('stack-cleared', syncUndo);
     return () => {
-      persistence.off('synced', onSynced);
+      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
       offSettings();
-      meta.unobserve(onMeta);
+      try { curMeta.unobserve(onMeta); } catch {}
       offSync();
-      undoManager.off('stack-item-added', syncUndo);
-      undoManager.off('stack-item-popped', syncUndo);
-      undoManager.off('stack-cleared', syncUndo);
+      curUndo.off('stack-item-added', syncUndo);
+      curUndo.off('stack-item-popped', syncUndo);
+      curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
       destroyProvider();
     };
-  }, []);
+  }, [boardId]);
 
   useEffect(() => {
     engineRef.current?.setTool(tool);
@@ -174,10 +244,25 @@ export default function App() {
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
       if (menuView.type === 'image') {
+        const view = engine?.views.get(shapeId);
+        const cropped = Boolean(view && (view.cropW !== undefined || view.cropH !== undefined));
         menuItems.push(
           { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() },
+          {
+            label: t(locale, 'crop'),
+            run: () => {
+              e?.setSelection([shapeId]);
+              e?.startCropSelected();
+            },
+          },
           { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
         );
+        if (cropped) {
+          menuItems.push({
+            label: t(locale, 'ctxResetCrop'),
+            run: () => e?.resetCropSelected(),
+          });
+        }
       }
       if (menuView.type === 'pen') {
         menuItems.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
@@ -207,6 +292,7 @@ export default function App() {
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
+        <PageBar locale={locale} />
         {editTarget && engine && (
           <TextOverlay
             target={editTarget}
@@ -221,13 +307,74 @@ export default function App() {
             }}
           />
         )}
+        {editGraph && engine && (
+          <GraphEditor
+            target={editGraph}
+            engine={engine}
+            onDone={() => setEditGraph(null)}
+          />
+        )}
+        {exportState && engine && (
+          <ExportDialog
+            locale={locale}
+            engine={engine}
+            initialSource={exportState.source}
+            rect={exportState.rect}
+            hasSelection={selectionCount > 0}
+            onPickAgain={() => {
+              setExportState(null);
+              engineRef.current?.beginExportPick();
+            }}
+            onClose={() => setExportState(null)}
+          />
+        )}
       </div>
 
       <header className="file-bar">
         <div className="island file-island">
-          <div className="brand">
-            {t(locale, 'brand')} <span className="brand-sub" aria-label={`${shapeCount}`}>{shapeCount}</span>
-          </div>
+          <button type="button" className="icon-btn" title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>⌂</span>
+          </button>
+          <div className="island-sep" />
+          {editingName ? (
+            <input
+              className="brand-edit"
+              value={boardTitle}
+              autoFocus
+              maxLength={40}
+              aria-label={t(locale, 'renameBoard')}
+              onChange={(e) => setBoardTitle(e.target.value)}
+              onBlur={() => {
+                const v = boardTitle.trim().slice(0, 40) || 'ReView';
+                renameBoard(boardId, v);
+                setBoardTitle(v);
+                setEditingName(false);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  const v = boardTitle.trim().slice(0, 40) || 'ReView';
+                  renameBoard(boardId, v);
+                  setBoardTitle(v);
+                  setEditingName(false);
+                }
+                if (e.key === 'Escape') {
+                  setBoardTitle(getBoard(boardId)?.name ?? 'ReView');
+                  setEditingName(false);
+                }
+              }}
+              onKeyUp={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <button
+              type="button"
+              className="brand"
+              title={t(locale, 'renameBoard')}
+              onClick={() => setEditingName(true)}
+            >
+              {boardTitle}
+            </button>
+          )}
           <div className="island-sep" />
           <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} disabled={!canUndo} onClick={() => undoManager.undo()}>
             <Icon name="undo" />
@@ -248,6 +395,25 @@ export default function App() {
           <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
             <Icon name="fit" />
           </button>
+          {ephemeral && (
+            <>
+              <div className="island-sep" />
+              <button
+                type="button"
+                className="style-btn active save-board-btn"
+                title={t(locale, 'saveBoardHint')}
+                aria-label={t(locale, 'saveBoard')}
+                onClick={() => {
+                  saveBoardLocally(boardId);
+                  enableBoardPersistence();
+                  setEphemeral(false);
+                  setSaved(true);
+                }}
+              >
+                {t(locale, 'saveBoard')}
+              </button>
+            </>
+          )}
         </div>
         <div className="island meta-island">
           {errorShown && errorView && (
@@ -261,7 +427,10 @@ export default function App() {
               {t(locale, 'error')}: {errorView}
             </button>
           )}
-          <Presence locale={locale} online={sync.online} />
+          <span className="shape-count" title={t(locale, 'objectsCount')} aria-label={`${shapeCount}`}>
+            {shapeCount}
+          </span>
+          <Presence locale={locale} online={sync.online} names={peers.map((p) => p.name)} />
           <div className="island-sep" />
           <button
             type="button"
@@ -286,6 +455,7 @@ export default function App() {
         eraser={eraser}
         onPatched={refreshSelected}
       />
+      <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
 
       <input
         ref={fileRef}
@@ -314,6 +484,20 @@ export default function App() {
         onCrop={() => engine?.startCropSelected()}
         onApplyCrop={() => engine?.applyCrop()}
         onCancelCrop={() => engine?.cancelCrop()}
+        onExport={() => {
+          const e = engineRef.current;
+          if (!e) return;
+          if (selectionCount > 0 && e.selectionBounds()) {
+            setExportState({ source: 'selection', rect: null });
+          } else {
+            const box = e.contentBox();
+            if (!box) {
+              e.beginExportPick();
+            } else {
+              setExportState({ source: 'all', rect: null });
+            }
+          }
+        }}
       />
 
       <SettingsSheet
@@ -324,6 +508,9 @@ export default function App() {
         gridOn={gridOn}
         sync={sync}
         saved={saved}
+        nick={nick}
+        ephemeral={ephemeral}
+        onNick={(value) => saveUser(value)}
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}
         onBg={(value) => setMeta({ bg: value })}
