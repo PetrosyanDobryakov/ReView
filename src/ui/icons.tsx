@@ -35,6 +35,16 @@ export const ICON_PATHS = {
   alignBottom: 'M4 21h16M8 10v7M12 8v11M16 10v7',
   distributeH: 'M3 4v16M7 8h3v8H7zM14 8h3v8h-3zM3 12h16',
   distributeV: 'M4 3h16M8 7v3h8V7zM8 14v3h8v-3zM12 3v16',
+  diamond: 'M12 3l9 9-9 9-9-9z',
+  frame: 'M3 3h18v18H3zM3 8h18M9 16h6M9 12h6',
+  triangle: 'M12 3l10 17H2z',
+  parallelogram: 'M7 5h12l-4 14H2z',
+  hexagon: 'M8 3h8l6 9-6 9H8l-6-9z',
+  cylinder: 'M5 6h14v8a7 3 0 0 1-14 0V6zM5 6a7 3 0 0 1 14 0M5 14a7 3 0 0 1 14 0',
+  terminator: 'M6 8h12a6 6 0 0 1 0 12H6a6 6 0 0 1 0-12z',
+  subroutine: 'M3 5h18v14H3zM7 5v14M17 5v14',
+  display: 'M3 5h11l5 7-5 7H3z',
+  more: 'M6 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0zM10 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0zM14 12a2 2 0 1 0 4 0a2 2 0 0 0-4 0z',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

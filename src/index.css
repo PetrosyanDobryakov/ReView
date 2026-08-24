@@ -1403,13 +1403,13 @@ h3 .swap-text,
   gap: 6px;
   padding: 6px 10px;
   border-radius: 10px;
-  background: #15171f;
-  border: 1px solid rgba(124, 140, 255, 0.5);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  background: var(--chrome-panel);
+  border: 1px solid var(--chrome-border);
+  box-shadow: var(--chrome-shadow);
   z-index: 30;
 }
 .graph-editor-label {
-  color: #7c8cff;
+  color: var(--chrome-accent-strong);
   font-weight: 600;
   font-family: "Space Grotesk", Onest, system-ui, sans-serif;
 }
@@ -1418,7 +1418,7 @@ h3 .swap-text,
   background: none;
   border: none;
   outline: none;
-  color: #e8ecf5;
+  color: var(--chrome-text);
   font: 14px/1.2 monospace;
 }
 

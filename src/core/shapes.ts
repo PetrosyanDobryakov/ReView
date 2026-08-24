@@ -1,7 +1,7 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
 export interface ShapeView {
   id: string;
@@ -25,6 +25,50 @@ export interface ShapeView {
   cropW?: number;
   cropH?: number;
   expr?: string;
+  fromId?: string;
+  fromPort?: string;
+  toId?: string;
+  toPort?: string;
+}
+
+export const PORTS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
+export type PortId = (typeof PORTS)[number];
+
+export function portPos(v: ShapeView, port: PortId, offset = 0): { x: number; y: number } {
+  let fx = 0.5, fy = 0.5;
+  switch (port) {
+    case 'nw': fx = 0; fy = 0; break;
+    case 'n': fx = 0.5; fy = 0; break;
+    case 'ne': fx = 1; fy = 0; break;
+    case 'e': fx = 1; fy = 0.5; break;
+    case 'se': fx = 1; fy = 1; break;
+    case 's': fx = 0.5; fy = 1; break;
+    case 'sw': fx = 0; fy = 1; break;
+    case 'w': fx = 0; fy = 0.5; break;
+  }
+  let x = v.x + fx * v.w;
+  let y = v.y + fy * v.h;
+  if (offset) {
+    const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
+    const dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    x += (dx / len) * offset;
+    y += (dy / len) * offset;
+  }
+  return { x, y };
+}
+
+export function portDir(port: PortId): { x: number; y: number } {
+  switch (port) {
+    case 'n': return { x: 0, y: -1 };
+    case 's': return { x: 0, y: 1 };
+    case 'e': return { x: 1, y: 0 };
+    case 'w': return { x: -1, y: 0 };
+    case 'ne': return { x: 0.7, y: -0.7 };
+    case 'nw': return { x: -0.7, y: -0.7 };
+    case 'se': return { x: 0.7, y: 0.7 };
+    case 'sw': return { x: -0.7, y: 0.7 };
+  }
 }
 
 export interface ShapeBox {
@@ -92,6 +136,100 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
       const dx = (px - (v.x + rx)) / rx;
       const dy = (py - (v.y + ry)) / ry;
       return dx * dx + dy * dy <= 1;
+    }
+    case 'diamond': {
+      const cx = v.x + v.w / 2;
+      const cy = v.y + v.h / 2;
+      const dx = Math.abs(px - cx) / (v.w / 2);
+      const dy = Math.abs(py - cy) / (v.h / 2);
+      return dx + dy <= 1;
+    }
+    case 'triangle': {
+      const ax = v.x + v.w / 2, ay = v.y;
+      const bx = v.x, by = v.y + v.h;
+      const cx = v.x + v.w, cy = v.y + v.h;
+      const denom = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (!denom) return false;
+      const a = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / denom;
+      const b = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / denom;
+      const c = 1 - a - b;
+      return a >= 0 && b >= 0 && c >= 0;
+    }
+    case 'parallelogram': {
+      const skew = v.w * 0.2;
+      const pts = [
+        { x: v.x + skew, y: v.y },
+        { x: v.x + v.w, y: v.y },
+        { x: v.x + v.w - skew, y: v.y + v.h },
+        { x: v.x, y: v.y + v.h },
+      ];
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    case 'hexagon': {
+      const cy = v.y + v.h / 2;
+      const pts = [
+        { x: v.x + v.w * 0.25, y: v.y },
+        { x: v.x + v.w * 0.75, y: v.y },
+        { x: v.x + v.w, y: cy },
+        { x: v.x + v.w * 0.75, y: v.y + v.h },
+        { x: v.x + v.w * 0.25, y: v.y + v.h },
+        { x: v.x, y: cy },
+      ];
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    case 'cylinder': {
+      // top ellipse + rect + bottom ellipse
+      const rx = v.w / 2, ry = Math.min(v.h * 0.15, 18);
+      if (py < v.y + ry) {
+        const dx = (px - (v.x + rx)) / rx;
+        const dy = (py - (v.y + ry)) / ry;
+        return dx * dx + dy * dy <= 1;
+      }
+      if (py > v.y + v.h - ry) {
+        const dx = (px - (v.x + rx)) / rx;
+        const dy = (py - (v.y + v.h - ry)) / ry;
+        return dx * dx + dy * dy <= 1;
+      }
+      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+    }
+    case 'terminator': {
+      const r = v.h / 2;
+      if (px < v.x + r) {
+        const dx = px - (v.x + r), dy = py - (v.y + r);
+        return dx * dx + dy * dy <= r * r;
+      }
+      if (px > v.x + v.w - r) {
+        const dx = px - (v.x + v.w - r), dy = py - (v.y + r);
+        return dx * dx + dy * dy <= r * r;
+      }
+      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+    }
+    case 'subroutine':
+      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+    case 'display': {
+      const pts = [
+        { x: v.x, y: v.y },
+        { x: v.x + v.w * 0.85, y: v.y },
+        { x: v.x + v.w, y: v.y + v.h / 2 },
+        { x: v.x + v.w * 0.85, y: v.y + v.h },
+        { x: v.x, y: v.y + v.h },
+      ];
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
     }
     case 'pen':
     case 'arrow':
@@ -267,6 +405,174 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
       ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w / 2, v.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'diamond': {
+      const cx = v.x + v.w / 2;
+      const cy = v.y + v.h / 2;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(cx, v.y);
+      ctx.lineTo(v.x + v.w, cy);
+      ctx.lineTo(cx, v.y + v.h);
+      ctx.lineTo(v.x, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawDiamondLabel(ctx, v, textColor);
+      break;
+    }
+    case 'frame': {
+      // ponytail: frame — structural scheme container, dashed outer + solid header
+      const headerH = Math.min(28, v.h * 0.22);
+      ctx.save();
+      ctx.fillStyle = v.fill === COLORS.fill ? 'rgba(255,255,255,0.06)' : v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // header
+      ctx.fillStyle = v.stroke === COLORS.stroke ? 'rgba(236,234,228,0.09)' : v.stroke;
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, headerH, [8, 8, 0, 0] as unknown as number);
+      ctx.fill();
+      ctx.restore();
+      if (v.text) {
+        ctx.save();
+        ctx.fillStyle = v.textColor ?? textColor;
+        ctx.font = `${Math.max(12, (v.fontSize ?? SHAPE_FONT) - 1)}px ${BOARD_TYPEFACE}`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        const pad = 10;
+        ctx.fillText(v.text.split('\n')[0] ?? '', v.x + pad, v.y + headerH / 2, v.w - pad * 2);
+        ctx.restore();
+      }
+      break;
+    }
+    case 'triangle': {
+      const ax = v.x + v.w / 2, ay = v.y;
+      const bx = v.x, by = v.y + v.h;
+      const cx = v.x + v.w, cy = v.y + v.h;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawTriangleLabel(ctx, v, textColor);
+      break;
+    }
+    case 'parallelogram': {
+      const skew = v.w * 0.2;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(v.x + skew, v.y);
+      ctx.lineTo(v.x + v.w, v.y);
+      ctx.lineTo(v.x + v.w - skew, v.y + v.h);
+      ctx.lineTo(v.x, v.y + v.h);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'hexagon': {
+      const cy = v.y + v.h / 2;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.w * 0.25, v.y);
+      ctx.lineTo(v.x + v.w * 0.75, v.y);
+      ctx.lineTo(v.x + v.w, cy);
+      ctx.lineTo(v.x + v.w * 0.75, v.y + v.h);
+      ctx.lineTo(v.x + v.w * 0.25, v.y + v.h);
+      ctx.lineTo(v.x, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'cylinder': {
+      const ry = Math.min(v.h * 0.15, 18);
+      const rx = v.w / 2, cx = v.x + rx;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      // body
+      ctx.moveTo(v.x, v.y + ry);
+      ctx.lineTo(v.x, v.y + v.h - ry);
+      ctx.ellipse(cx, v.y + v.h - ry, rx, ry, 0, 0, Math.PI);
+      ctx.lineTo(v.x + v.w, v.y + ry);
+      ctx.ellipse(cx, v.y + ry, rx, ry, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // top ellipse
+      ctx.beginPath();
+      ctx.ellipse(cx, v.y + ry, rx, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'terminator': {
+      const r = v.h / 2;
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, r);
+      ctx.fill();
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'subroutine': {
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, 6);
+      ctx.fill();
+      ctx.stroke();
+      const inset = 8;
+      ctx.beginPath();
+      ctx.moveTo(v.x + inset, v.y);
+      ctx.lineTo(v.x + inset, v.y + v.h);
+      ctx.moveTo(v.x + v.w - inset, v.y);
+      ctx.lineTo(v.x + v.w - inset, v.y + v.h);
+      ctx.stroke();
+      if (v.text) drawLabel(ctx, v, textColor);
+      break;
+    }
+    case 'display': {
+      ctx.fillStyle = v.fill;
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(v.x, v.y);
+      ctx.lineTo(v.x + v.w * 0.85, v.y);
+      ctx.lineTo(v.x + v.w, v.y + v.h / 2);
+      ctx.lineTo(v.x + v.w * 0.85, v.y + v.h);
+      ctx.lineTo(v.x, v.y + v.h);
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
       if (v.text) drawLabel(ctx, v, textColor);
@@ -532,23 +838,69 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView): void {
   const ay = pts[1];
   const bx = pts[2];
   const by = pts[3];
+  // ponytail: beautiful curved arrows — use port directions for connected, gentle bend for free
+  const isConnected = Boolean(v.fromId && v.toId && v.fromPort && v.toPort);
+  let c1x = ax, c1y = ay, c2x = bx, c2y = by;
+  let endAngle = Math.atan2(by - ay, bx - ax);
+  if (isConnected) {
+    const fromDir = portDir(v.fromPort as PortId);
+    const toDir = portDir(v.toPort as PortId);
+    const dist = Math.hypot(bx - ax, by - ay);
+    const off = Math.min(80, dist * 0.35);
+    c1x = ax + fromDir.x * off;
+    c1y = ay + fromDir.y * off;
+    c2x = bx + toDir.x * off;
+    c2y = by + toDir.y * off;
+    // end tangent is opposite of toDir
+    endAngle = Math.atan2(by - c2y, bx - c2x);
+    if (!isFinite(endAngle)) endAngle = Math.atan2(by - ay, bx - ax);
+  } else {
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const bend = Math.min(40, len * 0.18) * (Math.abs(dx) > Math.abs(dy) ? 1 : -1);
+    // gentle perpendicular bend for free arrows
+    c1x = mx + nx * bend * 0.5;
+    c1y = my + ny * bend * 0.5;
+    c2x = c1x; c2y = c1y;
+    endAngle = Math.atan2(by - c1y, bx - c1x);
+  }
   ctx.save();
   ctx.strokeStyle = v.stroke;
   ctx.fillStyle = v.stroke;
   ctx.lineWidth = v.strokeWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  // soft shadow for beauty
+  ctx.shadowColor = 'rgba(0,0,0,0.25)';
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 1;
   ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
+  if (isConnected) {
+    ctx.moveTo(ax, ay);
+    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
+  } else if (pts.length === 4 && !isConnected) {
+    // free arrow with gentle curve via quadratic
+    ctx.moveTo(ax, ay);
+    ctx.quadraticCurveTo(c1x, c1y, bx, by);
+  } else {
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+  }
   ctx.stroke();
-  const angle = Math.atan2(by - ay, bx - ax);
+  ctx.shadowColor = 'transparent';
   const head = Math.max(10, v.strokeWidth * 3.5);
+  const hx1 = bx - head * Math.cos(endAngle - 0.42);
+  const hy1 = by - head * Math.sin(endAngle - 0.42);
+  const hx2 = bx - head * Math.cos(endAngle + 0.42);
+  const hy2 = by - head * Math.sin(endAngle + 0.42);
   ctx.beginPath();
   ctx.moveTo(bx, by);
-  ctx.lineTo(bx - head * Math.cos(angle - 0.42), by - head * Math.sin(angle - 0.42));
-  ctx.moveTo(bx, by);
-  ctx.lineTo(bx - head * Math.cos(angle + 0.42), by - head * Math.sin(angle + 0.42));
+  ctx.lineTo(hx1, hy1);
+  ctx.lineTo(hx2, hy2);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
   ctx.restore();
 }
@@ -571,6 +923,52 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   ctx.textBaseline = 'middle';
   const lineHeight = size * 1.25;
   const startY = v.y + v.h / 2 - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, v.x + v.w / 2, startY + i * lineHeight));
+  ctx.restore();
+}
+
+function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
+  const size = v.fontSize ?? SHAPE_FONT;
+  const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.55));
+  if (!lines.length) return;
+  ctx.save();
+  const cx = v.x + v.w / 2;
+  const cy = v.y + v.h / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, v.y);
+  ctx.lineTo(v.x + v.w, cy);
+  ctx.lineTo(cx, v.y + v.h);
+  ctx.lineTo(v.x, cy);
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = v.textColor ?? textColor;
+  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lineHeight = size * 1.25;
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, cx, startY + i * lineHeight));
+  ctx.restore();
+}
+
+function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
+  const size = v.fontSize ?? SHAPE_FONT;
+  const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.6));
+  if (!lines.length) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(v.x + v.w / 2, v.y);
+  ctx.lineTo(v.x, v.y + v.h);
+  ctx.lineTo(v.x + v.w, v.y + v.h);
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = v.textColor ?? textColor;
+  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cy = v.y + v.h * 0.62;
+  const lineHeight = size * 1.25;
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => ctx.fillText(line, v.x + v.w / 2, startY + i * lineHeight));
   ctx.restore();
 }

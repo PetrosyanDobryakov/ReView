@@ -13,6 +13,7 @@ import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../core/store';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
+import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
 
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
@@ -35,6 +36,8 @@ export interface EditTarget {
   text: string;
   fontSize: number;
   color: string;
+  type: string | null;
+  centered: boolean;
 }
 
 export interface GraphEditTarget {
@@ -156,6 +159,8 @@ export class Engine {
   private exportRect: ShapeBox | null = null;
   private exportAnchor: { x: number; y: number } | null = null;
   private snapGuides: AlignGuide[] = [];
+  private connecting: { fromId: string; fromPort: PortId; cur: { x: number; y: number } } | null = null;
+  private hoverPort: { shapeId: string; port: PortId } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -403,6 +408,56 @@ export class Engine {
     return null;
   }
 
+  hitPort(sx: number, sy: number): { shapeId: string; port: PortId } | null {
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    // check selected first, then any visible
+    const candidates: string[] = [...this.selection, ...[...this.views.keys()].filter((k) => !this.selection.has(k))];
+    let best: { shapeId: string; port: PortId; dist: number } | null = null;
+    for (const id of candidates) {
+      const v = this.views.get(id);
+      if (!v || v.locked) continue;
+      if (v.type === 'pen' || v.type === 'arrow') continue;
+      for (const port of PORTS) {
+        const p = portPos(v, port, 0);
+        const hx = p.x * z + ox;
+        const hy = p.y * z + oy;
+        const d = Math.hypot(hx - sx, hy - sy);
+        if (d <= 12 && (!best || d < best.dist)) best = { shapeId: id, port, dist: d };
+      }
+    }
+    return best ? { shapeId: best.shapeId, port: best.port } : null;
+  }
+
+  getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
+    const v = this.views.get(shapeId);
+    if (!v) return null;
+    return portPos(v, port, 0);
+  }
+
+  updateConnectedArrows(movedIds: Set<string>): void {
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    for (const [id, v] of this.views) {
+      if (v.type !== 'arrow' || !v.fromId || !v.toId) continue;
+      if (!movedIds.has(v.fromId) && !movedIds.has(v.toId)) continue;
+      const from = this.views.get(v.fromId);
+      const to = this.views.get(v.toId);
+      if (!from || !to) continue;
+      const fromPort = (v.fromPort as PortId) || 'e';
+      const toPort = (v.toPort as PortId) || 'w';
+      const a = portPos(from, fromPort, 0);
+      const b = portPos(to, toPort, 0);
+      const pad = 6;
+      const minX = Math.min(a.x, b.x) - pad;
+      const minY = Math.min(a.y, b.y) - pad;
+      const maxX = Math.max(a.x, b.x) + pad;
+      const maxY = Math.max(a.y, b.y) + pad;
+      patches.push([id, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
+    }
+    if (patches.length) store.patchShapes(patches);
+  }
+
   worldToScreen(x: number, y: number): { x: number; y: number } {
     const z = this.camera.zoom;
     return {
@@ -414,9 +469,11 @@ export class Engine {
   translateSelection(dx: number, dy: number): void {
     if (!this.selection.size) return;
     const patches: Array<[string, Partial<ShapeView>]> = [];
+    const moved = new Set<string>();
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
+      moved.add(id);
       if (v.points) {
         patches.push([
           id,
@@ -426,7 +483,31 @@ export class Engine {
         patches.push([id, { x: v.x + dx, y: v.y + dy }]);
       }
     }
-    store.patchShapes(patches);
+    // update connected arrows
+    for (const [aid, av] of this.views) {
+      if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
+      if (!moved.has(av.fromId) && !moved.has(av.toId)) continue;
+      // skip if arrow itself is being moved
+      if (moved.has(aid)) continue;
+      const from = this.views.get(av.fromId);
+      const to = this.views.get(av.toId);
+      if (!from || !to) continue;
+      const fx = moved.has(av.fromId) ? from.x + dx : from.x;
+      const fy = moved.has(av.fromId) ? from.y + dy : from.y;
+      const tx = moved.has(av.toId) ? to.x + dx : to.x;
+      const ty = moved.has(av.toId) ? to.y + dy : to.y;
+      const fromBox = { ...from, x: fx, y: fy } as ShapeView;
+      const toBox = { ...to, x: tx, y: ty } as ShapeView;
+      const a = portPos(fromBox, (av.fromPort as PortId) || 'e', 0);
+      const b = portPos(toBox, (av.toPort as PortId) || 'w', 0);
+      const pad = 6;
+      const minX = Math.min(a.x, b.x) - pad;
+      const minY = Math.min(a.y, b.y) - pad;
+      const maxX = Math.max(a.x, b.x) + pad;
+      const maxY = Math.max(a.y, b.y) + pad;
+      patches.push([aid, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
+    }
+    if (patches.length) store.patchShapes(patches);
   }
 
   clearSnapGuides(): void {
@@ -719,8 +800,17 @@ export class Engine {
         arrow: 'infoArrow',
         image: 'infoImage',
         graph: 'infoGraph',
+        diamond: 'infoDiamond',
+        frame: 'infoFrame',
+        triangle: 'infoTriangle',
+        parallelogram: 'infoParallelogram',
+        hexagon: 'infoHexagon',
+        cylinder: 'infoCylinder',
+        terminator: 'infoTerminator',
+        subroutine: 'infoSubroutine',
+        display: 'infoDisplay',
       } as const
-    )[v.type];
+    )[v.type] as unknown as string ?? 'infoRect';
     const lines = [
       `${t(locale, 'infoSize')}: ${Math.round(v.w)} × ${Math.round(v.h)}`,
       `${t(locale, 'infoPos')}: ${Math.round(v.x)}, ${Math.round(v.y)}`,
@@ -733,7 +823,7 @@ export class Engine {
       }
     }
     if (v.locked) lines.push(t(locale, 'infoLocked'));
-    return { title: t(locale, typeKey), lines };
+    return { title: t(locale, typeKey as unknown as import('../ui/i18n').MessageKey), lines };
   }
 
   zoomBy(factor: number): void {
@@ -962,6 +1052,7 @@ export class Engine {
   openTextEditor(id: string): void {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
+    const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
     this.editing = true;
     this.events.onEditText?.({
       id,
@@ -973,12 +1064,14 @@ export class Engine {
       fontSize:
         v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
       color: v.type === 'sticky' ? (v.textColor ?? '#3a2f00') : (v.textColor ?? themeFor(store.metaBg()).text),
+      type: v.type,
+      centered,
     });
   }
 
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
     this.editing = true;
-    this.events.onEditText?.({ id: null, x, y, w: 240, h: 30, text: '', fontSize, color });
+    this.events.onEditText?.({ id: null, x, y, w: 240, h: 30, text: '', fontSize, color, type: 'text', centered: false });
   }
 
   cancelTextEdit(): void {
@@ -1074,22 +1167,45 @@ export class Engine {
   };
 
   private onStore = (ev: Y.YMapEvent<Y.Map<unknown>>): void => {
+    const deleted: string[] = [];
     ev.changes.keys.forEach((change, key) => {
       if (change.action === 'delete') {
         this.detachShape(key);
         this.views.delete(key);
         this.grid.remove(key);
         if (this.selection.delete(key)) this.events.onSelection?.([...this.selection]);
+        deleted.push(key);
       } else if (store.isOnActivePage(key)) {
         const m = store.board.get(key);
         if (m) {
           const v = { ...store.readShape(m), id: key };
+          // for connected arrows, recompute points from current port positions if needed
+          if (v.type === 'arrow' && v.fromId && v.toId) {
+            const from = this.views.get(v.fromId) ?? (store.board.has(v.fromId) ? store.readShape(store.board.get(v.fromId)!) : null);
+            const to = this.views.get(v.toId) ?? (store.board.has(v.toId) ? store.readShape(store.board.get(v.toId)!) : null);
+            // if we have both endpoints, ensure points reflect port positions (in case observer fired before move)
+            if (from && to) {
+              const a = portPos(from as ShapeView, (v.fromPort as PortId) || 'e', 0);
+              const b = portPos(to as ShapeView, (v.toPort as PortId) || 'w', 0);
+              // keep stored points in sync if needed (will be patched via updateConnectedArrows on move, but ensure here)
+              v.points = [a.x, a.y, b.x, b.y];
+              const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
+              v.x = minX; v.y = minY; v.w = maxX - minX; v.h = maxY - minY;
+            }
+          }
           this.views.set(key, v);
           this.grid.upsert(key, v);
           this.attachShape(key, m);
         }
       }
     });
+    if (deleted.length) {
+      const toDelete: string[] = [];
+      for (const [aid, av] of this.views) {
+        if (av.type === 'arrow' && ((av.fromId && deleted.includes(av.fromId)) || (av.toId && deleted.includes(av.toId!)))) toDelete.push(aid);
+      }
+      if (toDelete.length) store.removeShapes(toDelete);
+    }
     this.dirty = true;
   };
 
@@ -1183,6 +1299,14 @@ export class Engine {
     if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
+      const portHit = this.hitPort(info.screen.x, info.screen.y);
+      if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
+        this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
+        this.hoverPort = null;
+        this.setCursor('crosshair');
+        this.dirty = true;
+        return;
+      }
       let target = this.tool;
       if (target.id !== 'select' && target.id !== 'pan' && target.id !== 'pen' && target.id !== 'eraser') {
         if (this.hitTest(info.world.x, info.world.y)) target = this.tools.select;
@@ -1238,9 +1362,50 @@ export class Engine {
       }
       return;
     }
+    if (this.connecting) {
+      const info = this.pointerInfo(e);
+      this.connecting.cur = info.world;
+      const hp = this.hitPort(info.screen.x, info.screen.y);
+      if (hp && hp.shapeId !== this.connecting.fromId) this.hoverPort = hp;
+      else if (hp && hp.shapeId === this.connecting.fromId) this.hoverPort = null;
+      else {
+        const hit = this.hitTest(info.world.x, info.world.y);
+        if (hit && hit !== this.connecting.fromId) {
+          const v = this.views.get(hit);
+          if (v) {
+            let best: PortId | null = null;
+            let bestD = Infinity;
+            for (const port of PORTS) {
+              const pp = portPos(v, port, 0);
+              const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
+              if (d < bestD) { bestD = d; best = port; }
+            }
+            if (best && bestD < 40 / this.camera.zoom) this.hoverPort = { shapeId: hit, port: best };
+            else this.hoverPort = null;
+          } else this.hoverPort = null;
+        } else this.hoverPort = null;
+      }
+      this.dirty = true;
+      return;
+    }
     if (this.panDrag) {
       this.camera.panBy(e.movementX, e.movementY);
       return;
+    }
+    if (!this.pointerDown && !this.connecting && this.selection.size) {
+      const info = this.pointerInfo(e);
+      const hp = this.hitPort(info.screen.x, info.screen.y);
+      if (hp && this.selection.has(hp.shapeId)) {
+        if (!this.hoverPort || this.hoverPort.shapeId !== hp.shapeId || this.hoverPort.port !== hp.port) {
+          this.hoverPort = hp;
+          this.setCursor('crosshair');
+          this.dirty = true;
+        }
+      } else if (this.hoverPort) {
+        this.hoverPort = null;
+        this.setCursor(this.tool.cursor);
+        this.dirty = true;
+      }
     }
     if (this.editing) return;
     try {
@@ -1258,6 +1423,58 @@ export class Engine {
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.gesture = null;
     this.pointerDown = false;
+    if (this.connecting) {
+      const info = this.pointerInfo(e);
+      const target = this.hoverPort || this.hitPort(info.screen.x, info.screen.y);
+      let toId: string | null = null;
+      let toPort: PortId | null = null;
+      if (target && target.shapeId !== this.connecting.fromId) {
+        toId = target.shapeId;
+        toPort = target.port;
+      } else {
+        const hit = this.hitTest(info.world.x, info.world.y);
+        if (hit && hit !== this.connecting.fromId) {
+          const v = this.views.get(hit);
+          if (v) {
+            let best: PortId | null = null;
+            let bestD = Infinity;
+            for (const port of PORTS) {
+              const pp = portPos(v, port, 0);
+              const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
+              if (d < bestD) { bestD = d; best = port; }
+            }
+            if (best) { toId = hit; toPort = best; }
+          }
+        }
+      }
+      const fromId = this.connecting.fromId;
+      const fromPort = this.connecting.fromPort;
+      if (toId && toPort) {
+        const fromV = this.views.get(fromId);
+        const toV = this.views.get(toId);
+        if (fromV && toV) {
+          const a = portPos(fromV, fromPort, 0);
+          const b = portPos(toV, toPort, 0);
+          const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
+          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: 2, points: [a.x, a.y, b.x, b.y], fromId, fromPort, toId, toPort } as ShapeView);
+          this.setSelection([id]);
+        }
+      } else {
+        const fromV = this.views.get(fromId);
+        if (fromV) {
+          const a = portPos(fromV, fromPort, 0);
+          const b = info.world;
+          const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
+          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: 2, points: [a.x, a.y, b.x, b.y] } as ShapeView);
+          this.setSelection([id]);
+        }
+      }
+      this.connecting = null;
+      this.hoverPort = null;
+      this.setCursor(this.tool.cursor);
+      this.dirty = true;
+      return;
+    }
     if (this.exportPick) {
       const rect = this.exportRect;
       const min = 6 / this.camera.zoom;
@@ -1844,6 +2061,8 @@ export class Engine {
     }
     this.drawSelection(ctx);
     this.drawAlignGuides(ctx);
+    this.drawPorts(ctx);
+    this.drawConnecting(ctx);
     this.tool.render(this, ctx);
     this.drawPeers(ctx);
     if (this.crop) this.drawCropOverlay(ctx);
@@ -1972,6 +2191,129 @@ export class Engine {
         ctx.arc(g.a1, g.pos, 2 * s, 0, Math.PI * 2);
       }
       ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawPorts(ctx: CanvasRenderingContext2D): void {
+    if (this.editing) return;
+    const s = 1 / this.camera.zoom;
+    let showFor: string[] = [];
+    if (this.connecting) {
+      // при перетаскивании стрелки — подсветить все доступные точки
+      for (const [id, v] of this.views) {
+        if (v.locked || v.type === 'pen' || v.type === 'arrow') continue;
+        if (!store.isOnActivePage(id)) continue;
+        showFor.push(id);
+      }
+    } else {
+      if (!this.selection.size) return;
+      showFor = [...this.selection];
+    }
+    for (const id of showFor) {
+      const v = this.views.get(id);
+      if (!v || v.locked) continue;
+      if (v.type === 'pen' || v.type === 'arrow') continue;
+      for (const port of PORTS) {
+        const p = portPos(v, port, 0);
+        const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
+        const dx = p.x - cx, dy = p.y - cy;
+        const len = Math.hypot(dx, dy) || 1;
+        const ox = (dx / len) * (8 * s);
+        const oy = (dy / len) * (8 * s);
+        const px = p.x + ox, py = p.y + oy;
+        const isHover = this.hoverPort?.shapeId === id && this.hoverPort?.port === port;
+        const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;
+        const connectingActive = !!this.connecting;
+        ctx.save();
+        if (connectingActive) {
+          ctx.fillStyle = isHover ? '#7c8cff' : 'rgba(255,255,255,0.95)';
+          ctx.strokeStyle = isHover ? '#ffffff' : 'rgba(124,140,255,0.85)';
+        } else {
+          ctx.fillStyle = isHover || isFrom ? '#7c8cff' : '#ffffff';
+          ctx.strokeStyle = isHover || isFrom ? '#ffffff' : '#7c8cff';
+        }
+        ctx.lineWidth = 1.2 * s;
+        ctx.beginPath();
+        ctx.arc(px, py, connectingActive ? 5 * s : 4.5 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  private drawConnecting(ctx: CanvasRenderingContext2D): void {
+    if (!this.connecting) return;
+    const fromV = this.views.get(this.connecting.fromId);
+    if (!fromV) return;
+    const a = portPos(fromV, this.connecting.fromPort, 0);
+    const b = this.connecting.cur;
+    let bx = b.x, by = b.y;
+    let toPort: PortId | null = null;
+    if (this.hoverPort) {
+      const hv = this.views.get(this.hoverPort.shapeId);
+      if (hv) {
+        const hp = portPos(hv, this.hoverPort.port, 0);
+        bx = hp.x; by = hp.y;
+        toPort = this.hoverPort.port;
+      }
+    }
+    const s = 1 / this.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = '#7c8cff';
+    ctx.fillStyle = '#7c8cff';
+    ctx.lineWidth = 2 * s;
+    ctx.setLineDash([6 * s, 4 * s]);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,0.18)';
+    ctx.shadowBlur = 4 * s;
+    const fromDir = portDir(this.connecting.fromPort);
+    const dist = Math.hypot(bx - a.x, by - a.y);
+    const off = Math.min(80, dist * 0.35);
+    let c1x = a.x + fromDir.x * off, c1y = a.y + fromDir.y * off;
+    let c2x = bx, c2y = by;
+    let endAng = Math.atan2(by - a.y, bx - a.x);
+    if (toPort) {
+      const toDir = portDir(toPort);
+      c2x = bx + toDir.x * off;
+      c2y = by + toDir.y * off;
+      endAng = Math.atan2(by - c2y, bx - c2x);
+    } else {
+      const mx = (a.x + bx) / 2, my = (a.y + by) / 2;
+      const dx = bx - a.x, dy = by - a.y, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const bend = Math.min(30, len * 0.15);
+      c1x = mx + nx * bend * 0.5; c1y = my + ny * bend * 0.5;
+      c2x = c1x; c2y = c1y;
+      endAng = Math.atan2(by - c1y, bx - c1x);
+    }
+    ctx.beginPath();
+    if (toPort) ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
+    else ctx.quadraticCurveTo(c1x, c1y, bx, by);
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.setLineDash([]);
+    const head = 10 * s;
+    const hx1f = bx - head * Math.cos(endAng - 0.42), hy1f = by - head * Math.sin(endAng - 0.42);
+    const hx2f = bx - head * Math.cos(endAng + 0.42), hy2f = by - head * Math.sin(endAng + 0.42);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(hx1f, hy1f);
+    ctx.lineTo(hx2f, hy2f);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (this.hoverPort) {
+      const hv = this.views.get(this.hoverPort.shapeId);
+      if (hv) {
+        const hp = portPos(hv, this.hoverPort.port, 0);
+        ctx.fillStyle = 'rgba(124,140,255,0.25)';
+        ctx.beginPath();
+        ctx.arc(hp.x, hp.y, 10 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }

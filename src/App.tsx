@@ -448,7 +448,12 @@ export default function App() {
           if (selectionCount > 0 && e.selectionBounds()) {
             setExportState({ source: 'selection', rect: null });
           } else {
-            e.beginExportPick();
+            const box = e.contentBox();
+            if (!box) {
+              e.beginExportPick();
+            } else {
+              setExportState({ source: 'all', rect: null });
+            }
           }
         }}
       />

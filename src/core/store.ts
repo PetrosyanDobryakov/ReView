@@ -176,7 +176,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     stroke: (m.get('stroke') as string) ?? COLORS.stroke,
     strokeWidth: (m.get('strokeWidth') as number) ?? 2,
     text: m.get('text') as string | undefined,
-    fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : type === 'rect' || type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
+    fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : ['rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'].includes(type) ? SHAPE_FONT : TEXT_FONT),
     textColor: m.get('textColor') as string | undefined,
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
@@ -187,6 +187,10 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     cropH: m.get('cropH') as number | undefined,
     expr: m.get('expr') as string | undefined,
     points: points instanceof Y.Array ? points.toArray() : undefined,
+    fromId: m.get('fromId') as string | undefined,
+    fromPort: m.get('fromPort') as string | undefined,
+    toId: m.get('toId') as string | undefined,
+    toPort: m.get('toPort') as string | undefined,
   };
 }
 
@@ -201,7 +205,8 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   m.set('fill', v.fill);
   m.set('stroke', v.stroke);
   m.set('strokeWidth', v.strokeWidth);
-  if (v.type === 'sticky' || v.type === 'text' || v.type === 'rect' || v.type === 'ellipse') {
+  const textTypes = new Set(['sticky', 'text', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+  if (textTypes.has(v.type)) {
     m.set('text', v.text ?? '');
     m.set(
       'fontSize',
@@ -224,6 +229,10 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('cropH', v.cropH ?? 1);
   }
   if (v.type === 'graph') m.set('expr', v.expr ?? 'sin(x)');
+  if (v.fromId) m.set('fromId', v.fromId);
+  if (v.fromPort) m.set('fromPort', v.fromPort);
+  if (v.toId) m.set('toId', v.toId);
+  if (v.toPort) m.set('toPort', v.toPort);
   return m;
 }
 
