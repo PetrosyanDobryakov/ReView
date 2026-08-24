@@ -1,6 +1,6 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, type PortId } from '../core/shapes';
+import { COLORS, portPos, withAlpha, type PortId } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings } from '../core/settings';
@@ -205,7 +205,7 @@ export class SelectTool extends Tool {
     if (!this.marquee) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
-    ctx.fillStyle = 'rgba(124, 140, 255, 0.12)';
+    ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1.5 * s;
     ctx.beginPath();
@@ -945,7 +945,7 @@ export class LassoTool extends Tool {
     if (!this.active || this.pts.length < 2) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
-    ctx.fillStyle = 'rgba(124, 140, 255, 0.12)';
+    ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1.5 * s;
     ctx.beginPath();

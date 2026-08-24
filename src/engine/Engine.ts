@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
+import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, withAlpha } from '../core/shapes';
 import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor, intersects, normalizeBox } from '../core/shapes';
 import { measureMixedLine } from '../core/shapes';
 import { onFormulaLoad } from '../core/formula';
@@ -2196,7 +2196,7 @@ export class Engine {
     if (!this.snapGuides.length) return;
     const s = 1 / this.camera.zoom;
     ctx.save();
-    ctx.strokeStyle = '#7c8cff';
+    ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1 * s;
     ctx.setLineDash([4 * s, 4 * s]);
     for (const g of this.snapGuides) {
@@ -2212,7 +2212,7 @@ export class Engine {
     }
     ctx.setLineDash([]);
     // small dots at ends
-    ctx.fillStyle = '#7c8cff';
+    ctx.fillStyle = COLORS.selection;
     for (const g of this.snapGuides) {
       ctx.beginPath();
       if (g.orientation === 'v') {
@@ -2259,11 +2259,11 @@ export class Engine {
         const connectingActive = !!this.connecting;
         ctx.save();
         if (connectingActive) {
-          ctx.fillStyle = isHover ? '#7c8cff' : 'rgba(255,255,255,0.95)';
-          ctx.strokeStyle = isHover ? '#ffffff' : 'rgba(124,140,255,0.85)';
+          ctx.fillStyle = isHover ? COLORS.selection : 'rgba(255,255,255,0.95)';
+          ctx.strokeStyle = isHover ? '#ffffff' : withAlpha(COLORS.selection, 0.85);
         } else {
-          ctx.fillStyle = isHover || isFrom ? '#7c8cff' : '#ffffff';
-          ctx.strokeStyle = isHover || isFrom ? '#ffffff' : '#7c8cff';
+          ctx.fillStyle = isHover || isFrom ? COLORS.selection : '#ffffff';
+          ctx.strokeStyle = isHover || isFrom ? '#ffffff' : COLORS.selection;
         }
         ctx.lineWidth = 1.2 * s;
         ctx.beginPath();
@@ -2293,8 +2293,8 @@ export class Engine {
     }
     const s = 1 / this.camera.zoom;
     ctx.save();
-    ctx.strokeStyle = '#7c8cff';
-    ctx.fillStyle = '#7c8cff';
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = COLORS.selection;
     ctx.lineWidth = 2 * s;
     ctx.setLineDash([6 * s, 4 * s]);
     ctx.lineCap = 'round';
@@ -2341,7 +2341,7 @@ export class Engine {
       const hv = this.views.get(this.hoverPort.shapeId);
       if (hv) {
         const hp = portPos(hv, this.hoverPort.port, 0);
-        ctx.fillStyle = 'rgba(124,140,255,0.25)';
+        ctx.fillStyle = withAlpha(COLORS.selection, 0.25);
         ctx.beginPath();
         ctx.arc(hp.x, hp.y, 10 * s, 0, Math.PI * 2);
         ctx.fill();

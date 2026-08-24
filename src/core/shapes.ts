@@ -106,6 +106,16 @@ export function normalizeBox(a: { x: number; y: number }, b: { x: number; y: num
   };
 }
 
+/** `#rrggbb` + alpha → `rgba(...)` (for canvas fills derived from the theme selection color). */
+export function withAlpha(hex: string, alpha: number): string {
+  const v = hex.replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(v)) return hex;
+  const r = parseInt(v.slice(0, 2), 16);
+  const g = parseInt(v.slice(2, 4), 16);
+  const b = parseInt(v.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export interface BoardTheme {
   text: string;
   grid: string;
