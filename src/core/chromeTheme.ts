@@ -167,13 +167,17 @@ export function applyChromeTheme(id: ChromeThemeId): void {
   document.documentElement.dataset.chromeTheme = id;
   const rootStyle = document.documentElement.style;
   let metaColor = THEME_COLORS[id as Exclude<ChromeThemeId, 'custom'>];
+  let scheme: 'dark' | 'light' = 'dark';
   if (id === 'custom') {
     const colors = readCustomColors();
     for (const [name, value] of customVars(colors)) rootStyle.setProperty(name, value);
     metaColor = colors.bg;
+    scheme = luminance(colors.bg) > 0.5 ? 'light' : 'dark';
   } else {
     for (const name of CUSTOM_VAR_NAMES) rootStyle.removeProperty(name);
+    scheme = id === 'studio' || id === 'white' ? 'light' : 'dark';
   }
+  document.documentElement.style.colorScheme = scheme;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && metaColor) meta.setAttribute('content', metaColor);
   syncSelectionColor();

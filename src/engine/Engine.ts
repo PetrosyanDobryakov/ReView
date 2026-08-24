@@ -3,7 +3,17 @@ import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
 import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, withAlpha } from '../core/shapes';
-import { drawPenStroke, drawShape, getImage, onImageLoad, pointInShape, themeFor, intersects, normalizeBox } from '../core/shapes';
+import {
+  drawPenStroke,
+  drawShape,
+  getImage,
+  onImageLoad,
+  pointInShape,
+  readableTextOn,
+  themeFor,
+  intersects,
+  normalizeBox,
+} from '../core/shapes';
 import { measureMixedLine } from '../core/shapes';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
@@ -293,7 +303,7 @@ export class Engine {
       if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (!v || !intersects(v, box)) continue;
-      drawShape(ctx, v, theme.text);
+      drawShape(ctx, v, theme.text, store.metaBg());
     }
     return canvas;
   }
@@ -706,7 +716,7 @@ export class Engine {
     const theme = themeFor(store.metaBg());
     for (const id of ids) {
       const v = this.views.get(id);
-      if (v) drawShape(ctx, v, theme.text);
+      if (v) drawShape(ctx, v, theme.text, store.metaBg());
     }
     return canvas;
   }
@@ -1056,6 +1066,15 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
     const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
+    const bg = store.metaBg();
+    let color: string;
+    if (v.type === 'sticky') {
+      color = v.textColor ?? '#3a2f00';
+    } else if (v.type === 'text') {
+      color = readableTextOn(v.textColor ?? themeFor(bg).text, bg);
+    } else {
+      color = v.textColor ?? themeFor(bg).text;
+    }
     this.editing = true;
     this.events.onEditText?.({
       id,
@@ -1066,15 +1085,28 @@ export class Engine {
       text: v.text ?? '',
       fontSize:
         v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
-      color: v.type === 'sticky' ? (v.textColor ?? '#3a2f00') : (v.textColor ?? themeFor(store.metaBg()).text),
+      color,
       type: v.type,
       centered,
     });
   }
 
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
+    const bg = store.metaBg();
+    const readable = readableTextOn(color, bg);
     this.editing = true;
-    this.events.onEditText?.({ id: null, x, y, w: 240, h: 30, text: '', fontSize, color, type: 'text', centered: false });
+    this.events.onEditText?.({
+      id: null,
+      x,
+      y,
+      w: 240,
+      h: 30,
+      text: '',
+      fontSize,
+      color: readable,
+      type: 'text',
+      centered: false,
+    });
   }
 
   cancelTextEdit(): void {
@@ -1112,6 +1144,8 @@ export class Engine {
 
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
+    const bg = store.metaBg();
+    const color = target.type === 'text' ? readableTextOn(target.color, bg) : target.color;
     if (id === null) {
       const trimmed = text.trim();
       if (!trimmed) return;
@@ -1126,7 +1160,7 @@ export class Engine {
         strokeWidth: 0,
         text: trimmed,
         fontSize: target.fontSize,
-        textColor: target.color,
+        textColor: color,
       });
       const size = this.measureText(trimmed, target.fontSize);
       store.patchShape(newId, { w: size.w, h: size.h });
@@ -1140,7 +1174,7 @@ export class Engine {
         this.setSelection([]);
         return;
       }
-      const patch: Partial<ShapeView> = { text, textColor: target.color };
+      const patch: Partial<ShapeView> = { text, textColor: color };
       if (v.type === 'text') {
         const size = this.measureText(text, v.fontSize ?? TEXT_FONT);
         patch.w = size.w;
@@ -2063,7 +2097,7 @@ export class Engine {
       if (this.erasing.has(v.id)) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text);
+        drawShape(ctx, v, theme.text, store.metaBg());
         ctx.restore();
         // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
@@ -2075,7 +2109,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text);
+        drawShape(ctx, v, theme.text, store.metaBg());
       }
     };
     const ord = store.order;

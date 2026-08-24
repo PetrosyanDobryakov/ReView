@@ -134,6 +134,42 @@ export function themeFor(bg: string): BoardTheme {
     : { text: '#eceae4', grid: 'rgba(236, 234, 228, 0.055)' };
 }
 
+/** WCAG relative luminance for `#rrggbb`, or null if not a hex color. */
+export function relativeLuminance(hex: string): number | null {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const r = lin(parseInt(hex.slice(1, 3), 16));
+  const g = lin(parseInt(hex.slice(3, 5), 16));
+  const b = lin(parseInt(hex.slice(5, 7), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio between two `#rrggbb` colors, or null if either is invalid. */
+export function contrastRatio(a: string, b: string): number | null {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  if (la == null || lb == null) return null;
+  const light = Math.max(la, lb);
+  const dark = Math.min(la, lb);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** Minimum contrast for free-text on the board background (WCAG AA for normal text). */
+export const MIN_BOARD_TEXT_CONTRAST = 4.5;
+
+/**
+ * Keep free-text readable on the board background.
+ * Low-contrast picks (e.g. `#6b6b66` / `#1c1c1a` on a dark board) fall back to theme text.
+ */
+export function readableTextOn(fg: string, bg: string): string {
+  const ratio = contrastRatio(fg, bg);
+  if (ratio == null || ratio >= MIN_BOARD_TEXT_CONTRAST) return fg;
+  return themeFor(bg).text;
+}
+
 export function intersects(a: ShapeBox, b: ShapeBox): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
@@ -396,7 +432,12 @@ function drawMixedLine(
   }
 }
 
-export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string = COLORS.text): void {
+export function drawShape(
+  ctx: CanvasRenderingContext2D,
+  v: ShapeView,
+  textColor: string = COLORS.text,
+  boardBg: string = COLORS.background
+): void {
   const font = `${v.fontSize ?? TEXT_FONT}px ${BOARD_TYPEFACE}`;
   switch (v.type) {
     case 'rect': {
@@ -618,7 +659,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
     }
     case 'text': {
       if (!v.text) break;
-      ctx.fillStyle = v.textColor ?? textColor;
+      ctx.fillStyle = readableTextOn(v.textColor ?? textColor, boardBg);
       ctx.font = font;
       ctx.textBaseline = 'top';
       const size = v.fontSize ?? TEXT_FONT;
