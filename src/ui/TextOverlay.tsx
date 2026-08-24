@@ -3,6 +3,7 @@ import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
 import { readableTextOn } from '../core/shapes';
 import { metaBg } from '../core/store';
+import { agentLog } from '../debugAgentLog';
 
 export function TextOverlay({
   target,
@@ -63,7 +64,19 @@ export function TextOverlay({
   const finish = (commit: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    if (commit) onDone(ref.current?.innerText ?? '');
+    const raw = ref.current?.innerText ?? '';
+    // #region agent log
+    agentLog(commit ? 'A' : 'B', 'TextOverlay.tsx:finish', commit ? 'overlay commit' : 'overlay cancel', {
+      commit,
+      rawLen: raw.length,
+      rawPreview: raw.slice(0, 80),
+      trimmedLen: raw.trim().length,
+      targetType: target.type,
+      targetId: target.id,
+      hasEl: !!ref.current,
+    });
+    // #endregion
+    if (commit) onDone(raw);
     else onCancel();
   };
 

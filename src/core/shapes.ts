@@ -1,5 +1,6 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
+import { agentLog } from '../debugAgentLog';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
@@ -658,6 +659,27 @@ export function drawShape(
       break;
     }
     case 'text': {
+      // #region agent log
+      if (!(globalThis as { __ftDrawLogged?: Set<string> }).__ftDrawLogged) {
+        (globalThis as { __ftDrawLogged?: Set<string> }).__ftDrawLogged = new Set();
+      }
+      const drawn = (globalThis as { __ftDrawLogged: Set<string> }).__ftDrawLogged;
+      if (!drawn.has(v.id)) {
+        drawn.add(v.id);
+        const fill = v.text ? readableTextOn(v.textColor ?? textColor, boardBg) : null;
+        agentLog('D', 'shapes.ts:drawShape:text', v.text ? 'drawing text shape' : 'skip text empty', {
+          id: v.id,
+          textPreview: (v.text ?? '').slice(0, 80),
+          fill,
+          textColor: v.textColor,
+          boardBg,
+          x: v.x,
+          y: v.y,
+          w: v.w,
+          h: v.h,
+        });
+      }
+      // #endregion
       if (!v.text) break;
       ctx.fillStyle = readableTextOn(v.textColor ?? textColor, boardBg);
       ctx.font = font;

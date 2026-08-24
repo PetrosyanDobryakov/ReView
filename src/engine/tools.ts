@@ -4,6 +4,7 @@ import { COLORS, portPos, readableTextOn, withAlpha, type PortId } from '../core
 import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings, updateTextSettings } from '../core/settings';
+import { agentLog } from '../debugAgentLog';
 
 export type ToolId =
   | 'select'
@@ -856,6 +857,15 @@ export class TextTool extends Tool {
   onDown(engine: Engine, p: PointerInfo): void {
     const bg = store.metaBg();
     const color = readableTextOn(settings.text.color, bg);
+    // #region agent log
+    agentLog('E', 'tools.ts:TextTool.onDown', 'TextTool pointer down', {
+      world: p.world,
+      settingsColor: settings.text.color,
+      color,
+      size: settings.text.size,
+      bg,
+    });
+    // #endregion
     if (color !== settings.text.color) updateTextSettings({ color });
     engine.openTextEditorAt(p.world.x, p.world.y, settings.text.size, color);
   }
