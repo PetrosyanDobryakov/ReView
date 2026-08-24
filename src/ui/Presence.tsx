@@ -3,8 +3,17 @@ import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
 import { t } from './i18n';
 
-export function Presence({ locale, online }: { locale: LocaleId; online: boolean }) {
+export function Presence({
+  locale,
+  online,
+  names,
+}: {
+  locale: LocaleId;
+  online: boolean;
+  names?: string[];
+}) {
   const label = online ? t(locale, 'online') : t(locale, 'offline');
+  const title = names && names.length ? `${label}: ${names.join(', ')}` : t(locale, 'syncHint');
   const wasOnline = useRef(online);
   const [flash, setFlash] = useState(false);
 
@@ -21,13 +30,14 @@ export function Presence({ locale, online }: { locale: LocaleId; online: boolean
   return (
     <div
       className={`presence${online ? ' online' : ''}${flash ? ' flash' : ''}`}
-      title={t(locale, 'syncHint')}
+      title={title}
       role="status"
       aria-label={label}
     >
       <span className="presence-face">
         <Icon name="person" size={14} />
       </span>
+      {names && names.length > 0 && <span className="presence-count">{names.length + 1}</span>}
     </div>
   );
 }
