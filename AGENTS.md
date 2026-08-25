@@ -33,6 +33,7 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 
 - `localhost` and `127.0.0.1` are different origins — IndexedDB will not follow you between them. Pick one and stay there.
 - Sync is optional; local boards work fully offline with IndexedDB persistence.
+- Sync URL and connect/disconnect live in Settings → System → Connection. Virtual LAN (Tailscale etc.) is the supported way to sync beyond a raw LAN — see `docs/DEPLOY.md`.
 - Remote boards do not write IndexedDB unless the home toggle is on or the user clicks Save locally.
 - UI defaults to Russian; English and Chinese are available in settings.
 - Production / VM notes: `docs/DEPLOY.md`. Optional `VITE_SYNC_URL`.

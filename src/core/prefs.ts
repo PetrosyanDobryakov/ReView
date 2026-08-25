@@ -26,6 +26,13 @@ export interface AppPrefs {
    * Off = always free. Shift while rotating also bypasses the magnet.
    */
   rotateSnap: boolean;
+  /**
+   * Override for the Yjs websocket URL. null = built-in
+   * `VITE_SYNC_URL` or `ws(s)://<hostname>:1234`.
+   */
+  syncUrl: string | null;
+  /** When false, the websocket provider is destroyed and peers are offline. */
+  syncEnabled: boolean;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -39,7 +46,22 @@ const DEFAULTS: AppPrefs = {
   paperBg: null,
   recognizeShapes: false,
   rotateSnap: true,
+  syncUrl: null,
+  syncEnabled: true,
 };
+
+function normalizeSyncUrl(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (!/^wss?:\/\//i.test(s)) return null;
+  return s.replace(/\/$/, '');
+}
+
+export function parseSyncUrl(raw: string): string | null {
+  return normalizeSyncUrl(raw);
+}
 
 const CURSOR_SCALE_MIN = 0.7;
 const CURSOR_SCALE_MAX = 1.8;
@@ -87,6 +109,10 @@ function parsePrefs(raw: unknown): AppPrefs {
     recognizeShapes:
       typeof parsed.recognizeShapes === 'boolean' ? parsed.recognizeShapes : DEFAULTS.recognizeShapes,
     rotateSnap: typeof parsed.rotateSnap === 'boolean' ? parsed.rotateSnap : DEFAULTS.rotateSnap,
+    syncUrl: Object.prototype.hasOwnProperty.call(parsed, 'syncUrl')
+      ? normalizeSyncUrl(parsed.syncUrl)
+      : DEFAULTS.syncUrl,
+    syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
   };
 }
 
@@ -121,6 +147,13 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
             ? patch.paperBg
             : cur.paperBg
           : cur.paperBg,
+    syncUrl:
+      patch.syncUrl !== undefined
+        ? patch.syncUrl === null
+          ? null
+          : normalizeSyncUrl(patch.syncUrl) ?? cur.syncUrl
+        : cur.syncUrl,
+    syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
   };
   cached = next;
   try {

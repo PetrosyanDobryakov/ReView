@@ -56,7 +56,18 @@ server {
 }
 ```
 
-If you proxy the websocket under a path, point the client at that URL (today the client uses host `:1234` directly — open firewall port 1234 or adjust `SYNC_URL` in `src/core/store.ts` for a path-based proxy).
+If you proxy the websocket under a path, point the client at that URL. In the app: **Settings → System → Connection**, set Sync URL (or build with `VITE_SYNC_URL`). You can also disconnect sync without clearing the board.
+
+## Virtual LAN (recommended for remote friends)
+
+Keep the same WebSocket hub — do **not** expose port `1234` to the public internet unprotected.
+
+1. Host and guests join a private mesh (Tailscale, ZeroTier, or similar).
+2. Host runs `npm run server` (or `npm run dev`).
+3. Guests open the app and set Sync URL to `ws://<host-mesh-ip>:1234` (or `wss://` if you terminate TLS).
+4. Share a board link; room name stays `review-<boardId>`.
+
+WebRTC / true browser P2P is out of scope for now — the mesh + local hub path is the supported side option.
 
 ## Persistence honesty
 
