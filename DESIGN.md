@@ -256,7 +256,7 @@ Depth is a single ambient island shadow plus a 1px border. Active tools use an i
 
 ## Motion
 
-Chrome motion is feedback and continuity, not a show. The authored moment is the toolbelt (and locale) **sliding pill**: an absolutely positioned thumb that translates between hits in 220ms. Everything else is press, enter, or exit.
+Chrome motion is feedback and continuity, not a show. The authored moment is the toolbelt (and locale) **sliding pill**: an absolutely positioned thumb that translates between hits in 220ms. Optional toolbelt hover (Advanced → tool hover animations) plays a one-shot per-glyph motion — spins, jabs, scrubs — on the icon only; the pill does not lift. Everything else is press, enter, or exit.
 
 ### Timing
 - **Ease:** `cubic-bezier(0.22, 1, 0.36, 1)` (`--chrome-ease`).

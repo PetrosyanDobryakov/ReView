@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ToolId } from '../engine/tools';
+import { onPrefsChange, readPrefs } from '../core/prefs';
 import { Icon, TOOLBELT_ICON_SIZE } from './icons';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
@@ -78,10 +79,17 @@ export function Toolbar({
 }: ToolbarProps) {
   const [schemeOpen, setSchemeOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
+  useEffect(() => onPrefsChange((p) => setToolHoverAnim(p.toolHoverAnim)), []);
   const isSchemeActive = SCHEME.includes(tool);
   const isMoreActive = MORE.includes(tool);
   return (
-    <div className="toolbelt" role="toolbar" aria-label={t(locale, 'tools')}>
+    <div
+      className="toolbelt"
+      role="toolbar"
+      aria-label={t(locale, 'tools')}
+      data-tool-anim={toolHoverAnim ? 'on' : undefined}
+    >
       <ToolButtons ids={NAV} tool={tool} locale={locale} onTool={onTool} />
       <div className="toolbelt-sep" />
       <ToolButtons ids={CREATE} tool={tool} locale={locale} onTool={onTool} />

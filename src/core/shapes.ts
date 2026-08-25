@@ -4,6 +4,8 @@ import { readPrefs } from './prefs';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
+export type TextAlign = 'left' | 'center' | 'right';
+
 export interface ShapeView {
   id: string;
   type: ShapeType;
@@ -19,6 +21,12 @@ export interface ShapeView {
   points?: number[];
   alpha?: number;
   textColor?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  textAlign?: TextAlign;
+  highlight?: boolean;
   src?: string;
   locked?: boolean;
   cropX?: number;
@@ -80,6 +88,59 @@ export interface ShapeBox {
 }
 
 export const BOARD_TYPEFACE = '"Space Grotesk", Onest, "Segoe UI", system-ui, sans-serif';
+export const TEXT_HIGHLIGHT = 'rgba(255, 226, 122, 0.42)';
+
+export function boardFont(
+  size: number,
+  fmt: { bold?: boolean; italic?: boolean } = {}
+): string {
+  const style = fmt.italic ? 'italic' : 'normal';
+  const weight = fmt.bold ? '700' : '400';
+  return `${style} ${weight} ${size}px ${BOARD_TYPEFACE}`;
+}
+
+export function shapeFont(v: Pick<ShapeView, 'fontSize' | 'bold' | 'italic'>, fallback = TEXT_FONT): string {
+  return boardFont(v.fontSize ?? fallback, v);
+}
+
+function lineAnchorX(boxX: number, boxW: number, lineW: number, align: TextAlign): number {
+  if (align === 'center') return boxX + (boxW - lineW) / 2;
+  if (align === 'right') return boxX + boxW - lineW;
+  return boxX;
+}
+
+function drawTextDecorations(
+  ctx: CanvasRenderingContext2D,
+  startX: number,
+  lineY: number,
+  lineW: number,
+  size: number,
+  color: string,
+  underline?: boolean,
+  strike?: boolean
+): void {
+  if (!underline && !strike) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, size / 14);
+  ctx.lineCap = 'round';
+  if (underline) {
+    const y = lineY + size * 1.08;
+    ctx.beginPath();
+    ctx.moveTo(startX, y);
+    ctx.lineTo(startX + lineW, y);
+    ctx.stroke();
+  }
+  if (strike) {
+    const y = lineY + size * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(startX, y);
+    ctx.lineTo(startX + lineW, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export const COLORS = {
   background: '#1c1c1a',
   grid: 'rgba(236,234,228,0.055)',
@@ -420,7 +481,8 @@ function drawMixedLine(
   x: number,
   lineY: number,
   lineHeight: number,
-  size: number
+  size: number,
+  deco?: { color: string; underline?: boolean; strike?: boolean }
 ): void {
   const runs = layoutMixedLine(ctx, line, size);
   const centerY = lineY + lineHeight / 2;
@@ -440,6 +502,9 @@ function drawMixedLine(
       cursor += run.w;
     }
   }
+  if (deco && (deco.underline || deco.strike)) {
+    drawTextDecorations(ctx, x, lineY, cursor - x, size, deco.color, deco.underline, deco.strike);
+  }
 }
 
 export function drawShape(
@@ -448,7 +513,6 @@ export function drawShape(
   textColor: string = COLORS.text,
   boardBg: string = COLORS.background
 ): void {
-  const font = `${v.fontSize ?? TEXT_FONT}px ${BOARD_TYPEFACE}`;
   switch (v.type) {
     case 'rect': {
       ctx.fillStyle = v.fill;
@@ -653,13 +717,19 @@ export function drawShape(
         ctx.beginPath();
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
         ctx.clip();
-        ctx.fillStyle = v.textColor ?? '#3a2f00';
-        ctx.font = font;
+        const ink = v.textColor ?? '#3a2f00';
+        ctx.fillStyle = ink;
+        ctx.font = shapeFont(v, STICKY_FONT);
         ctx.textBaseline = 'top';
-        const lineHeight = (v.fontSize ?? STICKY_FONT) * 1.25;
+        const size = v.fontSize ?? STICKY_FONT;
+        const lineHeight = size * 1.25;
+        const align = v.textAlign ?? 'left';
         let lineY = v.y + 8;
         for (const line of wrapText(ctx, v.text, v.w - 16)) {
-          ctx.fillText(line, v.x + 8, lineY);
+          const lw = ctx.measureText(line).width;
+          const lx = lineAnchorX(v.x + 8, v.w - 16, lw, align);
+          ctx.fillText(line, lx, lineY);
+          drawTextDecorations(ctx, lx, lineY, lw, size, ink, v.underline, v.strike);
           lineY += lineHeight;
           if (lineY > v.y + v.h - 8) break;
         }
@@ -669,14 +739,28 @@ export function drawShape(
     }
     case 'text': {
       if (!v.text) break;
-      ctx.fillStyle = displayInk(v.textColor ?? textColor, boardBg);
-      ctx.font = font;
-      ctx.textBaseline = 'top';
+      const ink = displayInk(v.textColor ?? textColor, boardBg);
       const size = v.fontSize ?? TEXT_FONT;
       const lineHeight = size * 1.3;
+      if (v.highlight) {
+        ctx.fillStyle = TEXT_HIGHLIGHT;
+        ctx.beginPath();
+        ctx.roundRect(v.x - 4, v.y - 2, v.w + 8, v.h + 4, 4);
+        ctx.fill();
+      }
+      ctx.fillStyle = ink;
+      ctx.font = shapeFont(v, TEXT_FONT);
+      ctx.textBaseline = 'top';
+      const align = v.textAlign ?? 'left';
       let lineY = v.y;
       for (const line of v.text.split('\n')) {
-        drawMixedLine(ctx, line, v.x, lineY, lineHeight, size);
+        const lw = measureMixedLine(ctx, line, size);
+        const lx = lineAnchorX(v.x, v.w, lw, align);
+        drawMixedLine(ctx, line, lx, lineY, lineHeight, size, {
+          color: ink,
+          underline: v.underline,
+          strike: v.strike,
+        });
         lineY += lineHeight;
       }
       break;
@@ -970,6 +1054,7 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
 
 function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
+  ctx.font = shapeFont(v, SHAPE_FONT);
   const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w - 16));
   if (!lines.length) return;
   ctx.save();
@@ -980,18 +1065,25 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
     ctx.roundRect(v.x, v.y, v.w, v.h, 6);
   }
   ctx.clip();
-  ctx.fillStyle = v.textColor ?? textColor;
-  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'center';
+  const ink = v.textColor ?? textColor;
+  ctx.fillStyle = ink;
   ctx.textBaseline = 'middle';
+  const align = v.textAlign ?? 'center';
   const lineHeight = size * 1.25;
   const startY = v.y + v.h / 2 - ((lines.length - 1) * lineHeight) / 2;
-  lines.forEach((line, i) => ctx.fillText(line, v.x + v.w / 2, startY + i * lineHeight));
+  lines.forEach((line, i) => {
+    const lw = ctx.measureText(line).width;
+    const lx = lineAnchorX(v.x + 8, v.w - 16, lw, align);
+    const ly = startY + i * lineHeight - size / 2;
+    ctx.fillText(line, lx, startY + i * lineHeight);
+    drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
+  });
   ctx.restore();
 }
 
 function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
+  ctx.font = shapeFont(v, SHAPE_FONT);
   const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.55));
   if (!lines.length) return;
   ctx.save();
@@ -1004,18 +1096,27 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   ctx.lineTo(v.x, cy);
   ctx.closePath();
   ctx.clip();
-  ctx.fillStyle = v.textColor ?? textColor;
-  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'center';
+  const ink = v.textColor ?? textColor;
+  ctx.fillStyle = ink;
   ctx.textBaseline = 'middle';
+  const align = v.textAlign ?? 'center';
   const lineHeight = size * 1.25;
   const startY = cy - ((lines.length - 1) * lineHeight) / 2;
-  lines.forEach((line, i) => ctx.fillText(line, cx, startY + i * lineHeight));
+  const boxW = v.w * 0.55;
+  const boxX = cx - boxW / 2;
+  lines.forEach((line, i) => {
+    const lw = ctx.measureText(line).width;
+    const lx = lineAnchorX(boxX, boxW, lw, align);
+    const ly = startY + i * lineHeight - size / 2;
+    ctx.fillText(line, lx, startY + i * lineHeight);
+    drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
+  });
   ctx.restore();
 }
 
 function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
+  ctx.font = shapeFont(v, SHAPE_FONT);
   const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.6));
   if (!lines.length) return;
   ctx.save();
@@ -1025,13 +1126,21 @@ function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColo
   ctx.lineTo(v.x + v.w, v.y + v.h);
   ctx.closePath();
   ctx.clip();
-  ctx.fillStyle = v.textColor ?? textColor;
-  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'center';
+  const ink = v.textColor ?? textColor;
+  ctx.fillStyle = ink;
   ctx.textBaseline = 'middle';
+  const align = v.textAlign ?? 'center';
   const cy = v.y + v.h * 0.62;
   const lineHeight = size * 1.25;
   const startY = cy - ((lines.length - 1) * lineHeight) / 2;
-  lines.forEach((line, i) => ctx.fillText(line, v.x + v.w / 2, startY + i * lineHeight));
+  const boxW = v.w * 0.6;
+  const boxX = v.x + (v.w - boxW) / 2;
+  lines.forEach((line, i) => {
+    const lw = ctx.measureText(line).width;
+    const lx = lineAnchorX(boxX, boxW, lw, align);
+    const ly = startY + i * lineHeight - size / 2;
+    ctx.fillText(line, lx, startY + i * lineHeight);
+    drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
+  });
   ctx.restore();
 }

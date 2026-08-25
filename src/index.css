@@ -401,6 +401,253 @@ button.brand {
   height: 22px;
 }
 
+/* Toolbelt hover motion — unique per glyph; gated by data-tool-anim. No lift. */
+.toolbelt[data-tool-anim='on'] .tool-btn svg {
+  transform-origin: 50% 50%;
+}
+
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='select'] {
+  animation: tool-jab 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='lasso'] {
+  animation: tool-spin 720ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='pan'] {
+  animation: tool-orbit 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='pen'] {
+  animation: tool-scribble 640ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='eraser'] {
+  animation: tool-scrub 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='rect'] {
+  animation: tool-squash 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='ellipse'] {
+  animation: tool-spring 640ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='arrow'] {
+  animation: tool-shoot 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='sticky'] {
+  animation: tool-peel 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='text'] {
+  animation: tool-bob 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='blockScheme'] {
+  animation: tool-stack 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='diamond'] {
+  animation: tool-spin 720ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='triangle'] {
+  animation: tool-tip 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='parallelogram'] {
+  animation: tool-skew 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='hexagon'] {
+  animation: tool-spin-ccw 720ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='terminator'] {
+  animation: tool-stretch 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='subroutine'] {
+  animation: tool-squeeze 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='display'] {
+  animation: tool-tilt 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='frame'] {
+  animation: tool-inset 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='more'] {
+  animation: tool-shuffle 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='graph'] {
+  animation: tool-climb 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='trash'] {
+  animation: tool-shake 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='copy'] {
+  animation: tool-offset 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='paste'] {
+  animation: tool-drop 640ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='duplicate'] {
+  animation: tool-split 600ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='download'] {
+  animation: tool-dip 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='image'] {
+  animation: tool-pan 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='crop'] {
+  animation: tool-pinch 560ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='check'] {
+  animation: tool-nod 520ms var(--chrome-ease);
+}
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='close'] {
+  animation: tool-spin-half 520ms var(--chrome-ease);
+}
+
+.toolbelt[data-tool-anim='on'] .tool-btn:active:not(:disabled) svg {
+  animation: none;
+}
+
+@keyframes tool-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes tool-spin-ccw {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+@keyframes tool-spin-half {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(180deg); }
+}
+@keyframes tool-spring {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.14); }
+  55% { transform: scale(0.94); }
+  75% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+@keyframes tool-jab {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  40% { transform: translate(1.5px, 1.5px) rotate(4deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+@keyframes tool-orbit {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(1px, -1px); }
+  50% { transform: translate(0, -1.5px); }
+  75% { transform: translate(-1px, -0.5px); }
+  100% { transform: translate(0, 0); }
+}
+@keyframes tool-scribble {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(1px, -1px) rotate(-6deg); }
+  50% { transform: translate(-0.5px, 1px) rotate(5deg); }
+  75% { transform: translate(1px, 0.5px) rotate(-3deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+@keyframes tool-scrub {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-2px); }
+  70% { transform: translateX(2px); }
+}
+@keyframes tool-squash {
+  0%, 100% { transform: scale(1, 1); }
+  40% { transform: scale(1.08, 0.92); }
+  70% { transform: scale(0.96, 1.04); }
+}
+@keyframes tool-shoot {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(2.5px); }
+}
+@keyframes tool-peel {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  40% { transform: rotate(-7deg) translateY(-1px); }
+  70% { transform: rotate(3deg) translateY(0.5px); }
+}
+@keyframes tool-bob {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(-1.5px); }
+  70% { transform: translateY(1px); }
+}
+@keyframes tool-stack {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-1.5px); }
+  55% { transform: translateY(1px); }
+  75% { transform: translateY(-0.5px); }
+}
+@keyframes tool-tip {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(-6deg); }
+  65% { transform: rotate(4deg); }
+}
+@keyframes tool-skew {
+  0%, 100% { transform: skewX(0deg); }
+  40% { transform: skewX(-6deg); }
+  70% { transform: skewX(4deg); }
+}
+@keyframes tool-stretch {
+  0%, 100% { transform: scaleX(1); }
+  40% { transform: scaleX(1.1); }
+  70% { transform: scaleX(0.96); }
+}
+@keyframes tool-squeeze {
+  0%, 100% { transform: scaleX(1); }
+  45% { transform: scaleX(0.9); }
+}
+@keyframes tool-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  40% { transform: rotate(8deg); }
+  70% { transform: rotate(-3deg); }
+}
+@keyframes tool-inset {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(0.92); }
+}
+@keyframes tool-shuffle {
+  0%, 100% { transform: translateY(0); }
+  25% { transform: translateY(1.5px); }
+  50% { transform: translateY(-1px); }
+  75% { transform: translateY(0.5px); }
+}
+@keyframes tool-climb {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(0.5px, 1px); }
+  60% { transform: translate(1px, -1.5px); }
+}
+@keyframes tool-shake {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-5deg); }
+  40% { transform: rotate(5deg); }
+  60% { transform: rotate(-3deg); }
+  80% { transform: rotate(2deg); }
+}
+@keyframes tool-offset {
+  0%, 100% { transform: translate(0, 0); }
+  45% { transform: translate(1.5px, -1.5px); }
+}
+@keyframes tool-drop {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(1.25px); }
+  70% { transform: translateY(-0.5px); }
+}
+@keyframes tool-split {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.05); }
+  60% { transform: scale(0.97); }
+}
+@keyframes tool-dip {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(2px); }
+}
+@keyframes tool-pan {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(-1.5px, 0); }
+  65% { transform: translate(1.5px, 0); }
+}
+@keyframes tool-pinch {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(0.94); }
+}
+@keyframes tool-nod {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  40% { transform: rotate(-4deg) translateY(1px); }
+  70% { transform: rotate(2deg) translateY(-0.5px); }
+}
+
 .icon-btn:hover,
 .tool-btn:hover {
   background: var(--chrome-panel-2);
@@ -488,6 +735,17 @@ button.brand {
   align-items: center;
   gap: 8px;
   animation: body-in var(--chrome-dur) var(--chrome-ease);
+}
+
+.text-format {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.text-format .style-btn-icon.active {
+  background: var(--chrome-active-bg);
+  color: var(--chrome-accent-strong);
 }
 
 .style-island.is-leaving {

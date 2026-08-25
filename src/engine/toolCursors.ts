@@ -1,49 +1,81 @@
 import type { ToolId } from './tools';
-import { ICON_PATHS, type IconName } from '../ui/icons';
+import {
+  ICON_NUDGE,
+  ICON_PATHS,
+  LASSO_HANDLE,
+  LASSO_NUDGE,
+  type IconName,
+} from '../ui/icons';
 import { readPrefs } from '../core/prefs';
+import { viewPaperBg } from '../core/store';
 
 type CursorSpec = {
   icon?: IconName;
-  /** Custom body markup inside the viewBox (overrides icon). */
-  body?: string;
-  /** Square viewBox size. Default 24. Use larger + inset art so strokes aren't clipped. */
+  body?: (stroke: string) => string;
   view?: number;
   hx: number;
   hy: number;
-  fill?: boolean;
 };
 
-/** Same handle path as `Icon` for `lasso` in icons.tsx. */
-const LASSO_HANDLE = 'M7.2 16.8c-1.3 2.2-2.9 3.8-3.6 3.8';
 const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
-/** Tools that use a custom SVG cursor (pan keeps grab / grabbing). */
+/** Muted adaptive stroke — softer than board text (#1c1c1a / #eceae4). */
+const STROKE_ON_LIGHT = '#6e6c66';
+const STROKE_ON_DARK = '#a8a59c';
+
+function cursorStroke(bg: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(bg)) return STROKE_ON_DARK;
+  const r = parseInt(bg.slice(1, 3), 16);
+  const g = parseInt(bg.slice(3, 5), 16);
+  const b = parseInt(bg.slice(5, 7), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.5 ? STROKE_ON_LIGHT : STROKE_ON_DARK;
+}
+
+const STROKE = (c: string, w = 2) =>
+  `fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"`;
+
+/** Same markup as `Icon` for lasso — loop + handle + optical nudge. */
+function lassoBody(pad: number, stroke: string): string {
+  const [nx, ny] = LASSO_NUDGE;
+  return (
+    `<g transform="translate(${pad} ${pad}) translate(${nx} ${ny})" ${STROKE(stroke)}>` +
+    `<path d="${ICON_PATHS.lasso}"/>` +
+    `<path d="${LASSO_HANDLE}"/>` +
+    '</g>'
+  );
+}
+
+function iconBody(name: IconName, stroke: string): string {
+  const nudge = ICON_NUDGE[name];
+  const inner =
+    name === 'pen'
+      ? `<g transform="${PEN_FIT}"><path d="${ICON_PATHS.pen}"/></g>`
+      : name === 'lasso'
+        ? `<path d="${ICON_PATHS.lasso}"/><path d="${LASSO_HANDLE}"/>`
+        : `<path d="${ICON_PATHS[name]}"/>`;
+  const content = nudge
+    ? `<g transform="translate(${nudge[0]} ${nudge[1]})">${inner}</g>`
+    : inner;
+  return `<g ${STROKE(stroke)}>${content}</g>`;
+}
+
 const SPECS: Partial<Record<ToolId, CursorSpec>> = {
-  select: { icon: 'select', hx: 5, hy: 4, fill: true },
-  // Exact toolbelt glyph (dashed loop + handle), padded in 32² so the tip isn't clipped.
+  select: { icon: 'select', hx: 5, hy: 4 },
   lasso: {
-    view: 32,
-    hx: 8,
-    hy: 24,
-    body:
-      '<g transform="translate(4 3)" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
-      `<path d="${ICON_PATHS.lasso}" stroke="#eceae4" stroke-width="2.2" stroke-dasharray="3.25 2.7"/>` +
-      `<path d="${LASSO_HANDLE}" stroke="#eceae4" stroke-width="2.2"/>` +
-      `<path d="${ICON_PATHS.lasso}" stroke="#1c1c1a" stroke-width="1.5" stroke-dasharray="3.25 2.7"/>` +
-      `<path d="${LASSO_HANDLE}" stroke="#1c1c1a" stroke-width="1.5"/>` +
-      '</g>',
+    view: 40,
+    hx: 12,
+    hy: 28,
+    body: (stroke) => lassoBody(8, stroke),
   },
-  // Nudge tip off the absolute corner so the nib outline isn't clipped.
   pen: {
     view: 32,
     hx: 6,
     hy: 26,
-    body:
-      '<g transform="translate(4 2) scale(1.05)">' +
-      '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" fill="#1c1c1a" stroke="#eceae4" stroke-width="0.85" stroke-linejoin="round"/>' +
-      '</g>',
+    body: (stroke) =>
+      `<g transform="translate(4 2) scale(1.05)" ${STROKE(stroke)}><path d="${ICON_PATHS.pen}"/></g>`,
   },
-  eraser: { icon: 'eraser', hx: 5, hy: 19, fill: true },
+  eraser: { icon: 'eraser', hx: 5, hy: 19 },
   rect: { icon: 'rect', hx: 12, hy: 12 },
   ellipse: { icon: 'ellipse', hx: 12, hy: 12 },
   sticky: { icon: 'sticky', hx: 12, hy: 12 },
@@ -63,38 +95,13 @@ const SPECS: Partial<Record<ToolId, CursorSpec>> = {
 
 const cache = new Map<string, string>();
 
-function svgFor(spec: CursorSpec, pixelSize: number): string {
+function svgFor(spec: CursorSpec, pixelSize: number, stroke: string): string {
   const view = spec.view ?? 24;
-
-  if (spec.body) {
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 ${view} ${view}">` +
-      spec.body +
-      `</svg>`
-    );
-  }
-
-  const icon = spec.icon;
-  if (!icon) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 ${view} ${view}"/>`;
-  }
-
-  const stroke = spec.fill
-    ? `fill="#1c1c1a" stroke="#eceae4" stroke-width="0.85"`
-    : `fill="none" stroke="#1c1c1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"`;
-  const outline = spec.fill
-    ? ''
-    : `<path d="${ICON_PATHS[icon]}" fill="none" stroke="#eceae4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
-
-  let body: string;
-  if (icon === 'pen') {
-    body = `<g transform="${PEN_FIT}"><path d="${ICON_PATHS.pen}" ${stroke} stroke-linejoin="round"/></g>`;
-  } else if (spec.fill) {
-    body = `<path d="${ICON_PATHS[icon]}" ${stroke} stroke-linejoin="round"/>`;
-  } else {
-    body = `${outline}<path d="${ICON_PATHS[icon]}" ${stroke}/>`;
-  }
-
+  const body = spec.body
+    ? spec.body(stroke)
+    : spec.icon
+      ? iconBody(spec.icon, stroke)
+      : '';
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pixelSize}" height="${pixelSize}" viewBox="0 0 ${view} ${view}">` +
     body +
@@ -107,15 +114,17 @@ export function cursorCssForTool(id: ToolId): string | null {
   const spec = SPECS[id];
   if (!spec) return null;
   const scale = readPrefs().toolCursorScale;
+  const bg = viewPaperBg();
+  const stroke = cursorStroke(bg);
   const view = spec.view ?? 24;
-  const key = `${id}:${scale}:${view}`;
+  const key = `${id}:${stroke}:${scale}:${view}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const pixelSize = Math.max(16, Math.round(view * scale));
   const hx = Math.max(0, Math.min(pixelSize - 1, Math.round(spec.hx * scale)));
   const hy = Math.max(0, Math.min(pixelSize - 1, Math.round(spec.hy * scale)));
-  const url = `url("data:image/svg+xml,${encodeURIComponent(svgFor(spec, pixelSize))}") ${hx} ${hy}, crosshair`;
+  const url = `url("data:image/svg+xml,${encodeURIComponent(svgFor(spec, pixelSize, stroke))}") ${hx} ${hy}, crosshair`;
   cache.set(key, url);
   return url;
 }

@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, withAlpha } from '../core/shapes';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, boardFont, withAlpha } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -53,6 +53,12 @@ export interface EditTarget {
   color: string;
   type: string | null;
   centered: boolean;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  textAlign: 'left' | 'center' | 'right';
+  highlight: boolean;
 }
 
 export interface GraphEditTarget {
@@ -427,7 +433,7 @@ export class Engine {
         const [fx, fy] = HANDLE_POS[handle];
         const hx = (v.x + fx * v.w) * z + ox;
         const hy = (v.y + fy * v.h) * z + oy;
-        if (Math.abs(hx - sx) <= 8 && Math.abs(hy - sy) <= 8) {
+        if (Math.hypot(hx - sx, hy - sy) <= 9) {
           return { shapeId: id, handle };
         }
       }
@@ -439,7 +445,8 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const off = 8 / z;
+    /** Sit outside resize handles so connect ≠ resize. */
+    const off = 14 / z;
     const candidates: string[] = [...this.selection, ...[...this.views.keys()].filter((k) => !this.selection.has(k))];
     let best: { shapeId: string; port: PortId; dist: number } | null = null;
     for (const id of candidates) {
@@ -451,7 +458,7 @@ export class Engine {
         const hx = p.x * z + ox;
         const hy = p.y * z + oy;
         const d = Math.hypot(hx - sx, hy - sy);
-        if (d <= 12 && (!best || d < best.dist)) best = { shapeId: id, port, dist: d };
+        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port, dist: d };
       }
     }
     return best ? { shapeId: best.shapeId, port: best.port } : null;
@@ -460,7 +467,7 @@ export class Engine {
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
     const v = this.views.get(shapeId);
     if (!v) return null;
-    return portPos(v, port, 8 / this.camera.zoom);
+    return portPos(v, port, 14 / this.camera.zoom);
   }
 
   updateConnectedArrows(movedIds: Set<string>): void {
@@ -1103,6 +1110,12 @@ export class Engine {
       color,
       type: v.type,
       centered,
+      bold: !!v.bold,
+      italic: !!v.italic,
+      underline: !!v.underline,
+      strike: !!v.strike,
+      textAlign: v.textAlign ?? (centered ? 'center' : 'left'),
+      highlight: !!v.highlight,
     });
   }
 
@@ -1110,6 +1123,7 @@ export class Engine {
     const bg = store.viewPaperBg();
     const { adaptInkToPaper } = readPrefs();
     const editorColor = adaptInkToPaper ? color : readableTextOn(color, bg);
+    const fmt = settings.text;
     this.editing = true;
     this.events.onEditText?.({
       id: null,
@@ -1122,6 +1136,12 @@ export class Engine {
       color: editorColor,
       type: 'text',
       centered: false,
+      bold: fmt.bold,
+      italic: fmt.italic,
+      underline: fmt.underline,
+      strike: fmt.strike,
+      textAlign: fmt.align,
+      highlight: fmt.highlight,
     });
   }
 
@@ -1180,8 +1200,14 @@ export class Engine {
         text: trimmed,
         fontSize: target.fontSize,
         textColor: color,
+        bold: target.bold || undefined,
+        italic: target.italic || undefined,
+        underline: target.underline || undefined,
+        strike: target.strike || undefined,
+        textAlign: target.textAlign !== 'left' ? target.textAlign : undefined,
+        highlight: target.highlight || undefined,
       });
-      const size = this.measureText(trimmed, target.fontSize);
+      const size = this.measureText(trimmed, target.fontSize, target);
       store.patchShape(newId, { w: size.w, h: size.h });
       this.setSelection([]);
       this.setTool('select');
@@ -1193,9 +1219,21 @@ export class Engine {
         this.setSelection([]);
         return;
       }
-      const patch: Partial<ShapeView> = { text, textColor: color };
+      const patch: Partial<ShapeView> = {
+        text,
+        textColor: color,
+        bold: target.bold,
+        italic: target.italic,
+        underline: target.underline,
+        strike: target.strike,
+        textAlign: target.textAlign,
+        highlight: target.highlight,
+      };
       if (v.type === 'text') {
-        const size = this.measureText(text, v.fontSize ?? TEXT_FONT);
+        const size = this.measureText(text, v.fontSize ?? TEXT_FONT, {
+          bold: target.bold,
+          italic: target.italic,
+        });
         patch.w = size.w;
         patch.h = size.h;
       }
@@ -1204,8 +1242,12 @@ export class Engine {
     this.dirty = true;
   }
 
-  measureText(text: string, fontSize: number): { w: number; h: number } {
-    this.ctx.font = `${fontSize}px ${BOARD_TYPEFACE}`;
+  measureText(
+    text: string,
+    fontSize: number,
+    fmt: { bold?: boolean; italic?: boolean } = {}
+  ): { w: number; h: number } {
+    this.ctx.font = boardFont(fontSize, fmt);
     const lines = text.split('\n');
     let maxW = 0;
     for (const line of lines) {
@@ -1355,13 +1397,17 @@ export class Engine {
     if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
-      const portHit = this.hitPort(info.screen.x, info.screen.y);
-      if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
-        this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
-        this.hoverPort = null;
-        this.setCursor('crosshair');
-        this.dirty = true;
-        return;
+      // Resize wins over connect when both sit near the same edge.
+      const onHandle = this.hitHandle(info.screen.x, info.screen.y);
+      if (!onHandle) {
+        const portHit = this.hitPort(info.screen.x, info.screen.y);
+        if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
+          this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
+          this.hoverPort = null;
+          this.setCursor('crosshair');
+          this.dirty = true;
+          return;
+        }
       }
       let target = this.tool;
       if (target.id !== 'select' && target.id !== 'pan' && target.id !== 'pen' && target.id !== 'eraser') {
@@ -1450,17 +1496,24 @@ export class Engine {
     }
     if (!this.pointerDown && !this.connecting && this.selection.size) {
       const info = this.pointerInfo(e);
-      const hp = this.hitPort(info.screen.x, info.screen.y);
-      if (hp && this.selection.has(hp.shapeId)) {
-        if (!this.hoverPort || this.hoverPort.shapeId !== hp.shapeId || this.hoverPort.port !== hp.port) {
-          this.hoverPort = hp;
-          this.setCursor('crosshair');
+      if (this.hitHandle(info.screen.x, info.screen.y)) {
+        if (this.hoverPort) {
+          this.hoverPort = null;
           this.dirty = true;
         }
-      } else if (this.hoverPort) {
-        this.hoverPort = null;
-        this.setCursor(this.toolCursor());
-        this.dirty = true;
+      } else {
+        const hp = this.hitPort(info.screen.x, info.screen.y);
+        if (hp && this.selection.has(hp.shapeId)) {
+          if (!this.hoverPort || this.hoverPort.shapeId !== hp.shapeId || this.hoverPort.port !== hp.port) {
+            this.hoverPort = hp;
+            this.setCursor('crosshair');
+            this.dirty = true;
+          }
+        } else if (this.hoverPort) {
+          this.hoverPort = null;
+          this.setCursor(this.toolCursor());
+          this.dirty = true;
+        }
       }
     }
     if (this.editing) return;
@@ -1867,13 +1920,14 @@ export class Engine {
     ctx.strokeRect(c.box.x, c.box.y, c.box.w, c.box.h);
     ctx.setLineDash([]);
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1.5 * s;
+    const hr = 4.5 * s;
     for (const [fx, fy] of Object.values(HANDLE_POS)) {
       const hx = c.box.x + fx * c.box.w;
       const hy = c.box.y + fy * c.box.h;
       ctx.beginPath();
-      ctx.rect(hx - 5.5 * s, hy - 5.5 * s, 11 * s, 11 * s);
+      ctx.arc(hx, hy, hr, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -2085,6 +2139,8 @@ export class Engine {
       this.paperFrom = this.paperFill || this.paperTo;
       this.paperTo = target;
       this.paperT0 = performance.now();
+      clearToolCursorCache();
+      this.setCursor(this.toolCursor());
     }
     const reduce = this.reduceMotion;
     const u = reduce ? 1 : Math.min(1, (performance.now() - this.paperT0) / PAPER_MS);
@@ -2234,17 +2290,37 @@ export class Engine {
     if (this.editing) return;
     if (this.active !== 'select' && this.override !== 'select') return;
     const s = 1 / this.camera.zoom;
+    const pad = 2 * s;
+    const line = 1.5 * s;
+    const hr = 4.25 * s;
     ctx.save();
-    ctx.strokeStyle = COLORS.selection;
-    ctx.lineWidth = 2 * s;
+    ctx.lineJoin = 'round';
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v) continue;
-      ctx.strokeRect(v.x - 4 * s, v.y - 4 * s, v.w + 8 * s, v.h + 8 * s);
-      if (this.selection.size === 1) {
-        ctx.fillStyle = COLORS.selection;
+      const x = v.x - pad;
+      const y = v.y - pad;
+      const w = v.w + pad * 2;
+      const h = v.h + pad * 2;
+      // Underlay so the accent ring reads on light fills and dark paper alike.
+      ctx.strokeStyle = 'rgba(28, 28, 26, 0.5)';
+      ctx.lineWidth = line + 1.25 * s;
+      ctx.strokeRect(x, y, w, h);
+      ctx.strokeStyle = COLORS.selection;
+      ctx.lineWidth = line;
+      ctx.strokeRect(x, y, w, h);
+
+      if (this.selection.size === 1 && !v.locked) {
         for (const [fx, fy] of Object.values(HANDLE_POS)) {
-          ctx.fillRect(v.x + fx * v.w - 4.5 * s, v.y + fy * v.h - 4.5 * s, 9 * s, 9 * s);
+          const hx = v.x + fx * v.w;
+          const hy = v.y + fy * v.h;
+          ctx.beginPath();
+          ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = COLORS.selection;
+          ctx.lineWidth = 1.5 * s;
+          ctx.stroke();
         }
       }
     }
@@ -2289,44 +2365,38 @@ export class Engine {
   private drawPorts(ctx: CanvasRenderingContext2D): void {
     if (this.editing) return;
     const s = 1 / this.camera.zoom;
+    const connectingActive = !!this.connecting;
     let showFor: string[] = [];
-    if (this.connecting) {
-      // при перетаскивании стрелки — подсветить все доступные точки
+    if (connectingActive) {
       for (const [id, v] of this.views) {
         if (v.locked || v.type === 'pen' || v.type === 'arrow') continue;
         if (!store.isOnActivePage(id)) continue;
         showFor.push(id);
       }
     } else {
-      if (!this.selection.size) return;
-      showFor = [...this.selection];
+      // Idle selection: only the ring + resize handles. Ports bloom when the
+      // pointer reaches the outer connect ring (hitPort), so chrome stays calm.
+      if (!this.hoverPort || !this.selection.has(this.hoverPort.shapeId)) return;
+      if (this.active !== 'select' && this.override !== 'select') return;
+      showFor = [this.hoverPort.shapeId];
     }
+    const off = 14 * s;
     for (const id of showFor) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
       for (const port of PORTS) {
-        const p = portPos(v, port, 0);
-        const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
-        const dx = p.x - cx, dy = p.y - cy;
-        const len = Math.hypot(dx, dy) || 1;
-        const ox = (dx / len) * (8 * s);
-        const oy = (dy / len) * (8 * s);
-        const px = p.x + ox, py = p.y + oy;
+        const p = portPos(v, port, off);
         const isHover = this.hoverPort?.shapeId === id && this.hoverPort?.port === port;
         const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;
-        const connectingActive = !!this.connecting;
+        const hot = isHover || isFrom;
         ctx.save();
-        if (connectingActive) {
-          ctx.fillStyle = isHover ? COLORS.selection : 'rgba(255,255,255,0.95)';
-          ctx.strokeStyle = isHover ? '#ffffff' : withAlpha(COLORS.selection, 0.85);
-        } else {
-          ctx.fillStyle = isHover || isFrom ? COLORS.selection : '#ffffff';
-          ctx.strokeStyle = isHover || isFrom ? '#ffffff' : COLORS.selection;
-        }
-        ctx.lineWidth = 1.2 * s;
+        ctx.fillStyle = hot ? '#ffffff' : COLORS.selection;
+        ctx.strokeStyle = hot ? COLORS.selection : 'rgba(255,255,255,0.92)';
+        ctx.lineWidth = 1.35 * s;
+        const r = connectingActive ? (hot ? 5.5 * s : 4.25 * s) : hot ? 4.75 * s : 3.75 * s;
         ctx.beginPath();
-        ctx.arc(px, py, connectingActive ? 5 * s : 4.5 * s, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         ctx.restore();

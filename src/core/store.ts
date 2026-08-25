@@ -287,6 +287,12 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     text: m.get('text') as string | undefined,
     fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : ['rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'].includes(type) ? SHAPE_FONT : TEXT_FONT),
     textColor: m.get('textColor') as string | undefined,
+    bold: m.get('bold') === true,
+    italic: m.get('italic') === true,
+    underline: m.get('underline') === true,
+    strike: m.get('strike') === true,
+    textAlign: (m.get('textAlign') as ShapeView['textAlign'] | undefined) ?? undefined,
+    highlight: m.get('highlight') === true,
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
     locked: m.get('locked') as boolean | undefined,
@@ -322,6 +328,12 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
       v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT)
     );
     if (v.textColor) m.set('textColor', v.textColor);
+    if (v.bold) m.set('bold', true);
+    if (v.italic) m.set('italic', true);
+    if (v.underline) m.set('underline', true);
+    if (v.strike) m.set('strike', true);
+    if (v.textAlign && v.textAlign !== 'left') m.set('textAlign', v.textAlign);
+    if (v.highlight) m.set('highlight', true);
   }
   if (v.points) {
     const arr = new Y.Array<number>();

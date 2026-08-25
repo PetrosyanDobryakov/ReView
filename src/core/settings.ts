@@ -14,6 +14,12 @@ export interface ShapeSettings {
 export interface TextSettings {
   color: string;
   size: number;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  align: 'left' | 'center' | 'right';
+  highlight: boolean;
 }
 
 export type EraserMode = 'whole' | 'partial';
@@ -36,6 +42,12 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
   text: {
     color: '#eceae4',
     size: 18,
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    align: 'left',
+    highlight: false,
   },
   eraser: {
     size: 32,

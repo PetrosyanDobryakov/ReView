@@ -452,7 +452,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         shape={shape}
         text={text}
         eraser={eraser}
+        editing={!!editTarget}
+        editTarget={editTarget}
         onPatched={refreshSelected}
+        onEditStyle={(patch) => setEditTarget((cur) => (cur ? { ...cur, ...patch } : null))}
       />
       <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
 
