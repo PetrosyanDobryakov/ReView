@@ -97,7 +97,7 @@ export function Toolbar({
           aria-expanded={schemeOpen}
           onClick={() => setSchemeOpen((v) => !v)}
         >
-          <Icon name="frame" size={TOOLBELT_ICON_SIZE} />
+          <Icon name="blockScheme" size={TOOLBELT_ICON_SIZE} />
         </button>
         {schemeOpen && (
           <div
