@@ -1,14 +1,14 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, readableTextOn, displayInk, withAlpha, type PortId } from '../core/shapes';
-import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape } from '../core/shapes';
+import { COLORS, portPos, readableTextOn, displayInk, withAlpha, hasFill, type PortId } from '../core/shapes';
+import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
-import { effectivePen, settings, updateTextSettings } from '../core/settings';
+import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, updateTextSettings } from '../core/settings';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, rotatePointsAround, rotatedAabb, shapeRotation } from '../core/transform';
+import { degToRad, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg } from '../core/transform';
 
 /** Square a drag box around the original anchor (handles upward / leftward Shift draws). */
 function squareFromAnchor(start: { x: number; y: number }, cur: { x: number; y: number }): ShapeBox {
@@ -51,6 +51,8 @@ export interface PointerInfo {
   shift: boolean;
   alt?: boolean;
   pressure?: number;
+  /** `pen` / `touch` / `mouse` — only stylus gets variable-width strokes. */
+  pointerType?: string;
 }
 
 export abstract class Tool {
@@ -170,7 +172,8 @@ export class SelectTool extends Tool {
       const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
       const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
       let deg = this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI;
-      if (p.shift) deg = Math.round(deg / 15) * 15;
+      // Soft H/V magnet when prefs.rotateSnap is on; Shift = free.
+      deg = snapRotationDeg(deg, Boolean(p.shift) || !readPrefs().rotateSnap);
       if (o.type === 'pen' || o.type === 'arrow') {
         // Bake rotation into points; keep AABB rebuilt from points.
         const delta = deg - this.rotateOrigDeg;
@@ -391,35 +394,47 @@ export class SelectTool extends Tool {
       dx = lx;
       dy = ly;
     }
-    const MIN = 8 / engine.camera.zoom;
-    let x = orig.x;
-    let y = orig.y;
-    let w = orig.w;
-    let h = orig.h;
-    if (r.handle.includes('e')) w = Math.max(MIN, orig.w + dx);
-    if (r.handle.includes('w')) {
-      w = Math.max(MIN, orig.w - dx);
-      x = orig.x + orig.w - w;
+    // Edge-based resize so dragging past the opposite side mirrors (flips) the shape.
+    const MIN = 1 / Math.max(engine.camera.zoom, 0.01);
+    let left = orig.x;
+    let right = orig.x + orig.w;
+    let top = orig.y;
+    let bottom = orig.y + orig.h;
+    if (r.handle.includes('e')) right = orig.x + orig.w + dx;
+    if (r.handle.includes('w')) left = orig.x + dx;
+    if (r.handle.includes('s')) bottom = orig.y + orig.h + dy;
+    if (r.handle.includes('n')) top = orig.y + dy;
+
+    let x = Math.min(left, right);
+    let y = Math.min(top, bottom);
+    let w = Math.abs(right - left);
+    let h = Math.abs(bottom - top);
+    if (w < MIN) {
+      w = MIN;
+      x = (left + right) / 2 - w / 2;
     }
-    if (r.handle.includes('s')) h = Math.max(MIN, orig.h + dy);
-    if (r.handle.includes('n')) {
-      h = Math.max(MIN, orig.h - dy);
-      y = orig.y + orig.h - h;
+    if (h < MIN) {
+      h = MIN;
+      y = (top + bottom) / 2 - h / 2;
     }
+
     if (orig.type === 'image') {
       const corner = r.handle === 'nw' || r.handle === 'ne' || r.handle === 'se' || r.handle === 'sw';
       if (corner && orig.w > 0 && orig.h > 0) {
         const aspect = orig.w / orig.h;
         // Drive from the axis with larger movement so vertical corner drags work.
-        if (Math.abs(dx) * orig.h >= Math.abs(dy) * orig.w) {
+        if (Math.abs(right - left) * orig.h >= Math.abs(bottom - top) * orig.w) {
           h = w / aspect;
         } else {
           w = h * aspect;
         }
         w = Math.max(MIN, w);
         h = Math.max(MIN, h);
-        if (r.handle.includes('w')) x = orig.x + orig.w - w;
-        if (r.handle.includes('n')) y = orig.y + orig.h - h;
+        // Keep the opposite corner anchored after aspect lock.
+        if (r.handle.includes('w')) x = Math.max(left, right) - w;
+        else x = Math.min(left, right);
+        if (r.handle.includes('n')) y = Math.max(top, bottom) - h;
+        else y = Math.min(top, bottom);
       }
     }
     if (orig.type === 'text') {
@@ -459,11 +474,12 @@ export class SelectTool extends Tool {
       return;
     }
     if (orig.points) {
-      const sx = orig.w > 0 ? w / orig.w : 1;
-      const sy = orig.h > 0 ? h / orig.h : 1;
+      // Signed scales from the live edges so crossing the opposite side flips geometry.
+      const sx = orig.w !== 0 ? (right - left) / orig.w : 1;
+      const sy = orig.h !== 0 ? (bottom - top) / orig.h : 1;
       const points: number[] = [];
       for (let i = 0; i < orig.points.length; i += 2) {
-        points.push(x + (orig.points[i] - orig.x) * sx, y + (orig.points[i + 1] - orig.y) * sy);
+        points.push(left + (orig.points[i] - orig.x) * sx, top + (orig.points[i + 1] - orig.y) * sy);
       }
       store.patchShape(r.shapeId, { x, y, w, h, points });
     } else {
@@ -509,10 +525,13 @@ export class PenTool extends Tool {
   private last: { x: number; y: number } | null = null;
   private active = false;
   private shift = false;
+  /** Stylus only — mouse pressure is a flat 0.5 and must not force the ribbon path. */
+  private capturePressure = false;
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.pts = [p.world.x, p.world.y];
-    this.pressures = [clampPressure(p.pressure)];
+    this.capturePressure = p.pointerType === 'pen';
+    this.pressures = this.capturePressure ? [clampPressure(p.pressure)] : [];
     this.last = p.world;
     this.active = true;
     this.shift = p.shift;
@@ -530,7 +549,7 @@ export class PenTool extends Tool {
     const n = this.pts.length;
     if (n >= 2 && Math.hypot(p.world.x - this.pts[n - 2], p.world.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
     this.pts.push(p.world.x, p.world.y);
-    this.pressures.push(clampPressure(p.pressure));
+    if (this.capturePressure) this.pressures.push(clampPressure(p.pressure));
   }
 
   onUp(_engine: Engine): void {
@@ -539,10 +558,15 @@ export class PenTool extends Tool {
     const shift = this.shift;
     this.shift = false;
     const points = shift ? this.straightPoints() : this.pts;
-    const pressures = shift ? [this.pressures[0] ?? 0.5, this.pressures.at(-1) ?? 0.5] : this.pressures;
+    const pressures = this.capturePressure
+      ? shift
+        ? [this.pressures[0] ?? 0.5, this.pressures.at(-1) ?? 0.5]
+        : this.pressures
+      : [];
     if (points.length < 2) {
       this.pts = [];
       this.pressures = [];
+      this.capturePressure = false;
       this.last = null;
       store.endGesture();
       return;
@@ -560,12 +584,16 @@ export class PenTool extends Tool {
             y: guess.y,
             w: guess.w,
             h: guess.h,
-            fill: settings.shape.fill,
+            fill: shapeFillValue(),
             stroke: pen.color,
-            strokeWidth: Math.max(2, pen.width),
+            strokeWidth: Math.max(settings.shape.strokeWidth, pen.width),
+            ...(guess.kind === 'rect'
+              ? { cornerRadius: settings.shape.rounded ? RECT_CORNER_RADIUS : 0 }
+              : {}),
           });
           this.pts = [];
           this.pressures = [];
+          this.capturePressure = false;
           this.last = null;
           store.endGesture();
           return;
@@ -584,11 +612,13 @@ export class PenTool extends Tool {
             h: maxY - minY,
             fill: 'transparent',
             stroke: pen.color,
-            strokeWidth: Math.max(2, pen.width),
+            strokeWidth: Math.max(settings.shape.strokeWidth, pen.width),
+            arrowHead: settings.shape.arrowHead,
             points: [guess.x0, guess.y0, guess.x1, guess.y1],
           });
           this.pts = [];
           this.pressures = [];
+          this.capturePressure = false;
           this.last = null;
           store.endGesture();
           return;
@@ -608,7 +638,8 @@ export class PenTool extends Tool {
       minY = Math.min(minY, points[i + 1]);
       maxY = Math.max(maxY, points[i + 1]);
     }
-    const hasPressure = pressures.some((p) => p > 0 && p < 1);
+    const slice = pressures.slice(0, points.length / 2);
+    const hasPressure = pressureVaries(slice, points.length / 2);
     store.addShape({
       type: 'pen',
       x: minX - pad,
@@ -620,10 +651,11 @@ export class PenTool extends Tool {
       strokeWidth: pen.width,
       alpha: pen.alpha,
       points,
-      pressures: hasPressure ? pressures.slice(0, points.length / 2) : undefined,
+      pressures: hasPressure ? slice : undefined,
     });
     this.pts = [];
     this.pressures = [];
+    this.capturePressure = false;
     this.last = null;
     store.endGesture();
   }
@@ -632,6 +664,7 @@ export class PenTool extends Tool {
     this.active = false;
     this.pts = [];
     this.pressures = [];
+    this.capturePressure = false;
     this.last = null;
     store.endGesture();
   }
@@ -648,7 +681,7 @@ export class PenTool extends Tool {
       pen.width,
       displayInk(pen.color, bg),
       pen.alpha * 0.9,
-      this.shift ? undefined : this.pressures
+      this.shift || !this.capturePressure ? undefined : this.pressures
     );
   }
 
@@ -725,9 +758,12 @@ abstract class BoxTool extends Tool {
     const id = store.addShape({
       type: this.shapeType,
       ...box,
-      fill: settings.shape.fill,
+      fill: shapeFillValue(),
       stroke: settings.shape.stroke,
-      strokeWidth: 2,
+      strokeWidth: settings.shape.strokeWidth,
+      ...(this.shapeType === 'rect'
+        ? { cornerRadius: settings.shape.rounded ? RECT_CORNER_RADIUS : 0 }
+        : {}),
     });
     this.start = null;
     this.cur = null;
@@ -752,18 +788,25 @@ abstract class BoxTool extends Tool {
     const drawBox = this.previewBox();
     if (!drawBox) return;
     const s = 1 / engine.camera.zoom;
+    const fill = shapeFillValue();
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
-    ctx.fillStyle = settings.shape.fill + '22';
     ctx.lineWidth = 1.5 * s;
     ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();
     if (this.shapeType === 'ellipse') {
       ctx.ellipse(drawBox.x + drawBox.w / 2, drawBox.y + drawBox.h / 2, drawBox.w / 2, drawBox.h / 2, 0, 0, Math.PI * 2);
+    } else if (this.shapeType === 'rect') {
+      const rr = settings.shape.rounded ? RECT_CORNER_RADIUS : 0;
+      if (rr > 0) ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, rr);
+      else ctx.rect(drawBox.x, drawBox.y, drawBox.w, drawBox.h);
     } else {
       ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 6);
     }
-    ctx.fill();
+    if (hasFill(fill)) {
+      ctx.fillStyle = fill.length === 7 ? fill + '22' : withAlpha(fill, 0.13);
+      ctx.fill();
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -839,8 +882,64 @@ export class StickyTool extends BoxTool {
 export class GraphTool extends BoxTool {
   readonly id = 'graph';
   readonly shapeType = 'graph';
-  readonly defaultW = 380;
-  readonly defaultH = 280;
+  readonly defaultW = 420;
+  readonly defaultH = 300;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    this.shift = p.shift;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = {
+        x: p.world.x - this.defaultW / 2,
+        y: p.world.y - this.defaultH / 2,
+        w: this.defaultW,
+        h: this.defaultH,
+      };
+    } else if (this.shift) {
+      box = squareFromAnchor(this.start, this.cur);
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const id = store.addShape({
+      type: 'graph',
+      ...box,
+      fill: 'transparent',
+      stroke: settings.shape.stroke,
+      strokeWidth: 2.25,
+      expr: 'sin(x)',
+    });
+    this.start = null;
+    this.cur = null;
+    this.shift = false;
+    engine.openGraphEditor(id);
+    engine.setTool('select');
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const drawBox = this.previewBox();
+    if (!drawBox) return;
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = settings.shape.stroke;
+    ctx.fillStyle = 'transparent';
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([5 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 10);
+    ctx.stroke();
+    // Mini axes hint
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(drawBox.x + 16 * s, drawBox.y + drawBox.h - 16 * s);
+    ctx.lineTo(drawBox.x + drawBox.w - 12 * s, drawBox.y + drawBox.h - 16 * s);
+    ctx.moveTo(drawBox.x + 16 * s, drawBox.y + drawBox.h - 16 * s);
+    ctx.lineTo(drawBox.x + 16 * s, drawBox.y + 12 * s);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 export class DiamondTool extends BoxTool {
@@ -1077,7 +1176,8 @@ export class ArrowTool extends Tool {
       h: maxY - minY,
       fill: 'transparent',
       stroke: settings.shape.stroke,
-      strokeWidth: 2,
+      strokeWidth: settings.shape.strokeWidth,
+      arrowHead: settings.shape.arrowHead,
       points: [this.start.x, this.start.y, end.x, end.y],
     });
     this.start = null;
@@ -1100,11 +1200,12 @@ export class ArrowTool extends Tool {
     const bend = Math.min(30, len * 0.15);
     const cx = mx + nx * bend * 0.5, cy = my + ny * bend * 0.5;
     const ang = Math.atan2(by - cy, bx - cx);
+    const head = settings.shape.arrowHead;
     ctx.save();
     ctx.strokeStyle = settings.shape.stroke;
     ctx.fillStyle = settings.shape.stroke;
     ctx.globalAlpha = 0.85;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = settings.shape.strokeWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.shadowColor = 'rgba(0,0,0,0.2)';
@@ -1114,7 +1215,6 @@ export class ArrowTool extends Tool {
     ctx.quadraticCurveTo(cx, cy, bx, by);
     ctx.stroke();
     ctx.shadowColor = 'transparent';
-    const head = 10;
     const hx1 = bx - head * Math.cos(ang - 0.42), hy1 = by - head * Math.sin(ang - 0.42);
     const hx2 = bx - head * Math.cos(ang + 0.42), hy2 = by - head * Math.sin(ang + 0.42);
     ctx.beginPath();

@@ -10,6 +10,8 @@ export interface AppPrefs {
   adaptInkToPaper: boolean;
   /** Multiplier for on-canvas tool cursors (0.7–1.8). */
   toolCursorScale: number;
+  /** Chrome UI size multiplier (0.75–1.5). Does not affect the board canvas. */
+  uiScale: number;
   /** Per-tool hover motion on the toolbelt. */
   toolHoverAnim: boolean;
   /**
@@ -19,6 +21,11 @@ export interface AppPrefs {
   paperBg: string | null;
   /** Snap neat freehand strokes to rect / ellipse / line / arrow. */
   recognizeShapes: boolean;
+  /**
+   * Soft-snap rotation to horizontal / vertical when close (Miro-style).
+   * Off = always free. Shift while rotating also bypasses the magnet.
+   */
+  rotateSnap: boolean;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -27,13 +34,17 @@ const DEFAULTS: AppPrefs = {
   saveRemoteBoards: false,
   adaptInkToPaper: true,
   toolCursorScale: 1,
+  uiScale: 1,
   toolHoverAnim: true,
   paperBg: null,
   recognizeShapes: false,
+  rotateSnap: true,
 };
 
 const CURSOR_SCALE_MIN = 0.7;
 const CURSOR_SCALE_MAX = 1.8;
+const UI_SCALE_MIN = 0.75;
+const UI_SCALE_MAX = 1.5;
 
 type Listener = (prefs: AppPrefs) => void;
 const listeners = new Set<Listener>();
@@ -43,6 +54,16 @@ let cached: AppPrefs | null = null;
 function clampCursorScale(n: number): number {
   if (!Number.isFinite(n)) return DEFAULTS.toolCursorScale;
   return Math.min(CURSOR_SCALE_MAX, Math.max(CURSOR_SCALE_MIN, Math.round(n * 100) / 100));
+}
+
+function clampUiScale(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULTS.uiScale;
+  return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, Math.round(n * 100) / 100));
+}
+
+/** Push `--ui-scale` so chrome CSS `zoom` picks it up. */
+export function applyUiScale(scale: number = readPrefs().uiScale): void {
+  document.documentElement.style.setProperty('--ui-scale', String(clampUiScale(scale)));
 }
 
 function emit(): void {
@@ -60,10 +81,12 @@ function parsePrefs(raw: unknown): AppPrefs {
       typeof parsed.adaptInkToPaper === 'boolean' ? parsed.adaptInkToPaper : DEFAULTS.adaptInkToPaper,
     toolCursorScale:
       typeof parsed.toolCursorScale === 'number' ? clampCursorScale(parsed.toolCursorScale) : DEFAULTS.toolCursorScale,
+    uiScale: typeof parsed.uiScale === 'number' ? clampUiScale(parsed.uiScale) : DEFAULTS.uiScale,
     toolHoverAnim: typeof parsed.toolHoverAnim === 'boolean' ? parsed.toolHoverAnim : DEFAULTS.toolHoverAnim,
     paperBg: typeof parsed.paperBg === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.paperBg) ? parsed.paperBg : null,
     recognizeShapes:
       typeof parsed.recognizeShapes === 'boolean' ? parsed.recognizeShapes : DEFAULTS.recognizeShapes,
+    rotateSnap: typeof parsed.rotateSnap === 'boolean' ? parsed.rotateSnap : DEFAULTS.rotateSnap,
   };
 }
 
@@ -89,6 +112,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     ...patch,
     toolCursorScale:
       patch.toolCursorScale !== undefined ? clampCursorScale(patch.toolCursorScale) : cur.toolCursorScale,
+    uiScale: patch.uiScale !== undefined ? clampUiScale(patch.uiScale) : cur.uiScale,
     paperBg:
       patch.paperBg === null
         ? null
@@ -104,6 +128,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
   } catch {
     /* ignore */
   }
+  if (next.uiScale !== cur.uiScale) applyUiScale(next.uiScale);
   emit();
   return next;
 }
@@ -115,4 +140,4 @@ export function onPrefsChange(cb: Listener): () => void {
   };
 }
 
-export { CURSOR_SCALE_MIN, CURSOR_SCALE_MAX };
+export { CURSOR_SCALE_MIN, CURSOR_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_MAX };

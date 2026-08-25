@@ -8,6 +8,11 @@ import {
   updatePenSettings,
   updateShapeSettings,
   updateTextSettings,
+  ARROW_HEAD_MAX,
+  ARROW_HEAD_MIN,
+  RECT_CORNER_RADIUS,
+  SHAPE_STROKE_MAX,
+  SHAPE_STROKE_MIN,
   type EraserSettings,
   type PenSettings,
   type ShapeSettings,
@@ -21,6 +26,7 @@ import type { EditTarget } from '../engine/Engine';
 import { t } from './i18n';
 import { Icon, type IconName } from './icons';
 import { MOTION, useExitPresence } from './motion';
+import { hasFill } from '../core/shapes';
 
 const PEN_COLORS = ['#eceae4', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#c4b8a8', '#ff9fd0'];
 const FILL_COLORS = ['#ffffff', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#e8e2d6', '#ff9fd0'];
@@ -29,9 +35,9 @@ const STROKE_COLORS = ['#6b6b66', '#1c1c1a', '#ffffff', '#ff6b6b', '#4cd964', '#
 const TEXT_COLORS = ['#eceae4', '#ffe27a', '#4cd964', '#ff6b6b', '#ffa94d', '#c4a35a', '#6b6b66', '#1c1c1a'];
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const ERASER_SIZES = [16, 32, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph'];
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
@@ -305,24 +311,49 @@ export function StyleBar({
   const strokeTargets = selected.filter((v) => STROKE_TYPES.has(v.type) && !v.locked);
   const textTargets = selected.filter((v) => TEXT_TYPES.has(v.type) && !v.locked);
   const penTargets = selected.filter((v) => v.type === 'pen' && !v.locked);
+  const rectTargets = selected.filter((v) => v.type === 'rect' && !v.locked);
+  const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
+  const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
 
   const showFill = showShapeDraw || fillTargets.length > 0;
   const showStroke = showShapeDraw || showPen || strokeTargets.length > 0 || penTargets.length > 0;
   const showText = showTextDraw || textTargets.length > 0;
   const showPenStyle = showPen || (penTargets.length > 0 && fillTargets.length === 0 && textTargets.length === 0);
+  const showOutlineWidth =
+    (showShapeDraw && tool !== 'sticky' && tool !== 'graph') || outlineTargets.length > 0;
+  const showCorners = tool === 'rect' || rectTargets.length > 0;
+  const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
 
   const want = showEraser || showFill || showStroke || showText || showPenStyle;
   const shown = useExitPresence(want, MOTION.enter);
-  const flags = { showEraser, showFill, showStroke, showText, showPenStyle };
+  const flags = { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;
-  const mode = [view.showEraser, view.showPenStyle, view.showFill, view.showStroke, view.showText].map(Number).join('');
+  const mode = [
+    view.showEraser,
+    view.showPenStyle,
+    view.showFill,
+    view.showStroke,
+    view.showText,
+    view.showOutlineWidth,
+    view.showCorners,
+    view.showArrowHead,
+  ]
+    .map(Number)
+    .join('');
 
   if (!shown) return null;
 
-  const fillValue = fillTargets[0]?.fill ?? shape.fill;
+  const fillValue = fillTargets[0]?.fill ?? (shape.filled ? shape.fill : 'transparent');
+  const fillOn = hasFill(fillValue);
   const strokeValue = strokeTargets[0]?.stroke ?? penTargets[0]?.stroke ?? (showPen ? pen.color : shape.stroke);
+  const outlineWidth = outlineTargets[0]?.strokeWidth ?? shape.strokeWidth;
+  const cornersRound =
+    rectTargets.length > 0
+      ? rectTargets.every((v) => (v.cornerRadius === undefined ? true : v.cornerRadius > 0))
+      : shape.rounded;
+  const arrowHeadValue = arrowTargets[0]?.arrowHead ?? shape.arrowHead;
 
   const live = editTarget
     ? {
@@ -496,17 +527,71 @@ export function StyleBar({
       {view.showFill && (
         <>
           <span className="panel-label">{t(locale, 'fill')}</span>
+          <button
+            type="button"
+            className={`style-btn style-btn-icon${!fillOn ? ' active' : ''}`}
+            title={t(locale, 'noFill')}
+            aria-label={t(locale, 'noFill')}
+            aria-pressed={!fillOn}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              updateShapeSettings({ filled: false });
+              if (fillTargets.length) {
+                patchShapes(fillTargets.map((v) => [v.id, { fill: 'transparent' }]));
+                onPatched();
+              }
+            }}
+          >
+            <Icon name="noFill" size={16} />
+          </button>
           <Swatches
             colors={FILL_COLORS}
-            value={fillValue}
+            value={fillOn ? fillValue : ''}
             onPick={(c) => {
-              updateShapeSettings({ fill: c });
+              updateShapeSettings({ fill: c, filled: true });
               if (fillTargets.length) {
                 patchShapes(fillTargets.map((v) => [v.id, { fill: c }]));
                 onPatched();
               }
             }}
           />
+        </>
+      )}
+      {view.showCorners && (
+        <>
+          <div className="toolbelt-sep" />
+          <button
+            type="button"
+            className={`style-btn${!cornersRound ? ' active' : ''}`}
+            title={t(locale, 'cornersSharp')}
+            aria-pressed={!cornersRound}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              updateShapeSettings({ rounded: false });
+              if (rectTargets.length) {
+                patchShapes(rectTargets.map((v) => [v.id, { cornerRadius: 0 }]));
+                onPatched();
+              }
+            }}
+          >
+            {t(locale, 'cornersSharp')}
+          </button>
+          <button
+            type="button"
+            className={`style-btn${cornersRound ? ' active' : ''}`}
+            title={t(locale, 'cornersRound')}
+            aria-pressed={cornersRound}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              updateShapeSettings({ rounded: true });
+              if (rectTargets.length) {
+                patchShapes(rectTargets.map((v) => [v.id, { cornerRadius: RECT_CORNER_RADIUS }]));
+                onPatched();
+              }
+            }}
+          >
+            {t(locale, 'cornersRound')}
+          </button>
         </>
       )}
       {view.showStroke && (
@@ -537,6 +622,51 @@ export function StyleBar({
               }}
             />
           )}
+        </>
+      )}
+      {view.showOutlineWidth && (
+        <>
+          <input
+            className="size-slider"
+            type="range"
+            min={SHAPE_STROKE_MIN}
+            max={SHAPE_STROKE_MAX}
+            value={outlineWidth}
+            title={t(locale, 'strokeWidth')}
+            aria-label={t(locale, 'strokeWidth')}
+            onChange={(e) => {
+              const strokeWidth = Number(e.target.value);
+              updateShapeSettings({ strokeWidth });
+              if (outlineTargets.length) {
+                patchShapes(outlineTargets.map((v) => [v.id, { strokeWidth }]));
+                onPatched();
+              }
+            }}
+          />
+          <span className="size-value">{outlineWidth}</span>
+        </>
+      )}
+      {view.showArrowHead && (
+        <>
+          <span className="panel-label">{t(locale, 'arrowHead')}</span>
+          <input
+            className="size-slider"
+            type="range"
+            min={ARROW_HEAD_MIN}
+            max={ARROW_HEAD_MAX}
+            value={arrowHeadValue}
+            title={t(locale, 'arrowHead')}
+            aria-label={t(locale, 'arrowHead')}
+            onChange={(e) => {
+              const arrowHead = Number(e.target.value);
+              updateShapeSettings({ arrowHead });
+              if (arrowTargets.length) {
+                patchShapes(arrowTargets.map((v) => [v.id, { arrowHead }]));
+                onPatched();
+              }
+            }}
+          />
+          <span className="size-value">{arrowHeadValue}</span>
         </>
       )}
       {view.showText && (

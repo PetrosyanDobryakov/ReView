@@ -9,6 +9,38 @@ export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
+/** Screen-space stem length from the top edge to the rotate knob. */
+export const ROTATE_HANDLE_OFFSET_PX = 44;
+
+/** Degrees from a board axis (0/90/180/270) before the magnet pulls in. */
+export const ROTATE_MAGNET_DEG = 7;
+
+const ROTATE_AXES = [0, 90, 180, 270] as const;
+
+/**
+ * Miro-style rotation: free everywhere, soft-snap only when close to a
+ * horizontal or vertical board axis. `free` skips the magnet entirely.
+ */
+export function snapRotationDeg(deg: number, free: boolean, threshold = ROTATE_MAGNET_DEG): number {
+  if (free || threshold <= 0) return deg;
+  const a = ((deg % 360) + 360) % 360;
+  let nearest = 0;
+  let best = Infinity;
+  for (const ax of ROTATE_AXES) {
+    let d = Math.abs(a - ax);
+    if (d > 180) d = 360 - d;
+    if (d < best) {
+      best = d;
+      nearest = ax;
+    }
+  }
+  if (best > threshold) return deg;
+  let diff = nearest - a;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return deg + diff;
+}
+
 export function shapeCenter(v: ShapeBox): { x: number; y: number } {
   return { x: v.x + v.w / 2, y: v.y + v.h / 2 };
 }

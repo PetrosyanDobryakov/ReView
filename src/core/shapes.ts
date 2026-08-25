@@ -25,6 +25,10 @@ export interface ShapeView {
   points?: number[];
   /** Parallel to points (pairs): stylus pressure 0..1 per vertex for pens. */
   pressures?: number[];
+  /** Rect corner radius in world units. `0` = sharp; omit defaults to rounded. */
+  cornerRadius?: number;
+  /** Arrow head length in world units. Omit → derived from strokeWidth. */
+  arrowHead?: number;
   /** Degrees clockwise. Box shapes render rotated; pens/arrows bake into points. */
   rotation?: number;
   alpha?: number;
@@ -168,6 +172,23 @@ export const PEN_STROKE = 3;
 export const STICKY_FONT = 16;
 export const TEXT_FONT = 18;
 export const SHAPE_FONT = 16;
+/** Legacy default for rects drawn before the sharp/rounded option existed. */
+export const DEFAULT_RECT_RADIUS = 6;
+
+export function hasFill(fill: string | undefined): boolean {
+  return !!fill && fill !== 'transparent' && fill !== 'none';
+}
+
+export function rectCornerRadius(v: Pick<ShapeView, 'cornerRadius' | 'w' | 'h'>): number {
+  const raw = v.cornerRadius === undefined ? DEFAULT_RECT_RADIUS : Math.max(0, v.cornerRadius);
+  if (raw <= 0) return 0;
+  return Math.min(raw, Math.abs(v.w) / 2, Math.abs(v.h) / 2);
+}
+
+export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
+  if (typeof v.arrowHead === 'number' && v.arrowHead > 0) return v.arrowHead;
+  return Math.max(10, v.strokeWidth * 3.5);
+}
 
 export function normalizeBox(a: { x: number; y: number }, b: { x: number; y: number }): ShapeBox {
   return {
@@ -374,7 +395,7 @@ export function arrowBounds(v: ShapeView): ShapeBox {
   if (!curve) return { x: v.x, y: v.y, w: v.w, h: v.h };
 
   const points = sampleArrowCurve(curve);
-  const head = Math.max(10, v.strokeWidth * 3.5);
+  const head = arrowHeadLength(v);
   points.push(
     curve.end.x - head * Math.cos(curve.endAngle - 0.42),
     curve.end.y - head * Math.sin(curve.endAngle - 0.42),
@@ -544,6 +565,93 @@ function pointNearPolyline(pts: number[], px: number, py: number, tol: number): 
   return false;
 }
 
+/** True only when stylus pressure actually changes — mice report a flat ~0.5. */
+export function pressureVaries(pressures: number[] | undefined, pointCount: number): boolean {
+  if (!pressures || pressures.length < 2 || pressures.length < pointCount) return false;
+  let min = 1;
+  let max = 0;
+  for (let i = 0; i < pointCount; i++) {
+    const p = pressures[i] ?? 0.5;
+    if (p < min) min = p;
+    if (p > max) max = p;
+  }
+  return max - min > 0.08;
+}
+
+function strokeHalfWidth(base: number, pressure: number): number {
+  return Math.max(0.25, (base * (0.35 + 0.65 * pressure)) / 2);
+}
+
+/** Smooth quadratic polyline (constant width). */
+function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: number[], width: number): void {
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(pts[0], pts[1]);
+  if (pts.length === 4) {
+    ctx.lineTo(pts[2], pts[3]);
+  } else {
+    for (let i = 2; i < pts.length - 2; i += 2) {
+      const xc = (pts[i] + pts[i + 2]) / 2;
+      const yc = (pts[i + 1] + pts[i + 3]) / 2;
+      ctx.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
+    }
+    const n = pts.length - 4;
+    ctx.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Variable-width ribbon from stylus pressure.
+ * Filled outline + end caps — avoids the faceted look of per-segment lineTo strokes.
+ */
+function strokePressureRibbon(
+  ctx: CanvasRenderingContext2D,
+  pts: number[],
+  width: number,
+  pressures: number[]
+): void {
+  const n = pts.length / 2;
+  if (n < 2) return;
+  const leftX: number[] = [];
+  const leftY: number[] = [];
+  const rightX: number[] = [];
+  const rightY: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = pts[i * 2];
+    const y = pts[i * 2 + 1];
+    const r = strokeHalfWidth(width, pressures[i] ?? 0.5);
+    const i0 = Math.max(0, i - 1);
+    const i1 = Math.min(n - 1, i + 1);
+    let tx = pts[i1 * 2] - pts[i0 * 2];
+    let ty = pts[i1 * 2 + 1] - pts[i0 * 2 + 1];
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len;
+    ty /= len;
+    leftX.push(x - ty * r);
+    leftY.push(y + tx * r);
+    rightX.push(x + ty * r);
+    rightY.push(y - tx * r);
+  }
+  ctx.beginPath();
+  ctx.moveTo(leftX[0], leftY[0]);
+  for (let i = 1; i < n; i++) ctx.lineTo(leftX[i], leftY[i]);
+  for (let i = n - 1; i >= 0; i--) ctx.lineTo(rightX[i], rightY[i]);
+  ctx.closePath();
+  ctx.fill();
+  // Round caps so ends match the smooth constant-width path.
+  ctx.beginPath();
+  ctx.arc(pts[0], pts[1], strokeHalfWidth(width, pressures[0] ?? 0.5), 0, Math.PI * 2);
+  ctx.arc(
+    pts[pts.length - 2],
+    pts[pts.length - 1],
+    strokeHalfWidth(width, pressures[n - 1] ?? 0.5),
+    0,
+    Math.PI * 2
+  );
+  ctx.fill();
+}
+
 export function drawPenStroke(
   ctx: CanvasRenderingContext2D,
   pts: number[],
@@ -559,43 +667,18 @@ export function drawPenStroke(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   if (pts.length === 2) {
-    const w = pressures?.length ? width * (0.35 + 0.65 * (pressures[0] ?? 0.5)) : width;
+    const useP = pressureVaries(pressures, 1);
+    const w = useP ? width * (0.35 + 0.65 * (pressures![0] ?? 0.5)) : width;
     ctx.beginPath();
     ctx.arc(pts[0], pts[1], w / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     return;
   }
-  const usePressure = Boolean(pressures && pressures.length >= pts.length / 2);
-  if (!usePressure) {
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    ctx.moveTo(pts[0], pts[1]);
-    if (pts.length === 4) {
-      ctx.lineTo(pts[2], pts[3]);
-    } else {
-      for (let i = 2; i < pts.length - 2; i += 2) {
-        const xc = (pts[i] + pts[i + 2]) / 2;
-        const yc = (pts[i + 1] + pts[i + 3]) / 2;
-        ctx.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
-      }
-      const n = pts.length - 4;
-      ctx.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
-    }
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
-  // Variable-width segments from stylus pressure.
-  for (let i = 0; i < pts.length - 2; i += 2) {
-    const p0 = pressures![i / 2] ?? 0.5;
-    const p1 = pressures![i / 2 + 1] ?? p0;
-    const w = width * (0.35 + 0.65 * ((p0 + p1) / 2));
-    ctx.beginPath();
-    ctx.lineWidth = Math.max(0.5, w);
-    ctx.moveTo(pts[i], pts[i + 1]);
-    ctx.lineTo(pts[i + 2], pts[i + 3]);
-    ctx.stroke();
+  if (pressureVaries(pressures, pts.length / 2)) {
+    strokePressureRibbon(ctx, pts, width, pressures!);
+  } else {
+    strokeSmoothPath(ctx, pts, width);
   }
   ctx.restore();
 }
@@ -741,23 +824,29 @@ export function drawShape(
   }
   switch (v.type) {
     case 'rect': {
-      ctx.fillStyle = v.fill;
       ctx.strokeStyle = v.stroke;
       ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
-      ctx.roundRect(v.x, v.y, v.w, v.h, 6);
-      ctx.fill();
+      const rr = rectCornerRadius(v);
+      if (rr > 0) ctx.roundRect(v.x, v.y, v.w, v.h, rr);
+      else ctx.rect(v.x, v.y, v.w, v.h);
+      if (hasFill(v.fill)) {
+        ctx.fillStyle = v.fill;
+        ctx.fill();
+      }
       ctx.stroke();
       if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'ellipse': {
-      ctx.fillStyle = v.fill;
       ctx.strokeStyle = v.stroke;
       ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w / 2, v.h / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
+      if (hasFill(v.fill)) {
+        ctx.fillStyle = v.fill;
+        ctx.fill();
+      }
       ctx.stroke();
       if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
@@ -1079,51 +1168,152 @@ export function drawShape(
       break;
     }
     case 'graph':
-      drawGraph(ctx, v);
+      drawGraph(ctx, v, boardBg);
       break;
   }
 }
 
 const GRAPH_X_RANGE = 10;
+/** Default spawn size — chrome scale is relative to this. */
+const GRAPH_REF_W = 420;
+const GRAPH_REF_H = 300;
 
-function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView): void {
-  const size = Math.max(11, (v.fontSize ?? TEXT_FONT) * 0.8);
+function graphPanelFill(boardBg: string, shapeFill: string): string {
+  // Prefer an explicit fill when the user set one; otherwise lift slightly off the paper.
+  if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
+  const lum = relativeLuminance(boardBg);
+  if (lum == null) return '#2e2e2b';
+  return lum > 0.5 ? '#ffffff' : '#2a2a27';
+}
+
+function graphAxisInk(boardBg: string): { grid: string; axis: string; label: string; border: string } {
+  const lum = relativeLuminance(boardBg) ?? 0.1;
+  if (lum > 0.5) {
+    return {
+      grid: 'rgba(28, 28, 26, 0.08)',
+      axis: 'rgba(28, 28, 26, 0.45)',
+      label: 'rgba(28, 28, 26, 0.55)',
+      border: 'rgba(28, 28, 26, 0.18)',
+    };
+  }
+  return {
+    grid: 'rgba(236, 234, 228, 0.1)',
+    axis: 'rgba(236, 234, 228, 0.55)',
+    label: 'rgba(236, 234, 228, 0.72)',
+    border: 'rgba(236, 234, 228, 0.18)',
+  };
+}
+
+/** Font / pad / tick density all track the graph frame so stretch stays readable. */
+function graphChrome(v: ShapeView): {
+  scale: number;
+  labelSize: number;
+  pad: { left: number; right: number; top: number; bottom: number };
+  tickLen: number;
+  axisW: number;
+  borderW: number;
+  radius: number;
+  titlePad: number;
+  /** Target world-px between major ticks — larger frame → denser steps. */
+  targetTickPx: number;
+} {
+  const areaScale = Math.sqrt((Math.max(80, v.w) * Math.max(60, v.h)) / (GRAPH_REF_W * GRAPH_REF_H));
+  const scale = Math.min(2.4, Math.max(0.5, areaScale));
+  const labelSize = Math.round(Math.min(24, Math.max(9, 12 * scale)));
+  return {
+    scale,
+    labelSize,
+    pad: {
+      left: Math.round(Math.max(26, 38 * scale)),
+      right: Math.round(Math.max(10, 14 * scale)),
+      top: Math.round(Math.max(20, 28 * scale)),
+      bottom: Math.round(Math.max(20, 30 * scale)),
+    },
+    tickLen: Math.max(3, 4 * scale),
+    axisW: Math.max(1, 1.2 * scale),
+    borderW: Math.max(1, 1.25 * scale),
+    radius: Math.max(6, Math.min(16, 10 * scale)),
+    titlePad: Math.max(8, 10 * scale),
+    // ~56px at default size; grows slowly so big frames get finer ticks without clutter.
+    targetTickPx: Math.max(32, Math.min(80, 56 * Math.sqrt(scale))),
+  };
+}
+
+function formatTick(n: number, step: number): string {
+  if (!isFinite(n) || Math.abs(n) < step * 1e-6) return '0';
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
+  return String(+n.toFixed(decimals));
+}
+
+/** Pick a nice step so ticks land ~every `targetPx` along `spanPx` for a value span. */
+function stepForSpan(valueSpan: number, spanPx: number, targetPx: number): number {
+  const slots = Math.max(2, spanPx / Math.max(24, targetPx));
+  return niceStep(valueSpan / slots);
+}
+
+function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string): void {
+  const chrome = graphChrome(v);
+  const { labelSize, pad, tickLen, axisW, borderW, radius, titlePad, targetTickPx } = chrome;
+  const plot = {
+    x: v.x + pad.left,
+    y: v.y + pad.top,
+    w: Math.max(20, v.w - pad.left - pad.right),
+    h: Math.max(20, v.h - pad.top - pad.bottom),
+  };
+  const panel = graphPanelFill(boardBg, v.fill);
+  const ink = graphAxisInk(boardBg);
+  const curve = displayInk(v.stroke || COLORS.stroke, boardBg);
+  const themeText = themeFor(boardBg).text;
+
   ctx.save();
+  // Card
   ctx.beginPath();
-  ctx.roundRect(v.x, v.y, v.w, v.h, 10);
-  ctx.fillStyle = '#15171f';
+  ctx.roundRect(v.x, v.y, v.w, v.h, radius);
+  ctx.fillStyle = panel;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = ink.border;
+  ctx.lineWidth = borderW;
   ctx.stroke();
-  ctx.clip();
 
   const compiled = compileGraph(v.expr ?? '');
-  const toPxX = (t: number) => v.x + ((t + GRAPH_X_RANGE) / (2 * GRAPH_X_RANGE)) * v.w;
-  const toT = (px: number) => ((px - v.x) / v.w) * 2 * GRAPH_X_RANGE - GRAPH_X_RANGE;
+  const exprLabel = `y = ${(v.expr ?? '').trim() || '…'}`;
+
+  // Title chip (outside the clipped plot)
+  ctx.fillStyle = themeText;
+  ctx.globalAlpha = 0.72;
+  ctx.font = `600 ${labelSize}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(exprLabel, v.x + titlePad, v.y + titlePad * 0.8, v.w - titlePad * 2);
+  ctx.globalAlpha = 1;
 
   if (compiled.error !== undefined || !v.expr?.trim()) {
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = `${size}px ${BOARD_TYPEFACE}`;
+    ctx.fillStyle = themeText;
+    ctx.globalAlpha = 0.55;
+    ctx.font = `${labelSize + 1}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
-      compiled.error ? `⚠ ${compiled.error}` : 'y = f(x)',
-      v.x + v.w / 2,
-      v.y + v.h / 2
+      compiled.error ? compiled.error : 'y = f(x)',
+      plot.x + plot.w / 2,
+      plot.y + plot.h / 2,
+      plot.w - 8
     );
-    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
     ctx.restore();
     return;
   }
 
+  const toPxX = (t: number) => plot.x + ((t + GRAPH_X_RANGE) / (2 * GRAPH_X_RANGE)) * plot.w;
+  const toT = (px: number) => ((px - plot.x) / plot.w) * 2 * GRAPH_X_RANGE - GRAPH_X_RANGE;
+
   let lo = Infinity;
   let hi = -Infinity;
-  const N = Math.max(80, Math.min(400, Math.round(v.w)));
+  const N = Math.max(80, Math.min(640, Math.round(plot.w * 1.25)));
   const ts: number[] = [];
   const ys: number[] = [];
   for (let i = 0; i <= N; i++) {
-    const t = toT(v.x + (i / N) * v.w);
+    const t = toT(plot.x + (i / N) * plot.w);
     const y = compiled.fn(t);
     ts.push(t);
     ys.push(y);
@@ -1140,67 +1330,79 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView): void {
     lo -= 1;
     hi += 1;
   } else {
-    const pad = (hi - lo) * 0.12;
-    lo -= pad;
-    hi += pad;
+    const padY = (hi - lo) * 0.1;
+    lo -= padY;
+    hi += padY;
   }
-  const toPxY = (val: number) => v.y + (1 - (val - lo) / (hi - lo)) * v.h;
+  // Prefer including y=0 when the range is small enough to stay readable.
+  if (lo > 0 && lo < (hi - lo) * 0.35) lo = 0;
+  if (hi < 0 && -hi < (hi - lo) * 0.35) hi = 0;
 
-  // grid + axes with tick labels
-  const step = niceStep(Math.max(GRAPH_X_RANGE / 6, (hi - lo) / 8));
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-  ctx.lineWidth = 1;
+  const toPxY = (val: number) => plot.y + (1 - (val - lo) / (hi - lo)) * plot.h;
+
+  // Tick density follows frame size: stretch → finer (e.g. 2 → 1).
+  const xStep = stepForSpan(2 * GRAPH_X_RANGE, plot.w, targetTickPx);
+  const yStep = stepForSpan(hi - lo, plot.h, targetTickPx);
+
+  // Grid (clipped to plot)
+  ctx.save();
   ctx.beginPath();
-  for (let gx = Math.ceil(-GRAPH_X_RANGE / step) * step; gx <= GRAPH_X_RANGE; gx += step) {
-    if (Math.abs(gx) < 1e-9) continue;
+  ctx.rect(plot.x, plot.y, plot.w, plot.h);
+  ctx.clip();
+
+  ctx.strokeStyle = ink.grid;
+  ctx.lineWidth = Math.max(0.75, borderW * 0.7);
+  ctx.beginPath();
+  for (let gx = Math.ceil(-GRAPH_X_RANGE / xStep) * xStep; gx <= GRAPH_X_RANGE + 1e-9; gx += xStep) {
     const px = toPxX(gx);
-    ctx.moveTo(px, v.y);
-    ctx.lineTo(px, v.y + v.h);
+    ctx.moveTo(px, plot.y);
+    ctx.lineTo(px, plot.y + plot.h);
   }
-  for (let gy = Math.ceil(lo / step) * step; gy <= hi; gy += step) {
-    if (Math.abs(gy) < 1e-9) continue;
+  for (let gy = Math.ceil(lo / yStep) * yStep; gy <= hi + 1e-9; gy += yStep) {
     const py = toPxY(gy);
-    if (py < v.y - 1 || py > v.y + v.h + 1) continue;
-    ctx.moveTo(v.x, py);
-    ctx.lineTo(v.x + v.w, py);
+    if (py < plot.y - 0.5 || py > plot.y + plot.h + 0.5) continue;
+    ctx.moveTo(plot.x, py);
+    ctx.lineTo(plot.x + plot.w, py);
   }
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+
+  // Axes through origin when visible, else along the near edge of the plot.
+  ctx.strokeStyle = ink.axis;
+  ctx.lineWidth = axisW;
   ctx.beginPath();
-  const ax = toPxX(0);
-  if (ax >= v.x && ax <= v.x + v.w) {
-    ctx.moveTo(ax, v.y);
-    ctx.lineTo(ax, v.y + v.h);
+  let ax = toPxX(0);
+  if (ax < plot.x) ax = plot.x;
+  if (ax > plot.x + plot.w) ax = plot.x + plot.w;
+  let ay = toPxY(0);
+  if (ay < plot.y) ay = plot.y;
+  if (ay > plot.y + plot.h) ay = plot.y + plot.h;
+  ctx.moveTo(ax, plot.y);
+  ctx.lineTo(ax, plot.y + plot.h);
+  ctx.moveTo(plot.x, ay);
+  ctx.lineTo(plot.x + plot.w, ay);
+  ctx.stroke();
+
+  // Tick marks on axes
+  ctx.strokeStyle = ink.axis;
+  ctx.lineWidth = Math.max(0.75, axisW * 0.85);
+  ctx.beginPath();
+  for (let gx = Math.ceil(-GRAPH_X_RANGE / xStep) * xStep; gx <= GRAPH_X_RANGE + 1e-9; gx += xStep) {
+    const px = toPxX(gx);
+    if (px < plot.x + 1 || px > plot.x + plot.w - 1) continue;
+    ctx.moveTo(px, ay - tickLen);
+    ctx.lineTo(px, ay + tickLen);
   }
-  const ay = toPxY(0);
-  if (ay >= v.y && ay <= v.y + v.h) {
-    ctx.moveTo(v.x, ay);
-    ctx.lineTo(v.x + v.w, ay);
+  for (let gy = Math.ceil(lo / yStep) * yStep; gy <= hi + 1e-9; gy += yStep) {
+    const py = toPxY(gy);
+    if (py < plot.y + 1 || py > plot.y + plot.h - 1) continue;
+    ctx.moveTo(ax - tickLen, py);
+    ctx.lineTo(ax + tickLen, py);
   }
   ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.4)';
-  ctx.font = `${size}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  for (let gx = Math.ceil(-GRAPH_X_RANGE / step) * step; gx <= GRAPH_X_RANGE; gx += step) {
-    if (Math.abs(gx) < 1e-9) continue;
-    const px = toPxX(gx);
-    if (px < v.x + 12 || px > v.x + v.w - 12) continue;
-    const labelY = Math.max(v.y + 3, Math.min(v.y + v.h - size - 4, ay));
-    ctx.fillText(String(+gx.toFixed(4)), px, labelY + 2);
-  }
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  for (let gy = Math.ceil(lo / step) * step; gy <= hi; gy += step) {
-    if (Math.abs(gy) < 1e-9) continue;
-    const py = toPxY(gy);
-    if (py < v.y + size || py > v.y + v.h - size) continue;
-    ctx.fillText(String(+gy.toFixed(4)), ax + 4, py);
-  }
 
-  // curve
-  ctx.strokeStyle = '#7c8cff';
-  ctx.lineWidth = 2.25;
+  // Curve — stroke scales mildly with frame so it doesn't look hairline on huge cards.
+  ctx.strokeStyle = curve;
+  ctx.lineWidth = Math.max(1.5, (v.strokeWidth || 2) * Math.min(1.6, Math.max(0.85, chrome.scale)));
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.beginPath();
@@ -1213,7 +1415,7 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView): void {
       continue;
     }
     const py = toPxY(y);
-    if (started && Math.abs(py - prevPy) > v.h * 2) started = false;
+    if (started && Math.abs(py - prevPy) > plot.h * 2) started = false;
     if (!started) {
       ctx.moveTo(toPxX(ts[i]), py);
       started = true;
@@ -1223,6 +1425,49 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView): void {
     prevPy = py;
   }
   ctx.stroke();
+  ctx.restore(); // end plot clip
+
+  // Tick labels — skip if too close to neighbours (protects dense large frames).
+  ctx.fillStyle = ink.label;
+  ctx.font = `${labelSize}px ${BOARD_TYPEFACE}`;
+  const minLabelGap = labelSize * 1.6;
+
+  const xAxisAtBottom = ay >= plot.y + plot.h - 1.5;
+  const xLabelY = xAxisAtBottom ? ay - tickLen - 2 : plot.y + plot.h + Math.max(4, titlePad * 0.7);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = xAxisAtBottom ? 'bottom' : 'top';
+  let lastXLabel = -Infinity;
+  for (let gx = Math.ceil(-GRAPH_X_RANGE / xStep) * xStep; gx <= GRAPH_X_RANGE + 1e-9; gx += xStep) {
+    const px = toPxX(gx);
+    if (px < plot.x + labelSize || px > plot.x + plot.w - labelSize) continue;
+    if (px - lastXLabel < minLabelGap) continue;
+    ctx.fillText(formatTick(gx, xStep), px, xLabelY);
+    lastXLabel = px;
+  }
+
+  const yAxisAtLeft = ax <= plot.x + 1.5;
+  ctx.textAlign = yAxisAtLeft ? 'left' : 'right';
+  ctx.textBaseline = 'middle';
+  const yLabelX = yAxisAtLeft ? ax + tickLen + 4 : plot.x - Math.max(6, titlePad * 0.6);
+  let lastYLabel = -Infinity;
+  for (let gy = Math.ceil(lo / yStep) * yStep; gy <= hi + 1e-9; gy += yStep) {
+    const py = toPxY(gy);
+    if (py < plot.y + labelSize * 0.6 || py > plot.y + plot.h - labelSize * 0.6) continue;
+    if (Math.abs(py - lastYLabel) < minLabelGap) continue;
+    ctx.fillText(formatTick(gy, yStep), yLabelX, py);
+    lastYLabel = py;
+  }
+
+  // Axis names
+  ctx.fillStyle = ink.label;
+  ctx.font = `600 ${labelSize}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('x', v.x + v.w - titlePad, v.y + v.h - titlePad * 0.7);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('y', plot.x + Math.max(4, titlePad * 0.5), plot.y + Math.max(2, titlePad * 0.3));
+
   ctx.restore();
 }
 
@@ -1296,7 +1541,7 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   }
   ctx.stroke();
   ctx.shadowColor = 'transparent';
-  const head = Math.max(10, v.strokeWidth * 3.5);
+  const head = arrowHeadLength(v);
   const hx1 = curve.end.x - head * Math.cos(curve.endAngle - 0.42);
   const hy1 = curve.end.y - head * Math.sin(curve.endAngle - 0.42);
   const hx2 = curve.end.x - head * Math.cos(curve.endAngle + 0.42);
@@ -1321,7 +1566,9 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   if (v.type === 'ellipse') {
     ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w / 2, v.h / 2, 0, 0, Math.PI * 2);
   } else {
-    ctx.roundRect(v.x, v.y, v.w, v.h, 6);
+    const rr = rectCornerRadius(v);
+    if (rr > 0) ctx.roundRect(v.x, v.y, v.w, v.h, rr);
+    else ctx.rect(v.x, v.y, v.w, v.h);
   }
   ctx.clip();
   const ink = v.textColor ?? textColor;

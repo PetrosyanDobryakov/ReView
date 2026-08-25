@@ -9,6 +9,14 @@ export interface PenSettings {
 export interface ShapeSettings {
   fill: string;
   stroke: string;
+  /** Outline thickness for shapes / arrows. */
+  strokeWidth: number;
+  /** When false, new shapes get a transparent fill. */
+  filled: boolean;
+  /** Rounded corners for rectangles (sharp when false). */
+  rounded: boolean;
+  /** Arrow head length in world units. */
+  arrowHead: number;
 }
 
 export interface TextSettings {
@@ -29,6 +37,12 @@ export interface EraserSettings {
   mode: EraserMode;
 }
 
+export const SHAPE_STROKE_MIN = 1;
+export const SHAPE_STROKE_MAX = 16;
+export const ARROW_HEAD_MIN = 6;
+export const ARROW_HEAD_MAX = 48;
+export const RECT_CORNER_RADIUS = 6;
+
 export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSettings; eraser: EraserSettings } = {
   pen: {
     color: '#eceae4',
@@ -38,6 +52,10 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
   shape: {
     fill: '#ffffff',
     stroke: '#6b6b66',
+    strokeWidth: 2,
+    filled: true,
+    rounded: true,
+    arrowHead: 14,
   },
   text: {
     color: '#eceae4',
@@ -56,6 +74,10 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
 };
 
 const STORAGE_KEY = 'review-tool-settings';
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
 
 function persist(): void {
   try {
@@ -82,6 +104,18 @@ function restore(): void {
       const s = bag.shape as Record<string, unknown>;
       if (typeof s.fill === 'string') settings.shape.fill = s.fill;
       if (typeof s.stroke === 'string') settings.shape.stroke = s.stroke;
+      if (typeof s.strokeWidth === 'number') {
+        settings.shape.strokeWidth = clamp(s.strokeWidth, SHAPE_STROKE_MIN, SHAPE_STROKE_MAX);
+      }
+      if (typeof s.filled === 'boolean') settings.shape.filled = s.filled;
+      if (typeof s.rounded === 'boolean') settings.shape.rounded = s.rounded;
+      if (typeof s.arrowHead === 'number') {
+        settings.shape.arrowHead = clamp(s.arrowHead, ARROW_HEAD_MIN, ARROW_HEAD_MAX);
+      }
+      // Legacy: transparent fill stored without filled flag.
+      if (settings.shape.fill === 'transparent' || settings.shape.fill === 'none') {
+        settings.shape.filled = false;
+      }
     }
     if (bag.text && typeof bag.text === 'object') {
       const t = bag.text as Record<string, unknown>;
@@ -121,6 +155,12 @@ export function updatePenSettings(patch: Partial<PenSettings>): void {
 
 export function updateShapeSettings(patch: Partial<ShapeSettings>): void {
   Object.assign(settings.shape, patch);
+  if (typeof patch.strokeWidth === 'number') {
+    settings.shape.strokeWidth = clamp(patch.strokeWidth, SHAPE_STROKE_MIN, SHAPE_STROKE_MAX);
+  }
+  if (typeof patch.arrowHead === 'number') {
+    settings.shape.arrowHead = clamp(patch.arrowHead, ARROW_HEAD_MIN, ARROW_HEAD_MAX);
+  }
   persist();
   emit();
 }
@@ -142,6 +182,11 @@ export function onSettingsChange(l: Listener): () => void {
   return () => {
     listeners.delete(l);
   };
+}
+
+/** Fill string for newly drawn shapes (honours the no-fill toggle). */
+export function shapeFillValue(): string {
+  return settings.shape.filled ? settings.shape.fill : 'transparent';
 }
 
 export function effectivePen(): { color: string; width: number; alpha: number } {

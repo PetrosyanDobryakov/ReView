@@ -25,6 +25,8 @@ import type { SyncStatus } from '../core/store';
 import {
   CURSOR_SCALE_MAX,
   CURSOR_SCALE_MIN,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
   readPrefs,
   writePrefs,
   type AppPrefs,
@@ -370,6 +372,18 @@ export function SettingsSheet({
                   <SwapText text={t(locale, 'advanced')} />
                 </h3>
                 <label className="sheet-range">
+                  <span>{t(locale, 'uiScale')}</span>
+                  <input
+                    type="range"
+                    min={UI_SCALE_MIN}
+                    max={UI_SCALE_MAX}
+                    step={0.05}
+                    value={prefs.uiScale}
+                    onChange={(e) => patchPrefs({ uiScale: Number(e.target.value) })}
+                  />
+                  <span className="sheet-range-value">{Math.round(prefs.uiScale * 100)}%</span>
+                </label>
+                <label className="sheet-range">
                   <span>{t(locale, 'toolCursorSize')}</span>
                   <input
                     type="range"
@@ -408,6 +422,12 @@ export function SettingsSheet({
                   </li>
                   <li>
                     {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'rotateSnap')} <span>{t(locale, 'rotateSnapGesture')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'rotateFree')} <span>{t(locale, 'rotateFreeHint')}</span>
                   </li>
                   <li>
                     {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
@@ -648,6 +668,21 @@ export function SettingsSheet({
                   </button>
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'recognizeShapesHint')} />
+                  </p>
+                  <button
+                    type="button"
+                    className={`sheet-switch${prefs.rotateSnap ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={prefs.rotateSnap}
+                    onClick={() => patchPrefs({ rotateSnap: !prefs.rotateSnap })}
+                  >
+                    <span>{t(locale, 'rotateSnap')}</span>
+                    <span className="switch" aria-hidden="true">
+                      <span className="switch-thumb" />
+                    </span>
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'rotateSnapHint')} />
                   </p>
                 </section>
               )}

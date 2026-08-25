@@ -35,6 +35,7 @@
   --chrome-type: 15px;
   --chrome-type-title: 16px;
   --chrome-type-head: 18px;
+  --ui-scale: 1;
 }
 
 [data-chrome-theme='archive'] {
@@ -230,6 +231,21 @@ body {
 .app .toolbelt,
 .app .style-island {
   transition: opacity var(--chrome-dur-move) var(--chrome-ease);
+}
+
+/* Scale chrome islands/modals; leave the board canvas unscaled. */
+.file-bar,
+.toolbelt,
+.style-island,
+.align-island,
+.page-bar,
+.sheet-root,
+.home-root,
+.ctx-menu,
+.info-modal,
+.drop-overlay,
+.export-root {
+  zoom: var(--ui-scale);
 }
 
 .app.settings-open .file-bar,
@@ -2249,27 +2265,86 @@ h3 .swap-text,
 .graph-editor {
   position: absolute;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 10px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--chrome-radius);
   background: var(--chrome-panel);
   border: 1px solid var(--chrome-border);
   box-shadow: var(--chrome-shadow);
   z-index: 30;
+  min-width: 300px;
+  max-width: min(420px, calc(100vw - 24px));
+}
+.graph-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .graph-editor-label {
   color: var(--chrome-accent-strong);
   font-weight: 600;
+  font-size: var(--chrome-type-label);
   font-family: "Space Grotesk", Onest, system-ui, sans-serif;
+  flex-shrink: 0;
 }
 .graph-editor input {
-  width: 260px;
-  background: none;
-  border: none;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--chrome-panel-2);
+  border: 1px solid var(--chrome-border-soft);
+  border-radius: 8px;
   outline: none;
   color: var(--chrome-text);
-  font: 14px/1.2 monospace;
+  font: 500 14px/1.2 "Space Grotesk", Onest, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+.graph-editor input:focus-visible {
+  outline: 2px solid var(--chrome-accent);
+  outline-offset: 1px;
+}
+.graph-editor-hint,
+.graph-editor-error {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--chrome-text-dim);
+}
+.graph-editor-error {
+  color: var(--chrome-danger);
+}
+.graph-editor-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.graph-preset {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--chrome-border-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chrome-text-dim);
+  font: 500 12px/1 "Space Grotesk", Onest, system-ui, sans-serif;
+  cursor: pointer;
+  transition:
+    background-color var(--chrome-dur-fast) var(--chrome-ease),
+    color var(--chrome-dur-fast) var(--chrome-ease),
+    border-color var(--chrome-dur-fast) var(--chrome-ease);
+}
+.graph-preset:hover {
+  background: var(--chrome-panel-2);
+  color: var(--chrome-text);
+}
+.graph-preset.is-active {
+  background: var(--chrome-active-bg);
+  color: var(--chrome-accent-strong);
+  border-color: transparent;
+}
+.graph-preset:focus-visible {
+  outline: 2px solid var(--chrome-accent);
+  outline-offset: 1px;
 }
 
 /* --- page bar --- */
@@ -2583,8 +2658,8 @@ h3 .swap-text,
     minmax(72px, 96px)
     104px
     40px
-    minmax(88px, 112px)
-    168px;
+    minmax(100px, 128px)
+    120px;
   align-items: center;
   column-gap: 10px;
   row-gap: 0;
@@ -2818,7 +2893,7 @@ h3 .swap-text,
 /* Collapse by list width, not viewport — sidebar eats horizontal space. */
 @container home-list (max-width: 720px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 104px 40px 168px;
+    grid-template-columns: 28px minmax(0, 1fr) 104px 40px 120px;
   }
   .board-col-team,
   .board-col-date {
@@ -2827,7 +2902,7 @@ h3 .swap-text,
 }
 @container home-list (max-width: 520px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 168px;
+    grid-template-columns: 28px minmax(0, 1fr) 120px;
   }
   .board-col-team,
   .board-col-date,
@@ -2838,7 +2913,7 @@ h3 .swap-text,
 }
 @container home-list (max-width: 420px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 132px;
+    grid-template-columns: 28px minmax(0, 1fr) 112px;
   }
   .board-row-head {
     display: none;

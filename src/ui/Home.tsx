@@ -433,13 +433,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           {t(locale, 'saveBoard')}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="style-btn board-row-cta"
-                        onClick={() => navigate(boardUrl(b.id))}
-                      >
-                        {t(locale, 'openBoard')}
-                      </button>
                       <span className="board-row-tools">
                         <button
                           type="button"
