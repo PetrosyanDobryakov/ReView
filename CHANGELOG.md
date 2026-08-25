@@ -2,6 +2,13 @@
 
 ## 0.12.0 — unreleased
 
+### Documents
+- Insert PDF/TXT as a multi-page document object; flip pages with on-canvas arrows and a page counter (up to 60 pages, rendered to page images at import).
+- TXT pages are typeset onto A-ratio paper to match the PDF look.
+- New toolbar button next to image insert; pdf.js loads lazily only when importing.
+- Single upload button now accepts images and documents; files can also be dragged onto the window (drop overlay included).
+- Double-click no longer opens the text editor (image crop and graph editor keep their double-click actions).
+
 ### Board & toolbar
 - Custom board paper color: color picker under the background presets in settings.
 - Insert-image button now uses an upload-style icon.

@@ -811,6 +811,7 @@ export class Engine {
         sticky: 'infoSticky',
         text: 'infoText',
         pen: 'infoPen',
+        doc: 'infoDoc',
         arrow: 'infoArrow',
         image: 'infoImage',
         graph: 'infoGraph',
@@ -900,6 +901,122 @@ export class Engine {
     if (this.selection.size !== 1) return false;
     const v = this.views.get([...this.selection][0]);
     return Boolean(v && v.type === 'image' && !v.locked);
+  }
+
+  addDocument(pages: string[], ratio: number, at?: { x: number; y: number }): string | null {
+    if (!pages.length) return null;
+    const maxShow = 560;
+    const w = maxShow;
+    const h = Math.round(maxShow / (ratio || 0.707));
+    const pos = at ?? this.camera.screenToWorld(this.w / 2, this.h / 2, this.w / 2, this.h / 2);
+    const id = store.addShape({
+      type: 'doc',
+      x: pos.x - w / 2,
+      y: pos.y - h / 2,
+      w,
+      h,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      pages,
+      page: 0,
+    });
+    this.setSelection([id]);
+    return id;
+  }
+
+  private selectedDoc(): ShapeView | null {
+    if (this.selection.size !== 1) return null;
+    const v = this.views.get([...this.selection][0]);
+    return v && v.type === 'doc' && (v.pages?.length ?? 0) > 1 ? v : null;
+  }
+
+  /** Screen-space page-flip arrow zones for the selected doc. */
+  private docArrowZones(v: ShapeView): Array<{ side: 'prev' | 'next'; x: number; y: number }> {
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    const left = v.x * z + ox;
+    const right = (v.x + v.w) * z + ox;
+    const cy = (v.y + v.h / 2) * z + oy;
+    const off = 26;
+    return [
+      { side: 'prev', x: left - off, y: cy },
+      { side: 'next', x: right + off, y: cy },
+    ];
+  }
+
+  private docArrowRadius(): number {
+    return 15;
+  }
+
+  private drawDocControls(ctx: CanvasRenderingContext2D): void {
+    const v = this.selectedDoc();
+    if (!v || this.editing) return;
+    const zones = this.docArrowZones(v);
+    const r = this.docArrowRadius();
+    ctx.save();
+    // zones are computed in screen space; drop the camera transform
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    for (const zone of zones) {
+      ctx.beginPath();
+      ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.selection;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      if (zone.side === 'prev') {
+        ctx.moveTo(zone.x + 3, zone.y - 6);
+        ctx.lineTo(zone.x - 4, zone.y);
+        ctx.lineTo(zone.x + 3, zone.y + 6);
+      } else {
+        ctx.moveTo(zone.x - 3, zone.y - 6);
+        ctx.lineTo(zone.x + 4, zone.y);
+        ctx.lineTo(zone.x - 3, zone.y + 6);
+      }
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+    const page = (v.page ?? 0) + 1;
+    const total = v.pages?.length ?? 0;
+    ctx.font = '12px "Space Grotesk", Onest, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const label = `${page} / ${total}`;
+    const tw = ctx.measureText(label).width;
+    const z = this.camera.zoom;
+    const lx = (v.x + v.w / 2) * z + (this.w / 2 - this.camera.x * z);
+    const ly = (v.y + v.h) * z + (this.h / 2 - this.camera.y * z) + 8;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath();
+    ctx.roundRect(lx - tw / 2 - 8, ly, tw + 16, 20, 10);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, lx, ly + 4);
+    ctx.restore();
+  }
+
+  /** Returns true if the pointer press hit a doc page arrow (and handled it). */
+  private tryDocArrow(sx: number, sy: number): boolean {
+    const v = this.selectedDoc();
+    if (!v) return false;
+    const r = this.docArrowRadius() + 4;
+    for (const zone of this.docArrowZones(v)) {
+      if (Math.hypot(sx - zone.x, sy - zone.y) <= r) {
+        const pages = v.pages?.length ?? 0;
+        const cur = v.page ?? 0;
+        const next = zone.side === 'prev' ? Math.max(0, cur - 1) : Math.min(pages - 1, cur + 1);
+        if (next !== cur) store.patchShape(v.id, { page: next });
+        this.dirty = true;
+        return true;
+      }
+    }
+    return false;
   }
 
   startCropSelected(): void {
@@ -1337,6 +1454,7 @@ export class Engine {
     if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
+      if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) return;
       const portHit = this.hitPort(info.screen.x, info.screen.y);
       if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
         this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
@@ -1578,10 +1696,8 @@ export class Engine {
         this.openGraphEditor(id);
         return;
       }
-      this.openTextEditor(id);
-      return;
+      // no text editing on double click; use Enter or the text tool
     }
-    this.openTextEditorAt(p.world.x, p.world.y, settings.text.size, settings.text.color);
   };
 
   private cancelToolDrag(): void {
@@ -2129,6 +2245,7 @@ export class Engine {
     this.drawSelection(ctx);
     this.drawAlignGuides(ctx);
     this.drawPorts(ctx);
+    this.drawDocControls(ctx);
     this.drawConnecting(ctx);
     this.tool.render(this, ctx);
     this.drawPeers(ctx);

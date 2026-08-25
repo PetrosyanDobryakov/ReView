@@ -1,7 +1,7 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
 export interface ShapeView {
   id: string;
@@ -19,6 +19,8 @@ export interface ShapeView {
   alpha?: number;
   textColor?: string;
   src?: string;
+  pages?: string[];
+  page?: number;
   locked?: boolean;
   cropX?: number;
   cropY?: number;
@@ -691,6 +693,21 @@ export function drawShape(
         }
       } else {
         ctx.fillStyle = '#2e2e2b';
+        ctx.fillRect(v.x, v.y, v.w, v.h);
+        ctx.strokeStyle = '#454540';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(v.x, v.y, v.w, v.h);
+      }
+      break;
+    }
+    case 'doc': {
+      const pages = v.pages ?? [];
+      const src = pages[Math.min(v.page ?? 0, pages.length - 1)] ?? '';
+      const img = src ? getImage(src) : null;
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, v.x, v.y, v.w, v.h);
+      } else {
+        ctx.fillStyle = '#ffffff';
         ctx.fillRect(v.x, v.y, v.w, v.h);
         ctx.strokeStyle = '#454540';
         ctx.lineWidth = 1;

@@ -34,5 +34,16 @@ assert.ok(!engine.views.get(id).locked, 'unlocked after second toggle');
 store.patchShapes([[id, { locked: true }]]);
 assert.equal(engine.views.get(id).locked === true, true, 'locked via patchShapes, got: ' + engine.views.get(id).locked);
 
+// doc shape: pages array + page round-trip
+const docId = store.addShape({
+  type: 'doc', x: 0, y: 0, w: 300, h: 424, fill: 'transparent', stroke: 'transparent', strokeWidth: 0,
+  pages: ['data:image/png;base64,AAA', 'data:image/png;base64,BBB'], page: 1,
+});
+const docView = engine.views.get(docId);
+assert.equal(docView?.pages?.length, 2, 'doc pages stored, got: ' + JSON.stringify(docView?.pages));
+assert.equal(docView?.page, 1, 'doc page stored');
+store.patchShape(docId, { page: 0 });
+assert.equal(engine.views.get(docId)?.page, 0, 'doc page patched');
+
 console.log('lock-test: all checks passed');
 process.exit(0);

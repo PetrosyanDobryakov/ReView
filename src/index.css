@@ -1155,6 +1155,36 @@ button.brand {
   box-shadow: 0 0 0 2px var(--chrome-accent-strong);
 }
 
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--chrome-bg) 72%, transparent);
+}
+
+.drop-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border: 2px dashed var(--chrome-accent);
+  border-radius: var(--chrome-radius);
+}
+
+.drop-overlay span {
+  position: relative;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: var(--chrome-panel);
+  border: 1px solid var(--chrome-border);
+  box-shadow: var(--chrome-shadow);
+  font-size: var(--chrome-type-title);
+  font-weight: 600;
+  color: var(--chrome-text);
+}
+
 .custom-color input[type='color'] {
   position: absolute;
   inset: -4px;
