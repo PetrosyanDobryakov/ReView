@@ -62,7 +62,42 @@ const HOME_DOOR = 'M9 21v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8';
 const PAN_FIT = 'translate(12 12) scale(0.88) translate(-13 -12.5)';
 const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
+/** Translate glyphs so their ink sits in the center of the 24² viewBox (tool circle). */
+const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = {
+  select: [-0.75, 0],
+  lasso: [0.45, -0.8],
+  eraser: [-0.25, -0.75],
+  sticky: [-0.5, 0],
+  text: [0, -0.5],
+  blockScheme: [0, 1],
+  triangle: [0, 0.5],
+  parallelogram: [1.5, 0],
+  terminator: [0, -2],
+  display: [1, 0],
+  graph: [0, -0.5],
+  trash: [0, -1],
+  paste: [0, -0.5],
+};
+
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  const nudge = ICON_NUDGE[name];
+  const body =
+    name === 'pan' ? (
+      <g transform={PAN_FIT}>
+        <path d={ICON_PATHS.pan} />
+      </g>
+    ) : name === 'pen' ? (
+      <g transform={PEN_FIT}>
+        <path d={ICON_PATHS.pen} />
+      </g>
+    ) : (
+      <>
+        <path d={ICON_PATHS[name]} strokeDasharray={name === 'lasso' ? '3.25 2.7' : undefined} />
+        {name === 'lasso' ? <path d={LASSO_HANDLE} /> : null}
+        {name === 'home' ? <path d={HOME_DOOR} /> : null}
+      </>
+    );
+
   return (
     <svg
       width={size}
@@ -76,21 +111,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       overflow="visible"
       aria-hidden="true"
     >
-      {name === 'pan' ? (
-        <g transform={PAN_FIT}>
-          <path d={ICON_PATHS.pan} />
-        </g>
-      ) : name === 'pen' ? (
-        <g transform={PEN_FIT}>
-          <path d={ICON_PATHS.pen} />
-        </g>
-      ) : (
-        <>
-          <path d={ICON_PATHS[name]} strokeDasharray={name === 'lasso' ? '3.25 2.7' : undefined} />
-          {name === 'lasso' ? <path d={LASSO_HANDLE} /> : null}
-          {name === 'home' ? <path d={HOME_DOOR} /> : null}
-        </>
-      )}
+      {nudge ? <g transform={`translate(${nudge[0]} ${nudge[1]})`}>{body}</g> : body}
     </svg>
   );
 }

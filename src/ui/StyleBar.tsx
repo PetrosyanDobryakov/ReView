@@ -13,7 +13,8 @@ import {
   type ShapeSettings,
   type TextSettings,
 } from '../core/settings';
-import { metaBg, patchShapes } from '../core/store';
+import { viewPaperBg, patchShapes } from '../core/store';
+import { readPrefs } from '../core/prefs';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
 import { MOTION, useExitPresence } from './motion';
@@ -244,16 +245,22 @@ export function StyleBar({
             value={textValue}
             custom
             onPick={(c) => {
-              // Free-text tool: bump low-contrast picks to board-readable color. Sticky / shape labels keep the pick.
+              // With adapt-on: store the pick; each client remaps for their paper.
+              // With adapt-off: bump low-contrast free-text picks so they stay readable.
               const onlyFreeText =
                 showTextDraw || (textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
-              const next = onlyFreeText ? readableTextOn(c, metaBg()) : c;
+              const bg = viewPaperBg();
+              const next =
+                onlyFreeText && !readPrefs().adaptInkToPaper ? readableTextOn(c, bg) : c;
               updateTextSettings({ color: next });
               if (textTargets.length) {
                 patchShapes(
                   textTargets.map((v) => [
                     v.id,
-                    { textColor: v.type === 'text' ? readableTextOn(c, metaBg()) : c },
+                    {
+                      textColor:
+                        v.type === 'text' && !readPrefs().adaptInkToPaper ? readableTextOn(c, bg) : c,
+                    },
                   ])
                 );
                 onPatched();

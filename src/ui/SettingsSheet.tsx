@@ -9,6 +9,13 @@ import {
 } from '../core/chromeTheme';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import type { SyncStatus } from '../core/store';
+import {
+  CURSOR_SCALE_MAX,
+  CURSOR_SCALE_MIN,
+  readPrefs,
+  writePrefs,
+  type AppPrefs,
+} from '../core/prefs';
 import { Icon } from './icons';
 import { BG_PRESETS, CHROME_LABEL, modKey, t } from './i18n';
 import { MOTION, useExitPresence } from './motion';
@@ -59,6 +66,7 @@ export function SettingsSheet({
 }) {
   const mounted = useExitPresence(open, MOTION.sheetOut);
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
+  const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
   if (!mounted) return null;
 
   const applyCustomColor = (key: keyof CustomChromeColors, value: string) => {
@@ -67,6 +75,10 @@ export function SettingsSheet({
     writeCustomColors(next);
     writeChromeTheme('custom');
     onChromeTheme('custom');
+  };
+
+  const patchPrefs = (patch: Partial<AppPrefs>) => {
+    setPrefs(writePrefs(patch));
   };
 
   return (
@@ -227,8 +239,41 @@ export function SettingsSheet({
                 <span className="switch-thumb" />
               </span>
             </button>
+            <button
+              type="button"
+              className={`sheet-switch${prefs.adaptInkToPaper ? ' on' : ''}`}
+              role="switch"
+              aria-checked={prefs.adaptInkToPaper}
+              onClick={() => patchPrefs({ adaptInkToPaper: !prefs.adaptInkToPaper })}
+            >
+              <span>{t(locale, 'adaptInk')}</span>
+              <span className="switch" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+            </button>
+            <p className="sheet-hint">
+              <SwapText text={t(locale, 'adaptInkHint')} />
+            </p>
           </section>
           )}
+
+          <section className="sheet-section">
+            <h3>
+              <SwapText text={t(locale, 'advanced')} />
+            </h3>
+            <label className="sheet-range">
+              <span>{t(locale, 'toolCursorSize')}</span>
+              <input
+                type="range"
+                min={CURSOR_SCALE_MIN}
+                max={CURSOR_SCALE_MAX}
+                step={0.05}
+                value={prefs.toolCursorScale}
+                onChange={(e) => patchPrefs({ toolCursorScale: Number(e.target.value) })}
+              />
+              <span className="sheet-range-value">{Math.round(prefs.toolCursorScale * 100)}%</span>
+            </label>
+          </section>
 
           <section className="sheet-section">
             <h3>

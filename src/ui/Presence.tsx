@@ -37,7 +37,6 @@ export function Presence({
       <span className="presence-face">
         <Icon name="person" size={14} />
       </span>
-      {names && names.length > 0 && <span className="presence-count">{names.length + 1}</span>}
     </div>
   );
 }

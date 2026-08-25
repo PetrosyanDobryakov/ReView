@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Engine } from '../engine/Engine';
 import type { ShapeBox } from '../core/shapes';
-import { metaBg } from '../core/store';
+import { viewPaperBg } from '../core/store';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
 
@@ -54,7 +54,7 @@ export function ExportDialog({
         scale,
         format,
         quality,
-        background: format === 'jpeg' || !transparent ? metaBg() : null,
+        background: format === 'jpeg' || !transparent ? viewPaperBg() : null,
       });
       if (cancelled) return;
       if (!result) {

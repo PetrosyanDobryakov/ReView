@@ -5,6 +5,7 @@ import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import type { UserInfo } from '../core/user';
 import { getBoard, isBoardPersistedLocally } from '../core/boards';
+import { readPrefs } from '../core/prefs';
 
 export const LOCAL_ORIGIN = 'local';
 
@@ -172,6 +173,16 @@ export function metaBg(): string {
   const raw = meta.get('bg');
   const bg = typeof raw === 'string' ? raw : COLORS.background;
   return PAPER_MIGRATE[bg] ?? bg;
+}
+
+/**
+ * Paper color for this client. Local prefs override synced meta so collaborators
+ * can keep different papers on the same board.
+ */
+export function viewPaperBg(): string {
+  const local = readPrefs().paperBg;
+  if (typeof local === 'string') return PAPER_MIGRATE[local] ?? local;
+  return metaBg();
 }
 
 export function migratePaper(): void {

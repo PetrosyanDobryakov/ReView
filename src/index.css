@@ -291,16 +291,13 @@ body {
 
 .file-island,
 .meta-island {
-  padding: 6px;
+  gap: 0;
+  padding: 6px 8px;
   min-height: 44px;
 }
 
-.file-island {
-  gap: 0;
-  padding: 6px 8px;
-}
-
-.file-island .island-sep {
+.file-island .island-sep,
+.meta-island .island-sep {
   margin: 8px 10px;
 }
 
@@ -366,13 +363,6 @@ button.brand {
   font-size: var(--chrome-type-label);
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
-}
-
-.shape-count {
-  color: var(--chrome-text-dim);
-  font-weight: 500;
-  font-size: var(--chrome-type-label);
-  font-variant-numeric: tabular-nums;
 }
 
 .icon-btn,
@@ -1208,6 +1198,10 @@ button.brand {
   border-top: 1px solid var(--chrome-border-soft);
 }
 
+.sheet-section .sheet-range {
+  margin-top: 4px;
+}
+
 .sheet-switch .swap-text {
   flex: 1;
   min-width: 0;
@@ -1288,6 +1282,31 @@ button.brand {
   transform: translateX(16px);
   background: var(--chrome-panel);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.sheet-range {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  align-items: center;
+  width: 100%;
+  color: inherit;
+  font-size: var(--chrome-type);
+}
+
+.sheet-range > span:first-child {
+  grid-column: 1 / -1;
+}
+
+.sheet-range input[type='range'] {
+  width: 100%;
+  accent-color: var(--chrome-accent);
+}
+
+.sheet-range-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-text-dim);
+  font-size: var(--chrome-type-meta);
 }
 
 .sheet-keys {
@@ -1594,13 +1613,6 @@ h3 .swap-text,
   outline: 2px solid var(--chrome-accent);
   outline-offset: 1px;
 }
-.presence-count {
-  color: var(--chrome-text-dim, #999);
-  font-size: 12px;
-  margin-left: 4px;
-  font-variant-numeric: tabular-nums;
-}
-
 /* --- graph editor --- */
 .graph-editor {
   position: absolute;
