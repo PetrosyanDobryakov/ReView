@@ -30,7 +30,6 @@ function pathStats(pts: number[]): {
   const closed =
     pts.length >= 6 &&
     Math.hypot(pts[0] - pts[pts.length - 2], pts[1] - pts[pts.length - 1]) < Math.max(24, len * 0.08);
-  // Shoelace area
   let area = 0;
   const n = Math.floor(pts.length / 2);
   for (let i = 0; i < n; i++) {
@@ -61,23 +60,47 @@ function lineFitError(pts: number[]): number {
   return n ? err / n : Infinity;
 }
 
-function circleFitScore(pts: number[], box: { w: number; h: number; cx: number; cy: number }): number {
-  const r = (box.w + box.h) / 4;
-  if (r < 8) return 0;
+/**
+ * How well points sit on the bounding ellipse (unit-circle after normalize).
+ * Prefer this over single-radius circle fit so ovals also snap.
+ */
+function ellipseFitScore(pts: number[], box: { w: number; h: number; cx: number; cy: number }): number {
+  const rx = box.w / 2;
+  const ry = box.h / 2;
+  if (rx < 8 || ry < 8) return 0;
   let err = 0;
   let n = 0;
   for (let i = 0; i < pts.length; i += 2) {
-    err += Math.abs(Math.hypot(pts[i] - box.cx, pts[i + 1] - box.cy) - r);
+    const nx = (pts[i] - box.cx) / rx;
+    const ny = (pts[i + 1] - box.cy) / ry;
+    err += Math.abs(Math.hypot(nx, ny) - 1);
     n++;
   }
   const mean = n ? err / n : Infinity;
-  return mean < r * 0.28 ? 1 - mean / (r * 0.28) : 0;
+  return mean < 0.32 ? 1 - mean / 0.32 : 0;
+}
+
+/**
+ * Isoperimetric quotient 4πA/P² — ~1 for a circle, ~0.785 for a square.
+ * Critical: circle points land on the AABB edges, so rect-edge scoring alone
+ * falsely prefers rectangles. Roundness breaks that tie.
+ */
+function roundnessScore(area: number, len: number): number {
+  if (len <= 0) return 0;
+  return (4 * Math.PI * area) / (len * len);
 }
 
 function rectFitScore(pts: number[], box: { w: number; h: number; minX: number; minY: number }): number {
   if (box.w < 16 || box.h < 16) return 0;
   let onEdge = 0;
+  let nearCorner = 0;
   const tol = Math.max(10, Math.min(box.w, box.h) * 0.16);
+  const corners = [
+    { x: box.minX, y: box.minY },
+    { x: box.minX + box.w, y: box.minY },
+    { x: box.minX + box.w, y: box.minY + box.h },
+    { x: box.minX, y: box.minY + box.h },
+  ];
   for (let i = 0; i < pts.length; i += 2) {
     const x = pts[i];
     const y = pts[i + 1];
@@ -87,9 +110,19 @@ function rectFitScore(pts: number[], box: { w: number; h: number; minX: number; 
     const nearB = Math.abs(y - (box.minY + box.h)) <= tol;
     if ((nearL || nearR) && y >= box.minY - tol && y <= box.minY + box.h + tol) onEdge++;
     else if ((nearT || nearB) && x >= box.minX - tol && x <= box.minX + box.w + tol) onEdge++;
+    for (const c of corners) {
+      if (Math.hypot(x - c.x, y - c.y) <= tol * 1.4) {
+        nearCorner++;
+        break;
+      }
+    }
   }
-  const ratio = onEdge / (pts.length / 2);
-  return ratio > 0.55 ? ratio : 0;
+  const n = pts.length / 2;
+  const edgeRatio = onEdge / n;
+  const cornerRatio = nearCorner / n;
+  // Circles touch mid-edges but rarely cluster at corners.
+  if (edgeRatio < 0.55) return 0;
+  return edgeRatio * 0.7 + Math.min(1, cornerRatio * 4) * 0.3;
 }
 
 /**
@@ -116,7 +149,6 @@ export function recognizeStroke(pts: number[]): RecognizedShape | null {
       x1: pts[pts.length - 2],
       y1: pts[pts.length - 1],
     };
-    // Arrow if the stroke ends with a sharp hook (last 15% reverses)
     const mid = Math.max(2, Math.floor(pts.length * 0.7) & ~1);
     const tipDx = pts[pts.length - 2] - pts[mid];
     const tipDy = pts[pts.length - 1] - pts[mid + 1];
@@ -140,16 +172,23 @@ export function recognizeStroke(pts: number[]): RecognizedShape | null {
       cx: st.minX + w / 2,
       cy: st.minY + h / 2,
     };
-    const circ = circleFitScore(pts, box);
+    const ell = ellipseFitScore(pts, box);
     const rect = rectFitScore(pts, box);
+    const round = roundnessScore(st.area, st.len);
     const aspect = w > 0 && h > 0 ? Math.max(w, h) / Math.min(w, h) : 99;
-    if (circ > 0.4 && circ >= rect && aspect < 2.2) {
+
+    // Square isoperimetric ≈ 0.785; hex+ circles ≥ ~0.90. Use roundness so
+    // AABB-edge scoring cannot reclassify circles as rectangles.
+    if (round >= 0.86 && ell > 0.2 && aspect < 2.8) {
       return { kind: 'ellipse', x: st.minX, y: st.minY, w, h };
     }
-    if (rect > 0.5) {
+    if (ell > 0.5 && round >= 0.84 && aspect < 2.8) {
+      return { kind: 'ellipse', x: st.minX, y: st.minY, w, h };
+    }
+    if (rect > 0.55 && round < 0.86) {
       return { kind: 'rect', x: st.minX, y: st.minY, w, h };
     }
-    if (circ > 0.3 && aspect < 2.5) {
+    if (ell > 0.4 && round >= 0.84 && aspect < 3) {
       return { kind: 'ellipse', x: st.minX, y: st.minY, w, h };
     }
   }
