@@ -9,6 +9,10 @@
 - Single upload button now accepts images and documents; files can also be dragged onto the window (drop overlay included).
 - Double-click no longer opens the text editor (image crop and graph editor keep their double-click actions).
 
+### Board
+- Text, sticky and pen annotations lying fully inside an image now stick to it while dragging.
+- «Copy as image» includes annotations drawn on top of the photo (raw fast path only for clean images).
+
 ### Pen colors
 - Miro-style pen color system: 5 quick slots (white, black, red, green, blue) that remember their colors.
 - Clicking a slot opens a shade palette (8 hues × 4 shades) plus a custom colors section.

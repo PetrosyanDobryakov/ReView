@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, readableTextOn, withAlpha, type PortId } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
+import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings, updateTextSettings } from '../core/settings';
 
@@ -67,6 +67,8 @@ export class SelectTool extends Tool {
   private start = { x: 0, y: 0 };
   private moved = 0;
   private originals = new Map<string, ShapeView>();
+  /** annotations riding on a moved image, snapshotted at drag start */
+  private stuck = new Map<string, ShapeView>();
   private marquee: ShapeBox | null = null;
 
   onHover(engine: Engine, p: PointerInfo): void {
@@ -85,6 +87,7 @@ export class SelectTool extends Tool {
     this.mode = 'idle';
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
       this.resizing = h;
@@ -141,6 +144,28 @@ export class SelectTool extends Tool {
       }
       // also move connected arrows
       const movedIds = new Set(patches.map(([id]) => id));
+      // annotations (text/sticky/pen) sitting on a moved image stick to it
+      for (const [, o] of this.originals) {
+        if (o.type !== 'image') continue;
+        for (const [sid, sv] of engine.views) {
+          if (movedIds.has(sid) || this.originals.has(sid)) continue;
+          if (sv.locked) continue;
+          if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
+          // snapshot at drag start; containment is checked against that snapshot
+          let base = this.stuck.get(sid);
+          if (!base) {
+            if (!containedIn(sv, o)) continue;
+            base = { ...sv, points: sv.points ? [...sv.points] : undefined };
+            this.stuck.set(sid, base);
+          }
+          if (base.points) {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy, points: base.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
+          } else {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
+          }
+          movedIds.add(sid);
+        }
+      }
       for (const [aid, av] of engine.views) {
         if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
         if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
@@ -190,6 +215,7 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     engine.clearSnapGuides();
   }
 
@@ -198,6 +224,7 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     engine.clearSnapGuides();
   }
 
