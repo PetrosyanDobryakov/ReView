@@ -18,7 +18,7 @@ import type { AlignKind } from './core/align';
 import { Icon } from './ui/icons';
 import { modKey, t, type MessageKey } from './ui/i18n';
 import {
-  leaveBoard,
+  pauseBoardView,
   meta,
   metaBg,
   metaGrid,
@@ -30,8 +30,7 @@ import {
   undoManager,
   initBoard,
   enableBoardPersistence,
-  persistBoardIfOpen,
-  onPageChange,
+  onActivePageChange,
   onBoardReady,
   currentPageId,
 } from './core/store';
@@ -42,6 +41,7 @@ import {
   publishPresence,
   publishTool,
   publishPage,
+  publishBoardView,
   onSyncLifecycle,
   type SyncStatus,
   type PeerCursor,
@@ -286,6 +286,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     publishPresence(loadUser());
     publishTool(tool);
     publishPage(currentPageId());
+    publishBoardView(!document.hidden);
     const offUser = onUserChange((u) => {
       setNick(u.name);
       publishPresence(u);
@@ -294,31 +295,34 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       publishPresence(loadUser());
       publishTool(engineRef.current?.tool.id ?? 'select');
       publishPage(currentPageId());
+      publishBoardView(!document.hidden);
     });
+    const onVisibility = () => {
+      // Alt-tab / minimize: freeze cursor at last pose, do not clear awareness.
+      publishBoardView(!document.hidden);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       offUser();
       offLife();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [boardId]);
 
   useEffect(() => {
     let roster = '';
-    let lastList: PeerCursor[] = [];
     const pushEngine = (list: PeerCursor[]) => {
-      const page = currentPageId();
-      engineRef.current?.setPeers(list.filter((p) => p.page == null || p.page === page));
+      engineRef.current?.setPeers(list);
     };
     const offPeers = onPeers((list) => {
-      lastList = list;
       pushEngine(list);
       const next = peerRosterKey(list);
       if (next === roster) return;
       roster = next;
       setPeers(list);
     });
-    const offPage = onPageChange(() => {
+    const offPage = onActivePageChange(() => {
       publishPage(currentPageId());
-      pushEngine(lastList);
     });
     return () => {
       offPeers();
@@ -416,7 +420,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
-      leaveBoard();
+      pauseBoardView();
     };
   }, [boardId]);
 

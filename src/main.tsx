@@ -8,6 +8,7 @@ import { applyChromeTheme, readChromeTheme } from './core/chromeTheme';
 import { applyLocale, readLocale } from './core/locale';
 import { applyUiScale } from './core/prefs';
 import { t } from './ui/i18n';
+import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
 import '@fontsource/space-grotesk/400.css';
 import '@fontsource/space-grotesk/500.css';
@@ -27,6 +28,8 @@ applyChromeTheme(readChromeTheme());
 applyLocale(locale);
 applyUiScale();
 document.title = t(locale, 'title');
+
+window.addEventListener('pagehide', () => leaveBoard());
 
 window.addEventListener('error', (e) => {
   showErrorBanner('[error] ' + (e.error?.stack || e.message));

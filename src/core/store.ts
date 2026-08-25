@@ -5,7 +5,7 @@ import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync } from '../net';
+import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
 import {
   POINTS_SPACE_LOCAL,
   POINTS_SPACE_META,
@@ -34,6 +34,8 @@ export let order = doc.getArray<string>('order');
 export let pages = doc.getArray<string>('pages');
 let pagesObserved = false;
 const pageListeners = new Set<() => void>();
+const pageListListeners = new Set<() => void>();
+const activePageListeners = new Set<() => void>();
 export let undoManager = new Y.UndoManager([board, order, pages], {
   trackedOrigins: new Set([LOCAL_ORIGIN]),
   captureTimeout: 200,
@@ -201,9 +203,14 @@ export function initBoard(boardId: string): void {
   // Attach observer on the fresh array and refresh page UIs.
   pagesArray();
   syncActivePageFromStorage();
+  lastPageListEmitKey = '';
+  lastActivePageEmitKey = '';
   lastPagesEmitKey = '';
   queueMicrotask(() => {
-    if (currentBoardId === boardId) emitPages();
+    if (currentBoardId === boardId) {
+      emitPageList();
+      emitActivePage();
+    }
   });
   // Defer attach so React finish the render that called initBoard.
   queueMicrotask(() => {
@@ -218,12 +225,21 @@ export function initBoard(boardId: string): void {
   });
 }
 
-/** Tear down sync and clear the active board id (e.g. leaving `/board/:id`). */
+/** Tear down sync and clear the active board id (tab close / switch board). */
 export function leaveBoard(): void {
   flushWriteGate();
   flushBoardUpdated();
   detachSync();
   currentBoardId = null;
+}
+
+/** Leave the board view but keep sync + last cursor (navigate to home, still on site). */
+export function pauseBoardView(): void {
+  flushWriteGate();
+  flushBoardUpdated();
+  publishBoardView(false);
+  publishDraft(null);
+  publishErasePreview(null);
 }
 
 export function ensureOrder(): void {
@@ -393,7 +409,9 @@ function ensurePages(): void {
 
 /** In-memory active page — never read localStorage from the render loop. */
 let activePageId = 'main';
-/** Fingerprint of last emitPages payload — skip no-op storms from Yjs observe noise. */
+/** Fingerprints — skip no-op storms from Yjs observe noise. */
+let lastPageListEmitKey = '';
+let lastActivePageEmitKey = '';
 let lastPagesEmitKey = '';
 
 function readStoredPageId(): string {
@@ -411,8 +429,30 @@ function syncActivePageFromStorage(): void {
   activePageId = cur;
 }
 
+function pageListEmitKey(): string {
+  return listPages().join('\0');
+}
+
 function pagesEmitKey(): string {
-  return `${activePageId}\0${listPages().join('\0')}`;
+  return `${activePageId}\0${pageListEmitKey()}`;
+}
+
+function emitPageList(): void {
+  const key = pageListEmitKey();
+  if (key === lastPageListEmitKey) return;
+  lastPageListEmitKey = key;
+  lastPagesEmitKey = '';
+  for (const l of [...pageListListeners]) l();
+  emitPages();
+}
+
+function emitActivePage(): void {
+  const key = activePageId;
+  if (key === lastActivePageEmitKey) return;
+  lastActivePageEmitKey = key;
+  lastPagesEmitKey = '';
+  for (const l of [...activePageListeners]) l();
+  emitPages();
 }
 
 let uid = 0;
@@ -680,6 +720,22 @@ export function onPageChange(cb: () => void): () => void {
   };
 }
 
+/** Synced page list changed (count / ids) — does not switch anyone's active page. */
+export function onPageListChange(cb: () => void): () => void {
+  pageListListeners.add(cb);
+  return () => {
+    pageListListeners.delete(cb);
+  };
+}
+
+/** Local active page changed — canvas should reload that page only. */
+export function onActivePageChange(cb: () => void): () => void {
+  activePageListeners.add(cb);
+  return () => {
+    activePageListeners.delete(cb);
+  };
+}
+
 function emitPages(): void {
   const key = pagesEmitKey();
   if (key === lastPagesEmitKey) return;
@@ -690,7 +746,7 @@ function emitPages(): void {
 function pagesArray(): Y.Array<string> {
   if (!pagesObserved) {
     pages.observe(() => {
-      emitPages();
+      emitPageList();
     });
     pagesObserved = true;
   }
@@ -766,7 +822,7 @@ export function setCurrentPage(id: string): void {
   } catch {
     /* ignore */
   }
-  emitPages();
+  emitActivePage();
 }
 
 export function addPage(): void {
@@ -802,7 +858,7 @@ export function deletePage(id: string): void {
     a.delete(idx, 1);
   });
   if (currentPageId() === id) setCurrentPage(a.toArray()[0] ?? 'main');
-  else emitPages();
+  else emitPageList();
   bumpCurrentBoard();
 }
 

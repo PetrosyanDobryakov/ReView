@@ -155,7 +155,35 @@ await waitAware(
   'A sees Bob cursor + draft + erase preview'
 );
 
+// --- pages list sync (count only; no shape wipe) ---
+const pagesA = docA.getArray('pages');
+pagesA.push(['main']);
+const pid = 'p' + Date.now().toString(36);
+pagesA.push([pid]);
+await new Promise((r) => setTimeout(r, 600));
+const pagesB = docB.getArray('pages');
+assert.equal(pagesB.length, 2, 'client B received page list');
+assert.equal(pagesB.get(1), pid, 'new page id synced');
+assert.equal(boardB.has('sync1'), true, 'existing shapes intact after page add');
+
+// --- away presence keeps cursor ---
+pa.awareness.setLocalStateField('viewing', false);
+pa.awareness.setLocalStateField('cursor', { x: 100, y: 200 });
+await waitAware(
+  pb,
+  () => {
+    for (const [id, state] of pb.awareness.getStates()) {
+      if (id === pb.awareness.clientID) continue;
+      if (state.viewing === false && state.cursor?.x === 100 && state.cursor?.y === 200) {
+        return true;
+      }
+    }
+    return false;
+  },
+  'B sees away Alice cursor frozen'
+);
+
 pa.destroy();
 pb.destroy();
-console.log('sync-test: shapes + awareness + draft + erase preview verified');
+console.log('sync-test: shapes + awareness + pages + away presence verified');
 process.exit(0);
