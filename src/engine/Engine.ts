@@ -2015,21 +2015,49 @@ export class Engine {
         if (!m) continue;
         const v = store.readShape(m);
         const pts = v.points ?? [];
-        if (pts.length < 4) {
+        if (pts.length < 2) {
           store.removeShapes([id]);
+          continue;
+        }
+        // Two-point straight line: mid-hit marks both ends — split around brush center.
+        if (pts.length === 4 && indices.has(0) && indices.has(1)) {
+          const ax = pts[0];
+          const ay = pts[1];
+          const bx = pts[2];
+          const by = pts[3];
+          const mx = (ax + bx) / 2;
+          const my = (ay + by) / 2;
+          const gap = Math.max(v.strokeWidth, 8);
+          const len = Math.hypot(bx - ax, by - ay) || 1;
+          const ux = (bx - ax) / len;
+          const uy = (by - ay) / len;
+          const a2x = mx - ux * gap;
+          const a2y = my - uy * gap;
+          const b1x = mx + ux * gap;
+          const b1y = my + uy * gap;
+          const style = {
+            fill: 'transparent',
+            stroke: v.stroke,
+            strokeWidth: v.strokeWidth,
+            alpha: v.alpha,
+          };
+          const seg0 = [ax, ay, a2x, a2y];
+          const seg1 = [b1x, b1y, bx, by];
+          store.patchShape(id, { points: seg0, ...this.penBox(seg0, v.strokeWidth) });
+          store.addShape({ type: 'pen', ...style, points: seg1, ...this.penBox(seg1, v.strokeWidth) });
           continue;
         }
         const segments: number[][] = [];
         let cur: number[] = [];
         for (let i = 0; i < pts.length; i += 2) {
           if (indices.has(i / 2)) {
-            if (cur.length >= 4) segments.push(cur);
+            if (cur.length >= 2) segments.push(cur);
             cur = [];
           } else {
             cur.push(pts[i], pts[i + 1]);
           }
         }
-        if (cur.length >= 4) segments.push(cur);
+        if (cur.length >= 2) segments.push(cur);
         if (!segments.length) {
           store.removeShapes([id]);
           continue;
