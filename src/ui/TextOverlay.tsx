@@ -40,11 +40,6 @@ export function TextOverlay({
   };
 
   useLayoutEffect(() => {
-    editorRef?.(ref.current);
-    return () => editorRef?.(null);
-  }, [editorRef]);
-
-  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     armedRef.current = false;
@@ -82,6 +77,17 @@ export function TextOverlay({
       window.removeEventListener('pointerup', arm);
     };
   }, [target.id, target.x, target.y]);
+
+  useLayoutEffect(() => {
+    editorRef?.(ref.current);
+    return () => {
+      if (blurTimer.current !== null) {
+        window.clearTimeout(blurTimer.current);
+        blurTimer.current = null;
+      }
+      editorRef?.(null);
+    };
+  }, [editorRef]);
 
   useEffect(() => {
     const el = ref.current;

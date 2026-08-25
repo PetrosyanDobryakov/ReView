@@ -111,8 +111,8 @@ export function spansAreRich(spans: RichSpan[], base: RichStyle): boolean {
     if (Boolean(s.underline) !== Boolean(base.underline)) return true;
     if (Boolean(s.strike) !== Boolean(base.strike)) return true;
     if (Boolean(s.highlight) !== Boolean(base.highlight)) return true;
-    if (s.color) return true;
     if (s.color && base.color && s.color.toLowerCase() !== base.color.toLowerCase()) return true;
+    if (s.color && !base.color) return true;
   }
   return spans.length > 1;
 }

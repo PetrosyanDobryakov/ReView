@@ -36,11 +36,13 @@ export function GraphEditor({
   };
 
   const finish = () => {
+    window.clearTimeout(timerRef.current);
     engine.commitGraph(target.id, value);
     onDone();
   };
 
   const cancel = () => {
+    window.clearTimeout(timerRef.current);
     engine.commitGraph(target.id, target.expr);
     onDone();
   };

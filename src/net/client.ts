@@ -568,6 +568,8 @@ export class SyncClient {
     this.offAwareness?.();
     this.offProviderStatus = null;
     this.offAwareness = null;
+    this.offPeerDisplay?.();
+    this.offPeerDisplay = null;
     if (this.provider) {
       netLog.info('provider destroy', () => ({
         url: this.providerUrl,

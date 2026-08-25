@@ -171,9 +171,6 @@ export function initBoard(boardId: string): void {
   if (currentBoardId === boardId) return;
   detachSync();
   try {
-    (persistence as unknown as { destroy?: () => void })?.destroy?.();
-  } catch {}
-  try {
     persistence?.destroy();
   } catch {}
   // Rebind pages observer to the new doc; keep React/engine listeners.
