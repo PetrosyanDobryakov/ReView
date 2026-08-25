@@ -1,9 +1,10 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, readableTextOn, withAlpha, type PortId } from '../core/shapes';
+import { COLORS, portPos, readableTextOn, displayInk, withAlpha, type PortId } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings, updateTextSettings } from '../core/settings';
+import { readPrefs } from '../core/prefs';
 
 export type ToolId =
   | 'select'
@@ -76,7 +77,7 @@ export class SelectTool extends Tool {
       engine.setCursor(HANDLE_CURSORS[h.handle]);
       return;
     }
-    engine.setCursor(engine.hitTest(p.world.x, p.world.y) ? 'move' : 'default');
+    engine.setCursor(engine.hitTest(p.world.x, p.world.y) ? 'move' : engine.toolCursor());
   }
 
   onDown(engine: Engine, p: PointerInfo): void {
@@ -337,7 +338,8 @@ export class PenTool extends Tool {
     const shift = this.shift;
     this.shift = false;
     const points = shift ? this.straightPoints() : this.pts;
-    if (points.length < 4) {
+    // length 2 = single tap (dot); drawPenStroke renders it as a filled circle
+    if (points.length < 2) {
       this.pts = [];
       this.last = null;
       return;
@@ -381,7 +383,8 @@ export class PenTool extends Tool {
     const pen = effectivePen();
     const points = this.shift ? this.straightPoints() : this.pts;
     if (points.length < 2) return;
-    drawPenStroke(ctx, points, pen.width, pen.color, pen.alpha * 0.9);
+    const bg = store.viewPaperBg();
+    drawPenStroke(ctx, points, pen.width, displayInk(pen.color, bg), pen.alpha * 0.9);
   }
 
   private straightPoints(): number[] {
@@ -861,8 +864,9 @@ export class TextTool extends Tool {
   onUp(engine: Engine, p: PointerInfo): void {
     const at = this.down ?? p.world;
     this.down = null;
-    const bg = store.metaBg();
-    const color = readableTextOn(settings.text.color, bg);
+    const bg = store.viewPaperBg();
+    // With adapt-on, keep the authored pick; viewers remap. With adapt-off, force contrast now.
+    const color = readPrefs().adaptInkToPaper ? settings.text.color : readableTextOn(settings.text.color, bg);
     if (color !== settings.text.color) updateTextSettings({ color });
     engine.openTextEditorAt(at.x, at.y, settings.text.size, color);
   }

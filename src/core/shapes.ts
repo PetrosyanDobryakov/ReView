@@ -1,5 +1,6 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
+import { readPrefs } from './prefs';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
@@ -168,6 +169,15 @@ export function readableTextOn(fg: string, bg: string): string {
   const ratio = contrastRatio(fg, bg);
   if (ratio == null || ratio >= MIN_BOARD_TEXT_CONTRAST) return fg;
   return themeFor(bg).text;
+}
+
+/**
+ * Display color for ink (pen / arrow / free text) on this client's paper.
+ * Honors the Adapt ink preference — stored colors stay as authored.
+ */
+export function displayInk(color: string, boardBg: string): string {
+  if (!readPrefs().adaptInkToPaper) return color;
+  return readableTextOn(color, boardBg);
 }
 
 export function intersects(a: ShapeBox, b: ShapeBox): boolean {
@@ -659,7 +669,7 @@ export function drawShape(
     }
     case 'text': {
       if (!v.text) break;
-      ctx.fillStyle = readableTextOn(v.textColor ?? textColor, boardBg);
+      ctx.fillStyle = displayInk(v.textColor ?? textColor, boardBg);
       ctx.font = font;
       ctx.textBaseline = 'top';
       const size = v.fontSize ?? TEXT_FONT;
@@ -672,10 +682,10 @@ export function drawShape(
       break;
     }
     case 'pen':
-      drawPenStroke(ctx, v.points ?? [], v.strokeWidth, v.stroke, v.alpha ?? 1);
+      drawPenStroke(ctx, v.points ?? [], v.strokeWidth, displayInk(v.stroke, boardBg), v.alpha ?? 1);
       break;
     case 'arrow':
-      drawArrow(ctx, v);
+      drawArrow(ctx, v, boardBg);
       break;
     case 'image': {
       const img = getImage(v.src ?? '');
@@ -883,7 +893,7 @@ export function releaseImage(src: string): void {
   if (src) imageCache.delete(src);
 }
 
-export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView): void {
+export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?: string): void {
   const pts = v.points ?? [];
   if (pts.length < 4) return;
   const ax = pts[0];
@@ -918,9 +928,10 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView): void {
     c2x = c1x; c2y = c1y;
     endAngle = Math.atan2(by - c1y, bx - c1x);
   }
+  const ink = boardBg ? displayInk(v.stroke, boardBg) : v.stroke;
   ctx.save();
-  ctx.strokeStyle = v.stroke;
-  ctx.fillStyle = v.stroke;
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
   ctx.lineWidth = v.strokeWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';

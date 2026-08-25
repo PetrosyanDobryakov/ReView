@@ -16,7 +16,8 @@ import type { ExportSource } from './ui/ExportDialog';
 import type { ShapeBox } from './core/shapes';
 import { Icon } from './ui/icons';
 import { modKey, t } from './ui/i18n';
-import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
+import { destroyProvider, meta, metaBg, metaGrid, viewPaperBg, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
+import { readPrefs, writePrefs } from './core/prefs';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
@@ -48,7 +49,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [shape, setShape] = useState({ ...settings.shape });
   const [text, setText] = useState({ ...settings.text });
   const [eraser, setEraser] = useState({ ...settings.eraser });
-  const [bg, setBg] = useState(metaBg());
+  const [bg, setBg] = useState(() => viewPaperBg());
   const [gridOn, setGridOn] = useState(metaGrid());
   const [cropActive, setCropActive] = useState(false);
   const [canCrop, setCanCrop] = useState(false);
@@ -161,7 +162,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setEraser({ ...settings.eraser });
     });
     const onMeta = () => {
-      setBg(metaBg());
+      // Paper is local once chosen; until then follow synced meta.
+      if (readPrefs().paperBg == null) setBg(metaBg());
       setGridOn(metaGrid());
     };
     curMeta.observe(onMeta);
@@ -427,9 +429,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               {t(locale, 'error')}: {errorView}
             </button>
           )}
-          <span className="shape-count" title={t(locale, 'objectsCount')} aria-label={`${shapeCount}`}>
-            {shapeCount}
-          </span>
           <Presence locale={locale} online={sync.online} names={peers.map((p) => p.name)} />
           <div className="island-sep" />
           <button
@@ -513,7 +512,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onNick={(value) => saveUser(value)}
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}
-        onBg={(value) => setMeta({ bg: value })}
+        onBg={(value) => {
+          writePrefs({ paperBg: value });
+          setBg(value);
+        }}
         onGrid={(on) => setMeta({ grid: on })}
         onClose={() => setSettingsOpen(false)}
       />

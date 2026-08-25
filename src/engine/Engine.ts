@@ -10,6 +10,7 @@ import {
   onImageLoad,
   pointInShape,
   readableTextOn,
+  displayInk,
   themeFor,
   intersects,
   normalizeBox,
@@ -26,6 +27,8 @@ import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } fr
 import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
+import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
+import { onPrefsChange, readPrefs } from '../core/prefs';
 
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
@@ -153,6 +156,7 @@ export class Engine {
   private dragTool: Tool;
   private offImageLoad: () => void = () => {};
   private offFormulaLoad: () => void = () => {};
+  private offPrefs: () => void = () => {};
   private erasing = new Set<string>();
   private partialErase = new Map<string, Set<number>>();
   private pointers = new Map<number, { x: number; y: number }>();
@@ -212,6 +216,11 @@ export class Engine {
         this.reduceMotion = e.matches;
       });
     }
+    this.offPrefs = onPrefsChange(() => {
+      clearToolCursorCache();
+      this.setCursor(this.toolCursor());
+      this.dirty = true;
+    });
     this.rafId = requestAnimationFrame(this.loop);
   }
 
@@ -277,7 +286,7 @@ export class Engine {
     this.exportPick = false;
     this.exportRect = null;
     this.exportAnchor = null;
-    this.setCursor(this.tool.cursor);
+    this.setCursor(this.toolCursor());
     this.dirty = true;
   }
 
@@ -292,7 +301,7 @@ export class Engine {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     ctx.setTransform(opts.scale, 0, 0, opts.scale, -box.x * opts.scale, -box.y * opts.scale);
-    const theme = themeFor(store.metaBg());
+    const theme = themeFor(store.viewPaperBg());
     if (opts.background) {
       ctx.fillStyle = opts.background;
       ctx.fillRect(box.x, box.y, box.w, box.h);
@@ -303,7 +312,7 @@ export class Engine {
       if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (!v || !intersects(v, box)) continue;
-      drawShape(ctx, v, theme.text, store.metaBg());
+      drawShape(ctx, v, theme.text, store.viewPaperBg());
     }
     return canvas;
   }
@@ -345,6 +354,7 @@ export class Engine {
     store.order.unobserve(this.onOrder);
     this.offImageLoad();
     this.offFormulaLoad();
+    this.offPrefs();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
   }
@@ -353,10 +363,15 @@ export class Engine {
     return this.tools.get(this.override ?? this.active);
   }
 
+  /** Resolved CSS cursor for the active tool (icon cursors respect Advanced scale). */
+  toolCursor(): string {
+    return cursorCssForTool(this.tool.id) ?? this.tool.cursor;
+  }
+
   setTool(id: ToolId): void {
     this.active = id;
     this.override = null;
-    this.setCursor(this.tool.cursor);
+    this.setCursor(this.toolCursor());
     this.events.onTool?.(id);
     this.dirty = true;
   }
@@ -710,13 +725,13 @@ export class Engine {
     canvas.height = Math.max(1, Math.round(box.h + pad * 2));
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    ctx.fillStyle = store.metaBg();
+    ctx.fillStyle = store.viewPaperBg();
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(-box.x + pad, -box.y + pad);
-    const theme = themeFor(store.metaBg());
+    const theme = themeFor(store.viewPaperBg());
     for (const id of ids) {
       const v = this.views.get(id);
-      if (v) drawShape(ctx, v, theme.text, store.metaBg());
+      if (v) drawShape(ctx, v, theme.text, store.viewPaperBg());
     }
     return canvas;
   }
@@ -926,7 +941,7 @@ export class Engine {
 
   cancelCrop(): void {
     this.crop = null;
-    this.setCursor(this.tool.cursor);
+    this.setCursor(this.toolCursor());
     this.events.onCrop?.(false);
     this.dirty = true;
   }
@@ -953,7 +968,7 @@ export class Engine {
       cropH,
     });
     this.crop = null;
-    this.setCursor(this.tool.cursor);
+    this.setCursor(this.toolCursor());
     this.events.onCrop?.(false);
     this.dirty = true;
   }
@@ -1066,12 +1081,12 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
     const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
-    const bg = store.metaBg();
+    const bg = store.viewPaperBg();
     let color: string;
     if (v.type === 'sticky') {
       color = v.textColor ?? '#3a2f00';
     } else if (v.type === 'text') {
-      color = readableTextOn(v.textColor ?? themeFor(bg).text, bg);
+      color = v.textColor ?? themeFor(bg).text;
     } else {
       color = v.textColor ?? themeFor(bg).text;
     }
@@ -1092,8 +1107,9 @@ export class Engine {
   }
 
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
-    const bg = store.metaBg();
-    const readable = readableTextOn(color, bg);
+    const bg = store.viewPaperBg();
+    const { adaptInkToPaper } = readPrefs();
+    const editorColor = adaptInkToPaper ? color : readableTextOn(color, bg);
     this.editing = true;
     this.events.onEditText?.({
       id: null,
@@ -1103,7 +1119,7 @@ export class Engine {
       h: 30,
       text: '',
       fontSize,
-      color: readable,
+      color: editorColor,
       type: 'text',
       centered: false,
     });
@@ -1144,8 +1160,11 @@ export class Engine {
 
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
-    const bg = store.metaBg();
-    const color = target.type === 'text' ? readableTextOn(target.color, bg) : target.color;
+    const bg = store.viewPaperBg();
+    const color =
+      target.type === 'text' && !readPrefs().adaptInkToPaper
+        ? readableTextOn(target.color, bg)
+        : target.color;
     if (id === null) {
       const trimmed = text.trim();
       if (!trimmed) return;
@@ -1440,7 +1459,7 @@ export class Engine {
         }
       } else if (this.hoverPort) {
         this.hoverPort = null;
-        this.setCursor(this.tool.cursor);
+        this.setCursor(this.toolCursor());
         this.dirty = true;
       }
     }
@@ -1508,7 +1527,7 @@ export class Engine {
       }
       this.connecting = null;
       this.hoverPort = null;
-      this.setCursor(this.tool.cursor);
+      this.setCursor(this.toolCursor());
       this.dirty = true;
       return;
     }
@@ -1521,7 +1540,7 @@ export class Engine {
         return;
       }
       this.exportPick = false;
-      this.setCursor(this.tool.cursor);
+      this.setCursor(this.toolCursor());
       this.dirty = true;
       this.events.onExportRegion?.(rect);
       return;
@@ -1533,7 +1552,7 @@ export class Engine {
     if (this.panDrag) {
       this.panDrag = false;
       this.camera.instant = false;
-      this.setCursor(this.tool.cursor);
+      this.setCursor(this.toolCursor());
       if (
         e.button === 2 &&
         Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) < 5 &&
@@ -1566,21 +1585,19 @@ export class Engine {
     if (this.editing) return;
     const p = this.pointerInfo(e);
     const id = this.hitTest(p.world.x, p.world.y);
-    if (id) {
-      const type = this.views.get(id)?.type;
-      if (type === 'image') {
-        this.setSelection([id]);
-        this.startCropSelected();
-        return;
-      }
-      if (type === 'graph') {
-        this.openGraphEditor(id);
-        return;
-      }
-      this.openTextEditor(id);
+    // Empty board: no free-text spawn. Place text with the Text tool only.
+    if (!id) return;
+    const type = this.views.get(id)?.type;
+    if (type === 'image') {
+      this.setSelection([id]);
+      this.startCropSelected();
       return;
     }
-    this.openTextEditorAt(p.world.x, p.world.y, settings.text.size, settings.text.color);
+    if (type === 'graph') {
+      this.openGraphEditor(id);
+      return;
+    }
+    this.openTextEditor(id);
   };
 
   private cancelToolDrag(): void {
@@ -1910,7 +1927,7 @@ export class Engine {
       e.preventDefault();
       if (!this.override) {
         this.override = 'pan';
-        this.setCursor(this.tool.cursor);
+        this.setCursor(this.toolCursor());
       }
       return;
     }
@@ -2032,7 +2049,7 @@ export class Engine {
   private onKeyUp = (e: KeyboardEvent): void => {
     if (e.key === ' ' && this.override === 'pan') {
       this.override = null;
-      this.setCursor(this.tool.cursor);
+      this.setCursor(this.toolCursor());
     }
   };
 
@@ -2059,7 +2076,7 @@ export class Engine {
     // ensureOrder is handled on sync/board events; avoid spurious resize
     const { ctx, dpr, w, h } = this;
     const { x: cx, y: cy, zoom: z } = this.camera;
-    const target = store.metaBg();
+    const target = store.viewPaperBg();
     if (!this.paperTo) {
       this.paperFrom = target;
       this.paperTo = target;
@@ -2091,13 +2108,21 @@ export class Engine {
         for (let i = 0; i < pts.length; i += 2) {
           if (!partial.has(i / 2)) filtered.push(pts[i], pts[i + 1]);
         }
-        if (filtered.length >= 2) drawPenStroke(ctx, filtered, v.strokeWidth, v.stroke, v.alpha ?? 1);
+        if (filtered.length >= 2) {
+          drawPenStroke(
+            ctx,
+            filtered,
+            v.strokeWidth,
+            displayInk(v.stroke, store.viewPaperBg()),
+            v.alpha ?? 1
+          );
+        }
         return;
       }
       if (this.erasing.has(v.id)) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, store.metaBg());
+        drawShape(ctx, v, theme.text, store.viewPaperBg());
         ctx.restore();
         // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
@@ -2109,7 +2134,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, store.metaBg());
+        drawShape(ctx, v, theme.text, store.viewPaperBg());
       }
     };
     const ord = store.order;
