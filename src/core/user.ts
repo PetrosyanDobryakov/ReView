@@ -1,3 +1,6 @@
+import { readLocale } from './locale';
+import { t } from '../ui/i18n';
+
 export interface UserInfo {
   name: string;
   color: string;
@@ -48,7 +51,7 @@ export function loadUser(): UserInfo {
   }
   if (!cached) {
     const n = String(100 + Math.floor(Math.random() * 900));
-    cached = { name: `Гость-${n}`, color: colorFor(n) };
+    cached = { name: `${t(readLocale(), 'guestPrefix')}-${n}`, color: colorFor(n) };
     persist(cached);
   }
   return cached;

@@ -200,18 +200,19 @@ engine.setSelection([zB]);
 engine.sendBack();
 assert.equal(store.order.get(0), zB, 'sendBack moves shape to bottom');
 
-// real pen stroke via tool
+// real pen stroke via tool (zigzag so shape recognition does not snap it)
 engine.setTool('pen');
 const pensBeforeDraw = [...store.board].filter(([, m]) => m.get('type') === 'pen').length;
 engine.onPointerDown({ clientX: 600, clientY: 400, button: 0, pointerId: 20, shiftKey: false });
-engine.onPointerMove({ clientX: 620, clientY: 410, button: 0, pointerId: 20, shiftKey: false });
-engine.onPointerMove({ clientX: 640, clientY: 420, button: 0, pointerId: 20, shiftKey: false });
-engine.onPointerUp({ clientX: 640, clientY: 420, button: 0, pointerId: 20, shiftKey: false });
+engine.onPointerMove({ clientX: 620, clientY: 450, button: 0, pointerId: 20, shiftKey: false });
+engine.onPointerMove({ clientX: 640, clientY: 390, button: 0, pointerId: 20, shiftKey: false });
+engine.onPointerMove({ clientX: 660, clientY: 460, button: 0, pointerId: 20, shiftKey: false });
+engine.onPointerUp({ clientX: 660, clientY: 460, button: 0, pointerId: 20, shiftKey: false });
 const pensAfterDraw = [...store.board].filter(([, m]) => m.get('type') === 'pen');
 assert.equal(pensAfterDraw.length, pensBeforeDraw + 1, 'pen tool creates a stroke');
 const newPen = pensAfterDraw[pensAfterDraw.length - 1][1];
 const pts = newPen.get('points').toArray();
-assert.equal(pts.length, 6, 'stroke keeps multiple points');
+assert.equal(pts.length, 8, 'stroke keeps multiple points');
 assert.equal(newPen.get('strokeWidth'), 3, 'stroke uses pen width');
 
 // shift straight line

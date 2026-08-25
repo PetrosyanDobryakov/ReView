@@ -4,6 +4,17 @@ export const DOC_MAX_PAGES = 60;
 const PAGE_W = 1240;
 const PAGE_H = 1754;
 
+export class DocImportTruncatedError extends Error {
+  readonly pages: string[];
+  readonly ratio: number;
+  constructor(pages: string[], ratio: number) {
+    super('document truncated');
+    this.name = 'DocImportTruncatedError';
+    this.pages = pages;
+    this.ratio = ratio;
+  }
+}
+
 function pageCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = PAGE_W;
@@ -11,36 +22,45 @@ function pageCanvas(): HTMLCanvasElement {
   return c;
 }
 
-async function pdfPages(file: File): Promise<string[]> {
+async function pdfPages(file: File): Promise<{ pages: string[]; truncated: boolean }> {
   const pdfjs = await import('pdfjs-dist');
   const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   const data = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjs.getDocument({ data }).promise;
-  const count = Math.min(pdf.numPages, DOC_MAX_PAGES);
-  const pages: string[] = [];
-  for (let i = 1; i <= count; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 1 });
-    const scale = Math.min(PAGE_W / viewport.width, PAGE_H / viewport.height);
-    const vp = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(vp.width);
-    canvas.height = Math.round(vp.height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) continue;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-    pages.push(canvas.toDataURL('image/jpeg', 0.82));
+  try {
+    const truncated = pdf.numPages > DOC_MAX_PAGES;
+    const count = Math.min(pdf.numPages, DOC_MAX_PAGES);
+    const pages: string[] = [];
+    for (let i = 1; i <= count; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = Math.min(PAGE_W / viewport.width, PAGE_H / viewport.height);
+      const vp = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(vp.width);
+      canvas.height = Math.round(vp.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      pages.push(canvas.toDataURL('image/jpeg', 0.82));
+    }
+    return { pages, truncated };
+  } finally {
+    try {
+      await pdf.destroy();
+    } catch {
+      /* ignore */
+    }
   }
-  void pdf.destroy();
-  return pages;
 }
 
 export interface DocPages {
   pages: string[];
   ratio: number;
+  truncated?: boolean;
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -52,6 +72,24 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     }
     let line = '';
     for (const word of raw.split(' ')) {
+      if (ctx.measureText(word).width > maxWidth) {
+        if (line) {
+          lines.push(line);
+          line = '';
+        }
+        let chunk = '';
+        for (const ch of word) {
+          const next = chunk + ch;
+          if (chunk && ctx.measureText(next).width > maxWidth) {
+            lines.push(chunk);
+            chunk = ch;
+          } else {
+            chunk = next;
+          }
+        }
+        line = chunk;
+        continue;
+      }
       const next = line ? line + ' ' + word : word;
       if (ctx.measureText(next).width > maxWidth && line) {
         lines.push(line);
@@ -77,8 +115,12 @@ async function txtPages(file: File): Promise<DocPages> {
   const maxLines = Math.floor((PAGE_H - margin * 2) / lineHeight);
   const lines = wrapText(ctx, text, PAGE_W - margin * 2);
   const pages: string[] = [];
+  let truncated = false;
   for (let start = 0; start < lines.length || pages.length === 0; start += maxLines) {
-    if (pages.length >= DOC_MAX_PAGES) break;
+    if (pages.length >= DOC_MAX_PAGES) {
+      truncated = start < lines.length;
+      break;
+    }
     const chunk = lines.slice(start, start + maxLines);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, PAGE_W, PAGE_H);
@@ -89,7 +131,7 @@ async function txtPages(file: File): Promise<DocPages> {
     pages.push(canvas.toDataURL('image/png'));
     if (start + maxLines >= lines.length) break;
   }
-  return { pages, ratio: PAGE_W / PAGE_H };
+  return { pages, ratio: PAGE_W / PAGE_H, truncated };
 }
 
 export async function fileToDocPages(file: File): Promise<DocPages> {
@@ -102,15 +144,19 @@ export async function fileToDocPages(file: File): Promise<DocPages> {
   }
   let pages: string[];
   let ratio = PAGE_W / PAGE_H;
+  let truncated = false;
   if (isPdf) {
-    pages = await pdfPages(file);
+    const result = await pdfPages(file);
+    pages = result.pages;
+    truncated = result.truncated;
     ratio = await firstPageRatio(pages);
   } else {
     const txt = await txtPages(file);
     pages = txt.pages;
     ratio = txt.ratio;
+    truncated = Boolean(txt.truncated);
   }
-  return { pages, ratio };
+  return { pages, ratio, truncated };
 }
 
 async function firstPageRatio(pages: string[]): Promise<number> {

@@ -72,10 +72,33 @@ function restore(): void {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return;
     const bag = parsed as Record<string, unknown>;
-    if (bag.pen && typeof bag.pen === 'object') Object.assign(settings.pen, bag.pen);
-    if (bag.shape && typeof bag.shape === 'object') Object.assign(settings.shape, bag.shape);
-    if (bag.text && typeof bag.text === 'object') Object.assign(settings.text, bag.text);
-    if (bag.eraser && typeof bag.eraser === 'object') Object.assign(settings.eraser, bag.eraser);
+    if (bag.pen && typeof bag.pen === 'object') {
+      const p = bag.pen as Record<string, unknown>;
+      if (typeof p.color === 'string') settings.pen.color = p.color;
+      if (typeof p.size === 'number' && p.size > 0 && p.size < 200) settings.pen.size = p.size;
+      if (p.style === 'marker' || p.style === 'highlighter') settings.pen.style = p.style;
+    }
+    if (bag.shape && typeof bag.shape === 'object') {
+      const s = bag.shape as Record<string, unknown>;
+      if (typeof s.fill === 'string') settings.shape.fill = s.fill;
+      if (typeof s.stroke === 'string') settings.shape.stroke = s.stroke;
+    }
+    if (bag.text && typeof bag.text === 'object') {
+      const t = bag.text as Record<string, unknown>;
+      if (typeof t.color === 'string') settings.text.color = t.color;
+      if (typeof t.size === 'number' && t.size >= 4 && t.size <= 200) settings.text.size = t.size;
+      if (typeof t.bold === 'boolean') settings.text.bold = t.bold;
+      if (typeof t.italic === 'boolean') settings.text.italic = t.italic;
+      if (typeof t.underline === 'boolean') settings.text.underline = t.underline;
+      if (typeof t.strike === 'boolean') settings.text.strike = t.strike;
+      if (t.align === 'left' || t.align === 'center' || t.align === 'right') settings.text.align = t.align;
+      if (typeof t.highlight === 'boolean') settings.text.highlight = t.highlight;
+    }
+    if (bag.eraser && typeof bag.eraser === 'object') {
+      const e = bag.eraser as Record<string, unknown>;
+      if (typeof e.size === 'number' && e.size > 0 && e.size < 400) settings.eraser.size = e.size;
+      if (e.mode === 'whole' || e.mode === 'partial') settings.eraser.mode = e.mode;
+    }
   } catch {
     /* ignore */
   }
