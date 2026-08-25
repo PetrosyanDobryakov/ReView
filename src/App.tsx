@@ -7,15 +7,15 @@ import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { Presence } from './ui/Presence';
 import { StyleBar } from './ui/StyleBar';
-import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { GraphEditor } from './ui/GraphEditor';
 import { PageBar } from './ui/PageBar';
 import { ExportDialog } from './ui/ExportDialog';
 import type { ExportSource } from './ui/ExportDialog';
 import type { ShapeBox } from './core/shapes';
+import type { AlignKind } from './core/align';
 import { Icon } from './ui/icons';
-import { modKey, t } from './ui/i18n';
+import { modKey, t, type MessageKey } from './ui/i18n';
 import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
@@ -28,6 +28,65 @@ import type { PeerCursor } from './core/store';
 import { MOTION, useExitPresence } from './ui/motion';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
+
+type MenuItem = { label: string; hint?: string; danger?: boolean; holdMs?: number; run: () => void };
+
+const UNLOCK_HOLD_MS = 800;
+
+function HoldCtxItem({
+  item,
+  index,
+  onDone,
+}: {
+  item: MenuItem;
+  index: number;
+  onDone: () => void;
+}) {
+  const [filling, setFilling] = useState(false);
+  const timer = useRef<number | null>(null);
+  const stop = () => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    setFilling(false);
+  };
+  useEffect(() => stop, []);
+  return (
+    <button
+      type="button"
+      className={`ctx-item ctx-item-hold${item.danger ? ' danger' : ''}`}
+      style={{ animationDelay: `${index * 18}ms` }}
+      onPointerDown={() => {
+        stop();
+        setFilling(true);
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          onDone();
+        }, item.holdMs!);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onDone();
+        }
+      }}
+    >
+      <span
+        className="hold-fill"
+        style={{
+          transitionDuration: filling ? `${item.holdMs}ms` : '80ms',
+          width: filling ? '100%' : '0%',
+        }}
+      />
+      <span>{item.label}</span>
+      {item.hint && <span className="ctx-hint">{item.hint}</span>}
+    </button>
+  );
+}
 
 export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
   // init per-board store synchronously before any hooks that use it
@@ -232,7 +291,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const menuX = menuView ? Math.min(menuView.x, window.innerWidth - 240) : 0;
   const menuY = menuView ? Math.min(menuView.y, window.innerHeight - 320) : 0;
 
-  const menuItems: Array<{ label: string; hint?: string; danger?: boolean; run: () => void }> = [];
+      const menuItems: MenuItem[] = [];
   if (menuView) {
     const e = engine;
     if (menuView.shapeId) {
@@ -270,9 +329,35 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       menuItems.push(
         { label: t(locale, 'ctxFront'), run: () => e?.bringFront() },
         { label: t(locale, 'ctxBack'), run: () => e?.sendBack() },
+      );
+      const selViews = [...(e?.selection ?? [])]
+        .map((id) => e?.views.get(id))
+        .filter((v): v is ShapeView => Boolean(v));
+      const textish = selViews.some((v) => v.type === 'text' || v.type === 'sticky');
+      if (textish) {
+        const alignKinds: Array<[MessageKey, AlignKind]> = [
+          ['alignLeft', 'left'],
+          ['alignCenterH', 'centerH'],
+          ['alignRight', 'right'],
+          ['alignTop', 'top'],
+          ['alignCenterV', 'centerV'],
+          ['alignBottom', 'bottom'],
+        ];
+        for (const [key, kind] of alignKinds) {
+          menuItems.push({ label: t(locale, key), run: () => e?.alignSelection(kind) });
+        }
+        if (selViews.length >= 3) {
+          menuItems.push(
+            { label: t(locale, 'distributeH'), run: () => e?.alignSelection('distributeH') },
+            { label: t(locale, 'distributeV'), run: () => e?.alignSelection('distributeV') },
+          );
+        }
+      }
+      menuItems.push(
         {
           label: menuView.locked ? t(locale, 'ctxUnlock') : t(locale, 'ctxLock'),
-          hint: `${modKey()}+Shift+L`,
+          hint: menuView.locked ? t(locale, 'holdHint') : `${modKey()}+Shift+L`,
+          holdMs: menuView.locked ? UNLOCK_HOLD_MS : undefined,
           run: () => e?.toggleLockSelection(),
         },
         {
@@ -455,7 +540,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         eraser={eraser}
         onPatched={refreshSelected}
       />
-      <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
 
       <input
         ref={fileRef}
@@ -524,21 +608,25 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           style={{ left: menuX, top: menuY }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          {menuItems.map((item, index) => (
-            <button
-              type="button"
-              key={item.label}
-              className={`ctx-item${item.danger ? ' danger' : ''}`}
-              style={{ animationDelay: `${index * 18}ms` }}
-              onClick={() => {
-                item.run();
-                closeMenu();
-              }}
-            >
-              <span>{item.label}</span>
-              {item.hint && <span className="ctx-hint">{item.hint}</span>}
-            </button>
-          ))}
+          {menuItems.map((item, index) =>
+            item.holdMs ? (
+              <HoldCtxItem key={item.label} item={item} index={index} onDone={() => { item.run(); closeMenu(); }} />
+            ) : (
+              <button
+                type="button"
+                key={item.label}
+                className={`ctx-item${item.danger ? ' danger' : ''}`}
+                style={{ animationDelay: `${index * 18}ms` }}
+                onClick={() => {
+                  item.run();
+                  closeMenu();
+                }}
+              >
+                <span>{item.label}</span>
+                {item.hint && <span className="ctx-hint">{item.hint}</span>}
+              </button>
+            )
+          )}
         </div>
       )}
       {infoShown && infoView && (
