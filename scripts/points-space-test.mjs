@@ -6,15 +6,13 @@ import {
   downsamplePolyline,
   toLocalPoints,
   toWorldPoints,
-} from '../src/core/pointsSpace.ts';
-import {
   beginWriteGesture,
   configureWriteGate,
   endWriteGesture,
   enqueuePatches,
   flushNow,
   resetWriteGate,
-} from '../src/core/writeGate.ts';
+} from './core-bundle.mjs';
 
 const world = [100, 200, 150, 250, 180, 210];
 const local = toLocalPoints(world, 100, 200);
@@ -30,7 +28,7 @@ assert.equal(slim[slim.length - 2], 199, 'keeps last x');
 
 resetWriteGate();
 let flushes = 0;
-/** @type {import('../src/core/writeGate.ts').PatchBatch | null} */
+/** @type {import('./core-bundle.mjs').PatchBatch | null} */
 let lastBatch = null;
 configureWriteGate({
   flush: (batch) => {

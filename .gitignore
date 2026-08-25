@@ -2,6 +2,7 @@ node_modules
 dist
 .impeccable
 scripts/engine-bundle.mjs
+scripts/core-bundle.mjs
 *.log
 logs/
 .DS_Store
