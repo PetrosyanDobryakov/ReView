@@ -127,7 +127,7 @@ export function ExportDialog({
     n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   const sources: Array<{ id: ExportSource; label: string; disabled?: boolean }> = [
-    { id: 'all', label: t(locale, 'exportAll') },
+    { id: 'all', label: t(locale, 'exportPage') },
     { id: 'selection', label: t(locale, 'exportSelection'), disabled: !hasSelection },
     { id: 'region', label: t(locale, 'exportRegion'), disabled: !rect },
   ];
