@@ -39,6 +39,8 @@ export type PeerCursor = {
   publishedName: string;
   publishedColor: string;
   overridden: boolean;
+  /** False when the user left the board view but is still on the site. */
+  viewing: boolean;
   x: number | null;
   y: number | null;
   /** Active board tool when published. */

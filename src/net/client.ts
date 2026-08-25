@@ -64,6 +64,7 @@ export class SyncClient {
   private lastSentCursor: CursorPos | null = null;
   private lastTool: string | null = null;
   private lastPage: string | null = null;
+  private lastViewing = true;
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
   private lastCursorSent = 0;
@@ -125,6 +126,7 @@ export class SyncClient {
     this.lastSentCursor = null;
     this.lastTool = null;
     this.lastPage = null;
+    this.lastViewing = true;
     this.lastDraft = null;
     this.lastErase = null;
     this.lastEmittedStatus = null;
@@ -189,6 +191,7 @@ export class SyncClient {
     if (this.lastCursor) this.writeCursor(this.lastCursor);
     if (this.lastTool) this.writeTool(this.lastTool);
     if (this.lastPage) this.writePage(this.lastPage);
+    this.writeViewing(this.lastViewing);
     if (this.lastDraft) this.writeDraft(this.lastDraft);
     if (this.lastErase) this.writeErasePreview(this.lastErase);
 
@@ -251,6 +254,8 @@ export class SyncClient {
       const tool = typeof toolRaw === 'string' && toolRaw.trim() ? toolRaw.trim() : null;
       const pageRaw = state.page;
       const page = typeof pageRaw === 'string' && pageRaw.trim() ? pageRaw.trim() : null;
+      const viewingRaw = state.viewing;
+      const viewing = viewingRaw !== false;
       const draft = parseDraft(state.draft);
       const erasePreview = parseErasePreview(state.erasePreview);
       peers.push({
@@ -265,6 +270,7 @@ export class SyncClient {
         y: cur?.y ?? null,
         tool,
         page,
+        viewing,
         draft,
         erasePreview,
       });
@@ -295,6 +301,18 @@ export class SyncClient {
     this.lastPage = page;
     netLog.info('publishPage', () => ({ page }));
     this.writePage(page);
+  }
+
+  /** True while the tab is focused on `/board/:id` (false = alt-tab, home, or minimized). */
+  publishBoardView(viewing: boolean): void {
+    if (this.lastViewing === viewing) return;
+    this.lastViewing = viewing;
+    if (!viewing) {
+      this.clearDraft();
+      this.clearErasePreview();
+    }
+    netLog.info('publishBoardView', () => ({ viewing }));
+    this.writeViewing(viewing);
   }
 
   sendCursor(pos: CursorPos | null): void {
@@ -482,6 +500,14 @@ export class SyncClient {
     }
   }
 
+  private writeViewing(viewing: boolean): void {
+    try {
+      this.provider?.awareness.setLocalStateField('viewing', viewing);
+    } catch (err) {
+      netLog.warn('writeViewing failed', () => ({ err }));
+    }
+  }
+
   private writeDraft(draft: PeerDraft | null): void {
     try {
       this.provider?.awareness.setLocalStateField('draft', draft);
@@ -511,6 +537,7 @@ export class SyncClient {
         else this.writePresence(loadUser());
         if (this.lastTool) this.writeTool(this.lastTool);
         if (this.lastPage) this.writePage(this.lastPage);
+        this.writeViewing(this.lastViewing);
         if (this.lastCursor) this.writeCursor(this.lastCursor);
         if (this.lastDraft) this.writeDraft(this.lastDraft);
         if (this.lastErase) this.writeErasePreview(this.lastErase);
@@ -612,7 +639,7 @@ export class SyncClient {
     return peers
       .map(
         (p) =>
-          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}`
+          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.viewing ? 1 : 0}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}`
       )
       .join('\n');
   }

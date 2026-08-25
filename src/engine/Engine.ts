@@ -332,6 +332,7 @@ export class Engine {
         old.name !== peer.name ||
         old.tool !== peer.tool ||
         old.page !== peer.page ||
+        old.viewing !== peer.viewing ||
         Boolean(old.draft) !== Boolean(peer.draft) ||
         (peer.draft &&
           old.draft &&
@@ -450,7 +451,7 @@ export class Engine {
     // File drops are owned by App (images + PDF/TXT) so we don't double-insert.
     this.bindStore();
     store.setLiveViewApplier((batch) => this.applyLivePatches(batch));
-    this.offPageChange = store.onPageChange(() => {
+    this.offPageChange = store.onActivePageChange(() => {
       const page = store.currentPageId();
       if (page === this.boundPageId) return;
       this.boundPageId = page;
@@ -2153,7 +2154,7 @@ export class Engine {
   };
 
   private onPointerLeave = (): void => {
-    sendCursor(null);
+    // Keep the last world cursor in awareness — alt-tab and canvas exit must not wipe presence.
   };
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -3052,6 +3053,7 @@ export class Engine {
       ctx.restore();
     }
     ctx.restore();
+    this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
     this.dirty = u < 1 || this.peersAnimating;
   }
@@ -3126,7 +3128,6 @@ export class Engine {
         const svx = (pos.tx - pos.prevTx) / sampleDt;
         const svy = (pos.ty - pos.prevTy) / sampleDt;
         const age = Math.max(0, (now - pos.sampleAt) / 1000);
-        // Cap extrapolation so idle cursors don't drift after the peer stops.
         const lead = Math.min(leadSec, Math.max(0, leadSec - age * 0.5));
         const speed = Math.hypot(svx, svy);
         if (speed > 8) {
@@ -3145,6 +3146,15 @@ export class Engine {
         pos.vx = 0;
         pos.vy = 0;
       }
+
+      const screen = this.worldToScreen(pos.x, pos.y);
+      const edgePad = 40;
+      const onScreen =
+        screen.x >= edgePad &&
+        screen.x <= this.w - edgePad &&
+        screen.y >= edgePad &&
+        screen.y <= this.h - edgePad;
+      if (!onScreen) continue;
 
       const err = Math.hypot(aimX - pos.x, aimY - pos.y);
       const speed = Math.hypot(pos.vx, pos.vy);
@@ -3166,6 +3176,116 @@ export class Engine {
       ctx.fillText(label, glyph * 0.62, -glyph * 0.48);
 
       ctx.restore();
+    }
+  }
+
+  /** Edge name pills for peers off-screen or on another sub-page. */
+  private drawPeerMirrors(ctx: CanvasRenderingContext2D): void {
+    if (!this.remotePeers.length) return;
+    const { w, h } = this;
+    const edgePad = 36;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const myPage = store.currentPageId();
+    const pages = store.listPages();
+    const reduce = this.reduceMotion;
+    const smoothTime = 0.055;
+    const leadSec = 0.045;
+    const dt = this.frameDt;
+
+    for (const peer of this.remotePeers) {
+      if (peer.x === null || peer.y === null) continue;
+      const samePage = peer.page == null || peer.page === myPage;
+
+      let pos = this.peerLerp.get(peer.id);
+      if (!pos) {
+        pos = {
+          x: peer.x,
+          y: peer.y,
+          vx: 0,
+          vy: 0,
+          tx: peer.x,
+          ty: peer.y,
+          prevTx: peer.x,
+          prevTy: peer.y,
+          sampleAt: now,
+          prevSampleAt: now,
+        };
+        this.peerLerp.set(peer.id, pos);
+      }
+
+      let aimX = pos.tx;
+      let aimY = pos.ty;
+      if (!reduce) {
+        const sampleDt = Math.max(0.001, (pos.sampleAt - pos.prevSampleAt) / 1000);
+        const svx = (pos.tx - pos.prevTx) / sampleDt;
+        const svy = (pos.ty - pos.prevTy) / sampleDt;
+        const age = Math.max(0, (now - pos.sampleAt) / 1000);
+        const lead = Math.min(leadSec, Math.max(0, leadSec - age * 0.5));
+        const speed = Math.hypot(svx, svy);
+        if (speed > 8) {
+          aimX = pos.tx + svx * lead;
+          aimY = pos.ty + svy * lead;
+        }
+        const dampX = smoothDamp(pos.x, aimX, pos.vx, smoothTime, dt);
+        const dampY = smoothDamp(pos.y, aimY, pos.vy, smoothTime, dt);
+        pos.x = dampX.value;
+        pos.vx = dampX.velocity;
+        pos.y = dampY.value;
+        pos.vy = dampY.velocity;
+      } else {
+        pos.x = pos.tx;
+        pos.y = pos.ty;
+      }
+
+      const screen = this.worldToScreen(pos.x, pos.y);
+      const onScreen =
+        screen.x >= edgePad &&
+        screen.x <= w - edgePad &&
+        screen.y >= edgePad &&
+        screen.y <= h - edgePad;
+      if (samePage && onScreen) continue;
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const dx = screen.x - cx;
+      const dy = screen.y - cy;
+      let edgeX = screen.x;
+      let edgeY = screen.y;
+      if (Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4) {
+        const halfW = w / 2 - edgePad;
+        const halfH = h / 2 - edgePad;
+        const scale = Math.min(halfW / Math.abs(dx), halfH / Math.abs(dy));
+        edgeX = cx + dx * scale;
+        edgeY = cy + dy * scale;
+      } else {
+        edgeX = w - edgePad;
+        edgeY = cy;
+      }
+
+      const fill = peer.color || '#7c8cff';
+      const alpha = peer.viewing === false ? 0.72 : 1;
+      const pageIdx = peer.page ? pages.indexOf(peer.page) + 1 : 1;
+      const pageSuffix = !samePage && pageIdx > 0 ? ` · ${pageIdx}` : '';
+      const label = peer.name + pageSuffix;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(edgeX, edgeY);
+      ctx.font = `600 11px ${BOARD_TYPEFACE}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width;
+      const pillPadX = 8;
+      const pillH = 22;
+      const pillW = tw + pillPadX * 2;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.roundRect(-pillW / 2, -pillH / 2, pillW, pillH, pillH / 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+      this.peersAnimating = true;
     }
   }
 

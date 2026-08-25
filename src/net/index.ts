@@ -51,6 +51,10 @@ export function publishPage(page: string): void {
   syncClient.publishPage(page);
 }
 
+export function publishBoardView(viewing: boolean): void {
+  syncClient.publishBoardView(viewing);
+}
+
 export function sendCursor(pos: CursorPos | null): void {
   syncClient.sendCursor(pos);
 }
