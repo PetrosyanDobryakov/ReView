@@ -22,12 +22,27 @@ applyLocale(locale);
 document.title = t(locale, 'title');
 
 window.addEventListener('error', (e) => {
-  const box = document.createElement('pre');
-  box.style.cssText =
-    'position:fixed;inset:auto 12px 12px 12px;max-height:45vh;overflow:auto;z-index:99999;background:#300;color:#fff;padding:10px;font-size:12px;white-space:pre-wrap;border-radius:8px';
-  box.textContent = '[error] ' + (e.error?.stack || e.message);
-  document.body.appendChild(box);
+  showErrorBanner('[error] ' + (e.error?.stack || e.message));
 });
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason;
+  const text =
+    reason instanceof Error ? reason.stack || reason.message : String(reason ?? 'unhandled rejection');
+  showErrorBanner('[promise] ' + text);
+});
+
+function showErrorBanner(text: string): void {
+  const existing = document.querySelectorAll('.review-error-banner');
+  if (existing.length > 4) existing[0]?.remove();
+  const box = document.createElement('pre');
+  box.className = 'review-error-banner';
+  box.style.cssText =
+    'position:fixed;inset:auto 12px 12px 12px;max-height:45vh;overflow:auto;z-index:99999;background:#300;color:#fff;padding:10px;font-size:12px;white-space:pre-wrap;border-radius:8px;cursor:pointer';
+  box.textContent = text + '\n\n(click to dismiss)';
+  box.title = 'Click to dismiss';
+  box.addEventListener('click', () => box.remove());
+  document.body.appendChild(box);
+}
 
 function BoardRoute() {
   const { boardId } = useParams<{ boardId: string }>();

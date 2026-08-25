@@ -200,30 +200,56 @@ export function alignViews(
   const targetBox = groupBox(targets);
   if (!targetBox) return [];
 
-  // reference box = union of others if exists, else targetBox (center logic still works)
   const refBox = others.length ? groupBox(others) : null;
-  if (!refBox && (kind === 'distributeH' || kind === 'distributeV')) return [];
 
   const patches: Array<[string, Partial<ShapeView>]> = [];
 
-  if (kind === 'left' && refBox) {
-    const dx = refBox.x - targetBox.x;
-    for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
-  } else if (kind === 'right' && refBox) {
-    const dx = refBox.x + refBox.w - (targetBox.x + targetBox.w);
-    for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
-  } else if (kind === 'centerH' && refBox) {
-    const dx = refBox.x + refBox.w / 2 - (targetBox.x + targetBox.w / 2);
-    for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
-  } else if (kind === 'top' && refBox) {
-    const dy = refBox.y - targetBox.y;
-    for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
-  } else if (kind === 'bottom' && refBox) {
-    const dy = refBox.y + refBox.h - (targetBox.y + targetBox.h);
-    for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
-  } else if (kind === 'centerV' && refBox) {
-    const dy = refBox.y + refBox.h / 2 - (targetBox.y + targetBox.h / 2);
-    for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
+  if (kind === 'left') {
+    if (refBox) {
+      const dx = refBox.x - targetBox.x;
+      for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
+    } else if (targets.length >= 2) {
+      for (const v of targets) patches.push([v.id, { x: targetBox.x }]);
+    }
+  } else if (kind === 'right') {
+    if (refBox) {
+      const dx = refBox.x + refBox.w - (targetBox.x + targetBox.w);
+      for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
+    } else if (targets.length >= 2) {
+      const right = targetBox.x + targetBox.w;
+      for (const v of targets) patches.push([v.id, { x: right - v.w }]);
+    }
+  } else if (kind === 'centerH') {
+    if (refBox) {
+      const dx = refBox.x + refBox.w / 2 - (targetBox.x + targetBox.w / 2);
+      for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
+    } else if (targets.length >= 2) {
+      const center = targetBox.x + targetBox.w / 2;
+      for (const v of targets) patches.push([v.id, { x: center - v.w / 2 }]);
+    }
+  } else if (kind === 'top') {
+    if (refBox) {
+      const dy = refBox.y - targetBox.y;
+      for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
+    } else if (targets.length >= 2) {
+      for (const v of targets) patches.push([v.id, { y: targetBox.y }]);
+    }
+  } else if (kind === 'bottom') {
+    if (refBox) {
+      const dy = refBox.y + refBox.h - (targetBox.y + targetBox.h);
+      for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
+    } else if (targets.length >= 2) {
+      const bottom = targetBox.y + targetBox.h;
+      for (const v of targets) patches.push([v.id, { y: bottom - v.h }]);
+    }
+  } else if (kind === 'centerV') {
+    if (refBox) {
+      const dy = refBox.y + refBox.h / 2 - (targetBox.y + targetBox.h / 2);
+      for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
+    } else if (targets.length >= 2) {
+      const center = targetBox.y + targetBox.h / 2;
+      for (const v of targets) patches.push([v.id, { y: center - v.h / 2 }]);
+    }
   } else if (kind === 'distributeH') {
     if (targets.length < 3) return [];
     const sorted = [...targets].sort((a, b) => a.x - b.x);
@@ -259,7 +285,7 @@ export function alignViews(
       const ny = patch.y ?? v.y;
       const dx = nx - v.x;
       const dy = ny - v.y;
-      (patch as any).points = v.points.map((val, i) => val + (i % 2 === 0 ? dx : dy));
+      patch.points = v.points.map((val, i) => val + (i % 2 === 0 ? dx : dy));
     }
   }
 

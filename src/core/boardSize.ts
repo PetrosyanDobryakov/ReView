@@ -152,17 +152,25 @@ export async function estimateBoardBytes(boardId: string): Promise<number> {
   return 0;
 }
 
-export async function deleteBoardDatabase(boardId: string): Promise<void> {
-  if (typeof indexedDB === 'undefined') return;
+export async function deleteBoardDatabase(boardId: string): Promise<boolean> {
+  if (typeof indexedDB === 'undefined') return true;
   const name = boardPersistenceDbName(boardId);
-  await new Promise<void>((resolve) => {
+  return new Promise<boolean>((resolve) => {
     try {
       const req = indexedDB.deleteDatabase(name);
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-      req.onblocked = () => resolve();
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      req.onsuccess = () => done(true);
+      req.onerror = () => done(false);
+      // Blocked often still completes later; treat as soft failure so callers can warn.
+      req.onblocked = () => done(false);
+      globalThis.setTimeout(() => done(false), 4000);
     } catch {
-      resolve();
+      resolve(false);
     }
   });
 }

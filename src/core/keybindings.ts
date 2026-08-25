@@ -139,12 +139,18 @@ export function resetKeybinds(): void {
 }
 
 export function onKeybindsChange(cb: () => void): () => void {
-  const h = () => cb();
-  window.addEventListener('review-keybinds-changed', h);
-  window.addEventListener('storage', h);
+  const h = (e?: Event) => {
+    if (e instanceof StorageEvent) {
+      if (e.key !== null && e.key !== STORAGE_KEY) return;
+      current = load();
+    }
+    cb();
+  };
+  window.addEventListener('review-keybinds-changed', h as EventListener);
+  window.addEventListener('storage', h as EventListener);
   return () => {
-    window.removeEventListener('review-keybinds-changed', h);
-    window.removeEventListener('storage', h);
+    window.removeEventListener('review-keybinds-changed', h as EventListener);
+    window.removeEventListener('storage', h as EventListener);
   };
 }
 

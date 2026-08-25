@@ -32,6 +32,7 @@ export function ExportDialog({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
 
   const box: ShapeBox | null = useMemo(() => {
@@ -46,35 +47,59 @@ export function ExportDialog({
       setPreviewUrl(null);
       setFileSize(null);
       setDims(null);
+      setExportError(null);
       return;
     }
     let cancelled = false;
     const id = window.setTimeout(async () => {
-      const result = await engine.exportBlob(box, {
-        scale,
-        format,
-        quality,
-        background: format === 'jpeg' || !transparent ? viewPaperBg() : null,
-      });
-      if (cancelled) return;
-      if (!result) {
-        setPreviewUrl(null);
-        setFileSize(null);
-        setDims(null);
-        return;
+      try {
+        const result = await engine.exportBlob(box, {
+          scale,
+          format,
+          quality,
+          background: format === 'jpeg' || !transparent ? viewPaperBg() : null,
+        });
+        if (cancelled) return;
+        if (!result) {
+          setPreviewUrl(null);
+          setFileSize(null);
+          setDims(null);
+          setExportError(t(locale, 'exportFailed'));
+          return;
+        }
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        const url = URL.createObjectURL(result.blob);
+        urlRef.current = url;
+        setPreviewUrl(url);
+        setFileSize(result.blob.size);
+        setDims({ w: result.width, h: result.height });
+        setExportError(null);
+      } catch {
+        if (!cancelled) {
+          setPreviewUrl(null);
+          setFileSize(null);
+          setDims(null);
+          setExportError(t(locale, 'exportFailed'));
+        }
       }
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      const url = URL.createObjectURL(result.blob);
-      urlRef.current = url;
-      setPreviewUrl(url);
-      setFileSize(result.blob.size);
-      setDims({ w: result.width, h: result.height });
     }, 250);
     return () => {
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [box, scale, format, quality, transparent]);
+  }, [box, scale, format, quality, transparent, locale]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
 
   useEffect(
     () => () => {
@@ -84,16 +109,16 @@ export function ExportDialog({
   );
 
   const fmtSize = (n: number): string =>
-    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`;
+    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   const sources: Array<{ id: ExportSource; label: string; disabled?: boolean }> = [
-    { id: 'all', label: t(locale, 'exportAll') },
+    { id: 'all', label: t(locale, 'exportPage') },
     { id: 'selection', label: t(locale, 'exportSelection'), disabled: !hasSelection },
     { id: 'region', label: t(locale, 'exportRegion'), disabled: !rect },
   ];
 
   return (
-    <div className="export-root" role="dialog" aria-label={t(locale, 'export')}>
+    <div className="export-root" role="dialog" aria-modal="true" aria-label={t(locale, 'export')}>
       <button className="sheet-backdrop" onClick={onClose} />
       <div className="export-modal">
         <header className="export-head">
@@ -186,7 +211,7 @@ export function ExportDialog({
             {previewUrl ? (
               <img src={previewUrl} alt="" />
             ) : (
-              <span className="export-empty">{t(locale, 'exportEmpty')}</span>
+              <span className="export-empty">{exportError ?? t(locale, 'exportEmpty')}</span>
             )}
           </div>
         </div>

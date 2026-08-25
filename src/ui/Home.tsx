@@ -87,7 +87,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       if (!first.length) {
         const curTeams = listTeams();
         const def = curTeams[0]?.id ?? 'default';
-        createBoard('Моя первая доска', def);
+        createBoard(t(locale, 'firstBoard'), def);
         refresh();
       }
     }
@@ -107,7 +107,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   };
 
   const handleCreateTeam = () => {
-    const created = createTeam(locale === 'zh' ? '新团队' : locale === 'en' ? 'New team' : 'Новая команда');
+    const created = createTeam(t(locale, 'defaultTeamShort'));
     refresh();
     setActiveTeam(created.id);
   };
@@ -150,8 +150,11 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const handleDeleteBoard = async (id: string) => {
     if (!confirm(t(locale, 'deleteBoardConfirm'))) return;
-    await deleteBoardData(id);
+    const ok = await deleteBoardData(id);
     refresh();
+    if (!ok) {
+      window.alert(t(locale, 'error') + ': IndexedDB');
+    }
   };
 
   const toggleSaveRemote = () => {
@@ -212,11 +215,18 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           </div>
           <div className="home-teams">
             {teams.map((team) => (
-              <button
+              <div
                 key={team.id}
-                type="button"
                 className={`home-team-btn${activeTeam === team.id ? ' on' : ''}`}
+                role="button"
+                tabIndex={0}
                 onClick={() => setActiveTeam(team.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveTeam(team.id);
+                  }
+                }}
               >
                 {editingTeam === team.id ? (
                   <input
@@ -275,7 +285,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     </button>
                   )}
                 </span>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -386,6 +396,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         locale={locale}
                         label={t(locale, 'boardStatusCol')}
                         onChange={(status) => {
+                          if (status === 'remote' && b.status !== 'remote') {
+                            if (!confirm(t(locale, 'statusRemoteWarn'))) return;
+                          }
                           setBoardStatus(b.id, status);
                           refresh();
                         }}

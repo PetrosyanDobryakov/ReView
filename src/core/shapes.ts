@@ -257,6 +257,142 @@ export function containedIn(inner: ShapeBox, outer: ShapeBox, tol = 2): boolean 
   );
 }
 
+type Point = { x: number; y: number };
+
+type ArrowCurve =
+  | { kind: 'line'; start: Point; end: Point; endAngle: number }
+  | { kind: 'quadratic'; start: Point; control: Point; end: Point; endAngle: number }
+  | { kind: 'cubic'; start: Point; control1: Point; control2: Point; end: Point; endAngle: number };
+
+function isPortId(value: string | undefined): value is PortId {
+  return value !== undefined && PORTS.some((port) => port === value);
+}
+
+function arrowCurve(v: ShapeView): ArrowCurve | null {
+  const pts = v.points ?? [];
+  if (pts.length < 4) return null;
+
+  const start = { x: pts[0], y: pts[1] };
+  const end = { x: pts[2], y: pts[3] };
+  const fromPort = isPortId(v.fromPort) ? v.fromPort : null;
+  const toPort = isPortId(v.toPort) ? v.toPort : null;
+  const isConnected = Boolean(v.fromId && v.toId && fromPort && toPort);
+
+  if (isConnected && fromPort && toPort) {
+    const fromDir = portDir(fromPort);
+    const toDir = portDir(toPort);
+    const dist = Math.hypot(end.x - start.x, end.y - start.y);
+    const offset = Math.min(80, dist * 0.35);
+    const control1 = {
+      x: start.x + fromDir.x * offset,
+      y: start.y + fromDir.y * offset,
+    };
+    const control2 = {
+      x: end.x + toDir.x * offset,
+      y: end.y + toDir.y * offset,
+    };
+    let endAngle = Math.atan2(end.y - control2.y, end.x - control2.x);
+    if (!isFinite(endAngle)) {
+      endAngle = Math.atan2(end.y - start.y, end.x - start.x);
+    }
+    return { kind: 'cubic', start, control1, control2, end, endAngle };
+  }
+
+  if (pts.length === 4) {
+    const midpoint = {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    };
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const normal = { x: -dy / len, y: dx / len };
+    const bend = Math.min(40, len * 0.18) * (Math.abs(dx) > Math.abs(dy) ? 1 : -1);
+    const control = {
+      x: midpoint.x + normal.x * bend * 0.5,
+      y: midpoint.y + normal.y * bend * 0.5,
+    };
+    const endAngle = Math.atan2(end.y - control.y, end.x - control.x);
+    return { kind: 'quadratic', start, control, end, endAngle };
+  }
+
+  return {
+    kind: 'line',
+    start,
+    end,
+    endAngle: Math.atan2(end.y - start.y, end.x - start.x),
+  };
+}
+
+function pointOnArrowCurve(curve: ArrowCurve, t: number): Point {
+  const u = 1 - t;
+  if (curve.kind === 'quadratic') {
+    return {
+      x: u * u * curve.start.x + 2 * u * t * curve.control.x + t * t * curve.end.x,
+      y: u * u * curve.start.y + 2 * u * t * curve.control.y + t * t * curve.end.y,
+    };
+  }
+  if (curve.kind === 'cubic') {
+    return {
+      x:
+        u * u * u * curve.start.x +
+        3 * u * u * t * curve.control1.x +
+        3 * u * t * t * curve.control2.x +
+        t * t * t * curve.end.x,
+      y:
+        u * u * u * curve.start.y +
+        3 * u * u * t * curve.control1.y +
+        3 * u * t * t * curve.control2.y +
+        t * t * t * curve.end.y,
+    };
+  }
+  return {
+    x: curve.start.x + (curve.end.x - curve.start.x) * t,
+    y: curve.start.y + (curve.end.y - curve.start.y) * t,
+  };
+}
+
+function sampleArrowCurve(curve: ArrowCurve, segments = 24): number[] {
+  const points: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const point = pointOnArrowCurve(curve, i / segments);
+    points.push(point.x, point.y);
+  }
+  return points;
+}
+
+export function arrowBounds(v: ShapeView): ShapeBox {
+  const curve = arrowCurve(v);
+  if (!curve) return { x: v.x, y: v.y, w: v.w, h: v.h };
+
+  const points = sampleArrowCurve(curve);
+  const head = Math.max(10, v.strokeWidth * 3.5);
+  points.push(
+    curve.end.x - head * Math.cos(curve.endAngle - 0.42),
+    curve.end.y - head * Math.sin(curve.endAngle - 0.42),
+    curve.end.x - head * Math.cos(curve.endAngle + 0.42),
+    curve.end.y - head * Math.sin(curve.endAngle + 0.42)
+  );
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < points.length; i += 2) {
+    minX = Math.min(minX, points[i]);
+    minY = Math.min(minY, points[i + 1]);
+    maxX = Math.max(maxX, points[i]);
+    maxY = Math.max(maxY, points[i + 1]);
+  }
+  const pad = v.strokeWidth / 2 + 5;
+  return {
+    x: minX - pad,
+    y: minY - pad,
+    w: maxX - minX + pad * 2,
+    h: maxY - minY + pad * 2,
+  };
+}
+
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   switch (v.type) {
     case 'ellipse': {
@@ -362,8 +498,13 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
       return inside;
     }
     case 'pen':
-    case 'arrow':
       return pointNearPolyline(v.points ?? [], px, py, v.strokeWidth / 2 + 3);
+    case 'arrow': {
+      const curve = arrowCurve(v);
+      return curve
+        ? pointNearPolyline(sampleArrowCurve(curve), px, py, v.strokeWidth / 2 + 3)
+        : false;
+    }
     default:
       return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
   }
@@ -427,7 +568,28 @@ export function drawPenStroke(
   ctx.restore();
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+function splitOverlongWord(
+  ctx: CanvasRenderingContext2D,
+  word: string,
+  maxWidth: number,
+  fontSize: number
+): string[] {
+  const chunks: string[] = [];
+  let chunk = '';
+  for (const char of word) {
+    const next = chunk + char;
+    if (chunk && measureMixedLine(ctx, next, fontSize) > maxWidth) {
+      chunks.push(chunk);
+      chunk = char;
+    } else {
+      chunk = next;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
+
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const lines: string[] = [];
   // Use measureMixedLine so $formula$ width matches drawMixedLine / commit height.
   const sizeMatch = /([\d.]+)px/.exec(ctx.font);
@@ -439,6 +601,16 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     }
     let line = '';
     for (const word of raw.split(/\s+/)) {
+      if (measureMixedLine(ctx, word, fontSize) > maxWidth) {
+        if (line) {
+          lines.push(line);
+          line = '';
+        }
+        const chunks = splitOverlongWord(ctx, word, maxWidth, fontSize);
+        lines.push(...chunks.slice(0, -1));
+        line = chunks.at(-1) ?? '';
+        continue;
+      }
       const test = line ? line + ' ' + word : word;
       if (line && measureMixedLine(ctx, test, fontSize) > maxWidth) {
         lines.push(line);
@@ -1010,40 +1182,8 @@ export function releaseImage(src: string): void {
 }
 
 export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?: string): void {
-  const pts = v.points ?? [];
-  if (pts.length < 4) return;
-  const ax = pts[0];
-  const ay = pts[1];
-  const bx = pts[2];
-  const by = pts[3];
-  // ponytail: beautiful curved arrows — use port directions for connected, gentle bend for free
-  const isConnected = Boolean(v.fromId && v.toId && v.fromPort && v.toPort);
-  let c1x = ax, c1y = ay, c2x = bx, c2y = by;
-  let endAngle = Math.atan2(by - ay, bx - ax);
-  if (isConnected) {
-    const fromDir = portDir(v.fromPort as PortId);
-    const toDir = portDir(v.toPort as PortId);
-    const dist = Math.hypot(bx - ax, by - ay);
-    const off = Math.min(80, dist * 0.35);
-    c1x = ax + fromDir.x * off;
-    c1y = ay + fromDir.y * off;
-    c2x = bx + toDir.x * off;
-    c2y = by + toDir.y * off;
-    // end tangent is opposite of toDir
-    endAngle = Math.atan2(by - c2y, bx - c2x);
-    if (!isFinite(endAngle)) endAngle = Math.atan2(by - ay, bx - ax);
-  } else {
-    const mx = (ax + bx) / 2, my = (ay + by) / 2;
-    const dx = bx - ax, dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len, ny = dx / len;
-    const bend = Math.min(40, len * 0.18) * (Math.abs(dx) > Math.abs(dy) ? 1 : -1);
-    // gentle perpendicular bend for free arrows
-    c1x = mx + nx * bend * 0.5;
-    c1y = my + ny * bend * 0.5;
-    c2x = c1x; c2y = c1y;
-    endAngle = Math.atan2(by - c1y, bx - c1x);
-  }
+  const curve = arrowCurve(v);
+  if (!curve) return;
   const ink = boardBg ? displayInk(v.stroke, boardBg) : v.stroke;
   ctx.save();
   ctx.strokeStyle = ink;
@@ -1056,26 +1196,31 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   ctx.shadowBlur = 4;
   ctx.shadowOffsetY = 1;
   ctx.beginPath();
-  if (isConnected) {
-    ctx.moveTo(ax, ay);
-    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
-  } else if (pts.length === 4 && !isConnected) {
+  ctx.moveTo(curve.start.x, curve.start.y);
+  if (curve.kind === 'cubic') {
+    ctx.bezierCurveTo(
+      curve.control1.x,
+      curve.control1.y,
+      curve.control2.x,
+      curve.control2.y,
+      curve.end.x,
+      curve.end.y
+    );
+  } else if (curve.kind === 'quadratic') {
     // free arrow with gentle curve via quadratic
-    ctx.moveTo(ax, ay);
-    ctx.quadraticCurveTo(c1x, c1y, bx, by);
+    ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
   } else {
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
+    ctx.lineTo(curve.end.x, curve.end.y);
   }
   ctx.stroke();
   ctx.shadowColor = 'transparent';
   const head = Math.max(10, v.strokeWidth * 3.5);
-  const hx1 = bx - head * Math.cos(endAngle - 0.42);
-  const hy1 = by - head * Math.sin(endAngle - 0.42);
-  const hx2 = bx - head * Math.cos(endAngle + 0.42);
-  const hy2 = by - head * Math.sin(endAngle + 0.42);
+  const hx1 = curve.end.x - head * Math.cos(curve.endAngle - 0.42);
+  const hy1 = curve.end.y - head * Math.sin(curve.endAngle - 0.42);
+  const hx2 = curve.end.x - head * Math.cos(curve.endAngle + 0.42);
+  const hy2 = curve.end.y - head * Math.sin(curve.endAngle + 0.42);
   ctx.beginPath();
-  ctx.moveTo(bx, by);
+  ctx.moveTo(curve.end.x, curve.end.y);
   ctx.lineTo(hx1, hy1);
   ctx.lineTo(hx2, hy2);
   ctx.closePath();

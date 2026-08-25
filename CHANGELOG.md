@@ -2,6 +2,24 @@
 
 ## 0.12.0 — unreleased
 
+### Functional review pass
+- Align/distribute: multi-select aligns within the selection; distribute no longer no-ops.
+- Clipboard: paste/duplicate remaps connector `fromId`/`toId`; plain-text paste creates a text object.
+- Arrows: hit-test and spatial bounds follow the rendered curve; connector preview starts with `moveTo`.
+- Eraser: radius matches the cursor; partial erase hits stroke segments (including two-point lines); preview splits gaps like commit.
+- Selection: cancel restores pre-drag geometry; frames move contained shapes; resize keeps image aspect on vertical corner drags; text N/S edges pad height.
+- Shift-draw boxes stay anchored; frame default label is localized.
+- Highlighters respect stacking order; crop overlay highlights the live crop box.
+- Trackpad pixel-scroll pans; mouse wheel / pinch still zoom. Ctrl/Cmd+1 fits content.
+- Cleared keybinds stay cleared (no silent fallback); cross-tab bind updates reload.
+- Undo tracks pages; legacy `review-v1` migrates once with a marker; gesture boundaries via `beginGesture`/`endGesture`.
+- Export: Escape closes dialog, soft size caps, stroke padding, clearer current-page label, failure message.
+- Home: validated board metadata, localized defaults, remote-status warning, IndexedDB delete failures surface, team rows are not nested buttons.
+- Docs import: long-word wrap, PDF destroy on error, truncation notice.
+- Tool settings restore validates fields; paper can reset to board default; dismissible error banners + unhandled rejections.
+- Text editor: Enter inserts newline; Ctrl/Cmd+Enter commits. Stickies get matching overlay padding.
+- Style bar: rect/ellipse labels get formatting controls; custom colors delete with Del/Backspace.
+
 ### Documents
 - Insert PDF/TXT as a multi-page document object; flip pages with on-canvas arrows and a page counter (up to 60 pages, rendered to page images at import).
 - TXT pages are typeset onto A-ratio paper to match the PDF look.

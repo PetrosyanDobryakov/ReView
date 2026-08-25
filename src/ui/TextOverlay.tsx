@@ -93,7 +93,7 @@ export function TextOverlay({
       role="textbox"
       aria-multiline="true"
       suppressContentEditableWarning
-      spellCheck={false}
+      spellCheck
       style={{
         left: pos.x,
         top: pos.y,
@@ -112,12 +112,13 @@ export function TextOverlay({
           .join(' ') || 'none',
         background: target.highlight && target.type === 'text' ? TEXT_HIGHLIGHT : 'transparent',
         borderRadius: target.highlight && target.type === 'text' ? 4 : undefined,
-        padding: isCentered ? '0 8px' : target.highlight ? '2px 4px' : '0',
+        padding: isCentered ? '0 8px' : target.type === 'sticky' ? '8px' : target.highlight ? '2px 4px' : '0',
         overflow: isCentered ? 'hidden' : undefined,
+        boxSizing: 'border-box',
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
           finish(true);
         } else if (e.key === 'Escape') {

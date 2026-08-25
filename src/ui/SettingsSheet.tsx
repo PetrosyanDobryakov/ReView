@@ -144,6 +144,7 @@ export function SettingsSheet({
   onLocale,
   onChromeTheme,
   onBg,
+  onPaperReset,
   onGrid,
   onClose,
 }: {
@@ -161,6 +162,7 @@ export function SettingsSheet({
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
   onBg: (value: string) => void;
+  onPaperReset?: () => void;
   onGrid: (on: boolean) => void;
   onClose: () => void;
 }) {
@@ -600,6 +602,11 @@ export function SettingsSheet({
                       />
                     </label>
                   </CustomSwatchRollout>
+                  {onPaperReset && (
+                    <button type="button" className="style-btn" onClick={onPaperReset}>
+                      {t(locale, 'paperUseBoard')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`sheet-switch${gridOn ? ' on' : ''}`}

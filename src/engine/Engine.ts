@@ -14,6 +14,7 @@ import {
   themeFor,
   intersects,
   normalizeBox,
+  arrowBounds,
 } from '../core/shapes';
 import { measureMixedLine } from '../core/shapes';
 import { onFormulaLoad } from '../core/formula';
@@ -95,6 +96,11 @@ const TOOL_KEYS_FALLBACK: Record<string, ToolId> = {
   KeyT: 'text',
   KeyE: 'eraser',
 };
+
+/** True when any binding (including empty) was set for this tool in stored binds. */
+function toolBindExplicitlyCleared(tool: ToolId, binds: Record<ToolId, string>): boolean {
+  return Object.prototype.hasOwnProperty.call(binds, tool) && !binds[tool];
+}
 
 const PAPER_MS = 280;
 
@@ -231,13 +237,17 @@ export class Engine {
     this.rafId = requestAnimationFrame(this.loop);
   }
 
+  private spatialBox(v: ShapeView): ShapeBox {
+    return v.type === 'arrow' ? arrowBounds(v) : { x: v.x, y: v.y, w: v.w, h: v.h };
+  }
+
   private loadActivePage(): void {
     store.ensureOrder();
     for (const [key, m] of store.board) {
       if (!store.isOnActivePage(key)) continue;
       const v = { ...store.readShape(m), id: key };
       this.views.set(key, v);
-      this.grid.upsert(key, v);
+      this.grid.upsert(key, this.spatialBox(v));
       this.attachShape(key, m);
     }
   }
@@ -269,14 +279,15 @@ export class Engine {
     for (const id of ids) {
       const v = this.views.get(id);
       if (!v) continue;
+      const b = v.type === 'arrow' ? arrowBounds(v) : { x: v.x, y: v.y, w: v.w, h: v.h };
       box = box
         ? {
-            x: Math.min(box.x, v.x),
-            y: Math.min(box.y, v.y),
-            w: Math.max(box.x + box.w, v.x + v.w) - Math.min(box.x, v.x),
-            h: Math.max(box.y + box.h, v.y + v.h) - Math.min(box.y, v.y),
+            x: Math.min(box.x, b.x),
+            y: Math.min(box.y, b.y),
+            w: Math.max(box.x + box.w, b.x + b.w) - Math.min(box.x, b.x),
+            h: Math.max(box.y + box.h, b.y + b.h) - Math.min(box.y, b.y),
           }
-        : { x: v.x, y: v.y, w: v.w, h: v.h };
+        : { ...b };
     }
     return box;
   }
@@ -302,26 +313,38 @@ export class Engine {
     opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null }
   ): HTMLCanvasElement | null {
     if (box.w <= 0 || box.h <= 0) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(box.w * opts.scale));
-    canvas.height = Math.max(1, Math.round(box.h * opts.scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.setTransform(opts.scale, 0, 0, opts.scale, -box.x * opts.scale, -box.y * opts.scale);
-    const theme = themeFor(store.viewPaperBg());
-    if (opts.background) {
-      ctx.fillStyle = opts.background;
-      ctx.fillRect(box.x, box.y, box.w, box.h);
+    const pad = 4;
+    const exportBox = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 };
+    const width = Math.max(1, Math.round(exportBox.w * opts.scale));
+    const height = Math.max(1, Math.round(exportBox.h * opts.scale));
+    // Soft-cap huge canvases — browsers throw / OOM past ~16k on a side.
+    if (width > 8192 || height > 8192 || width * height > 64_000_000) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.setTransform(opts.scale, 0, 0, opts.scale, -exportBox.x * opts.scale, -exportBox.y * opts.scale);
+      const theme = themeFor(store.viewPaperBg());
+      if (opts.background) {
+        ctx.fillStyle = opts.background;
+        ctx.fillRect(exportBox.x, exportBox.y, exportBox.w, exportBox.h);
+      }
+      const ord = store.order;
+      for (let i = 0; i < ord.length; i++) {
+        const id = ord.get(i);
+        if (!store.isOnActivePage(id)) continue;
+        const v = this.views.get(id);
+        if (!v) continue;
+        const vb = v.type === 'arrow' ? arrowBounds(v) : v;
+        if (!intersects(vb, exportBox)) continue;
+        drawShape(ctx, v, theme.text, store.viewPaperBg());
+      }
+      return canvas;
+    } catch {
+      return null;
     }
-    const ord = store.order;
-    for (let i = 0; i < ord.length; i++) {
-      const id = ord.get(i);
-      if (!store.isOnActivePage(id)) continue;
-      const v = this.views.get(id);
-      if (!v || !intersects(v, box)) continue;
-      drawShape(ctx, v, theme.text, store.viewPaperBg());
-    }
-    return canvas;
   }
 
   exportBlob(
@@ -332,11 +355,15 @@ export class Engine {
     if (!canvas) return Promise.resolve(null);
     const mime = opts.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return new Promise((resolve) => {
-      canvas.toBlob(
-        (blob) => resolve(blob ? { blob, width: canvas.width, height: canvas.height } : null),
-        mime,
-        opts.quality
-      );
+      try {
+        canvas.toBlob(
+          (blob) => resolve(blob ? { blob, width: canvas.width, height: canvas.height } : null),
+          mime,
+          opts.quality
+        );
+      } catch {
+        resolve(null);
+      }
     });
   }
 
@@ -586,16 +613,16 @@ export class Engine {
     const selected = [...this.selection].map((id) => this.views.get(id)).filter(Boolean) as ShapeView[];
     const unlocked = selected.filter((v) => !v.locked);
     if (!unlocked.length) return;
-    // others = all views not in selection, or if single selection and kind aligns to others' union, use others
-    // if multiple selection and align to each other, others = [] means align within group? But spec says "относительно других объектов"
-    // So for single or multi, align to union of unselected shapes
-    const others = [...this.views.values()].filter((v) => !this.selection.has(v.id));
+    // Multi-select aligns within the selection. Single-select aligns to other board shapes.
+    const others =
+      unlocked.length >= 2
+        ? []
+        : [...this.views.values()].filter((v) => !this.selection.has(v.id) && store.isOnActivePage(v.id));
     let patches: Array<[string, Partial<ShapeView>]> = [];
     if (kind === 'centerH' || kind === 'centerV' || kind === 'left' || kind === 'right' || kind === 'top' || kind === 'bottom') {
-      if (others.length) {
+      if (unlocked.length >= 2 || others.length) {
         patches = alignViews(unlocked, others, kind);
       } else {
-        // no others — align within selection? do nothing
         return;
       }
     } else if (kind === 'distributeH' || kind === 'distributeV') {
@@ -616,6 +643,47 @@ export class Engine {
 
   private clipboard: ShapeView[] = [];
   private pasteN = 0;
+  private pasteAt: { x: number; y: number } | null = null;
+
+  /** Clone clipboard shapes with remapped ids and connector endpoints. */
+  private cloneShapes(source: ShapeView[], dx: number, dy: number): string[] {
+    const idMap = new Map<string, string>();
+    const ids: string[] = [];
+    for (const v of source) {
+      const newKey = store.addShape({
+        ...v,
+        id: undefined,
+        x: v.x + dx,
+        y: v.y + dy,
+        points: v.points ? v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) : undefined,
+        fromId: undefined,
+        fromPort: undefined,
+        toId: undefined,
+        toPort: undefined,
+      });
+      idMap.set(v.id, newKey);
+      ids.push(newKey);
+    }
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    for (let i = 0; i < source.length; i++) {
+      const v = source[i];
+      if (v.type !== 'arrow') continue;
+      const fromId = v.fromId ? idMap.get(v.fromId) : undefined;
+      const toId = v.toId ? idMap.get(v.toId) : undefined;
+      if (!fromId && !toId) continue;
+      patches.push([
+        ids[i],
+        {
+          fromId,
+          toId,
+          fromPort: fromId ? v.fromPort : undefined,
+          toPort: toId ? v.toPort : undefined,
+        },
+      ]);
+    }
+    if (patches.length) store.patchShapes(patches);
+    return ids;
+  }
 
   copySelection(): void {
     this.clipboard = [];
@@ -647,20 +715,11 @@ export class Engine {
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const drift = (((this.pasteN - 1) % 8) * 24) / this.camera.zoom;
-    const dx = this.camera.x - cx + drift;
-    const dy = this.camera.y - cy + drift;
-    const ids: string[] = [];
-    for (const v of this.clipboard) {
-      ids.push(
-        store.addShape({
-          ...v,
-          id: undefined,
-          x: v.x + dx,
-          y: v.y + dy,
-          points: v.points ? v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) : undefined,
-        })
-      );
-    }
+    const anchor = this.pasteAt;
+    this.pasteAt = null;
+    const dx = (anchor ? anchor.x : this.camera.x) - cx + (anchor ? 0 : drift);
+    const dy = (anchor ? anchor.y : this.camera.y) - cy + (anchor ? 0 : drift);
+    const ids = this.cloneShapes(this.clipboard, dx, dy);
     this.setSelection(ids);
     this.setTool('select');
   }
@@ -668,20 +727,12 @@ export class Engine {
   duplicateSelection(): void {
     if (!this.selection.size) return;
     const off = 40 / this.camera.zoom;
-    const ids: string[] = [];
+    const source: ShapeView[] = [];
     for (const id of this.selection) {
       const v = this.views.get(id);
-      if (!v) continue;
-      ids.push(
-        store.addShape({
-          ...v,
-          id: undefined,
-          x: v.x + off,
-          y: v.y + off,
-          points: v.points ? v.points.map((p) => p + off) : undefined,
-        })
-      );
+      if (v) source.push(structuredClone(v));
     }
+    const ids = this.cloneShapes(source, off, off);
     this.setSelection(ids);
     this.setTool('select');
   }
@@ -1168,10 +1219,58 @@ export class Engine {
           }
         }
       }
+      for (const item of items) {
+        if (item.type === 'text/plain') {
+          e.preventDefault();
+          item.getAsString((text) => {
+            const trimmed = text.replace(/\r\n/g, '\n').trim();
+            if (!trimmed) {
+              this.pasteSelection();
+              return;
+            }
+            if (this.clipboard.length) {
+              this.pasteSelection();
+              return;
+            }
+            this.insertPlainText(trimmed);
+          });
+          return;
+        }
+      }
     }
     e.preventDefault();
     this.pasteSelection();
   };
+
+  private insertPlainText(text: string): void {
+    const fontSize = settings.text.size;
+    const color = settings.text.color;
+    const measured = this.measureTextWrapped(text, fontSize, 320, {
+      bold: settings.text.bold,
+      italic: settings.text.italic,
+    });
+    const id = store.addShape({
+      type: 'text',
+      x: this.camera.x - measured.w / 2,
+      y: this.camera.y - measured.h / 2,
+      w: measured.w,
+      h: measured.h,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      text,
+      fontSize,
+      textColor: color,
+      bold: settings.text.bold,
+      italic: settings.text.italic,
+      underline: settings.text.underline,
+      strike: settings.text.strike,
+      textAlign: settings.text.align,
+      highlight: settings.text.highlight,
+    });
+    this.setSelection([id]);
+    this.setTool('select');
+  }
 
   private async pasteFromClipboard(): Promise<void> {
     if (this.clipboard.length) {
@@ -1477,7 +1576,7 @@ export class Engine {
             }
           }
           this.views.set(key, v);
-          this.grid.upsert(key, v);
+          this.grid.upsert(key, this.spatialBox(v));
           this.attachShape(key, m);
         }
       }
@@ -1501,8 +1600,9 @@ export class Engine {
     const cb = () => {
       const v = { ...store.readShape(m), id: key };
       this.views.set(key, v);
-      this.grid.upsert(key, v);
+      this.grid.upsert(key, this.spatialBox(v));
       this.dirty = true;
+      if (this.selection.has(key)) this.events.onSelection?.([...this.selection]);
     };
     m.observe(cb);
     this.shapeObs.set(key, { un: () => m.unobserve(cb), m });
@@ -1817,7 +1917,19 @@ export class Engine {
     const rect = this.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-e.deltaY * 0.0022));
+    // Pinch (ctrl/meta) and discrete mouse wheels zoom; pixel trackpad scrolls pan.
+    const zoomGesture =
+      e.ctrlKey ||
+      e.metaKey ||
+      e.deltaMode === WheelEvent.DOM_DELTA_LINE ||
+      e.deltaMode === WheelEvent.DOM_DELTA_PAGE;
+    if (!zoomGesture) {
+      this.camera.panBy(-e.deltaX, -e.deltaY);
+      this.dirty = true;
+      return;
+    }
+    const dy = e.shiftKey && Math.abs(e.deltaY) < 0.01 ? e.deltaX : e.deltaY;
+    this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-dy * 0.0022));
     this.dirty = true;
   };
 
@@ -2093,12 +2205,12 @@ export class Engine {
       ctx.globalAlpha = 0.35;
       ctx.drawImage(img, c.full.x, c.full.y, c.full.w, c.full.h);
       ctx.globalAlpha = 1;
-      const fx = ((v.x - c.full.x) / c.full.w) * img.naturalWidth;
-      const fy = ((v.y - c.full.y) / c.full.h) * img.naturalHeight;
-      const fw = (v.w / c.full.w) * img.naturalWidth;
-      const fh = (v.h / c.full.h) * img.naturalHeight;
+      const fx = ((c.box.x - c.full.x) / c.full.w) * img.naturalWidth;
+      const fy = ((c.box.y - c.full.y) / c.full.h) * img.naturalHeight;
+      const fw = (c.box.w / c.full.w) * img.naturalWidth;
+      const fh = (c.box.h / c.full.h) * img.naturalHeight;
       if (fw > 0 && fh > 0) {
-        ctx.drawImage(img, fx, fy, fw, fh, v.x, v.y, v.w, v.h);
+        ctx.drawImage(img, fx, fy, fw, fh, c.box.x, c.box.y, c.box.w, c.box.h);
       }
     }
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -2170,7 +2282,7 @@ export class Engine {
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
     }
-    if (document.querySelector('.sheet-root:not(.is-leaving), .ctx-menu, .info-modal')) return;
+    if (document.querySelector('.sheet-root:not(.is-leaving), .ctx-menu, .info-modal, .export-root')) return;
     if (this.crop) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -2200,11 +2312,13 @@ export class Engine {
       e.preventDefault();
       if (e.shiftKey) store.undoManager.redo();
       else store.undoManager.undo();
+      this.events.onSelection?.([...this.selection]);
       return;
     }
     if (mod && e.code === 'KeyY') {
       e.preventDefault();
       store.undoManager.redo();
+      this.events.onSelection?.([...this.selection]);
       return;
     }
     if (mod && e.code === 'KeyA') {
@@ -2253,6 +2367,11 @@ export class Engine {
       this.resetZoom();
       return;
     }
+    if (mod && e.code === 'Digit1') {
+      e.preventDefault();
+      this.fitContent();
+      return;
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (this.selection.size) {
         e.preventDefault();
@@ -2275,15 +2394,21 @@ export class Engine {
     if (!mod && !e.altKey) {
       const toolBinds = getToolBinds();
       for (const [tool, bind] of Object.entries(toolBinds) as Array<[ToolId, string]>) {
-        if (bind === e.code) {
+        if (bind && bind === e.code) {
           this.setTool(tool);
           return;
         }
       }
-      const t = TOOL_KEYS_FALLBACK[e.code];
-      if (t) {
-        this.setTool(t);
-        return;
+      // Fallback defaults only when the user has not cleared that tool's bind.
+      const fallback = TOOL_KEYS_FALLBACK[e.code];
+      if (fallback && !toolBindExplicitlyCleared(fallback, toolBinds)) {
+        const owned = (Object.entries(toolBinds) as Array<[ToolId, string]>).some(
+          ([tool, bind]) => bind === e.code && tool !== fallback
+        );
+        if (!owned) {
+          this.setTool(fallback);
+          return;
+        }
       }
       // color binds — 1..8 etc
       const colorBinds = getColorBinds();
@@ -2299,6 +2424,7 @@ export class Engine {
             if (v.type === 'pen') patches.push([id, { stroke: color }]);
             else if (['rect','ellipse','diamond','frame','triangle','parallelogram','hexagon','cylinder','terminator','subroutine','display'].includes(v.type)) patches.push([id, { fill: color, stroke: color }]);
             else if (v.type === 'sticky') patches.push([id, { fill: color }]);
+            else if (v.type === 'text' || v.type === 'arrow') patches.push([id, { stroke: color, textColor: color }]);
           }
           if (patches.length) store.patchShapes(patches);
           return;
@@ -2369,18 +2495,27 @@ export class Engine {
       const partial = this.partialErase.get(v.id);
       if (partial && partial.size) {
         const pts = v.points ?? [];
-        const filtered: number[] = [];
+        const segments: number[][] = [];
+        let cur: number[] = [];
         for (let i = 0; i < pts.length; i += 2) {
-          if (!partial.has(i / 2)) filtered.push(pts[i], pts[i + 1]);
+          if (partial.has(i / 2)) {
+            if (cur.length >= 2) segments.push(cur);
+            cur = [];
+          } else {
+            cur.push(pts[i], pts[i + 1]);
+          }
         }
-        if (filtered.length >= 2) {
-          drawPenStroke(
-            ctx,
-            filtered,
-            v.strokeWidth,
-            displayInk(v.stroke, store.viewPaperBg()),
-            v.alpha ?? 1
-          );
+        if (cur.length >= 2) segments.push(cur);
+        for (const seg of segments) {
+          if (seg.length >= 2) {
+            drawPenStroke(
+              ctx,
+              seg,
+              v.strokeWidth,
+              displayInk(v.stroke, store.viewPaperBg()),
+              v.alpha ?? 1
+            );
+          }
         }
         return;
       }
@@ -2403,17 +2538,12 @@ export class Engine {
       }
     };
     const ord = store.order;
+    // Single pass in stacking order so highlighters respect bring-to-front / send-to-back.
     for (let i = 0; i < ord.length; i++) {
       const id = ord.get(i);
       if (!visible.has(id) || !store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
-      if (v && v.alpha !== undefined && v.alpha < 1) draw(v);
-    }
-    for (let i = 0; i < ord.length; i++) {
-      const id = ord.get(i);
-      if (!visible.has(id) || !store.isOnActivePage(id)) continue;
-      const v = this.views.get(id);
-      if (v && (v.alpha === undefined || v.alpha >= 1)) draw(v);
+      if (v) draw(v);
     }
     this.drawSelection(ctx);
     this.drawAlignGuides(ctx);
@@ -2661,6 +2791,7 @@ export class Engine {
       endAng = Math.atan2(by - c1y, bx - c1x);
     }
     ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
     if (toPort) ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
     else ctx.quadraticCurveTo(c1x, c1y, bx, by);
     ctx.stroke();

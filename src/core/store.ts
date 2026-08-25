@@ -4,10 +4,11 @@ import { WebsocketProvider } from 'y-websocket';
 import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import type { UserInfo } from '../core/user';
-import { getBoard, isBoardPersistedLocally } from '../core/boards';
+import { bumpBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { readPrefs } from '../core/prefs';
 
 export const LOCAL_ORIGIN = 'local';
+const LEGACY_MIGRATION_KEY = 'review-v1-migrated';
 
 // --- per-board state ---
 let currentBoardId: string | null = null;
@@ -15,7 +16,10 @@ export let doc = new Y.Doc();
 export let board = doc.getMap<Y.Map<unknown>>('shapes');
 export let meta = doc.getMap('meta');
 export let order = doc.getArray<string>('order');
-export let undoManager = new Y.UndoManager([board, order], {
+export let pages = doc.getArray<string>('pages');
+let pagesObserved = false;
+const pageListeners = new Set<() => void>();
+export let undoManager = new Y.UndoManager([board, order, pages], {
   trackedOrigins: new Set([LOCAL_ORIGIN]),
   captureTimeout: 200,
 });
@@ -52,6 +56,66 @@ function attachPersistence(boardId: string): void {
   });
 }
 
+function legacyMigrationDone(): boolean {
+  try {
+    return localStorage.getItem(LEGACY_MIGRATION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markLegacyMigrationDone(): void {
+  try {
+    localStorage.setItem(LEGACY_MIGRATION_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+async function migrateLegacyBoard(targetPersistence: IndexeddbPersistence): Promise<void> {
+  if (legacyMigrationDone()) return;
+  const targetDoc = doc;
+  const targetBoard = board;
+  const targetOrder = order;
+  const targetBoardId = currentBoardId;
+
+  try {
+    await targetPersistence.whenSynced;
+  } catch {
+    return;
+  }
+  if (doc !== targetDoc || currentBoardId !== targetBoardId || legacyMigrationDone()) return;
+  if (targetBoard.size > 0 || targetOrder.length > 0) return;
+
+  const oldDoc = new Y.Doc();
+  const oldPersist = new IndexeddbPersistence('review-v1', oldDoc);
+  let removeLegacyData = false;
+  try {
+    await oldPersist.whenSynced;
+    const oldBoard = oldDoc.getMap('shapes');
+    if (oldBoard.size === 0) {
+      markLegacyMigrationDone();
+      removeLegacyData = true;
+      return;
+    }
+    // The current board may have loaded or changed while the legacy doc synced.
+    if (doc !== targetDoc || currentBoardId !== targetBoardId || targetBoard.size > 0) return;
+    Y.applyUpdate(targetDoc, Y.encodeStateAsUpdate(oldDoc));
+    markLegacyMigrationDone();
+    removeLegacyData = true;
+  } catch {
+    /* leave the legacy database available for a later attempt */
+  } finally {
+    try {
+      if (removeLegacyData) await oldPersist.clearData();
+      else await oldPersist.destroy();
+    } catch {
+      /* migration already succeeded, cleanup is best-effort */
+    }
+    oldDoc.destroy();
+  }
+}
+
 /** Enable IndexedDB for the current board (after explicit Save). */
 export function enableBoardPersistence(): void {
   if (!currentBoardId || persistence) return;
@@ -72,7 +136,7 @@ export function initBoard(boardId: string): void {
     persistence?.destroy();
   } catch {}
   // clear old observers
-  pagesArr = null;
+  pagesObserved = false;
   pageListeners.clear();
   // new doc
   try {
@@ -82,7 +146,8 @@ export function initBoard(boardId: string): void {
   board = doc.getMap<Y.Map<unknown>>('shapes');
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
-  undoManager = new Y.UndoManager([board, order], {
+  pages = doc.getArray<string>('pages');
+  undoManager = new Y.UndoManager([board, order, pages], {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
     captureTimeout: 200,
   });
@@ -90,28 +155,7 @@ export function initBoard(boardId: string): void {
   persistence = null;
   if (shouldPersist(boardId)) {
     attachPersistence(boardId);
-    // migrate old single-board data if new board empty and old exists
-    const maybeMigrate = async () => {
-      if (board.size === 0 && order.length === 0) {
-        try {
-          const oldDoc = new Y.Doc();
-          const oldPersist = new IndexeddbPersistence('review-v1', oldDoc);
-          await new Promise<void>((res) => {
-            if ((oldPersist as unknown as { synced: boolean }).synced) res();
-            else oldPersist.on('synced', () => res());
-            setTimeout(() => res(), 1200);
-          });
-          const oldBoard = oldDoc.getMap('shapes');
-          if (oldBoard.size > 0) {
-            const update = Y.encodeStateAsUpdate(oldDoc);
-            Y.applyUpdate(doc, update);
-          }
-          oldPersist.destroy();
-          oldDoc.destroy();
-        } catch {}
-      }
-    };
-    maybeMigrate();
+    if (persistence) void migrateLegacyBoard(persistence);
   } else {
     // ephemeral session — still need pages
     ensurePages();
@@ -271,6 +315,14 @@ export function transact(fn: () => void): void {
   doc.transact(fn, LOCAL_ORIGIN);
 }
 
+export function beginGesture(): void {
+  undoManager.stopCapturing();
+}
+
+export function endGesture(): void {
+  undoManager.stopCapturing();
+}
+
 export function readShape(m: Y.Map<unknown>): ShapeView {
   const type = m.get('type') as ShapeType;
   const points = m.get('points');
@@ -375,20 +427,7 @@ export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
     board.set(key, m);
     order.push([key]);
   });
-  // bump board updated
-  try {
-    if (currentBoardId) {
-      const raw = localStorage.getItem('review-boards');
-      if (raw) {
-        const arr = JSON.parse(raw) as Array<{ id: string; updatedAt: number }>;
-        const idx = arr.findIndex((b) => b.id === currentBoardId);
-        if (idx >= 0) {
-          arr[idx].updatedAt = Date.now();
-          localStorage.setItem('review-boards', JSON.stringify(arr));
-        }
-      }
-    }
-  } catch {}
+  bumpCurrentBoard();
   return key;
 }
 
@@ -415,12 +454,15 @@ export function patchShape(id: string, patch: Partial<ShapeView>): void {
   transact(() => {
     patchShapeInternal(id, patch);
   });
+  bumpCurrentBoard();
 }
 
 export function patchShapes(patches: Array<[string, Partial<ShapeView>]>): void {
+  if (!patches.length) return;
   transact(() => {
     for (const [id, patch] of patches) patchShapeInternal(id, patch);
   });
+  bumpCurrentBoard();
 }
 
 export function removeShapes(ids: string[]): void {
@@ -432,6 +474,11 @@ export function removeShapes(ids: string[]): void {
       if (idx >= 0) order.delete(idx, 1);
     }
   });
+  bumpCurrentBoard();
+}
+
+function bumpCurrentBoard(): void {
+  if (currentBoardId) bumpBoardUpdated(currentBoardId);
 }
 
 export function clearShapeKeys(id: string, keys: string[]): void {
@@ -474,21 +521,18 @@ export function onPageChange(cb: () => void): () => void {
   };
 }
 
-let pagesArr: Y.Array<string> | null = null;
-const pageListeners = new Set<() => void>();
-
 function emitPages(): void {
   for (const l of [...pageListeners]) l();
 }
 
 function pagesArray(): Y.Array<string> {
-  if (!pagesArr) {
-    pagesArr = doc.getArray<string>('pages');
-    pagesArr.observe(() => {
+  if (!pagesObserved) {
+    pages.observe(() => {
       emitPages();
     });
+    pagesObserved = true;
   }
-  return pagesArr;
+  return pages;
 }
 
 export function listPages(): string[] {
@@ -567,11 +611,14 @@ export function addPage(): void {
   const pid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   transact(() => pagesArray().push([pid]));
   setCurrentPage(pid);
+  bumpCurrentBoard();
 }
 
 export function deletePage(id: string): void {
   const a = pagesArray();
   if (a.length <= 1) return;
+  const idx = a.toArray().indexOf(id);
+  if (idx < 0) return;
   const isMain = id === 'main';
   transact(() => {
     for (const key of [...board.keys()]) {
@@ -584,11 +631,11 @@ export function deletePage(id: string): void {
     });
     order.delete(0, order.length);
     if (kept.length) order.push(kept);
+    a.delete(idx, 1);
   });
-  const idx = a.toArray().indexOf(id);
-  if (idx >= 0) transact(() => a.delete(idx, 1));
   if (currentPageId() === id) setCurrentPage(a.toArray()[0] ?? 'main');
   else emitPages();
+  bumpCurrentBoard();
 }
 
 export function pageOfKey(key: string): string {
