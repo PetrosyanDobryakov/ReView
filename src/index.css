@@ -2262,6 +2262,31 @@ h3 .swap-text,
   color: var(--chrome-text);
   white-space: nowrap;
 }
+
+.home-version {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  font-size: var(--chrome-type-meta);
+  color: var(--chrome-text-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-version.warn {
+  color: var(--chrome-warn);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-version.warn:hover {
+  text-decoration: underline;
+}
+
+.home-version.dev {
+  color: #b18cff;
+  font-weight: 600;
+}
 @media (max-width: 800px) {
   .home-body { grid-template-columns: 1fr; }
 }
