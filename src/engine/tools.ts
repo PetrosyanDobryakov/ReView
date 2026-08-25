@@ -1066,56 +1066,22 @@ function markPartialEraseHits(
     const dy = points[i + 1] - world.y;
     if (dx * dx + dy * dy <= r2) into.add(i / 2);
   }
-  // Two-point (or sparse) strokes: also erase when the brush crosses the open segment.
-  // Mark a synthetic split by tagging both endpoints only when the closest point is
-  // strictly between them — for dense polylines the vertex loop above is enough.
-  if (points.length === 4) {
-    const ax = points[0];
-    const ay = points[1];
-    const bx = points[2];
-    const by = points[3];
+  for (let i = 0; i < points.length - 2; i += 2) {
+    const ax = points[i];
+    const ay = points[i + 1];
+    const bx = points[i + 2];
+    const by = points[i + 3];
     const abx = bx - ax;
     const aby = by - ay;
     const len2 = abx * abx + aby * aby;
-    if (len2 < 0.001) return;
+    if (len2 < 0.001) continue;
     const t = Math.max(0, Math.min(1, ((world.x - ax) * abx + (world.y - ay) * aby) / len2));
     const px = ax + abx * t;
     const py = ay + aby * t;
-    if ((px - world.x) * (px - world.x) + (py - world.y) * (py - world.y) <= r2) {
-      // Split the line into two stubs around the contact: insert a gap by removing
-      // neither endpoint if t is mid-segment — instead mark a virtual cut by
-      // converting to three points is not available, so remove both and recreate
-      // stubs in commit via indices. For a 2-point line, mark both so commit
-      // replaces with stubs from the cut position.
-      if (t > 0.02 && t < 0.98) {
-        into.add(0);
-        into.add(1);
-        // Stash cut point on the set via a side channel is awkward; handle in eraseAt.
-      } else {
-        into.add(t < 0.5 ? 0 : 1);
-      }
-    }
-  } else {
-    for (let i = 0; i < points.length - 2; i += 2) {
-      const ax = points[i];
-      const ay = points[i + 1];
-      const bx = points[i + 2];
-      const by = points[i + 3];
-      const abx = bx - ax;
-      const aby = by - ay;
-      const len2 = abx * abx + aby * aby;
-      if (len2 < 0.001) continue;
-      const t = Math.max(0, Math.min(1, ((world.x - ax) * abx + (world.y - ay) * aby) / len2));
-      if (t <= 0.02 || t >= 0.98) continue;
-      const px = ax + abx * t;
-      const py = ay + aby * t;
-      if ((px - world.x) * (px - world.x) + (py - world.y) * (py - world.y) <= r2) {
-        // Prefer the nearer vertex so we don't wipe both sides of a short segment.
-        const d0 = (world.x - ax) * (world.x - ax) + (world.y - ay) * (world.y - ay);
-        const d1 = (world.x - bx) * (world.x - bx) + (world.y - by) * (world.y - by);
-        into.add(d0 <= d1 ? i / 2 : i / 2 + 1);
-      }
-    }
+    if ((px - world.x) * (px - world.x) + (py - world.y) * (py - world.y) > r2) continue;
+    // Open-segment hit: drop both endpoints so the stroke actually opens a gap.
+    into.add(i / 2);
+    into.add(i / 2 + 1);
   }
 }
 
