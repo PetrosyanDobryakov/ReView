@@ -28,6 +28,7 @@ import { SettingsSheet } from './SettingsSheet';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
+import { APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
@@ -47,6 +48,17 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [weightsReady, setWeightsReady] = useState(false);
   const weightsGen = useRef(0);
+  const [verStatus, setVerStatus] = useState<VersionStatus | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    checkAppVersion().then((s) => {
+      if (alive) setVerStatus(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     setTeams(listTeams());
@@ -157,6 +169,24 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           <span className="brand">{t(locale, 'brand')}</span>
           <div className="island-sep" />
           <span className="home-title">{t(locale, 'home')}</span>
+          <div className="island-sep" />
+          {verStatus?.kind === 'outdated' ? (
+            <a
+              className="home-version warn"
+              href={RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              title={t(locale, 'updateAvailable')}
+            >
+              {t(locale, 'updateAvailable')} — v{verStatus.latest}
+            </a>
+          ) : verStatus?.kind === 'dev' ? (
+            <span className="home-version dev" title={t(locale, 'devVersion')}>
+              {t(locale, 'devVersion')}
+            </span>
+          ) : (
+            <span className="home-version">v{APP_VERSION}</span>
+          )}
         </div>
         <div className="island meta-island">
           <button
