@@ -1151,6 +1151,10 @@ button.brand {
   transform: scale(1.12);
 }
 
+.custom-color.active {
+  box-shadow: 0 0 0 2px var(--chrome-accent-strong);
+}
+
 .custom-color input[type='color'] {
   position: absolute;
   inset: -4px;
