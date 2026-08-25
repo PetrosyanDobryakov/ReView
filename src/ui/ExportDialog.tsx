@@ -14,6 +14,8 @@ export function ExportDialog({
   initialSource,
   rect,
   hasSelection,
+  selectionRevision,
+  shapeRevision,
   onPickAgain,
   onClose,
 }: {
@@ -22,6 +24,10 @@ export function ExportDialog({
   initialSource: ExportSource;
   rect: ShapeBox | null;
   hasSelection: boolean;
+  /** Bumps when selection count or bounds change so export preview stays in sync. */
+  selectionRevision?: number;
+  /** Bumps when board content changes (for whole-board export preview). */
+  shapeRevision?: number;
   onPickAgain: () => void;
   onClose: () => void;
 }) {
@@ -40,8 +46,7 @@ export function ExportDialog({
     if (source === 'region') return rect;
     if (source === 'selection') return engine.selectionBounds();
     return engine.contentBox();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, rect]);
+  }, [source, rect, engine, selectionRevision, shapeRevision]);
 
   useEffect(() => {
     if (!box) {
@@ -122,7 +127,7 @@ export function ExportDialog({
     n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   const sources: Array<{ id: ExportSource; label: string; disabled?: boolean }> = [
-    { id: 'all', label: t(locale, 'exportPage') },
+    { id: 'all', label: t(locale, 'exportAll') },
     { id: 'selection', label: t(locale, 'exportSelection'), disabled: !hasSelection },
     { id: 'region', label: t(locale, 'exportRegion'), disabled: !rect },
   ];

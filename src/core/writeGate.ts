@@ -133,7 +133,6 @@ function flushHeavyNow(): void {
   const batch = snapshotHeavy();
   pendingHeavy = new Map();
   flushToDoc(batch);
-  if (pendingHeavy.size) liveApply?.(snapshotHeavy());
 }
 
 function scheduleHeavyFlush(): void {

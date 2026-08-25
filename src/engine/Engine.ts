@@ -1708,14 +1708,15 @@ export class Engine {
   fitContent(): void {
     let box: ShapeBox | null = null;
     for (const v of this.views.values()) {
+      const b = this.spatialBox(v);
       box = box
         ? {
-            x: Math.min(box.x, v.x),
-            y: Math.min(box.y, v.y),
-            w: Math.max(box.x + box.w, v.x + v.w) - Math.min(box.x, v.x),
-            h: Math.max(box.y + box.h, v.y + v.h) - Math.min(box.y, v.y),
+            x: Math.min(box.x, b.x),
+            y: Math.min(box.y, b.y),
+            w: Math.max(box.x + box.w, b.x + b.w) - Math.min(box.x, b.x),
+            h: Math.max(box.y + box.h, b.y + b.h) - Math.min(box.y, b.y),
           }
-        : { x: v.x, y: v.y, w: v.w, h: v.h };
+        : { ...b };
     }
     const target = box ?? { x: -600, y: -400, w: 1200, h: 800 };
     this.camera.fitView(

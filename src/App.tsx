@@ -130,12 +130,11 @@ function HoldCtxItem({
 
 export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
   const navigate = useNavigate();
-  // init per-board store synchronously before any hooks that use it
-  initBoard(boardId);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [tool, setTool] = useState<ToolId>('select');
   const [selectionCount, setSelectionCount] = useState(0);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [selected, setSelected] = useState<ShapeView[]>([]);
   const [zoom, setZoom] = useState(100);
   const [shapeCount, setShapeCount] = useState(0);
@@ -422,6 +421,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     engineRef.current = engine;
     engine.events.onSelection = (ids) => {
       setSelectionCount(ids.length);
+      setSelectionRevision((n) => n + 1);
       setCanCrop(engine.hasImageSelection());
       setSelected(engine.selectedViews());
     };
@@ -671,6 +671,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             initialSource={exportState.source}
             rect={exportState.rect}
             hasSelection={selectionCount > 0}
+            selectionRevision={selectionRevision}
+            shapeRevision={shapeCount}
             onPickAgain={() => {
               setExportState(null);
               engineRef.current?.beginExportPick();
