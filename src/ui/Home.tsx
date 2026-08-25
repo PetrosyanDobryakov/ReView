@@ -16,12 +16,13 @@ import {
   saveBoardLocally,
   isBoardPersistedLocally,
 } from '../core/boards';
-import type { BoardMeta, Team, BoardStatus } from '../core/boards';
+import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
+import { StatusSelect } from './StatusSelect';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
@@ -278,8 +279,13 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                   if (e.key === 'Enter') handleJoin();
                 }}
               />
-              <button type="button" className="style-btn active" onClick={handleJoin} aria-label={t(locale, 'join')}>
-                →
+              <button
+                type="button"
+                className="style-btn active style-btn-icon"
+                onClick={handleJoin}
+                aria-label={t(locale, 'join')}
+              >
+                <Icon name="arrow" size={16} />
               </button>
             </div>
           </div>
@@ -289,7 +295,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           <div className="home-main-head">
             <h2>{teams.find((tm) => tm.id === activeTeam)?.name ?? ''}</h2>
             <button type="button" className="style-btn active" onClick={handleCreateBoard}>
-              <Icon name="plus" size={14} /> {t(locale, 'newBoard')}
+              <Icon name="plus" size={14} />
+              {t(locale, 'newBoard')}
             </button>
           </div>
           <div className="home-list">
@@ -344,19 +351,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     </span>
                     <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
                     <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
-                      <select
+                      <StatusSelect
                         value={b.status}
-                        onChange={(e) => {
-                          setBoardStatus(b.id, e.target.value as BoardStatus);
+                        locale={locale}
+                        label={t(locale, 'boardStatusCol')}
+                        onChange={(status) => {
+                          setBoardStatus(b.id, status);
                           refresh();
                         }}
-                        className="size-select home-status-select"
-                        aria-label={t(locale, 'boardStatusCol')}
-                      >
-                        <option value="local">{t(locale, 'statusLocal')}</option>
-                        <option value="shared">{t(locale, 'statusShared')}</option>
-                        <option value="remote">{t(locale, 'statusRemote')}</option>
-                      </select>
+                      />
                     </span>
                     <span
                       className="board-col-weight panel-label"
@@ -369,49 +372,52 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                       {needsSave && (
                         <button
                           type="button"
-                          className="style-btn"
+                          className="style-btn board-row-cta"
                           title={t(locale, 'saveBoardHint')}
                           onClick={() => handleSaveBoard(b.id)}
                         >
                           {t(locale, 'saveBoard')}
                         </button>
                       )}
-                      <button type="button" className="style-btn" onClick={() => navigate(boardUrl(b.id))}>
+                      <button
+                        type="button"
+                        className="style-btn board-row-cta"
+                        onClick={() => navigate(boardUrl(b.id))}
+                      >
                         {t(locale, 'openBoard')}
                       </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        style={{ width: 28, height: 28 }}
-                        title={t(locale, 'copyLink')}
-                        aria-label={t(locale, 'copyLink')}
-                        onClick={() => handleCopyLink(b.id)}
-                      >
-                        <Icon name="copy" size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        style={{ width: 28, height: 28 }}
-                        title={t(locale, 'rename')}
-                        aria-label={t(locale, 'rename')}
-                        onClick={() => {
-                          setEditingBoard(b.id);
-                          setBoardName(b.name);
-                        }}
-                      >
-                        <Icon name="pen" size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        style={{ width: 28, height: 28 }}
-                        title={t(locale, 'ctxDelete')}
-                        aria-label={t(locale, 'ctxDelete')}
-                        onClick={() => void handleDeleteBoard(b.id)}
-                      >
-                        <Icon name="trash" size={14} />
-                      </button>
+                      <span className="board-row-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'copyLink')}
+                          aria-label={t(locale, 'copyLink')}
+                          onClick={() => handleCopyLink(b.id)}
+                        >
+                          <Icon name="copy" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'rename')}
+                          aria-label={t(locale, 'rename')}
+                          onClick={() => {
+                            setEditingBoard(b.id);
+                            setBoardName(b.name);
+                          }}
+                        >
+                          <Icon name="pen" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'ctxDelete')}
+                          aria-label={t(locale, 'ctxDelete')}
+                          onClick={() => void handleDeleteBoard(b.id)}
+                        >
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </span>
                     </span>
                   </div>
                 );
