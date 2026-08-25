@@ -50,6 +50,7 @@ export const ICON_PATHS = {
   more: 'M12 2.5l8 4-8 4-8-4zM4 12.5l8 4 8-4M4 17.5l8 4 8-4',
   // Two stacked process boxes + connector.
   blockScheme: 'M7 3.5h10v6H7zM12 9.5v3M7 12.5h10v6H7z',
+  chevronDown: 'M6 9l6 6 6-6',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
