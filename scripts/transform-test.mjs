@@ -4,7 +4,7 @@ import {
   reanchorRotatedResize,
   resizeAnchorFractions,
   shapeCenter,
-} from '../src/core/transform.ts';
+} from './core-bundle.mjs';
 
 const orig = { x: 100, y: 100, w: 200, h: 100, rotation: 90 };
 const handle = 'e';

@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "bundle:engine": "node scripts/bundle-engine.mjs",
-    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/board-size-test.mjs && node scripts/board-title-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs && node scripts/transform-test.mjs && node scripts/points-space-test.mjs",
+    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/lock-test.mjs && node scripts/board-size-test.mjs && node scripts/board-title-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs && node scripts/bundle-core.mjs && node scripts/transform-test.mjs && node scripts/points-space-test.mjs && node scripts/sync-test.mjs",
     "test:sync": "node scripts/sync-test.mjs"
   },
   "dependencies": {
