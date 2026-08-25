@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, withAlpha } from '../core/shapes';
+import { BOARD_TYPEFACE, COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, containedIn, withAlpha } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -692,6 +692,16 @@ export class Engine {
   }
 
   private selectionCanvas(ids: string[]): HTMLCanvasElement | null {
+    // include annotations that sit on top of selected images
+    const all = [...ids];
+    for (const id of ids) {
+      const v = this.views.get(id);
+      if (v?.type !== 'image') continue;
+      for (const a of this.annotationsOn(v)) {
+        if (!all.includes(a.id)) all.push(a.id);
+      }
+    }
+    ids = all;
     let box: ShapeBox | null = null;
     for (const id of ids) {
       const v = this.views.get(id);
@@ -716,18 +726,38 @@ export class Engine {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(-box.x + pad, -box.y + pad);
     const theme = themeFor(store.metaBg());
-    for (const id of ids) {
+    const set = new Set(ids);
+    // keep board z-order so annotations land on top of the image
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      const id = ord.get(i);
+      if (!set.has(id)) continue;
       const v = this.views.get(id);
       if (v) drawShape(ctx, v, theme.text, store.metaBg());
     }
     return canvas;
   }
 
+  /** Text/sticky/pen annotations sitting fully inside the image bounds. */
+  annotationsOn(v: ShapeView): ShapeView[] {
+    const out: ShapeView[] = [];
+    for (const [sid, sv] of this.views) {
+      if (sid === v.id || sv.locked) continue;
+      if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
+      if (!store.isOnActivePage(sid)) continue;
+      if (containedIn(sv, v)) out.push(sv);
+    }
+    return out;
+  }
+
   private async copyAsImage(ids: string[]): Promise<void> {
     let dataUrl: string | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined) dataUrl = v.src;
+      // raw fast path only when nothing is drawn on top of the image
+      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
+        dataUrl = v.src;
+      }
     }
     if (!dataUrl) {
       const canvas = this.selectionCanvas(ids);

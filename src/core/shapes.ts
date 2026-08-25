@@ -176,6 +176,16 @@ export function intersects(a: ShapeBox, b: ShapeBox): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+/** `inner` lies fully inside `outer` (with tolerance). */
+export function containedIn(inner: ShapeBox, outer: ShapeBox, tol = 2): boolean {
+  return (
+    inner.x >= outer.x - tol &&
+    inner.y >= outer.y - tol &&
+    inner.x + inner.w <= outer.x + outer.w + tol &&
+    inner.y + inner.h <= outer.y + outer.h + tol
+  );
+}
+
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   switch (v.type) {
     case 'ellipse': {
