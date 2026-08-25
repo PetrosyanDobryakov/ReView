@@ -27,6 +27,7 @@ export const ICON_PATHS = {
    person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4',
+  home: 'M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   alignLeft: 'M3 4v16M7 8h13M7 12h10M7 16h13',
   alignCenterH: 'M12 4v16M6 8h12M5 12h14M6 16h12',
   alignRight: 'M21 4v16M4 8h13M7 12h10M4 16h13',
@@ -36,7 +37,8 @@ export const ICON_PATHS = {
   distributeH: 'M3 4v16M7 8h3v8H7zM14 8h3v8h-3zM3 12h16',
   distributeV: 'M4 3h16M8 7v3h8V7zM8 14v3h8v-3zM12 3v16',
   diamond: 'M12 3l9 9-9 9-9-9z',
-  frame: 'M10 3h4v4h-4z M6 10h4v4H6z M14 10h4v4h-4z M3 17h4v4H3z M10 17h4v4h-4z M17 17h4v4h-4z M12 7v3 M8 12l2 2 M16 12l-2 2 M6 14v3 M11 14l-1 1 M17 14l-1 1',
+  // Container with header bar — matches on-canvas frame (not a tiny org tree).
+  frame: 'M4 4h16v16H4zM4 9h16',
   triangle: 'M12 3l10 17H2z',
   parallelogram: 'M7 5h12l-4 14H2z',
   hexagon: 'M8 3h8l6 9-6 9H8l-6-9z',
@@ -44,7 +46,10 @@ export const ICON_PATHS = {
   terminator: 'M6 8h12a6 6 0 0 1 0 12H6a6 6 0 0 1 0-12z',
   subroutine: 'M3 5h18v14H3zM7 5v14M17 5v14',
   display: 'M3 5h11l5 7-5 7H3z',
-  more: 'M12 2l8 4-8 4-8-4z M4 11l8 4 8-4 M4 15l8 4 8-4 M12 14v6 M9 17h6',
+  // Evenly spaced layers — closed top plate, open shelves (no stem).
+  more: 'M12 2.5l8 4-8 4-8-4zM4 12.5l8 4 8-4M4 17.5l8 4 8-4',
+  // Two stacked process boxes + connector.
+  blockScheme: 'M7 3.5h10v6H7zM12 9.5v3M7 12.5h10v6H7z',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -52,6 +57,7 @@ export type IconName = keyof typeof ICON_PATHS;
 export const TOOLBELT_ICON_SIZE = 22;
 
 const LASSO_HANDLE = 'M7.2 16.8c-1.3 2.2-2.9 3.8-3.6 3.8';
+const HOME_DOOR = 'M9 21v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8';
 const PAN_FIT = 'translate(12 12) scale(0.88) translate(-13 -12.5)';
 const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
@@ -81,6 +87,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <>
           <path d={ICON_PATHS[name]} strokeDasharray={name === 'lasso' ? '3.25 2.7' : undefined} />
           {name === 'lasso' ? <path d={LASSO_HANDLE} /> : null}
+          {name === 'home' ? <path d={HOME_DOOR} /> : null}
         </>
       )}
     </svg>
