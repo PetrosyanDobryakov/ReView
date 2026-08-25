@@ -333,7 +333,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       <header className="file-bar">
         <div className="island file-island">
           <button type="button" className="icon-btn" title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
-            <span style={{ fontSize: 16, lineHeight: 1 }}>⌂</span>
+            <Icon name="home" />
           </button>
           <div className="island-sep" />
           {editingName ? (
