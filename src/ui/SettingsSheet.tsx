@@ -144,6 +144,7 @@ export function SettingsSheet({
   onLocale,
   onChromeTheme,
   onBg,
+  onPaperReset,
   onGrid,
   onClose,
 }: {
@@ -161,6 +162,7 @@ export function SettingsSheet({
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
   onBg: (value: string) => void;
+  onPaperReset?: () => void;
   onGrid: (on: boolean) => void;
   onClose: () => void;
 }) {
@@ -600,6 +602,11 @@ export function SettingsSheet({
                       />
                     </label>
                   </CustomSwatchRollout>
+                  {onPaperReset && (
+                    <button type="button" className="style-btn" onClick={onPaperReset}>
+                      {t(locale, 'paperUseBoard')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`sheet-switch${gridOn ? ' on' : ''}`}
@@ -626,6 +633,21 @@ export function SettingsSheet({
                   </button>
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'adaptInkHint')} />
+                  </p>
+                  <button
+                    type="button"
+                    className={`sheet-switch${prefs.recognizeShapes ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={prefs.recognizeShapes}
+                    onClick={() => patchPrefs({ recognizeShapes: !prefs.recognizeShapes })}
+                  >
+                    <span>{t(locale, 'recognizeShapes')}</span>
+                    <span className="switch" aria-hidden="true">
+                      <span className="switch-thumb" />
+                    </span>
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'recognizeShapesHint')} />
                   </p>
                 </section>
               )}

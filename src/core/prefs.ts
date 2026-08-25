@@ -17,6 +17,8 @@ export interface AppPrefs {
    * can use different papers on the same board.
    */
   paperBg: string | null;
+  /** Snap neat freehand strokes to rect / ellipse / line / arrow. */
+  recognizeShapes: boolean;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -27,6 +29,7 @@ const DEFAULTS: AppPrefs = {
   toolCursorScale: 1,
   toolHoverAnim: true,
   paperBg: null,
+  recognizeShapes: false,
 };
 
 const CURSOR_SCALE_MIN = 0.7;
@@ -59,6 +62,8 @@ function parsePrefs(raw: unknown): AppPrefs {
       typeof parsed.toolCursorScale === 'number' ? clampCursorScale(parsed.toolCursorScale) : DEFAULTS.toolCursorScale,
     toolHoverAnim: typeof parsed.toolHoverAnim === 'boolean' ? parsed.toolHoverAnim : DEFAULTS.toolHoverAnim,
     paperBg: typeof parsed.paperBg === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.paperBg) ? parsed.paperBg : null,
+    recognizeShapes:
+      typeof parsed.recognizeShapes === 'boolean' ? parsed.recognizeShapes : DEFAULTS.recognizeShapes,
   };
 }
 

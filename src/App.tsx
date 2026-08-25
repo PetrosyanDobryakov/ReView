@@ -156,12 +156,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     }
     const locale = readLocale();
     fileToDocPages(file)
-      .then(({ pages, ratio }) => {
+      .then(({ pages, ratio, truncated }) => {
         if (!pages.length) {
           setError(t(locale, 'docFailed'));
           return;
         }
         e.addDocument(pages, ratio, at);
+        if (truncated) setError(t(locale, 'docTruncated'));
       })
       .catch(() => setError(t(locale, 'docFailed')));
   };
@@ -460,8 +461,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <TextOverlay
             target={editTarget}
             engine={engine}
-            onDone={(value) => {
-              engine.commitText(editTarget.id, value, editTarget);
+            onDone={(value, html) => {
+              engine.commitText(editTarget.id, value, editTarget, html);
               setEditTarget(null);
             }}
             onCancel={() => {
@@ -685,6 +686,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onBg={(value) => {
           writePrefs({ paperBg: value });
           setBg(value);
+        }}
+        onPaperReset={() => {
+          writePrefs({ paperBg: null });
+          setBg(metaBg());
         }}
         onGrid={(on) => setMeta({ grid: on })}
         onClose={() => setSettingsOpen(false)}

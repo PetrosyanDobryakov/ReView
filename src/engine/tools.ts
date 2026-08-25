@@ -5,6 +5,23 @@ import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape } fr
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings, updateTextSettings } from '../core/settings';
 import { readPrefs } from '../core/prefs';
+import { readLocale } from '../core/locale';
+import { t } from '../ui/i18n';
+import { recognizeStroke } from '../core/recognize';
+import { degToRad, rotatePointsAround, rotatedAabb, shapeRotation } from '../core/transform';
+
+/** Square a drag box around the original anchor (handles upward / leftward Shift draws). */
+function squareFromAnchor(start: { x: number; y: number }, cur: { x: number; y: number }): ShapeBox {
+  const dx = cur.x - start.x;
+  const dy = cur.y - start.y;
+  const side = Math.max(Math.abs(dx), Math.abs(dy));
+  return {
+    x: dx < 0 ? start.x - side : start.x,
+    y: dy < 0 ? start.y - side : start.y,
+    w: side,
+    h: side,
+  };
+}
 
 export type ToolId =
   | 'select'
@@ -33,6 +50,7 @@ export interface PointerInfo {
   world: { x: number; y: number };
   shift: boolean;
   alt?: boolean;
+  pressure?: number;
 }
 
 export abstract class Tool {
@@ -63,7 +81,7 @@ const HANDLE_CURSORS: Record<HandleId, string> = {
 export class SelectTool extends Tool {
   readonly id = 'select';
   cursor = 'default';
-  private mode: 'idle' | 'move' | 'marquee' = 'idle';
+  private mode: 'idle' | 'move' | 'marquee' | 'rotate' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
   private start = { x: 0, y: 0 };
   private moved = 0;
@@ -71,9 +89,15 @@ export class SelectTool extends Tool {
   /** annotations riding on a moved image, snapshotted at drag start */
   private stuck = new Map<string, ShapeView>();
   private marquee: ShapeBox | null = null;
+  private rotateStartAngle = 0;
+  private rotateOrigDeg = 0;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
+    if (engine.hitRotateHandle(p.screen.x, p.screen.y)) {
+      engine.setCursor('grab');
+      return;
+    }
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
       engine.setCursor(HANDLE_CURSORS[h.handle]);
@@ -94,6 +118,20 @@ export class SelectTool extends Tool {
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
+    store.beginGesture();
+    const rotHit = engine.hitRotateHandle(p.screen.x, p.screen.y);
+    if (rotHit) {
+      const v = engine.views.get(rotHit);
+      if (v && !v.locked) {
+        this.mode = 'rotate';
+        this.originals.set(rotHit, { ...v, points: v.points ? [...v.points] : undefined });
+        const c = { x: v.x + v.w / 2, y: v.y + v.h / 2 };
+        this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+        this.rotateOrigDeg = shapeRotation(v);
+        engine.setSelection([rotHit]);
+        return;
+      }
+    }
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
       this.resizing = h;
@@ -126,6 +164,36 @@ export class SelectTool extends Tool {
       this.moved,
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
+    if (this.mode === 'rotate') {
+      const [id, o] = [...this.originals.entries()][0] ?? [];
+      if (!id || !o) return;
+      const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+      const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+      let deg = this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI;
+      if (p.shift) deg = Math.round(deg / 15) * 15;
+      if (o.type === 'pen' || o.type === 'arrow') {
+        // Bake rotation into points; keep AABB rebuilt from points.
+        const delta = deg - this.rotateOrigDeg;
+        const pts = rotatePointsAround(o.points ?? [], c.x, c.y, delta);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let i = 0; i < pts.length; i += 2) {
+          minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
+          minY = Math.min(minY, pts[i + 1]); maxY = Math.max(maxY, pts[i + 1]);
+        }
+        const pad = (o.strokeWidth ?? 2) / 2 + 2;
+        store.patchShape(id, {
+          points: pts,
+          x: minX - pad,
+          y: minY - pad,
+          w: maxX - minX + pad * 2,
+          h: maxY - minY + pad * 2,
+          rotation: 0,
+        });
+      } else {
+        store.patchShape(id, { rotation: deg });
+      }
+      return;
+    }
     if (this.mode === 'move') {
       let dx = p.world.x - this.start.x;
       let dy = p.world.y - this.start.y;
@@ -158,6 +226,26 @@ export class SelectTool extends Tool {
           if (sv.locked) continue;
           if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
           // snapshot at drag start; containment is checked against that snapshot
+          let base = this.stuck.get(sid);
+          if (!base) {
+            if (!containedIn(sv, o)) continue;
+            base = { ...sv, points: sv.points ? [...sv.points] : undefined };
+            this.stuck.set(sid, base);
+          }
+          if (base.points) {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy, points: base.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
+          } else {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
+          }
+          movedIds.add(sid);
+        }
+      }
+      // frames carry contained shapes with them
+      for (const [, o] of this.originals) {
+        if (o.type !== 'frame') continue;
+        for (const [sid, sv] of engine.views) {
+          if (movedIds.has(sid) || this.originals.has(sid)) continue;
+          if (sv.locked) continue;
           let base = this.stuck.get(sid);
           if (!base) {
             if (!containedIn(sv, o)) continue;
@@ -210,12 +298,17 @@ export class SelectTool extends Tool {
         for (const id of engine.grid.query(this.marquee)) {
           if (!store.isOnActivePage(id)) continue;
           const v = engine.views.get(id);
-          if (v && intersects(v, this.marquee)) ids.push(id);
+          if (!v) continue;
+          const b = v.type === 'arrow' ? v : rotatedAabb(v);
+          if (intersects(b, this.marquee)) ids.push(id);
         }
         engine.setSelection(p.shift ? [...new Set([...engine.selection, ...ids])] : ids);
       } else if (!p.shift) {
         engine.setSelection([]);
       }
+    }
+    if (this.resizing) {
+      engine.updateConnectedArrows(new Set([this.resizing.shapeId]));
     }
     this.mode = 'idle';
     this.resizing = null;
@@ -223,15 +316,48 @@ export class SelectTool extends Tool {
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
+    store.endGesture();
   }
 
   cancel(engine: Engine): void {
+    if (this.originals.size) {
+      const patches: Array<[string, Partial<ShapeView>]> = [];
+      for (const [id, o] of this.originals) {
+        patches.push([
+          id,
+          {
+            x: o.x,
+            y: o.y,
+            w: o.w,
+            h: o.h,
+            points: o.points ? [...o.points] : undefined,
+            fontSize: o.fontSize,
+            rotation: o.rotation,
+          },
+        ]);
+      }
+      for (const [id, o] of this.stuck) {
+        patches.push([
+          id,
+          {
+            x: o.x,
+            y: o.y,
+            w: o.w,
+            h: o.h,
+            points: o.points ? [...o.points] : undefined,
+            rotation: o.rotation,
+          },
+        ]);
+      }
+      if (patches.length) store.patchShapes(patches);
+    }
     this.mode = 'idle';
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
+    store.endGesture();
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -253,8 +379,18 @@ export class SelectTool extends Tool {
     if (!r) return;
     const orig = this.originals.get(r.shapeId);
     if (!orig || orig.locked) return;
-    const dx = p.world.x - this.start.x;
-    const dy = p.world.y - this.start.y;
+    let dx = p.world.x - this.start.x;
+    let dy = p.world.y - this.start.y;
+    const rot = shapeRotation(orig);
+    if (rot) {
+      const rad = -degToRad(rot);
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      dx = lx;
+      dy = ly;
+    }
     const MIN = 8 / engine.camera.zoom;
     let x = orig.x;
     let y = orig.y;
@@ -272,8 +408,17 @@ export class SelectTool extends Tool {
     }
     if (orig.type === 'image') {
       const corner = r.handle === 'nw' || r.handle === 'ne' || r.handle === 'se' || r.handle === 'sw';
-      if (corner && orig.h > 0) {
-        h = w / (orig.w / orig.h);
+      if (corner && orig.w > 0 && orig.h > 0) {
+        const aspect = orig.w / orig.h;
+        // Drive from the axis with larger movement so vertical corner drags work.
+        if (Math.abs(dx) * orig.h >= Math.abs(dy) * orig.w) {
+          h = w / aspect;
+        } else {
+          w = h * aspect;
+        }
+        w = Math.max(MIN, w);
+        h = Math.max(MIN, h);
+        if (r.handle.includes('w')) x = orig.x + orig.w - w;
         if (r.handle.includes('n')) y = orig.y + orig.h - h;
       }
     }
@@ -296,13 +441,21 @@ export class SelectTool extends Tool {
         store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
         return;
       }
-      // edge handles resize the wrap frame only — font size unchanged; recompute height
+      // edge handles: E/W change wrap width; N/S keep wrap width and pad height
       const fontSize = orig.fontSize ?? 18;
-      const measured = engine.measureTextWrapped(orig.text ?? '', fontSize, Math.max(w, fontSize * 2), {
+      const wrapW = r.handle === 'n' || r.handle === 's' ? orig.w : Math.max(w, fontSize * 2);
+      const measured = engine.measureTextWrapped(orig.text ?? '', fontSize, wrapW, {
         bold: orig.bold,
         italic: orig.italic,
       });
-      store.patchShape(r.shapeId, { x, y, w, h: measured.h });
+      if (r.handle === 'e' || r.handle === 'w') {
+        store.patchShape(r.shapeId, { x, y: orig.y, w: wrapW, h: measured.h });
+        return;
+      }
+      const pad = Math.max(0, h - measured.h);
+      let ny = orig.y;
+      if (r.handle === 'n') ny = orig.y + orig.h - (measured.h + pad);
+      store.patchShape(r.shapeId, { x: orig.x, y: ny, w: orig.w, h: measured.h + pad });
       return;
     }
     if (orig.points) {
@@ -328,8 +481,8 @@ export class PanTool extends Tool {
     engine.setCursor(this.last ? 'grabbing' : 'grab');
   }
 
-  onDown(engine: Engine): void {
-    this.last = null;
+  onDown(engine: Engine, p: PointerInfo): void {
+    this.last = { x: p.screen.x, y: p.screen.y };
     engine.camera.instant = true;
     engine.setCursor('grabbing');
   }
@@ -352,15 +505,18 @@ export class PenTool extends Tool {
   readonly id = 'pen';
   cursor = 'crosshair';
   private pts: number[] = [];
+  private pressures: number[] = [];
   private last: { x: number; y: number } | null = null;
   private active = false;
   private shift = false;
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.pts = [p.world.x, p.world.y];
+    this.pressures = [clampPressure(p.pressure)];
     this.last = p.world;
     this.active = true;
     this.shift = p.shift;
+    store.beginGesture();
   }
 
   onMove(engine: Engine, p: PointerInfo): void {
@@ -374,6 +530,7 @@ export class PenTool extends Tool {
     const n = this.pts.length;
     if (n >= 2 && Math.hypot(p.world.x - this.pts[n - 2], p.world.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
     this.pts.push(p.world.x, p.world.y);
+    this.pressures.push(clampPressure(p.pressure));
   }
 
   onUp(_engine: Engine): void {
@@ -382,12 +539,63 @@ export class PenTool extends Tool {
     const shift = this.shift;
     this.shift = false;
     const points = shift ? this.straightPoints() : this.pts;
-    // length 2 = single tap (dot); drawPenStroke renders it as a filled circle
+    const pressures = shift ? [this.pressures[0] ?? 0.5, this.pressures.at(-1) ?? 0.5] : this.pressures;
     if (points.length < 2) {
       this.pts = [];
+      this.pressures = [];
       this.last = null;
+      store.endGesture();
       return;
     }
+
+    // Shape recognition (prefs): snap neat strokes to geometry.
+    if (!shift && readPrefs().recognizeShapes) {
+      const guess = recognizeStroke(points);
+      if (guess) {
+        const pen = effectivePen();
+        if (guess.kind === 'rect' || guess.kind === 'ellipse') {
+          store.addShape({
+            type: guess.kind,
+            x: guess.x,
+            y: guess.y,
+            w: guess.w,
+            h: guess.h,
+            fill: settings.shape.fill,
+            stroke: pen.color,
+            strokeWidth: Math.max(2, pen.width),
+          });
+          this.pts = [];
+          this.pressures = [];
+          this.last = null;
+          store.endGesture();
+          return;
+        }
+        if (guess.kind === 'line' || guess.kind === 'arrow') {
+          const pad = 6;
+          const minX = Math.min(guess.x0, guess.x1) - pad;
+          const minY = Math.min(guess.y0, guess.y1) - pad;
+          const maxX = Math.max(guess.x0, guess.x1) + pad;
+          const maxY = Math.max(guess.y0, guess.y1) + pad;
+          store.addShape({
+            type: 'arrow',
+            x: minX,
+            y: minY,
+            w: maxX - minX,
+            h: maxY - minY,
+            fill: 'transparent',
+            stroke: pen.color,
+            strokeWidth: Math.max(2, pen.width),
+            points: [guess.x0, guess.y0, guess.x1, guess.y1],
+          });
+          this.pts = [];
+          this.pressures = [];
+          this.last = null;
+          store.endGesture();
+          return;
+        }
+      }
+    }
+
     const pen = effectivePen();
     const pad = pen.width / 2 + 2;
     let minX = Infinity;
@@ -400,6 +608,7 @@ export class PenTool extends Tool {
       minY = Math.min(minY, points[i + 1]);
       maxY = Math.max(maxY, points[i + 1]);
     }
+    const hasPressure = pressures.some((p) => p > 0 && p < 1);
     store.addShape({
       type: 'pen',
       x: minX - pad,
@@ -411,15 +620,20 @@ export class PenTool extends Tool {
       strokeWidth: pen.width,
       alpha: pen.alpha,
       points,
+      pressures: hasPressure ? pressures.slice(0, points.length / 2) : undefined,
     });
     this.pts = [];
+    this.pressures = [];
     this.last = null;
+    store.endGesture();
   }
 
   cancel(_engine: Engine): void {
     this.active = false;
     this.pts = [];
+    this.pressures = [];
     this.last = null;
+    store.endGesture();
   }
 
   render(_engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -428,7 +642,14 @@ export class PenTool extends Tool {
     const points = this.shift ? this.straightPoints() : this.pts;
     if (points.length < 2) return;
     const bg = store.viewPaperBg();
-    drawPenStroke(ctx, points, pen.width, displayInk(pen.color, bg), pen.alpha * 0.9);
+    drawPenStroke(
+      ctx,
+      points,
+      pen.width,
+      displayInk(pen.color, bg),
+      pen.alpha * 0.9,
+      this.shift ? undefined : this.pressures
+    );
   }
 
   private straightPoints(): number[] {
@@ -439,6 +660,11 @@ export class PenTool extends Tool {
     const end = snapStraightEnd(ax, ay, bx, by);
     return [ax, ay, end.x, end.y];
   }
+}
+
+function clampPressure(raw: number | undefined): number {
+  if (raw === undefined || !Number.isFinite(raw) || raw <= 0) return 0.5;
+  return Math.min(1, Math.max(0.05, raw));
 }
 
 export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number): { x: number; y: number } {
@@ -461,11 +687,13 @@ abstract class BoxTool extends Tool {
   protected start: { x: number; y: number } | null = null;
   protected cur: { x: number; y: number } | null = null;
   protected movedScreen = 0;
+  protected shift = false;
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.start = p.world;
     this.cur = p.world;
     this.movedScreen = 0;
+    this.shift = p.shift;
   }
 
   onMove(engine: Engine, p: PointerInfo): void {
@@ -475,10 +703,12 @@ abstract class BoxTool extends Tool {
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
     this.cur = p.world;
+    this.shift = p.shift;
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
     if (!this.start || !this.cur) return;
+    this.shift = p.shift;
     let box: ShapeBox;
     if (this.movedScreen < 3) {
       box = {
@@ -487,13 +717,10 @@ abstract class BoxTool extends Tool {
         w: this.defaultW,
         h: this.defaultH,
       };
+    } else if (this.shift) {
+      box = squareFromAnchor(this.start, this.cur);
     } else {
       box = normalizeBox(this.start, this.cur);
-      if (p.shift) {
-        const s = Math.max(box.w, box.h);
-        box.w = s;
-        box.h = s;
-      }
     }
     const id = store.addShape({
       type: this.shapeType,
@@ -504,6 +731,7 @@ abstract class BoxTool extends Tool {
     });
     this.start = null;
     this.cur = null;
+    this.shift = false;
     if (this.shapeType === 'sticky') engine.openTextEditor(id);
     if (this.shapeType === 'graph') engine.openGraphEditor(id);
     engine.setTool('select');
@@ -512,11 +740,17 @@ abstract class BoxTool extends Tool {
   cancel(_engine: Engine): void {
     this.start = null;
     this.cur = null;
+    this.shift = false;
+  }
+
+  protected previewBox(): ShapeBox | null {
+    if (!this.start || !this.cur) return null;
+    return this.shift ? squareFromAnchor(this.start, this.cur) : normalizeBox(this.start, this.cur);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
+    const drawBox = this.previewBox();
+    if (!drawBox) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
@@ -525,9 +759,9 @@ abstract class BoxTool extends Tool {
     ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();
     if (this.shapeType === 'ellipse') {
-      ctx.ellipse(box.x + box.w / 2, box.y + box.h / 2, box.w / 2, box.h / 2, 0, 0, Math.PI * 2);
+      ctx.ellipse(drawBox.x + drawBox.w / 2, drawBox.y + drawBox.h / 2, drawBox.w / 2, drawBox.h / 2, 0, 0, Math.PI * 2);
     } else {
-      ctx.roundRect(box.x, box.y, box.w, box.h, 6);
+      ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 6);
     }
     ctx.fill();
     ctx.stroke();
@@ -662,21 +896,25 @@ export class FrameTool extends BoxTool {
   }
   onUp(engine: Engine, p: PointerInfo): void {
     if (!this.start || !this.cur) return;
+    this.shift = p.shift;
     let box: ShapeBox;
     if (this.movedScreen < 3) {
       box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
+    } else if (this.shift) {
+      box = squareFromAnchor(this.start, this.cur);
     } else {
       box = normalizeBox(this.start, this.cur);
     }
-    const id = store.addShape({ type: this.shapeType, ...box, fill: 'rgba(255,255,255,0.06)', stroke: settings.shape.stroke, strokeWidth: 2, text: 'Схема' });
+    const id = store.addShape({ type: this.shapeType, ...box, fill: 'rgba(255,255,255,0.06)', stroke: settings.shape.stroke, strokeWidth: 2, text: t(readLocale(), 'frameDefault') });
     this.start = null;
     this.cur = null;
+    this.shift = false;
     engine.openTextEditor(id);
     engine.setTool('select');
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
+    const box = this.previewBox();
+    if (!box) return;
     const s = 1 / engine.camera.zoom;
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
@@ -922,9 +1160,64 @@ export class TextTool extends Tool {
 
 function circleHitsShape(cx: number, cy: number, r: number, v: ShapeView): boolean {
   if (pointInShape(v, cx, cy)) return true;
+  // Avoid AABB false positives on non-rect shapes (triangle / diamond / hexagon corners).
+  const precise = new Set([
+    'ellipse',
+    'diamond',
+    'triangle',
+    'parallelogram',
+    'hexagon',
+    'cylinder',
+    'terminator',
+    'display',
+    'pen',
+    'arrow',
+  ]);
+  if (precise.has(v.type)) {
+    // Sample points on the eraser circle; hit if any lands inside the shape.
+    const samples = 12;
+    for (let i = 0; i < samples; i++) {
+      const a = (i / samples) * Math.PI * 2;
+      if (pointInShape(v, cx + Math.cos(a) * r, cy + Math.sin(a) * r)) return true;
+    }
+    return false;
+  }
   const nx = Math.max(v.x, Math.min(cx, v.x + v.w));
   const ny = Math.max(v.y, Math.min(cy, v.y + v.h));
   return Math.hypot(cx - nx, cy - ny) <= r;
+}
+
+/** Mark pen vertices near the eraser, including hits along open segments. */
+function markPartialEraseHits(
+  points: number[],
+  world: { x: number; y: number },
+  r: number,
+  into: Set<number>
+): void {
+  if (points.length < 2) return;
+  const r2 = r * r;
+  for (let i = 0; i < points.length; i += 2) {
+    const dx = points[i] - world.x;
+    const dy = points[i + 1] - world.y;
+    if (dx * dx + dy * dy <= r2) into.add(i / 2);
+  }
+  for (let i = 0; i < points.length - 2; i += 2) {
+    const ax = points[i];
+    const ay = points[i + 1];
+    const bx = points[i + 2];
+    const by = points[i + 3];
+    const abx = bx - ax;
+    const aby = by - ay;
+    const len2 = abx * abx + aby * aby;
+    if (len2 < 0.001) continue;
+    const t = Math.max(0, Math.min(1, ((world.x - ax) * abx + (world.y - ay) * aby) / len2));
+    const px = ax + abx * t;
+    const py = ay + aby * t;
+    if ((px - world.x) * (px - world.x) + (py - world.y) * (py - world.y) > r2) continue;
+    // Open-segment hit: drop both endpoints so the stroke actually opens a gap.
+    into.add(i / 2);
+    into.add(i / 2 + 1);
+  }
 }
 
 export class EraserTool extends Tool {
@@ -980,7 +1273,7 @@ export class EraserTool extends Tool {
   }
 
   private eraseAt(engine: Engine, world: { x: number; y: number }): void {
-    const r = settings.eraser.size + 10;
+    const r = settings.eraser.size;
     const partial = settings.eraser.mode === 'partial';
     const box = { x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 };
     for (const id of engine.grid.query(box)) {
@@ -993,9 +1286,7 @@ export class EraserTool extends Tool {
           idx = new Set();
           this.partialHits.set(id, idx);
         }
-        for (let i = 0; i < v.points.length; i += 2) {
-          if (Math.hypot(v.points[i] - world.x, v.points[i + 1] - world.y) <= r) idx.add(i / 2);
-        }
+        markPartialEraseHits(v.points, world, r, idx);
       } else if (!this.wholeHits.has(id) && circleHitsShape(world.x, world.y, r, v)) {
         this.wholeHits.add(id);
       }

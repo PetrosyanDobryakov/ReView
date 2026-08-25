@@ -18,6 +18,7 @@ import {
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
+import { cloneBoard } from '../core/boardClone';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
@@ -87,7 +88,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       if (!first.length) {
         const curTeams = listTeams();
         const def = curTeams[0]?.id ?? 'default';
-        createBoard('Моя первая доска', def);
+        createBoard(t(locale, 'firstBoard'), def);
         refresh();
       }
     }
@@ -107,7 +108,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   };
 
   const handleCreateTeam = () => {
-    const created = createTeam(locale === 'zh' ? '新团队' : locale === 'en' ? 'New team' : 'Новая команда');
+    const created = createTeam(t(locale, 'defaultTeamShort'));
     refresh();
     setActiveTeam(created.id);
   };
@@ -150,8 +151,21 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const handleDeleteBoard = async (id: string) => {
     if (!confirm(t(locale, 'deleteBoardConfirm'))) return;
-    await deleteBoardData(id);
+    const ok = await deleteBoardData(id);
     refresh();
+    if (!ok) {
+      window.alert(t(locale, 'error') + ': IndexedDB');
+    }
+  };
+
+  const handleCloneBoard = async (id: string) => {
+    const copy = await cloneBoard(id);
+    if (!copy) {
+      window.alert(t(locale, 'error'));
+      return;
+    }
+    refresh();
+    void refreshWeights(listBoards());
   };
 
   const toggleSaveRemote = () => {
@@ -212,11 +226,18 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           </div>
           <div className="home-teams">
             {teams.map((team) => (
-              <button
+              <div
                 key={team.id}
-                type="button"
                 className={`home-team-btn${activeTeam === team.id ? ' on' : ''}`}
+                role="button"
+                tabIndex={0}
                 onClick={() => setActiveTeam(team.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveTeam(team.id);
+                  }
+                }}
               >
                 {editingTeam === team.id ? (
                   <input
@@ -275,7 +296,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     </button>
                   )}
                 </span>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -386,6 +407,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         locale={locale}
                         label={t(locale, 'boardStatusCol')}
                         onChange={(status) => {
+                          if (status === 'remote' && b.status !== 'remote') {
+                            if (!confirm(t(locale, 'statusRemoteWarn'))) return;
+                          }
                           setBoardStatus(b.id, status);
                           refresh();
                         }}
@@ -417,6 +441,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         {t(locale, 'openBoard')}
                       </button>
                       <span className="board-row-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'duplicateBoard')}
+                          aria-label={t(locale, 'duplicateBoard')}
+                          onClick={() => void handleCloneBoard(b.id)}
+                        >
+                          <Icon name="duplicate" size={14} />
+                        </button>
                         <button
                           type="button"
                           className="icon-btn"

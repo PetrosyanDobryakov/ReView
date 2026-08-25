@@ -1,5 +1,7 @@
 import { readPrefs } from './prefs';
 import { deleteBoardDatabase } from './boardSize';
+import { readLocale } from './locale';
+import { t } from '../ui/i18n';
 
 export interface Team {
   id: string;
@@ -23,12 +25,48 @@ export interface BoardMeta {
 const TEAMS_KEY = 'review-teams';
 const BOARDS_KEY = 'review-boards';
 
+function isBoardStatus(value: unknown): value is BoardStatus {
+  return value === 'local' || value === 'shared' || value === 'remote';
+}
+
+function parseTeam(raw: unknown): Team | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const t = raw as Record<string, unknown>;
+  if (typeof t.id !== 'string' || !t.id) return null;
+  if (typeof t.name !== 'string') return null;
+  return {
+    id: t.id,
+    name: t.name,
+    createdAt: typeof t.createdAt === 'number' ? t.createdAt : Date.now(),
+  };
+}
+
+function parseBoard(raw: unknown): BoardMeta | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = raw as Record<string, unknown>;
+  if (typeof b.id !== 'string' || !b.id) return null;
+  if (typeof b.name !== 'string') return null;
+  return {
+    id: b.id,
+    name: b.name,
+    teamId: typeof b.teamId === 'string' && b.teamId ? b.teamId : 'default',
+    createdAt: typeof b.createdAt === 'number' ? b.createdAt : Date.now(),
+    updatedAt: typeof b.updatedAt === 'number' ? b.updatedAt : Date.now(),
+    status: isBoardStatus(b.status) ? b.status : 'local',
+    savedLocally: b.savedLocally === true ? true : undefined,
+  };
+}
+
 function readTeams(): Team[] {
   try {
     const raw = localStorage.getItem(TEAMS_KEY);
-    if (raw) return JSON.parse(raw) as Team[];
-  } catch {}
-  return [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(parseTeam).filter((x): x is Team => x !== null);
+  } catch {
+    return [];
+  }
 }
 
 function writeTeams(teams: Team[]): void {
@@ -40,9 +78,13 @@ function writeTeams(teams: Team[]): void {
 function readBoards(): BoardMeta[] {
   try {
     const raw = localStorage.getItem(BOARDS_KEY);
-    if (raw) return JSON.parse(raw) as BoardMeta[];
-  } catch {}
-  return [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(parseBoard).filter((x): x is BoardMeta => x !== null);
+  } catch {
+    return [];
+  }
 }
 
 function writeBoards(boards: BoardMeta[]): void {
@@ -54,40 +96,47 @@ function writeBoards(boards: BoardMeta[]): void {
 export function listTeams(): Team[] {
   let teams = readTeams();
   if (!teams.length) {
-    teams = [{ id: 'default', name: 'Моя команда', createdAt: Date.now() }];
+    teams = [{ id: 'default', name: t(readLocale(), 'defaultTeam'), createdAt: Date.now() }];
     writeTeams(teams);
   }
   return teams;
 }
 
 export function createTeam(name: string): Team {
-  const t: Team = { id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4), name: name.trim() || 'Команда', createdAt: Date.now() };
+  const team: Team = {
+    id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+    name: name.trim() || t(readLocale(), 'defaultTeamShort'),
+    createdAt: Date.now(),
+  };
   const teams = listTeams();
-  teams.push(t);
+  teams.push(team);
   writeTeams(teams);
-  return t;
+  return team;
 }
 
 export function renameTeam(id: string, name: string): void {
-  const teams = listTeams().map((t) => (t.id === id ? { ...t, name: name.trim() || t.name } : t));
+  const teams = listTeams().map((team) => (team.id === id ? { ...team, name: name.trim() || team.name } : team));
   writeTeams(teams);
 }
 
 export function deleteTeam(id: string): void {
   if (id === 'default') return;
-  let teams = listTeams().filter((t) => t.id !== id);
-  if (!teams.length) teams = [{ id: 'default', name: 'Моя команда', createdAt: Date.now() }];
+  let teams = listTeams().filter((team) => team.id !== id);
+  if (!teams.length) teams = [{ id: 'default', name: t(readLocale(), 'defaultTeam'), createdAt: Date.now() }];
   writeTeams(teams);
-  // move boards of deleted team to default
   const boards = listBoards().map((b) => (b.teamId === id ? { ...b, teamId: 'default' } : b));
   writeBoards(boards);
 }
 
 export function listBoards(): BoardMeta[] {
   const boards = readBoards();
-  // migrate old boards without status
   let changed = false;
-  for (const b of boards) if (!(b as unknown as { status?: string }).status) { (b as unknown as BoardMeta).status = 'local'; changed = true; }
+  for (const b of boards) {
+    if (!isBoardStatus((b as BoardMeta).status)) {
+      (b as BoardMeta).status = 'local';
+      changed = true;
+    }
+  }
   if (changed) writeBoards(boards);
   return boards;
 }
@@ -111,10 +160,10 @@ function touchBoard(id: string): void {
 
 export function createBoard(name: string, teamId = 'default', status: BoardStatus = 'local'): BoardMeta {
   const teams = listTeams();
-  if (!teams.find((t) => t.id === teamId)) teamId = 'default';
+  if (!teams.find((team) => team.id === teamId)) teamId = 'default';
   const b: BoardMeta = {
     id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    name: name.trim() || 'Новая доска',
+    name: name.trim() || t(readLocale(), 'newBoard'),
     teamId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -137,12 +186,11 @@ export function deleteBoard(id: string): void {
   try {
     localStorage.removeItem(`review-page-${id}`);
   } catch {}
-  // IndexedDB cleanup is async; fire-and-forget from callers that can await deleteBoardData
 }
 
-export async function deleteBoardData(id: string): Promise<void> {
+export async function deleteBoardData(id: string): Promise<boolean> {
   deleteBoard(id);
-  await deleteBoardDatabase(id);
+  return deleteBoardDatabase(id);
 }
 
 /** Mark a remote board as kept on this device (local copy). */
@@ -175,21 +223,24 @@ export function moveBoard(id: string, teamId: string): void {
 }
 
 export function setBoardStatus(id: string, status: BoardStatus): void {
-  const boards = readBoards().map((b) => (b.id === id ? { ...b, status, updatedAt: Date.now() } : b));
+  const boards = readBoards().map((b) => {
+    if (b.id !== id) return b;
+    // Switching away from remote keeps any local copy flag so content is not lost.
+    const savedLocally = status === 'remote' ? b.savedLocally : b.savedLocally;
+    return { ...b, status, savedLocally, updatedAt: Date.now() };
+  });
   writeBoards(boards);
 }
 
 export function ensureDefaultBoard(): BoardMeta {
-  let boards = listBoards();
+  const boards = listBoards();
   if (boards.length) return boards[0];
-  // try to reuse old board name
-  let oldName = 'Моя первая доска';
+  let oldName = t(readLocale(), 'firstBoard');
   try {
     const v = localStorage.getItem('review-name');
     if (v && v.trim()) oldName = v.trim().slice(0, 40);
   } catch {}
-  const b = createBoard(oldName, 'default');
-  return b;
+  return createBoard(oldName, 'default');
 }
 
 export function boardUrl(id: string): string {
@@ -201,11 +252,16 @@ export function parseBoardIdFromPath(path: string): string | null {
   return m ? m[1] : null;
 }
 
-export function ensureBoardWithId(id: string, name = 'Чужая доска', teamId = 'default', status: BoardStatus = 'remote'): BoardMeta {
+export function ensureBoardWithId(
+  id: string,
+  name = t(readLocale(), 'remoteBoardName'),
+  teamId = 'default',
+  status: BoardStatus = 'remote'
+): BoardMeta {
   const existing = getBoard(id);
   if (existing) return existing;
   const teams = listTeams();
-  if (!teams.find((t) => t.id === teamId)) teamId = 'default';
+  if (!teams.find((team) => team.id === teamId)) teamId = 'default';
   const b: BoardMeta = { id, name, teamId, createdAt: Date.now(), updatedAt: Date.now(), status };
   const boards = readBoards();
   boards.push(b);
@@ -213,7 +269,6 @@ export function ensureBoardWithId(id: string, name = 'Чужая доска', te
   return b;
 }
 
-// call on every shape change to bump updatedAt
 export function bumpBoardUpdated(id: string): void {
   touchBoard(id);
 }
