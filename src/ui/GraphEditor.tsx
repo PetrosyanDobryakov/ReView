@@ -73,7 +73,6 @@ export function GraphEditor({
           placeholder="sin(x)"
           onChange={(e) => {
             setValue(e.target.value);
-            preview(e.target.value);
           }}
           onBlur={(e) => {
             // Keep open when focus moves to a preset chip inside the editor.
