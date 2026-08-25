@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, readableTextOn, displayInk, withAlpha, type PortId } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape } from '../core/shapes';
+import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, settings, updateTextSettings } from '../core/settings';
 import { readPrefs } from '../core/prefs';
@@ -68,6 +68,8 @@ export class SelectTool extends Tool {
   private start = { x: 0, y: 0 };
   private moved = 0;
   private originals = new Map<string, ShapeView>();
+  /** annotations riding on a moved image, snapshotted at drag start */
+  private stuck = new Map<string, ShapeView>();
   private marquee: ShapeBox | null = null;
 
   onHover(engine: Engine, p: PointerInfo): void {
@@ -91,6 +93,7 @@ export class SelectTool extends Tool {
     this.mode = 'idle';
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
       this.resizing = h;
@@ -147,6 +150,28 @@ export class SelectTool extends Tool {
       }
       // also move connected arrows
       const movedIds = new Set(patches.map(([id]) => id));
+      // annotations (text/sticky/pen) sitting on a moved image stick to it
+      for (const [, o] of this.originals) {
+        if (o.type !== 'image') continue;
+        for (const [sid, sv] of engine.views) {
+          if (movedIds.has(sid) || this.originals.has(sid)) continue;
+          if (sv.locked) continue;
+          if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
+          // snapshot at drag start; containment is checked against that snapshot
+          let base = this.stuck.get(sid);
+          if (!base) {
+            if (!containedIn(sv, o)) continue;
+            base = { ...sv, points: sv.points ? [...sv.points] : undefined };
+            this.stuck.set(sid, base);
+          }
+          if (base.points) {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy, points: base.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
+          } else {
+            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
+          }
+          movedIds.add(sid);
+        }
+      }
       for (const [aid, av] of engine.views) {
         if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
         if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
@@ -196,6 +221,7 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     engine.clearSnapGuides();
   }
 
@@ -204,6 +230,7 @@ export class SelectTool extends Tool {
     this.resizing = null;
     this.marquee = null;
     this.originals.clear();
+    this.stuck.clear();
     engine.clearSnapGuides();
   }
 
@@ -251,19 +278,31 @@ export class SelectTool extends Tool {
       }
     }
     if (orig.type === 'text') {
-      const base = orig.fontSize ?? 18;
-      const sx = orig.w > 0 ? w / orig.w : 1;
-      const sy = orig.h > 0 ? h / orig.h : sx;
-      const s = Math.max(0.15, Math.min(10, (sx + sy) / 2));
-      const fontSize = Math.max(4, Math.round(base * s));
-      const applied = base > 0 ? fontSize / base : s;
-      let nx = orig.x;
-      let ny = orig.y;
-      const nw = orig.w * applied;
-      const nh = orig.h * applied;
-      if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
-      if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
-      store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+      const corner = r.handle === 'nw' || r.handle === 'ne' || r.handle === 'se' || r.handle === 'sw';
+      if (corner) {
+        // corner handles scale the font (and the frame with it)
+        const base = orig.fontSize ?? 18;
+        const sx = orig.w > 0 ? w / orig.w : 1;
+        const sy = orig.h > 0 ? h / orig.h : sx;
+        const s = Math.max(0.15, Math.min(10, (sx + sy) / 2));
+        const fontSize = Math.max(4, Math.round(base * s));
+        const applied = base > 0 ? fontSize / base : s;
+        let nx = orig.x;
+        let ny = orig.y;
+        const nw = orig.w * applied;
+        const nh = orig.h * applied;
+        if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
+        if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
+        store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+        return;
+      }
+      // edge handles resize the wrap frame only — font size unchanged; recompute height
+      const fontSize = orig.fontSize ?? 18;
+      const measured = engine.measureTextWrapped(orig.text ?? '', fontSize, Math.max(w, fontSize * 2), {
+        bold: orig.bold,
+        italic: orig.italic,
+      });
+      store.patchShape(r.shapeId, { x, y, w, h: measured.h });
       return;
     }
     if (orig.points) {

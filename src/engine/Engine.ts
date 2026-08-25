@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, boardFont, withAlpha } from '../core/shapes';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, boardFont, containedIn, withAlpha } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -133,6 +133,7 @@ export class Engine {
   readonly selection = new Set<string>();
   events: EngineEvents = {};
   editing = false;
+  editId: string | null = null;
   remotePeers: PeerCursor[] = [];
 
   setPeers(peers: PeerCursor[]): void {
@@ -201,8 +202,7 @@ export class Engine {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('paste', this.onPaste);
-    window.addEventListener('dragover', this.onDragOver);
-    window.addEventListener('drop', this.onDrop);
+    // File drops are owned by App (images + PDF/TXT) so we don't double-insert.
     store.board.observe(this.onStore);
     store.meta.observe(this.onMeta);
     store.order.observe(this.onOrder);
@@ -353,8 +353,6 @@ export class Engine {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('paste', this.onPaste);
-    window.removeEventListener('dragover', this.onDragOver);
-    window.removeEventListener('drop', this.onDrop);
     store.board.unobserve(this.onStore);
     store.meta.unobserve(this.onMeta);
     store.order.unobserve(this.onOrder);
@@ -446,7 +444,7 @@ export class Engine {
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
     /** Sit outside resize handles so connect ≠ resize. */
-    const off = 14 / z;
+    const off = 18 / z;
     const candidates: string[] = [...this.selection, ...[...this.views.keys()].filter((k) => !this.selection.has(k))];
     let best: { shapeId: string; port: PortId; dist: number } | null = null;
     for (const id of candidates) {
@@ -467,7 +465,7 @@ export class Engine {
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
     const v = this.views.get(shapeId);
     if (!v) return null;
-    return portPos(v, port, 14 / this.camera.zoom);
+    return portPos(v, port, 18 / this.camera.zoom);
   }
 
   updateConnectedArrows(movedIds: Set<string>): void {
@@ -705,13 +703,24 @@ export class Engine {
       const v = this.views.get(id);
       if (v && !v.locked) anyUnlocked = true;
     }
-    const locked = !anyUnlocked;
+    // any unlocked shape in the selection → lock everything, otherwise unlock
+    const locked = anyUnlocked;
     const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const id of this.selection) patches.push([id, { locked }]);
     store.patchShapes(patches);
   }
 
   private selectionCanvas(ids: string[]): HTMLCanvasElement | null {
+    // include annotations that sit on top of selected images
+    const all = [...ids];
+    for (const id of ids) {
+      const v = this.views.get(id);
+      if (v?.type !== 'image') continue;
+      for (const a of this.annotationsOn(v)) {
+        if (!all.includes(a.id)) all.push(a.id);
+      }
+    }
+    ids = all;
     let box: ShapeBox | null = null;
     for (const id of ids) {
       const v = this.views.get(id);
@@ -736,18 +745,38 @@ export class Engine {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(-box.x + pad, -box.y + pad);
     const theme = themeFor(store.viewPaperBg());
-    for (const id of ids) {
+    const set = new Set(ids);
+    // keep board z-order so annotations land on top of the image
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      const id = ord.get(i);
+      if (!set.has(id)) continue;
       const v = this.views.get(id);
       if (v) drawShape(ctx, v, theme.text, store.viewPaperBg());
     }
     return canvas;
   }
 
+  /** Text/sticky/pen annotations sitting fully inside the image bounds. */
+  annotationsOn(v: ShapeView): ShapeView[] {
+    const out: ShapeView[] = [];
+    for (const [sid, sv] of this.views) {
+      if (sid === v.id || sv.locked) continue;
+      if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
+      if (!store.isOnActivePage(sid)) continue;
+      if (containedIn(sv, v)) out.push(sv);
+    }
+    return out;
+  }
+
   private async copyAsImage(ids: string[]): Promise<void> {
     let dataUrl: string | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined) dataUrl = v.src;
+      // raw fast path only when nothing is drawn on top of the image
+      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
+        dataUrl = v.src;
+      }
     }
     if (!dataUrl) {
       const canvas = this.selectionCanvas(ids);
@@ -774,7 +803,16 @@ export class Engine {
     if (!this.selection.size) return;
     const ids = [...this.selection];
     const v = this.views.get(ids[0]);
-    if (ids.length === 1 && v?.type === 'image' && v.src) {
+    // Raw src only when a lone image has no annotations; otherwise bake the canvas
+    // (same path as copy-as-image) so pens/stickies/text on the photo are included.
+    if (
+      ids.length === 1 &&
+      v?.type === 'image' &&
+      v.src &&
+      v.cropW === undefined &&
+      v.cropH === undefined &&
+      this.annotationsOn(v).length === 0
+    ) {
       const a = document.createElement('a');
       a.href = v.src;
       a.download = 'review-image.png';
@@ -832,6 +870,7 @@ export class Engine {
         sticky: 'infoSticky',
         text: 'infoText',
         pen: 'infoPen',
+        doc: 'infoDoc',
         arrow: 'infoArrow',
         image: 'infoImage',
         graph: 'infoGraph',
@@ -921,6 +960,122 @@ export class Engine {
     if (this.selection.size !== 1) return false;
     const v = this.views.get([...this.selection][0]);
     return Boolean(v && v.type === 'image' && !v.locked);
+  }
+
+  addDocument(pages: string[], ratio: number, at?: { x: number; y: number }): string | null {
+    if (!pages.length) return null;
+    const maxShow = 560;
+    const w = maxShow;
+    const h = Math.round(maxShow / (ratio || 0.707));
+    const pos = at ?? this.camera.screenToWorld(this.w / 2, this.h / 2, this.w / 2, this.h / 2);
+    const id = store.addShape({
+      type: 'doc',
+      x: pos.x - w / 2,
+      y: pos.y - h / 2,
+      w,
+      h,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      pages,
+      page: 0,
+    });
+    this.setSelection([id]);
+    return id;
+  }
+
+  private selectedDoc(): ShapeView | null {
+    if (this.selection.size !== 1) return null;
+    const v = this.views.get([...this.selection][0]);
+    return v && v.type === 'doc' && (v.pages?.length ?? 0) > 1 ? v : null;
+  }
+
+  /** Screen-space page-flip arrow zones for the selected doc. */
+  private docArrowZones(v: ShapeView): Array<{ side: 'prev' | 'next'; x: number; y: number }> {
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    const left = v.x * z + ox;
+    const right = (v.x + v.w) * z + ox;
+    const cy = (v.y + v.h / 2) * z + oy;
+    const off = 26;
+    return [
+      { side: 'prev', x: left - off, y: cy },
+      { side: 'next', x: right + off, y: cy },
+    ];
+  }
+
+  private docArrowRadius(): number {
+    return 15;
+  }
+
+  private drawDocControls(ctx: CanvasRenderingContext2D): void {
+    const v = this.selectedDoc();
+    if (!v || this.editing) return;
+    const zones = this.docArrowZones(v);
+    const r = this.docArrowRadius();
+    ctx.save();
+    // zones are computed in screen space; drop the camera transform
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    for (const zone of zones) {
+      ctx.beginPath();
+      ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.selection;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      if (zone.side === 'prev') {
+        ctx.moveTo(zone.x + 3, zone.y - 6);
+        ctx.lineTo(zone.x - 4, zone.y);
+        ctx.lineTo(zone.x + 3, zone.y + 6);
+      } else {
+        ctx.moveTo(zone.x - 3, zone.y - 6);
+        ctx.lineTo(zone.x + 4, zone.y);
+        ctx.lineTo(zone.x - 3, zone.y + 6);
+      }
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+    const page = (v.page ?? 0) + 1;
+    const total = v.pages?.length ?? 0;
+    ctx.font = '12px "Space Grotesk", Onest, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const label = `${page} / ${total}`;
+    const tw = ctx.measureText(label).width;
+    const z = this.camera.zoom;
+    const lx = (v.x + v.w / 2) * z + (this.w / 2 - this.camera.x * z);
+    const ly = (v.y + v.h) * z + (this.h / 2 - this.camera.y * z) + 8;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath();
+    ctx.roundRect(lx - tw / 2 - 8, ly, tw + 16, 20, 10);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, lx, ly + 4);
+    ctx.restore();
+  }
+
+  /** Returns true if the pointer press hit a doc page arrow (and handled it). */
+  private tryDocArrow(sx: number, sy: number): boolean {
+    const v = this.selectedDoc();
+    if (!v) return false;
+    const r = this.docArrowRadius() + 4;
+    for (const zone of this.docArrowZones(v)) {
+      if (Math.hypot(sx - zone.x, sy - zone.y) <= r) {
+        const pages = v.pages?.length ?? 0;
+        const cur = v.page ?? 0;
+        const next = zone.side === 'prev' ? Math.max(0, cur - 1) : Math.min(pages - 1, cur + 1);
+        if (next !== cur) store.patchShape(v.id, { page: next });
+        this.dirty = true;
+        return true;
+      }
+    }
+    return false;
   }
 
   startCropSelected(): void {
@@ -1042,22 +1197,6 @@ export class Engine {
     this.pasteSelection();
   }
 
-  private onDragOver = (e: DragEvent): void => {
-    e.preventDefault();
-  };
-
-  private onDrop = (e: DragEvent): void => {
-    e.preventDefault();
-    if (this.editing) return;
-    const rect = this.canvas.getBoundingClientRect();
-    const at = this.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top, this.w / 2, this.h / 2);
-    const files = e.dataTransfer?.files;
-    if (!files) return;
-    for (const file of files) {
-      if (file.type.startsWith('image/')) this.insertImageFile(file, at);
-    }
-  };
-
   resetZoom(): void {
     this.camera.setZoom(1);
   }
@@ -1098,6 +1237,7 @@ export class Engine {
       color = v.textColor ?? themeFor(bg).text;
     }
     this.editing = true;
+    this.editId = id;
     this.events.onEditText?.({
       id,
       x: v.x,
@@ -1125,6 +1265,7 @@ export class Engine {
     const editorColor = adaptInkToPaper ? color : readableTextOn(color, bg);
     const fmt = settings.text;
     this.editing = true;
+    this.editId = null;
     this.events.onEditText?.({
       id: null,
       x,
@@ -1147,6 +1288,7 @@ export class Engine {
 
   cancelTextEdit(): void {
     this.editing = false;
+    this.editId = null;
   }
 
   openGraphEditor(id: string): void {
@@ -1180,6 +1322,7 @@ export class Engine {
 
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
+    this.editId = null;
     const bg = store.viewPaperBg();
     const color =
       target.type === 'text' && !readPrefs().adaptInkToPaper
@@ -1230,11 +1373,14 @@ export class Engine {
         highlight: target.highlight,
       };
       if (v.type === 'text') {
-        const size = this.measureText(text, v.fontSize ?? TEXT_FONT, {
-          bold: target.bold,
-          italic: target.italic,
-        });
-        patch.w = size.w;
+        // keep the user's frame width; recompute height from wrapped lines
+        const size = this.measureTextWrapped(
+          text,
+          v.fontSize ?? TEXT_FONT,
+          Math.max(v.w, (v.fontSize ?? TEXT_FONT) * 2),
+          { bold: target.bold, italic: target.italic }
+        );
+        patch.w = Math.max(v.w, size.w);
         patch.h = size.h;
       }
       store.patchShape(id, patch);
@@ -1254,6 +1400,43 @@ export class Engine {
       maxW = Math.max(maxW, measureMixedLine(this.ctx, line, fontSize));
     }
     return { w: maxW + 4, h: lines.length * fontSize * 1.3 };
+  }
+
+  /** Height of `text` when wrapped to `maxW`, plus the widest wrapped line. */
+  measureTextWrapped(
+    text: string,
+    fontSize: number,
+    maxW: number,
+    fmt: { bold?: boolean; italic?: boolean } = {}
+  ): { w: number; h: number } {
+    this.ctx.font = boardFont(fontSize, fmt);
+    const lines: string[] = [];
+    for (const raw of text.split('\n')) {
+      if (!raw) {
+        lines.push('');
+        continue;
+      }
+      let line = '';
+      for (const word of raw.split(/\s+/)) {
+        const test = line ? line + ' ' + word : word;
+        if (line && measureMixedLine(this.ctx, test, fontSize) > maxW) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+    }
+    let w = 0;
+    for (const line of lines) w = Math.max(w, measureMixedLine(this.ctx, line, fontSize));
+    return { w: w + 4, h: lines.length * fontSize * 1.3 };
+  }
+
+  /** World point under a client (viewport) coordinate — used by App file drops. */
+  worldAtClient(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return this.camera.screenToWorld(clientX - rect.left, clientY - rect.top, this.w / 2, this.h / 2);
   }
 
   private onMeta = (): void => {
@@ -1397,6 +1580,7 @@ export class Engine {
     if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
+      if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) return;
       // Resize wins over connect when both sit near the same edge.
       const onHandle = this.hitHandle(info.screen.x, info.screen.y);
       if (!onHandle) {
@@ -1650,7 +1834,22 @@ export class Engine {
       this.openGraphEditor(id);
       return;
     }
-    this.openTextEditor(id);
+    const TEXT_TYPES = new Set([
+      'text',
+      'sticky',
+      'rect',
+      'ellipse',
+      'diamond',
+      'frame',
+      'triangle',
+      'parallelogram',
+      'hexagon',
+      'cylinder',
+      'terminator',
+      'subroutine',
+      'display',
+    ]);
+    if (type && TEXT_TYPES.has(type)) this.openTextEditor(id);
   };
 
   private cancelToolDrag(): void {
@@ -2157,6 +2356,8 @@ export class Engine {
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
     const draw = (v: ShapeView) => {
+      // hide canvas text of the shape being edited — the overlay renders it
+      const hideText = this.editing && this.editId === v.id;
       const partial = this.partialErase.get(v.id);
       if (partial && partial.size) {
         const pts = v.points ?? [];
@@ -2178,7 +2379,7 @@ export class Engine {
       if (this.erasing.has(v.id)) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, store.viewPaperBg());
+        drawShape(ctx, v, theme.text, store.viewPaperBg(), hideText);
         ctx.restore();
         // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
@@ -2190,7 +2391,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, store.viewPaperBg());
+        drawShape(ctx, v, theme.text, store.viewPaperBg(), hideText);
       }
     };
     const ord = store.order;
@@ -2209,6 +2410,7 @@ export class Engine {
     this.drawSelection(ctx);
     this.drawAlignGuides(ctx);
     this.drawPorts(ctx);
+    this.drawDocControls(ctx);
     this.drawConnecting(ctx);
     this.tool.render(this, ctx);
     this.drawPeers(ctx);
@@ -2380,7 +2582,7 @@ export class Engine {
       if (this.active !== 'select' && this.override !== 'select') return;
       showFor = [this.hoverPort.shapeId];
     }
-    const off = 14 * s;
+    const off = 18 * s;
     for (const id of showFor) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;

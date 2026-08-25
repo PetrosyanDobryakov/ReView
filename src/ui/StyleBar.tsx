@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView, TextAlign } from '../core/shapes';
 import { readableTextOn } from '../core/shapes';
@@ -15,6 +15,7 @@ import {
 } from '../core/settings';
 import { viewPaperBg, patchShapes } from '../core/store';
 import { readPrefs } from '../core/prefs';
+import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
 import { t } from './i18n';
@@ -124,6 +125,144 @@ function formatFromShape(v: ShapeView): {
     color: v.textColor ?? '',
     size: v.fontSize ?? 18,
   };
+}
+
+/** Miro-style pen slots: quick slots + palette popup with shades and custom colors. */
+function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string; onPick: (c: string) => void }) {
+  const [slots, setSlots] = useState<string[]>(() => readPenSlots());
+  const [customs, setCustoms] = useState<string[]>(() => readCustomColors());
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const lastAddAt = useRef(0);
+  const addInputRef = useRef<HTMLInputElement>(null);
+
+  // native 'change' fires once on dialog confirm — use it to commit to custom colors
+  // (synthetic onChange fires continuously while dragging in the native picker)
+  useEffect(() => {
+    const el = addInputRef.current;
+    if (!el) return;
+    const commit = () => {
+      lastAddAt.current = performance.now();
+      setCustoms(addCustomColor(el.value));
+    };
+    el.addEventListener('change', commit);
+    return () => el.removeEventListener('change', commit);
+  });
+
+  useEffect(() => {
+    if (openIdx === null) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
+      // native color dialog can emit a stray outside pointerdown on focus return
+      if (performance.now() - lastAddAt.current < 600) return;
+      setOpenIdx(null);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [openIdx]);
+
+  const pick = (c: string) => {
+    if (openIdx !== null) {
+      writePenSlot(openIdx, c);
+      setSlots(readPenSlots());
+    }
+    onPick(c);
+    setOpenIdx(null);
+  };
+
+  const shadeRows: string[][] = [];
+  for (let row = 0; row < PALETTE_HUES[0].length; row++) {
+    shadeRows.push(PALETTE_HUES.map((hue) => hue[row]));
+  }
+
+  const activeColor = color.toLowerCase();
+
+  return (
+    <div className="pen-slots" ref={rootRef}>
+      {slots.map((c, i) => (
+        <button
+          type="button"
+          key={i}
+          className={`pen-slot${activeColor === c.toLowerCase() ? ' active' : ''}`}
+          style={{ background: c }}
+          title={c}
+          aria-label={`color ${i + 1}`}
+          aria-pressed={activeColor === c.toLowerCase()}
+          onClick={() => {
+            if (openIdx === i) {
+              setOpenIdx(null);
+              return;
+            }
+            onPick(c);
+            setOpenIdx(i);
+          }}
+        />
+      ))}
+      {openIdx !== null && (
+        <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')}>
+          <div className="pen-pop-grid">
+            {shadeRows.map((row, ri) =>
+              row.map((c, ci) => (
+                <button
+                  type="button"
+                  key={`${ri}-${ci}`}
+                  className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
+                  style={{ background: c }}
+                  title={c}
+                  aria-label={c}
+                  onClick={() => pick(c)}
+                />
+              ))
+            )}
+          </div>
+          {customs.length > 0 && (
+            <>
+              <span className="panel-label">
+                {t(locale, 'customColors')} · {t(locale, 'rightClickDelete')}
+              </span>
+              <div className="pen-pop-grid customs">
+                {customs.map((c) => (
+                  <button
+                    type="button"
+                    key={c}
+                    className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
+                    style={{ background: c }}
+                    title={c}
+                    aria-label={c}
+                    onClick={() => pick(c)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCustoms(removeCustomColor(c));
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          <label className="pen-add" title={t(locale, 'addColor')}>
+            <span>{t(locale, 'addColor')}</span>
+            <input
+              ref={addInputRef}
+              type="color"
+              value={color}
+              onPointerDown={() => {
+                lastAddAt.current = performance.now();
+              }}
+              onChange={(e) => {
+                // live: preview on slot/pen; customs list is committed on the native change event
+                lastAddAt.current = performance.now();
+                if (openIdx !== null) {
+                  writePenSlot(openIdx, e.target.value);
+                  setSlots(readPenSlots());
+                }
+                onPick(e.target.value);
+              }}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function StyleBar({
@@ -354,21 +493,31 @@ export function StyleBar({
       {view.showStroke && (
         <>
           <span className="panel-label">{t(locale, 'stroke')}</span>
-          <Swatches
-            colors={showPen || penTargets.length ? PEN_COLORS : STROKE_COLORS}
-            value={strokeValue}
-            custom
-            onPick={(c) => {
-              updatePenSettings({ color: c });
-              updateShapeSettings({ stroke: c });
-              const patches: Array<[string, Partial<ShapeView>]> = [];
-              for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
-              if (patches.length) {
-                patchShapes(patches);
-                onPatched();
-              }
-            }}
-          />
+          {showPen && penTargets.length === 0 ? (
+            <PenColorSlots
+              locale={locale}
+              color={strokeValue}
+              onPick={(c) => {
+                updatePenSettings({ color: c });
+              }}
+            />
+          ) : (
+            <Swatches
+              colors={penTargets.length ? PEN_COLORS : STROKE_COLORS}
+              value={strokeValue}
+              custom
+              onPick={(c) => {
+                updatePenSettings({ color: c });
+                updateShapeSettings({ stroke: c });
+                const patches: Array<[string, Partial<ShapeView>]> = [];
+                for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
+                if (patches.length) {
+                  patchShapes(patches);
+                  onPatched();
+                }
+              }}
+            />
+          )}
         </>
       )}
       {view.showText && (
