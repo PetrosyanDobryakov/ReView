@@ -1,4 +1,4 @@
-import { COLORS } from './shapes';
+import { COLORS, readableTextOn } from './shapes';
 
 export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'white' | 'ink' | 'ocean' | 'forest' | 'sunset' | 'custom';
 
@@ -96,8 +96,12 @@ export function readCustomColors(): CustomChromeColors {
 }
 
 export function writeCustomColors(colors: CustomChromeColors): void {
+  const safe: CustomChromeColors = {
+    ...colors,
+    text: readableTextOn(colors.text, colors.bg),
+  };
   try {
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(colors));
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(safe));
   } catch {
     /* ignore */
   }
@@ -110,14 +114,15 @@ export function writeCustomColors(colors: CustomChromeColors): void {
 
 function customVars(c: CustomChromeColors): Array<[string, string]> {
   const dark = luminance(c.bg) <= 0.5;
+  const text = readableTextOn(c.text, c.bg);
   return [
     ['--chrome-bg', c.bg],
     ['--chrome-panel', c.panel],
-    ['--chrome-panel-2', mix(c.panel, c.text, 0.07)],
-    ['--chrome-border', mix(c.panel, c.text, 0.17)],
-    ['--chrome-border-soft', mix(c.panel, c.text, 0.1)],
-    ['--chrome-text', c.text],
-    ['--chrome-text-dim', mix(c.text, c.bg, 0.45)],
+    ['--chrome-panel-2', mix(c.panel, text, 0.07)],
+    ['--chrome-border', mix(c.panel, text, 0.17)],
+    ['--chrome-border-soft', mix(c.panel, text, 0.1)],
+    ['--chrome-text', text],
+    ['--chrome-text-dim', mix(text, c.bg, 0.45)],
     ['--chrome-accent', c.accent],
     ['--chrome-accent-strong', mix(c.accent, c.text, 0.4)],
     ['--chrome-active-bg', rgba(c.accent, 0.13)],

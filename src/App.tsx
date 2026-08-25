@@ -415,6 +415,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   useEffect(() => {
     // Re-init if leaveBoard nulled the id (Strict Mode remount / HMR).
     initBoard(boardId);
+    setEphemeral(!persistence);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = new Engine(canvas);
