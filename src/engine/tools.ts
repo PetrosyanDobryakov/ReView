@@ -245,19 +245,26 @@ export class SelectTool extends Tool {
       }
     }
     if (orig.type === 'text') {
-      const base = orig.fontSize ?? 18;
-      const sx = orig.w > 0 ? w / orig.w : 1;
-      const sy = orig.h > 0 ? h / orig.h : sx;
-      const s = Math.max(0.15, Math.min(10, (sx + sy) / 2));
-      const fontSize = Math.max(4, Math.round(base * s));
-      const applied = base > 0 ? fontSize / base : s;
-      let nx = orig.x;
-      let ny = orig.y;
-      const nw = orig.w * applied;
-      const nh = orig.h * applied;
-      if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
-      if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
-      store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+      const corner = r.handle === 'nw' || r.handle === 'ne' || r.handle === 'se' || r.handle === 'sw';
+      if (corner) {
+        // corner handles scale the font (and the frame with it)
+        const base = orig.fontSize ?? 18;
+        const sx = orig.w > 0 ? w / orig.w : 1;
+        const sy = orig.h > 0 ? h / orig.h : sx;
+        const s = Math.max(0.15, Math.min(10, (sx + sy) / 2));
+        const fontSize = Math.max(4, Math.round(base * s));
+        const applied = base > 0 ? fontSize / base : s;
+        let nx = orig.x;
+        let ny = orig.y;
+        const nw = orig.w * applied;
+        const nh = orig.h * applied;
+        if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
+        if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
+        store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+        return;
+      }
+      // edge handles resize the wrap frame only — font size unchanged
+      store.patchShape(r.shapeId, { x, y, w, h });
       return;
     }
     if (orig.points) {

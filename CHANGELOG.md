@@ -9,6 +9,13 @@
 - Single upload button now accepts images and documents; files can also be dragged onto the window (drop overlay included).
 - Double-click no longer opens the text editor (image crop and graph editor keep their double-click actions).
 
+### Text editing
+- Fixed text ghosting: the canvas hides the edited shape's text while the overlay is open.
+- Text now wraps to the frame width on canvas; committing keeps the frame and recomputes height from wrapped lines.
+- Handle semantics for text: corners scale the font, edge handles resize the wrap frame only.
+- Double-click opens text editing on text-bearing objects (not on empty canvas).
+- Block-scheme ports moved further from the shape edge (8 → 18 px) to avoid accidental grabs.
+
 ### Board & toolbar
 - Custom board paper color: color picker under the background presets in settings.
 - Insert-image button now uses an upload-style icon.
