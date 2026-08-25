@@ -222,8 +222,8 @@ export interface GraphEditTarget {
 export interface EngineEvents {
   onSelection?: (ids: string[]) => void;
   onStats?: (stats: { zoom: number; shapes: number }) => void;
-  onEditText?: (target: EditTarget) => void;
-  onEditGraph?: (target: GraphEditTarget) => void;
+  onEditText?: (target: EditTarget | null) => void;
+  onEditGraph?: (target: GraphEditTarget | null) => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
   onCrop?: (active: boolean) => void;
@@ -542,6 +542,12 @@ export class Engine {
   }
 
   resetToPage(): void {
+    if (this.editing) {
+      this.editing = false;
+      this.editId = null;
+      this.events.onEditText?.(null);
+      this.events.onEditGraph?.(null);
+    }
     this.boundPageId = store.currentPageId();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
@@ -907,7 +913,6 @@ export class Engine {
   }
 
   updateConnectedArrows(movedIds: Set<string>): void {
-    const off = 8 / this.camera.zoom;
     const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const [id, v] of this.views) {
       if (v.type !== 'arrow' || !v.fromId || !v.toId) continue;
@@ -917,8 +922,8 @@ export class Engine {
       if (!from || !to) continue;
       const fromPort = (v.fromPort as PortId) || 'e';
       const toPort = (v.toPort as PortId) || 'w';
-      const a = portPos(from, fromPort, off);
-      const b = portPos(to, toPort, off);
+      const a = portPos(from, fromPort, 0);
+      const b = portPos(to, toPort, 0);
       const pad = 6;
       const minX = Math.min(a.x, b.x) - pad;
       const minY = Math.min(a.y, b.y) - pad;
@@ -1739,7 +1744,7 @@ export class Engine {
     } else if (v.type === 'text') {
       color = v.textColor ?? themeFor(bg).text;
     } else {
-      color = v.textColor ?? themeFor(bg).text;
+      color = readableTextOn(v.textColor ?? themeFor(bg).text, bg);
     }
     this.editing = true;
     this.editId = id;
@@ -1801,6 +1806,7 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.type !== 'graph') return;
     this.editing = true;
+    store.beginGesture();
     this.events.onEditGraph?.({
       id,
       x: v.x,
@@ -1814,6 +1820,7 @@ export class Engine {
   commitGraph(id: string, expr: string): void {
     this.editing = false;
     store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    store.endGesture();
     this.dirty = true;
   }
 
@@ -1824,6 +1831,7 @@ export class Engine {
 
   cancelGraphEditor(): void {
     this.editing = false;
+    store.endGesture();
   }
 
   commitText(id: string | null, text: string, target: EditTarget, richHtml?: string): void {
@@ -2126,7 +2134,7 @@ export class Engine {
         e.button === 0 &&
         (p.world.x < f.x || p.world.x > f.x + f.w || p.world.y < f.y || p.world.y > f.y + f.h);
       if (farOutside) {
-        this.applyCrop();
+        this.cancelCrop();
         return;
       }
       this.cropPointerDown(e);

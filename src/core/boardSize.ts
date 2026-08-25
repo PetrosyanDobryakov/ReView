@@ -61,15 +61,17 @@ async function databaseExists(name: string): Promise<boolean> {
   }
   return new Promise((resolve) => {
     let resolved = false;
+    let timer: ReturnType<typeof globalThis.setTimeout>;
     const done = (v: boolean) => {
       if (resolved) return;
       resolved = true;
+      globalThis.clearTimeout(timer);
       resolve(v);
     };
+    timer = globalThis.setTimeout(() => done(false), 1200);
     try {
       const req = indexedDB.open(name);
       req.onupgradeneeded = () => {
-        // Missing DB — abort creation.
         try {
           req.transaction?.abort();
         } catch {
@@ -93,6 +95,7 @@ async function databaseExists(name: string): Promise<boolean> {
         done(true);
       };
       req.onerror = () => done(false);
+      req.onblocked = () => done(false);
     } catch {
       done(false);
     }
