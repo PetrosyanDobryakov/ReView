@@ -407,8 +407,8 @@ button.brand {
 }
 
 .tool-btn {
-  width: 36px;
-  height: 36px;
+  width: var(--tool-btn-size, 36px);
+  height: var(--tool-btn-size, 36px);
   border-radius: 999px;
 }
 
@@ -479,8 +479,8 @@ button.brand {
 .toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='frame'] {
   animation: tool-inset 560ms var(--chrome-ease);
 }
-.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='more'] {
-  animation: tool-shuffle 600ms var(--chrome-ease);
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='cylinder'] {
+  animation: tool-stretch 560ms var(--chrome-ease);
 }
 .toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='graph'] {
   animation: tool-climb 600ms var(--chrome-ease);
@@ -500,8 +500,8 @@ button.brand {
 .toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='download'] {
   animation: tool-dip 560ms var(--chrome-ease);
 }
-.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='image'] {
-  animation: tool-pan 560ms var(--chrome-ease);
+.toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='upload'] {
+  animation: tool-dip 560ms var(--chrome-ease);
 }
 .toolbelt[data-tool-anim='on'] .tool-btn:hover:not(:disabled) svg[data-icon='crop'] {
   animation: tool-pinch 560ms var(--chrome-ease);
@@ -791,12 +791,21 @@ button.brand {
 }
 
 .toolbelt {
+  --tool-btn-size: 36px;
   position: absolute;
   z-index: 20;
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
   padding: 7px 8px;
+  overflow: visible;
+}
+
+.toolbelt-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .tool-group,
@@ -804,6 +813,55 @@ button.brand {
   position: relative;
   display: flex;
   gap: 4px;
+}
+
+.scheme-group {
+  gap: 2px;
+}
+
+.scheme-chevron {
+  width: 22px;
+  min-width: 22px;
+}
+
+.scheme-chevron svg {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--chrome-dur-fast) var(--chrome-ease);
+}
+
+.scheme-chevron[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.block-scheme-popover {
+  position: absolute;
+  bottom: calc(var(--tool-btn-size) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px;
+  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, var(--tool-btn-size));
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.block-scheme-popover-title {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--chrome-text-dim);
+  text-align: center;
+  padding: 0 0 4px;
+}
+
+.tool-media-slot {
+  width: var(--tool-btn-size);
+  height: var(--tool-btn-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--tool-btn-size);
 }
 
 .locale-row {
@@ -2142,8 +2200,16 @@ button.brand {
     left: 12px;
     right: 12px;
     transform: none;
-    overflow-x: auto;
+    overflow: visible;
     justify-content: flex-start;
+  }
+
+  .toolbelt-scroll {
+    overflow-x: auto;
+    overflow-y: visible;
+    justify-content: flex-start;
+    width: 100%;
+    padding-bottom: 2px;
   }
 
   .style-island {

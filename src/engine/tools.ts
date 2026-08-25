@@ -770,7 +770,6 @@ abstract class BoxTool extends Tool {
     this.shift = false;
     if (this.shapeType === 'sticky') engine.openTextEditor(id);
     if (this.shapeType === 'graph') engine.openGraphEditor(id);
-    engine.setTool('select');
   }
 
   cancel(_engine: Engine): void {
@@ -858,7 +857,6 @@ export class StickyTool extends BoxTool {
     this.start = null;
     this.cur = null;
     engine.openTextEditor(id);
-    engine.setTool('select');
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -913,7 +911,6 @@ export class GraphTool extends BoxTool {
     this.cur = null;
     this.shift = false;
     engine.openGraphEditor(id);
-    engine.setTool('select');
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -959,7 +956,6 @@ export class DiamondTool extends BoxTool {
     this.start = null;
     this.cur = null;
     engine.openTextEditor(id);
-    engine.setTool('select');
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
@@ -1009,7 +1005,6 @@ export class FrameTool extends BoxTool {
     this.cur = null;
     this.shift = false;
     engine.openTextEditor(id);
-    engine.setTool('select');
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     const box = this.previewBox();
@@ -1042,7 +1037,7 @@ export class TriangleTool extends BoxTool {
     if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
     else box = normalizeBox(this.start, this.cur);
     const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+    this.start = null; this.cur = null; engine.openTextEditor(id);
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
@@ -1064,7 +1059,7 @@ export class ParallelogramTool extends BoxTool {
     if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
     else box = normalizeBox(this.start, this.cur);
     const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+    this.start = null; this.cur = null; engine.openTextEditor(id);
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
@@ -1086,7 +1081,7 @@ export class HexagonTool extends BoxTool {
     if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
     else box = normalizeBox(this.start, this.cur);
     const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+    this.start = null; this.cur = null; engine.openTextEditor(id);
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
@@ -1108,7 +1103,7 @@ export class CylinderTool extends BoxTool {
     if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
     else box = normalizeBox(this.start, this.cur);
     const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id); engine.setTool('select');
+    this.start = null; this.cur = null; engine.openTextEditor(id);
   }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.start || !this.cur) return;
@@ -1121,17 +1116,17 @@ export class CylinderTool extends BoxTool {
 
 export class TerminatorTool extends BoxTool {
   readonly id = 'terminator'; readonly shapeType = 'terminator'; readonly defaultW = 140; readonly defaultH = 60;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; const r=box.h/2; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, r); ctx.fill(); ctx.stroke(); ctx.restore(); }
 }
 export class SubroutineTool extends BoxTool {
   readonly id = 'subroutine'; readonly shapeType = 'subroutine'; readonly defaultW = 160; readonly defaultH = 80;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(box.x+8, box.y); ctx.lineTo(box.x+8, box.y+box.h); ctx.moveTo(box.x+box.w-8, box.y); ctx.lineTo(box.x+box.w-8, box.y+box.h); ctx.stroke(); ctx.restore(); }
 }
 export class DisplayTool extends BoxTool {
   readonly id = 'display'; readonly shapeType = 'display'; readonly defaultW = 150; readonly defaultH = 80;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); engine.setTool('select'); }
+  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.openTextEditor(id); }
   render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.moveTo(box.x, box.y); ctx.lineTo(box.x+box.w*0.85, box.y); ctx.lineTo(box.x+box.w, box.y+box.h/2); ctx.lineTo(box.x+box.w*0.85, box.y+box.h); ctx.lineTo(box.x, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
 }
 
@@ -1182,7 +1177,6 @@ export class ArrowTool extends Tool {
     });
     this.start = null;
     this.cur = null;
-    engine.setTool('select');
   }
 
   cancel(_engine: Engine): void {
