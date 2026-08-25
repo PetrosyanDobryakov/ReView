@@ -20,6 +20,7 @@ import { destroyProvider, meta, metaBg, metaGrid, onSyncStatus, persistence, set
 import type { SyncStatus } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
+import { fileToDocPages } from './core/docImport';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
@@ -134,6 +135,65 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
   const errorHold = useRef<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFile = (file: File) => {
+    const e = engineRef.current;
+    if (!e) return;
+    if (file.type.startsWith('image/')) {
+      e.insertImageFile(file);
+      return;
+    }
+    const locale = readLocale();
+    fileToDocPages(file)
+      .then(({ pages, ratio }) => {
+        if (!pages.length) {
+          setError(t(locale, 'docFailed'));
+          return;
+        }
+        e.addDocument(pages, ratio);
+      })
+      .catch(() => setError(t(locale, 'docFailed')));
+  };
+  const handleFileRef = useRef(handleFile);
+  handleFileRef.current = handleFile;
+
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      setDragOver(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDragLeave = () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragOver(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) handleFileRef.current(file);
+    };
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragleave', onDragLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
+
   if (menu) menuHold.current = menu;
   if (info) infoHold.current = info;
   if (error) errorHold.current = error;
@@ -544,14 +604,20 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.pdf,application/pdf,.txt,text/plain"
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) engine?.insertImageFile(file);
           e.target.value = '';
+          if (file) handleFileRef.current(file);
         }}
       />
+
+      {dragOver && (
+        <div className="drop-overlay" aria-hidden="true">
+          <span>{t(locale, 'dropHint')}</span>
+        </div>
+      )}
 
       <Toolbar
         locale={locale}

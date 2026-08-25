@@ -263,6 +263,7 @@ export function transact(fn: () => void): void {
 export function readShape(m: Y.Map<unknown>): ShapeView {
   const type = m.get('type') as ShapeType;
   const points = m.get('points');
+  const pagesArr = m.get('pages');
   return {
     id: m.get('id') as string,
     type,
@@ -278,6 +279,8 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     textColor: m.get('textColor') as string | undefined,
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
+    pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
+    page: m.get('page') as number | undefined,
     locked: m.get('locked') as boolean | undefined,
     cropX: m.get('cropX') as number | undefined,
     cropY: m.get('cropY') as number | undefined,
@@ -316,6 +319,12 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     const arr = new Y.Array<number>();
     arr.insert(0, v.points);
     m.set('points', arr);
+  }
+  if (v.pages) {
+    const arr = new Y.Array<string>();
+    arr.insert(0, v.pages);
+    m.set('pages', arr);
+    m.set('page', v.page ?? 0);
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
@@ -367,8 +376,12 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
     if (value === undefined) continue;
     if (key === 'points' && Array.isArray(value)) {
       const arr = new Y.Array<number>();
-      arr.insert(0, value);
+      arr.insert(0, value as number[]);
       m.set('points', arr);
+    } else if (key === 'pages' && Array.isArray(value)) {
+      const arr = new Y.Array<string>();
+      arr.insert(0, value as string[]);
+      m.set('pages', arr);
     } else {
       m.set(key, value);
     }
