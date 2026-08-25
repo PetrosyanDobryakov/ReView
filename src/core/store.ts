@@ -1,13 +1,10 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { WebsocketProvider } from 'y-websocket';
 import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
-import type { UserInfo } from '../core/user';
-import { loadUser } from '../core/user';
-import { bumpBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
+import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { readPrefs } from '../core/prefs';
-import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
+import { attachSync, detachSync } from '../net';
 
 export const LOCAL_ORIGIN = 'local';
 const LEGACY_MIGRATION_KEY = 'review-v1-migrated';
@@ -30,13 +27,6 @@ export let persistence: IndexeddbPersistence | null = null;
 function boardPersistenceKey(id: string): string {
   return `review-v1-${id}`;
 }
-function boardRoom(id: string): string {
-  return `review-${id}`;
-}
-
-export function getBoardRoomName(boardId: string | null = currentBoardId): string {
-  return boardId ? boardRoom(boardId) : 'review';
-}
 
 function pageKey(id: string | null): string {
   return id ? `review-page-${id}` : 'review-page';
@@ -52,15 +42,37 @@ function shouldPersist(boardId: string): boolean {
 
 function attachPersistence(boardId: string): void {
   persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
-  if ((persistence as unknown as { synced: boolean }).synced) {
+  const onSynced = () => {
     ensurePages();
-    migratePaper();
-  }
-  persistence.on('synced', () => {
-    ensurePages();
+    syncActivePageFromStorage();
     ensureOrder();
     migratePaper();
-  });
+    emitBoardReady();
+  };
+  if ((persistence as unknown as { synced: boolean }).synced) {
+    onSynced();
+  }
+  persistence.on('synced', onSynced);
+}
+
+const boardReadyListeners = new Set<() => void>();
+
+function emitBoardReady(): void {
+  for (const l of [...boardReadyListeners]) {
+    try {
+      l();
+    } catch {
+      /* listener error */
+    }
+  }
+}
+
+/** Fired when IndexedDB (or a fresh ephemeral board) has shapes ready to paint. */
+export function onBoardReady(cb: () => void): () => void {
+  boardReadyListeners.add(cb);
+  return () => {
+    boardReadyListeners.delete(cb);
+  };
 }
 
 function legacyMigrationDone(): boolean {
@@ -131,16 +143,15 @@ export function enableBoardPersistence(): void {
 
 export function initBoard(boardId: string): void {
   if (currentBoardId === boardId) return;
-  destroyProvider();
+  detachSync();
   try {
     (persistence as unknown as { destroy?: () => void })?.destroy?.();
   } catch {}
   try {
     persistence?.destroy();
   } catch {}
-  // clear old observers
+  // Rebind pages observer to the new doc; keep React/engine listeners.
   pagesObserved = false;
-  pageListeners.clear();
   // new doc
   try {
     doc.destroy();
@@ -163,15 +174,28 @@ export function initBoard(boardId: string): void {
     // ephemeral session — still need pages
     ensurePages();
   }
-  // Defer so App render finishes before subscribers setState / open WS.
-  queueMicrotask(() => emitSyncChange());
+  // Attach observer on the fresh array and refresh page UIs.
+  pagesArray();
+  syncActivePageFromStorage();
+  lastPagesEmitKey = '';
+  queueMicrotask(() => {
+    if (currentBoardId === boardId) emitPages();
+  });
+  // Defer attach so React finish the render that called initBoard.
+  queueMicrotask(() => {
+    if (currentBoardId === boardId) attachSync(doc, boardId);
+  });
+  // Ephemeral boards never get an IDB 'synced' — still notify the engine.
+  if (!persistence) queueMicrotask(() => {
+    if (currentBoardId === boardId) emitBoardReady();
+  });
 }
 
 /** Tear down sync and clear the active board id (e.g. leaving `/board/:id`). */
 export function leaveBoard(): void {
-  destroyProvider();
+  flushBoardUpdated();
+  detachSync();
   currentBoardId = null;
-  queueMicrotask(() => emitSyncChange());
 }
 
 export function ensureOrder(): void {
@@ -261,149 +285,28 @@ function ensurePages(): void {
   }
 }
 
-const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
-const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
-const BUILTIN_SYNC_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SYNC_URL) ||
-  `${proto}://${host}:1234`;
+/** In-memory active page — never read localStorage from the render loop. */
+let activePageId = 'main';
+/** Fingerprint of last emitPages payload — skip no-op storms from Yjs observe noise. */
+let lastPagesEmitKey = '';
 
-let provider: WebsocketProvider | null = null;
-let providerUrl: string | null = null;
-const syncListeners = new Set<() => void>();
-
-function emitSyncChange(): void {
-  for (const l of [...syncListeners]) l();
-}
-
-export function onSyncConfigChange(cb: () => void): () => void {
-  syncListeners.add(cb);
-  return () => {
-    syncListeners.delete(cb);
-  };
-}
-
-export function defaultSyncUrl(): string {
-  return BUILTIN_SYNC_URL;
-}
-
-export function effectiveSyncUrl(): string {
-  return readPrefs().syncUrl || BUILTIN_SYNC_URL;
-}
-
-export function isSyncEnabled(): boolean {
-  return readPrefs().syncEnabled !== false;
-}
-
-/** Recreate or tear down the provider after prefs / board change. */
-export function reconnectSync(): void {
-  destroyProvider();
-  if (isSyncEnabled() && currentBoardId) {
-    try {
-      getProvider();
-    } catch {
-      /* ignore */
-    }
-  }
-  emitSyncChange();
-}
-
-export function getProvider(): WebsocketProvider {
-  if (!isSyncEnabled()) {
-    throw new Error('sync disabled');
-  }
-  const room = getBoardRoomName();
-  const url = effectiveSyncUrl();
-  if (!provider) {
-    provider = new WebsocketProvider(url, room, doc);
-    providerUrl = url;
-  } else {
-    const curRoom = (provider as unknown as { roomname?: string }).roomname;
-    if (curRoom !== room || providerUrl !== url) {
-      try {
-        provider.destroy();
-      } catch {
-        /* ignore */
-      }
-      provider = new WebsocketProvider(url, room, doc);
-      providerUrl = url;
-    }
-  }
-  return provider;
-}
-
-export function tryGetProvider(): WebsocketProvider | null {
-  if (!isSyncEnabled()) return null;
+function readStoredPageId(): string {
   try {
-    return getProvider();
+    return localStorage.getItem(pageKey(currentBoardId)) ?? '';
   } catch {
-    return null;
+    return '';
   }
 }
 
-export function destroyProvider(): void {
-  if (provider) {
-    try {
-      provider.destroy();
-    } catch {
-      /* ignore */
-    }
-    provider = null;
-  }
-  providerUrl = null;
+function syncActivePageFromStorage(): void {
+  const list = listPages();
+  let cur = readStoredPageId();
+  if (!list.includes(cur)) cur = list[0] ?? 'main';
+  activePageId = cur;
 }
 
-export type SyncStatus = { online: boolean; users: number; enabled: boolean };
-
-export function onSyncStatus(cb: (status: SyncStatus) => void): () => void {
-  const emit = () => {
-    const p = tryGetProvider();
-    if (!p) {
-      cb({ online: false, users: 0, enabled: isSyncEnabled() });
-      return;
-    }
-    const online = p.ws?.readyState === WebSocket.OPEN;
-    const users = online ? p.awareness.getStates().size : 0;
-    cb({ online, users, enabled: true });
-  };
-  const onStatus = (e: { status: string }) => {
-    if (e.status === 'connected') {
-      const p = tryGetProvider();
-      cb({ online: true, users: p ? p.awareness.getStates().size : 0, enabled: true });
-    } else {
-      cb({ online: false, users: 0, enabled: isSyncEnabled() });
-    }
-  };
-
-  let offAwareness: (() => void) | null = null;
-  let bound: WebsocketProvider | null = null;
-
-  const bind = () => {
-    if (bound) {
-      bound.off('status', onStatus);
-      offAwareness?.();
-      bound = null;
-      offAwareness = null;
-    }
-    const p = tryGetProvider();
-    if (!p) {
-      emit();
-      return;
-    }
-    bound = p;
-    p.on('status', onStatus);
-    const onAware = () => emit();
-    p.awareness.on('change', onAware);
-    offAwareness = () => p.awareness.off('change', onAware);
-    emit();
-  };
-
-  bind();
-  const unSubConfig = onSyncConfigChange(bind);
-  return () => {
-    unSubConfig();
-    if (bound) bound.off('status', onStatus);
-    offAwareness?.();
-  };
+function pagesEmitKey(): string {
+  return `${activePageId}\0${listPages().join('\0')}`;
 }
 
 let uid = 0;
@@ -618,113 +521,6 @@ export function clearShapeKeys(id: string, keys: string[]): void {
   });
 }
 
-export function publishPresence(user: UserInfo): void {
-  const p = tryGetProvider();
-  if (!p) return;
-  p.awareness.setLocalStateField('user', user);
-}
-
-let lastCursorSent = 0;
-
-export function sendCursor(pos: { x: number; y: number } | null): void {
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  if (pos && now - lastCursorSent < 40) return;
-  lastCursorSent = now;
-  try {
-    const p = tryGetProvider();
-    if (!p) return;
-    p.awareness.setLocalStateField('cursor', pos);
-  } catch {
-    /* no provider in tests */
-  }
-}
-
-export interface PeerCursor {
-  /** Awareness client id (ephemeral). */
-  id: number;
-  /** Stable user id from awareness, when published. */
-  userId: string;
-  name: string;
-  color: string;
-  /** Published name before local override. */
-  publishedName: string;
-  /** Published color before local override. */
-  publishedColor: string;
-  overridden: boolean;
-  x: number | null;
-  y: number | null;
-}
-
-export function collectPeers(): PeerCursor[] {
-  const p = tryGetProvider();
-  if (!p || p.ws?.readyState !== WebSocket.OPEN) return [];
-  const selfId = loadUser().id;
-  const peers: PeerCursor[] = [];
-  for (const [id, state] of p.awareness.getStates()) {
-    if (id === p.awareness.clientID) continue;
-    const user = state.user as UserInfo | undefined;
-    if (!user || !user.name) continue;
-    const userId = typeof user.id === 'string' && user.id.trim() ? user.id.trim() : '';
-    if (userId && userId === selfId) continue;
-    const published = { name: user.name, color: user.color || '#7c8cff' };
-    const display = userId ? getPeerDisplay(userId, published) : { ...published, overridden: false };
-    const cur = state.cursor as { x: number; y: number } | null | undefined;
-    peers.push({
-      id,
-      userId: userId || `client:${id}`,
-      name: display.name,
-      color: display.color,
-      publishedName: published.name,
-      publishedColor: published.color,
-      overridden: display.overridden,
-      x: cur?.x ?? null,
-      y: cur?.y ?? null,
-    });
-  }
-  return peers;
-}
-
-export function onPeers(cb: (peers: PeerCursor[]) => void): () => void {
-  const emit = () => cb(collectPeers());
-  let offAwareness: (() => void) | null = null;
-  let bound: WebsocketProvider | null = null;
-
-  const onStatus = (e: { status: string }) => {
-    if (e.status !== 'connected') cb([]);
-    else emit();
-  };
-
-  const bind = () => {
-    if (bound) {
-      bound.off('status', onStatus);
-      offAwareness?.();
-      bound = null;
-      offAwareness = null;
-    }
-    const p = tryGetProvider();
-    if (!p) {
-      cb([]);
-      return;
-    }
-    bound = p;
-    p.on('status', onStatus);
-    const onAware = () => emit();
-    p.awareness.on('change', onAware);
-    offAwareness = () => p.awareness.off('change', onAware);
-    emit();
-  };
-
-  bind();
-  const unSubConfig = onSyncConfigChange(bind);
-  const unSubDisplay = onPeerDisplayChange(emit);
-  return () => {
-    unSubConfig();
-    unSubDisplay();
-    if (bound) bound.off('status', onStatus);
-    offAwareness?.();
-  };
-}
-
 export function onPageChange(cb: () => void): () => void {
   pageListeners.add(cb);
   return () => {
@@ -733,6 +529,9 @@ export function onPageChange(cb: () => void): () => void {
 }
 
 function emitPages(): void {
+  const key = pagesEmitKey();
+  if (key === lastPagesEmitKey) return;
+  lastPagesEmitKey = key;
   for (const l of [...pageListeners]) l();
 }
 
@@ -782,14 +581,10 @@ export function listPages(): string[] {
 
 export function currentPageId(): string {
   const list = listPages();
-  let cur = '';
-  try {
-    cur = localStorage.getItem(pageKey(currentBoardId)) ?? '';
-  } catch {
-    /* ignore */
+  if (!list.includes(activePageId)) {
+    activePageId = list[0] ?? 'main';
   }
-  if (!list.includes(cur)) cur = list[0] ?? 'main';
-  return cur;
+  return activePageId;
 }
 
 export function currentPagePrefix(): string {
@@ -797,13 +592,23 @@ export function currentPagePrefix(): string {
   return id === 'main' ? '' : id + ':';
 }
 
+/** Hot-path page filter — uses in-memory activePageId only (no storage / Y reads). */
 export function isOnActivePage(key: string): boolean {
-  const prefix = currentPagePrefix();
-  if (prefix === '') return !key.includes(':');
-  return key.startsWith(prefix);
+  if (activePageId === 'main') return !key.includes(':');
+  return key.startsWith(activePageId + ':');
 }
 
 export function setCurrentPage(id: string): void {
+  if (activePageId === id) {
+    // Still persist if storage was missing, but don't re-emit.
+    try {
+      localStorage.setItem(pageKey(currentBoardId), id);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  activePageId = id;
   try {
     localStorage.setItem(pageKey(currentBoardId), id);
   } catch {

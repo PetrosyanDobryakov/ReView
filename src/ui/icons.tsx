@@ -59,6 +59,8 @@ export const ICON_PATHS = {
   // Flowchart: top node + two branches (rects drawn separately in Icon).
   blockScheme: 'M12 6V10.5H4V14M12 10.5H20V14',
   chevronDown: 'M6 9l6 6 6-6',
+  chevronLeft: 'M15 6l-6 6 6 6',
+  chevronRight: 'M9 6l6 6-6 6',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

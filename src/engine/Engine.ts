@@ -25,7 +25,9 @@ import { readLocale } from '../core/locale';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
-import type { PeerCursor } from '../core/store';
+import type { PeerCursor } from '../net';
+import { sendCursor, publishTool } from '../net';
+import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
 import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
 import { getToolBinds, getColorBinds } from '../core/keybindings';
@@ -51,6 +53,94 @@ function peerLabelInk(fill: string): string {
   const b = parseInt(fill.slice(5, 7), 16);
   const lum = (r * 299 + g * 587 + b * 114) / 1000;
   return lum >= 160 ? '#1c1c1a' : '#f7f5f0';
+}
+
+/** Outline ink for peer tool cursors — follows this client's paper theme. */
+function peerToolOutline(paperBg: string): string {
+  return themeFor(paperBg).text;
+}
+
+const PEER_TOOL_ICON: Record<string, IconName> = {
+  select: 'select',
+  lasso: 'lasso',
+  pan: 'pan',
+  pen: 'pen',
+  eraser: 'eraser',
+  rect: 'rect',
+  ellipse: 'ellipse',
+  sticky: 'sticky',
+  text: 'text',
+  arrow: 'arrow',
+  graph: 'graph',
+  diamond: 'diamond',
+  frame: 'frame',
+  triangle: 'triangle',
+  parallelogram: 'parallelogram',
+  hexagon: 'hexagon',
+  cylinder: 'cylinder',
+  terminator: 'terminator',
+  subroutine: 'subroutine',
+  display: 'display',
+};
+
+function peerToolIcon(tool: string | null | undefined): IconName {
+  if (tool && PEER_TOOL_ICON[tool]) return PEER_TOOL_ICON[tool];
+  return 'select';
+}
+
+/**
+ * Peer cursor = their tool glyph.
+ * Fill = peer color; outline = local paper theme (black on light / light on dark).
+ */
+const peerPathCache = new Map<IconName, Path2D>();
+let peerHandlePath: Path2D | null = null;
+
+function peerPath(icon: IconName): Path2D {
+  let p = peerPathCache.get(icon);
+  if (!p) {
+    p = new Path2D(ICON_PATHS[icon]);
+    peerPathCache.set(icon, p);
+  }
+  return p;
+}
+
+function paintPeerToolGlyph(
+  ctx: CanvasRenderingContext2D,
+  icon: IconName,
+  size: number,
+  fill: string,
+  outline: string,
+  worldStroke: number
+): void {
+  ctx.save();
+  ctx.translate(-size / 2, -size / 2);
+  const scale = size / 24;
+  ctx.scale(scale, scale);
+  const path = peerPath(icon);
+  if (icon === 'lasso' && !peerHandlePath) peerHandlePath = new Path2D(LASSO_HANDLE);
+  const handle = icon === 'lasso' ? peerHandlePath : null;
+  const lw = worldStroke / scale;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Theme outline (wider)
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = lw * 2.55;
+  ctx.stroke(path);
+  if (handle) ctx.stroke(handle);
+
+  // Peer fill for closed glyphs
+  ctx.fillStyle = fill;
+  ctx.fill(path);
+
+  // Peer body stroke
+  ctx.strokeStyle = fill;
+  ctx.lineWidth = lw;
+  ctx.stroke(path);
+  if (handle) ctx.stroke(handle);
+
+  ctx.restore();
 }
 
 import { settings } from '../core/settings';
@@ -160,25 +250,48 @@ export class Engine {
   private peerLerp = new Map<number, { x: number; y: number; tx: number; ty: number }>();
 
   setPeers(peers: PeerCursor[]): void {
-    this.remotePeers = peers;
+    const prevById = new Map(this.remotePeers.map((p) => [p.id, p]));
+    let shouldPaint = peers.length !== this.remotePeers.length;
+
     const live = new Set(peers.map((p) => p.id));
     for (const id of [...this.peerLerp.keys()]) {
-      if (!live.has(id)) this.peerLerp.delete(id);
+      if (!live.has(id)) {
+        this.peerLerp.delete(id);
+        shouldPaint = true;
+      }
     }
+
     for (const peer of peers) {
+      const old = prevById.get(peer.id);
+      if (
+        !old ||
+        old.color !== peer.color ||
+        old.name !== peer.name ||
+        old.tool !== peer.tool ||
+        old.page !== peer.page
+      ) {
+        shouldPaint = true;
+      }
       if (peer.x === null || peer.y === null) {
-        this.peerLerp.delete(peer.id);
+        if (this.peerLerp.has(peer.id)) {
+          this.peerLerp.delete(peer.id);
+          shouldPaint = true;
+        }
         continue;
       }
       const cur = this.peerLerp.get(peer.id);
       if (!cur) {
         this.peerLerp.set(peer.id, { x: peer.x, y: peer.y, tx: peer.x, ty: peer.y });
-      } else {
+        shouldPaint = true;
+      } else if (cur.tx !== peer.x || cur.ty !== peer.y) {
         cur.tx = peer.x;
         cur.ty = peer.y;
+        shouldPaint = true;
       }
     }
-    this.dirty = true;
+
+    this.remotePeers = peers;
+    if (shouldPaint) this.dirty = true;
   }
 
   private active: ToolId = 'select';
@@ -225,6 +338,12 @@ export class Engine {
   private connecting: { fromId: string; fromPort: PortId; cur: { x: number; y: number } } | null = null;
   private hoverPort: { shapeId: string; port: PortId } | null = null;
 
+  private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
+  private observedMeta: Y.Map<unknown> | null = null;
+  private observedOrder: Y.Array<string> | null = null;
+  private offPageChange: () => void = () => {};
+  private boundPageId: string | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -244,17 +363,20 @@ export class Engine {
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('paste', this.onPaste);
     // File drops are owned by App (images + PDF/TXT) so we don't double-insert.
-    store.board.observe(this.onStore);
-    store.meta.observe(this.onMeta);
-    store.order.observe(this.onOrder);
-    store.ensureOrder();
+    this.bindStore();
+    this.offPageChange = store.onPageChange(() => {
+      const page = store.currentPageId();
+      if (page === this.boundPageId) return;
+      this.boundPageId = page;
+      this.resetToPage();
+    });
+    this.boundPageId = store.currentPageId();
     this.offImageLoad = onImageLoad(() => {
       this.dirty = true;
     });
     this.offFormulaLoad = onFormulaLoad(() => {
       this.dirty = true;
     });
-    this.loadActivePage();
     this.dragTool = this.tool;
     if (typeof matchMedia === 'function') {
       const mq = matchMedia('(prefers-reduced-motion: reduce)');
@@ -269,6 +391,51 @@ export class Engine {
       this.dirty = true;
     });
     this.rafId = requestAnimationFrame(this.loop);
+  }
+
+  /** Watch the live store maps (rebind after initBoard replaces the Y.Doc). */
+  bindStore(): void {
+    if (this.observedBoard) {
+      try {
+        this.observedBoard.unobserve(this.onStore);
+      } catch {
+        /* gone */
+      }
+    }
+    if (this.observedMeta) {
+      try {
+        this.observedMeta.unobserve(this.onMeta);
+      } catch {
+        /* gone */
+      }
+    }
+    if (this.observedOrder) {
+      try {
+        this.observedOrder.unobserve(this.onOrder);
+      } catch {
+        /* gone */
+      }
+    }
+    this.observedBoard = store.board;
+    this.observedMeta = store.meta;
+    this.observedOrder = store.order;
+    store.board.observe(this.onStore);
+    store.meta.observe(this.onMeta);
+    store.order.observe(this.onOrder);
+    store.ensureOrder();
+    this.resetToPage();
+  }
+
+  /** No-op if already on the current maps; otherwise rebind (Strict Mode / HMR safety). */
+  ensureStoreBound(): void {
+    if (
+      this.observedBoard === store.board &&
+      this.observedMeta === store.meta &&
+      this.observedOrder === store.order
+    ) {
+      return;
+    }
+    this.bindStore();
   }
 
   private spatialBox(v: ShapeView): ShapeBox {
@@ -288,6 +455,7 @@ export class Engine {
   }
 
   resetToPage(): void {
+    this.boundPageId = store.currentPageId();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
     this.views.clear();
@@ -471,9 +639,31 @@ export class Engine {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('paste', this.onPaste);
-    store.board.unobserve(this.onStore);
-    store.meta.unobserve(this.onMeta);
-    store.order.unobserve(this.onOrder);
+    if (this.observedBoard) {
+      try {
+        this.observedBoard.unobserve(this.onStore);
+      } catch {
+        /* gone */
+      }
+    }
+    if (this.observedMeta) {
+      try {
+        this.observedMeta.unobserve(this.onMeta);
+      } catch {
+        /* gone */
+      }
+    }
+    if (this.observedOrder) {
+      try {
+        this.observedOrder.unobserve(this.onOrder);
+      } catch {
+        /* gone */
+      }
+    }
+    this.observedBoard = null;
+    this.observedMeta = null;
+    this.observedOrder = null;
+    this.offPageChange();
     this.offImageLoad();
     this.offFormulaLoad();
     this.offPrefs();
@@ -494,6 +684,7 @@ export class Engine {
     this.active = id;
     this.override = null;
     this.setCursor(this.toolCursor());
+    publishTool(id);
     this.events.onTool?.(id);
     this.dirty = true;
   }
@@ -1714,16 +1905,41 @@ export class Engine {
 
   private shapeObs = new Map<string, { un: () => void; m: Y.Map<unknown> }>();
 
+  /** Geometry-only keys — updating these must not poke React selection (StyleBar). */
+  private static readonly GEOM_KEYS = new Set([
+    'x',
+    'y',
+    'w',
+    'h',
+    'points',
+    'pressures',
+    'rotation',
+    'fromId',
+    'fromPort',
+    'toId',
+    'toPort',
+  ]);
+
   private attachShape(key: string, m: Y.Map<unknown>): void {
     const existing = this.shapeObs.get(key);
     if (existing && existing.m === m) return;
     this.detachShape(key);
-    const cb = () => {
+    const cb = (ev: Y.YMapEvent<unknown>) => {
       const v = { ...store.readShape(m), id: key };
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.dirty = true;
-      if (this.selection.has(key)) this.events.onSelection?.([...this.selection]);
+      if (!this.selection.has(key)) return;
+      let styleish = false;
+      const changed = ev?.keysChanged;
+      if (!changed || changed.size === 0) {
+        styleish = true;
+      } else {
+        changed.forEach((k) => {
+          if (!Engine.GEOM_KEYS.has(k)) styleish = true;
+        });
+      }
+      if (styleish) this.events.onSelection?.([...this.selection]);
     };
     m.observe(cb);
     this.shapeObs.set(key, { un: () => m.unobserve(cb), m });
@@ -1762,6 +1978,7 @@ export class Engine {
   }
 
   private onPointerDown = (e: PointerEvent): void => {
+    this.ensureStoreBound();
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.pointers.size >= 2) {
@@ -1833,7 +2050,7 @@ export class Engine {
   };
 
   private onPointerLeave = (): void => {
-    store.sendCursor(null);
+    sendCursor(null);
   };
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -1846,7 +2063,7 @@ export class Engine {
       this.updateGesture();
       return;
     }
-    store.sendCursor(this.pointerInfo(e).world);
+    sendCursor(this.pointerInfo(e).world);
     if (this.exportPick) {
       if (this.exportAnchor) {
         const p = this.pointerInfo(e);
@@ -2621,9 +2838,10 @@ export class Engine {
     const reduce = this.reduceMotion;
     const u = reduce ? 1 : Math.min(1, (performance.now() - this.paperT0) / PAPER_MS);
     this.paperFill = u >= 1 ? this.paperTo : mixHex(this.paperFrom, this.paperTo, u);
-    const theme = themeFor(this.paperFill);
+    const paperBg = this.paperFill;
+    const theme = themeFor(paperBg);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = this.paperFill;
+    ctx.fillStyle = paperBg;
     ctx.fillRect(0, 0, w, h);
     ctx.save();
     ctx.translate(w / 2, h / 2);
@@ -2651,13 +2869,7 @@ export class Engine {
         if (cur.length >= 2) segments.push(cur);
         for (const seg of segments) {
           if (seg.length >= 2) {
-            drawPenStroke(
-              ctx,
-              seg,
-              v.strokeWidth,
-              displayInk(v.stroke, store.viewPaperBg()),
-              v.alpha ?? 1
-            );
+            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1);
           }
         }
         return;
@@ -2665,7 +2877,7 @@ export class Engine {
       if (this.erasing.has(v.id)) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, store.viewPaperBg(), hideText);
+        drawShape(ctx, v, theme.text, paperBg, hideText);
         ctx.restore();
         // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
@@ -2677,7 +2889,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, store.viewPaperBg(), hideText);
+        drawShape(ctx, v, theme.text, paperBg, hideText);
       }
     };
     const ord = store.order;
@@ -2720,10 +2932,15 @@ export class Engine {
   private drawPeers(ctx: CanvasRenderingContext2D): void {
     if (!this.remotePeers.length) return;
     const s = 1 / this.camera.zoom;
-    const dt = 0.18;
+    const dt = 0.22;
     let stillMoving = false;
+    const myPage = store.currentPageId();
+    const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
+    const glyph = 22 * s;
 
     for (const peer of this.remotePeers) {
+      // Hide cursors of people on another sub-page (missing page → show everywhere).
+      if (peer.page != null && peer.page !== myPage) continue;
       if (peer.x === null || peer.y === null) continue;
       let pos = this.peerLerp.get(peer.id);
       if (!pos) {
@@ -2732,50 +2949,36 @@ export class Engine {
       }
       pos.x += (pos.tx - pos.x) * dt;
       pos.y += (pos.ty - pos.y) * dt;
-      if (Math.abs(pos.tx - pos.x) > 0.15 || Math.abs(pos.ty - pos.y) > 0.15) stillMoving = true;
+      if (Math.abs(pos.tx - pos.x) > 0.12 || Math.abs(pos.ty - pos.y) > 0.12) stillMoving = true;
 
       const x = pos.x;
       const y = pos.y;
       const fill = peer.color || '#7c8cff';
       const ink = peerLabelInk(fill);
+      const icon = peerToolIcon(peer.tool);
 
       ctx.save();
-      // Pointer: filled body + light outline (FigJam-ish).
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + 14 * s, y + 5 * s);
-      ctx.lineTo(x + 10.5 * s, y + 9 * s);
-      ctx.lineTo(x + 16 * s, y + 18 * s);
-      ctx.lineTo(x + 12.5 * s, y + 19.5 * s);
-      ctx.lineTo(x + 7 * s, y + 10.5 * s);
-      ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 1.25 * s;
-      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
-      ctx.lineWidth = 0.75 * s;
-      ctx.stroke();
+      ctx.translate(x, y);
 
-      // Name chip
-      ctx.font = `600 ${12 * s}px ${BOARD_TYPEFACE}`;
-      const label = peer.name;
-      const padX = 8 * s;
-      const padY = 5 * s;
-      const tw = ctx.measureText(label).width;
-      const chipX = x + 18 * s;
-      const chipY = y - 8 * s;
-      const chipW = tw + padX * 2;
-      const chipH = 12 * s + padY * 2;
+      // Soft contact shadow under the tool tip
       ctx.beginPath();
-      ctx.roundRect(chipX, chipY - chipH, chipW, chipH, 6 * s);
-      ctx.fillStyle = fill;
+      ctx.ellipse(1.2 * s, glyph * 0.42, glyph * 0.38, glyph * 0.14, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
       ctx.fill();
-      ctx.fillStyle = ink;
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, chipX + padX, chipY - chipH / 2);
+
+      paintPeerToolGlyph(ctx, icon, glyph, fill, outline, 2.1 * s);
+
+      const label = peer.name;
+      ctx.font = `500 ${11 * s}px ${BOARD_TYPEFACE}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const ly = glyph * 0.55;
+      ctx.lineWidth = 2.5 * s;
+      ctx.strokeStyle = ink === '#f7f5f0' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.55)';
+      ctx.strokeText(label, 0, ly);
+      ctx.fillStyle = fill;
+      ctx.fillText(label, 0, ly);
+
       ctx.restore();
     }
 

@@ -21,16 +21,21 @@ import {
   setToolBind,
 } from '../core/keybindings';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
-import type {
-  SyncStatus,
-} from '../core/store';
+import { getCurrentBoardId } from '../core/store';
 import {
   defaultSyncUrl,
   effectiveSyncUrl,
+  fetchLanAddresses,
   getBoardRoomName,
-  getCurrentBoardId,
+  inviteHostname,
+  isLocalHostname,
+  isNetLogEnabled,
+  lanAppUrl,
+  netLog,
   reconnectSync,
-} from '../core/store';
+  setNetLogEnabled,
+  type SyncStatus,
+} from '../net';
 import {
   CURSOR_SCALE_MAX,
   CURSOR_SCALE_MIN,
@@ -188,6 +193,11 @@ export function SettingsSheet({
   const [userColor, setUserColor] = useState(() => loadUser().color);
   const [syncUrlDraft, setSyncUrlDraft] = useState(() => readPrefs().syncUrl ?? '');
   const [syncUrlError, setSyncUrlError] = useState(false);
+  const [lanHosts, setLanHosts] = useState<string[]>([]);
+  const [lanLoading, setLanLoading] = useState(false);
+  const [lanError, setLanError] = useState(false);
+  const [lanCopied, setLanCopied] = useState(false);
+  const [netLogOn, setNetLogOn] = useState(() => isNetLogEnabled());
   const connectionRef = useRef<HTMLElement | null>(null);
   const boardSession = Boolean(getCurrentBoardId());
   const [customBoardBg, setCustomBoardBg] = useState(() => {
@@ -231,6 +241,7 @@ export function SettingsSheet({
     setUserColor(loadUser().color);
     setSyncUrlDraft(readPrefs().syncUrl ?? '');
     setSyncUrlError(false);
+    setNetLogOn(isNetLogEnabled());
     return onKeybindsChange(syncBinds);
   }, [open]);
 
@@ -246,6 +257,30 @@ export function SettingsSheet({
     });
     return () => cancelAnimationFrame(id);
   }, [open, focusSection, tab]);
+
+  useEffect(() => {
+    if (!open || tab !== 'system') return;
+    if (typeof location !== 'undefined' && !isLocalHostname(location.hostname)) {
+      setLanHosts([location.hostname]);
+      setLanLoading(false);
+      setLanError(false);
+      return;
+    }
+    const ac = new AbortController();
+    setLanLoading(true);
+    setLanError(false);
+    fetchLanAddresses(ac.signal)
+      .then((info) => {
+        setLanHosts(info.addresses);
+        setLanError(info.addresses.length === 0);
+      })
+      .catch(() => {
+        setLanHosts([]);
+        setLanError(true);
+      })
+      .finally(() => setLanLoading(false));
+    return () => ac.abort();
+  }, [open, tab]);
 
   useEffect(() => {
     if (!listening) return;
@@ -393,6 +428,52 @@ export function SettingsSheet({
                 <p className="sheet-hint">
                   <SwapText text={t(locale, 'syncLanHint')} />
                 </p>
+                <div className="lan-block">
+                  <h4 className="lan-block-title">
+                    <SwapText text={t(locale, 'syncLanSection')} />
+                  </h4>
+                  {lanLoading ? (
+                    <p className="sheet-hint">
+                      <SwapText text={t(locale, 'syncLanLoading')} />
+                    </p>
+                  ) : lanError || lanHosts.length === 0 ? (
+                    <p className="sheet-hint">
+                      <SwapText text={t(locale, 'syncLanEmpty')} />
+                    </p>
+                  ) : (
+                    <ul className="lan-ip-list">
+                      {lanHosts.map((ip) => (
+                        <li key={ip} className="sheet-mono">
+                          {ip}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'syncLanFirewall')} />
+                  </p>
+                  <div className="sheet-actions">
+                    <button
+                      type="button"
+                      className="style-btn active"
+                      disabled={lanLoading || !inviteHostname(lanHosts)}
+                      onClick={async () => {
+                        const host = inviteHostname(lanHosts);
+                        if (!host) return;
+                        const url = lanAppUrl(host);
+                        try {
+                          await navigator.clipboard.writeText(url);
+                          setLanCopied(true);
+                          window.setTimeout(() => setLanCopied(false), 2000);
+                        } catch {
+                          prompt(t(locale, 'syncLanCopyApp'), url);
+                        }
+                      }}
+                    >
+                      {lanCopied ? t(locale, 'syncLanCopied') : t(locale, 'syncLanCopyApp')}
+                    </button>
+                  </div>
+                </div>
                 {!boardSession ? (
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'syncBoardOnly')} />
@@ -494,6 +575,23 @@ export function SettingsSheet({
                     {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  role="switch"
+                  className={`sheet-switch${netLogOn ? ' on' : ''}`}
+                  aria-checked={netLogOn}
+                  onClick={() => {
+                    const next = !isNetLogEnabled();
+                    setNetLogEnabled(next);
+                    setNetLogOn(next);
+                    if (next) netLog.info('logging enabled via settings');
+                  }}
+                >
+                  <span>{t(locale, 'netLog')}</span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'netLogHint')} />
+                </p>
               </section>
 
               <section className="sheet-section">

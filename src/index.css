@@ -1536,6 +1536,61 @@ button.brand {
   border-top: 1px solid var(--chrome-border-soft);
 }
 
+.members-status {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--chrome-text-dim);
+}
+
+.members-status.on {
+  color: var(--chrome-accent, #3d8b6e);
+}
+
+.members-lan-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.members-lan-ip {
+  max-width: 100%;
+  font-size: 12px;
+}
+
+.members-invite-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.lan-block {
+  margin: 8px 0 4px;
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--chrome-border-soft);
+}
+
+.lan-block-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chrome-text);
+}
+
+.lan-ip-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lan-ip-list .sheet-mono {
+  max-width: 100%;
+}
+
 .sheet-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2746,21 +2801,12 @@ h3 .swap-text,
   outline-offset: 1px;
 }
 
-/* --- page bar --- */
+/* --- page bar (top chrome island) --- */
 .page-bar {
-  position: absolute;
-  left: 16px;
-  bottom: 16px;
-  z-index: 20;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  border-radius: 14px;
-  background: var(--chrome-panel, rgba(30, 30, 28, 0.92));
-  border: 1px solid var(--chrome-border, rgba(255, 255, 255, 0.09));
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  user-select: none;
+  pointer-events: auto;
+  gap: 2px;
+  padding: 6px 10px;
+  min-height: 44px;
 }
 .page-btn {
   appearance: none;
@@ -2768,14 +2814,13 @@ h3 .swap-text,
   background: none;
   color: inherit;
   cursor: pointer;
-  min-width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  font-size: 15px;
-  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 .page-btn:hover:not(:disabled) {
   background: rgba(127, 127, 127, 0.18);
@@ -2788,17 +2833,25 @@ h3 .swap-text,
   background: rgba(255, 107, 107, 0.22);
 }
 .page-indicator {
-  min-width: 44px;
+  min-width: 52px;
+  padding: 0 4px;
   text-align: center;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
   color: var(--chrome-text-dim, #aaa);
+  user-select: none;
+}
+.page-of {
+  opacity: 0.55;
+  margin: 0 1px;
 }
 .page-sep {
   width: 1px;
-  height: 16px;
+  height: 18px;
+  align-self: center;
   background: var(--chrome-border, rgba(255, 255, 255, 0.12));
-  margin: 0 3px;
+  margin: 0 6px;
 }
 
 /* --- export dialog --- */

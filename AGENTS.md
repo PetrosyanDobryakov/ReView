@@ -33,7 +33,9 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 
 - `localhost` and `127.0.0.1` are different origins — IndexedDB will not follow you between them. Pick one and stay there.
 - Sync is optional; local boards work fully offline with IndexedDB persistence.
-- Sync URL and connect/disconnect live in Settings → System → Connection. Virtual LAN (Tailscale etc.) is the supported way to sync beyond a raw LAN — see `docs/DEPLOY.md`.
+- Sync client lives in `src/net/` (WebSocket + Yjs awareness). Friend path is same Wi‑Fi / LAN: Members → copy invite (uses `GET /lan` on the sync server). Settings → System → Connection shows LAN IPs. Tailscale is optional for remote-only — see `docs/DEPLOY.md`.
+- Live sync smoke test: with server up, `npm run test:sync`.
+- **Net debug logs:** **on by default.** Console `[review:net]` + session files under `logs/net/` (written by the sync server). Pointers: `logs/net/CURRENT`, `logs/net/latest.log`, and `logs/net/session-<stamp>.log`. Disable with `?netLog=0`, Settings → System → Connection, or `localStorage.setItem('review-net-log','0')`. Client POSTs batches to `http://<sync>:1234/net-log`; server also records ws connect/disconnect. `GET /net-log` returns the active file path.
 - Remote boards do not write IndexedDB unless the home toggle is on or the user clicks Save locally.
 - UI defaults to Russian; English and Chinese are available in settings.
 - Production / VM notes: `docs/DEPLOY.md`. Optional `VITE_SYNC_URL`.

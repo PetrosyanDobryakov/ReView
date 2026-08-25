@@ -20,7 +20,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   const idx = Math.max(0, pages.indexOf(cur));
 
   return (
-    <div className="page-bar" role="group" aria-label={t(locale, 'pages')}>
+    <div className="island page-bar" role="group" aria-label={t(locale, 'pages')}>
       <button
         type="button"
         className="page-btn"
@@ -29,10 +29,10 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         disabled={idx <= 0}
         onClick={() => store.setCurrentPage(pages[idx - 1])}
       >
-        ‹
+        <Icon name="chevronLeft" size={16} />
       </button>
       <span className="page-indicator">
-        {idx + 1} / {pages.length}
+        {idx + 1} <span className="page-of">/</span> {pages.length}
       </span>
       <button
         type="button"
@@ -42,9 +42,9 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         disabled={idx >= pages.length - 1}
         onClick={() => store.setCurrentPage(pages[idx + 1])}
       >
-        ›
+        <Icon name="chevronRight" size={16} />
       </button>
-      <span className="page-sep" />
+      <span className="page-sep" aria-hidden="true" />
       <button
         type="button"
         className="page-btn"
@@ -52,7 +52,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         aria-label={t(locale, 'addPage')}
         onClick={() => store.addPage()}
       >
-        <Icon name="plus" size={14} />
+        <Icon name="plus" size={15} />
       </button>
       <button
         type="button"
@@ -64,7 +64,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
           if (window.confirm(`${t(locale, 'deletePage')}?`)) store.deletePage(cur);
         }}
       >
-        <Icon name="trash" size={14} />
+        <Icon name="trash" size={15} />
       </button>
     </div>
   );

@@ -30,6 +30,7 @@ import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/c
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
 import { APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
+import { resolveInviteBoardUrl } from '../net';
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
@@ -114,7 +115,13 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   };
 
   const handleCopyLink = async (id: string) => {
-    const url = `${window.location.origin}${boardUrl(id)}`;
+    let url = `${window.location.origin}${boardUrl(id)}`;
+    try {
+      const invite = await resolveInviteBoardUrl(id);
+      url = invite.url;
+    } catch {
+      /* keep origin URL */
+    }
     try {
       await navigator.clipboard.writeText(url);
     } catch {

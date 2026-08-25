@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleId } from '../core/locale';
-import type { PeerCursor } from '../core/store';
+import type { PeerCursor } from '../net';
+import {
+  fetchLanAddresses,
+  inviteHostname,
+  isLocalHostname,
+  lanBoardUrl,
+  resolveInviteBoardUrl,
+} from '../net';
 import { clearPeerDisplay, setPeerDisplay } from '../core/peerDisplay';
 import {
   loadUser,
@@ -59,14 +66,32 @@ function ColorRow({
   );
 }
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      prompt('', text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function MembersMenu({
   locale,
+  boardId,
   online,
+  syncEnabled,
   peers,
   onOpenConnection,
 }: {
   locale: LocaleId;
+  boardId: string;
   online: boolean;
+  syncEnabled: boolean;
   peers: PeerCursor[];
   onOpenConnection: () => void;
 }) {
@@ -78,6 +103,10 @@ export function MembersMenu({
   const [user, setUser] = useState<UserInfo>(() => loadUser());
   const [nickDraft, setNickDraft] = useState(() => loadUser().name);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
+  const [lanHosts, setLanHosts] = useState<string[]>([]);
+  const [lanLoading, setLanLoading] = useState(false);
+  const [lanError, setLanError] = useState(false);
+  const [inviteFlash, setInviteFlash] = useState<'ok' | 'fail' | null>(null);
 
   useEffect(() => onUserChange((u) => {
     setUser(u);
@@ -90,6 +119,31 @@ export function MembersMenu({
     return () => cancelAnimationFrame(id);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    if (typeof location !== 'undefined' && !isLocalHostname(location.hostname)) {
+      setLanHosts([location.hostname]);
+      setLanLoading(false);
+      setLanError(false);
+      return;
+    }
+    const ac = new AbortController();
+    setLanLoading(true);
+    setLanError(false);
+    fetchLanAddresses(ac.signal)
+      .then((info) => {
+        const host = inviteHostname(info.addresses);
+        setLanHosts(host ? info.addresses : []);
+        setLanError(!host);
+      })
+      .catch(() => {
+        setLanHosts([]);
+        setLanError(true);
+      })
+      .finally(() => setLanLoading(false));
+    return () => ac.abort();
+  }, [open]);
+
   const close = useCallback(() => setOpen(false), []);
 
   const placeMenu = useCallback(() => {
@@ -99,7 +153,7 @@ export function MembersMenu({
     const width = 300;
     const gap = 8;
     const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
-    const estimatedHeight = 360;
+    const estimatedHeight = 440;
     const below = rect.bottom + gap;
     const above = rect.top - gap - estimatedHeight;
     const flip = below + estimatedHeight > window.innerHeight - 8 && above >= 8;
@@ -116,7 +170,7 @@ export function MembersMenu({
       window.removeEventListener('resize', onReflow);
       window.removeEventListener('scroll', onReflow, true);
     };
-  }, [open, placeMenu, peers.length]);
+  }, [open, placeMenu, peers.length, lanHosts.length, lanLoading, inviteFlash]);
 
   useEffect(() => {
     if (!open) return;
@@ -145,10 +199,32 @@ export function MembersMenu({
     ...peers.slice(0, 3).map((p) => ({ color: p.color, key: `peer-${p.id}` })),
   ];
   const overflow = Math.max(0, peers.length - 3);
-  const label = online ? t(locale, 'online') : t(locale, 'offline');
+  const statusLabel = !syncEnabled
+    ? t(locale, 'syncDisconnect')
+    : online
+      ? t(locale, 'online')
+      : t(locale, 'offline');
   const title = peers.length
-    ? `${label}: ${[user.name, ...peers.map((p) => p.name)].join(', ')}`
-    : `${t(locale, 'members')} — ${label}`;
+    ? `${statusLabel}: ${[user.name, ...peers.map((p) => p.name)].join(', ')}`
+    : `${t(locale, 'members')} — ${statusLabel}`;
+
+  const primaryHost = inviteHostname(lanHosts);
+
+  const handleCopyInvite = async () => {
+    try {
+      const { url } = await resolveInviteBoardUrl(boardId);
+      const ok = await copyText(url);
+      setInviteFlash(ok ? 'ok' : 'fail');
+    } catch {
+      if (primaryHost) {
+        const ok = await copyText(lanBoardUrl(boardId, primaryHost));
+        setInviteFlash(ok ? 'ok' : 'fail');
+      } else {
+        setInviteFlash('fail');
+      }
+    }
+    window.setTimeout(() => setInviteFlash(null), 2000);
+  };
 
   const menu =
     open && menuStyle
@@ -162,6 +238,38 @@ export function MembersMenu({
             className="members-menu island"
             style={{ left: menuStyle.left, top: menuStyle.top }}
           >
+            <section className="members-section">
+              <h3 className="members-section-title">{t(locale, 'membersInvite')}</h3>
+              <p className={`members-status${online && syncEnabled ? ' on' : ''}`}>
+                {statusLabel}
+              </p>
+              {lanLoading ? (
+                <p className="members-empty">{t(locale, 'syncLanLoading')}</p>
+              ) : lanError || !primaryHost ? (
+                <p className="members-empty">{t(locale, 'syncLanEmpty')}</p>
+              ) : (
+                <ul className="members-lan-list">
+                  {lanHosts.map((ip) => (
+                    <li key={ip} className="members-lan-ip sheet-mono">
+                      {ip}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                className="style-btn active members-invite-btn"
+                disabled={lanLoading || (!primaryHost && lanError)}
+                onClick={() => void handleCopyInvite()}
+              >
+                {inviteFlash === 'ok'
+                  ? t(locale, 'membersInviteCopied')
+                  : inviteFlash === 'fail'
+                    ? t(locale, 'membersInviteFail')
+                    : t(locale, 'membersCopyInvite')}
+              </button>
+            </section>
+
             <section className="members-section">
               <h3 className="members-section-title">{t(locale, 'membersYou')}</h3>
               <label className="members-field">

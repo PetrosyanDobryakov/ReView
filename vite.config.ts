@@ -6,9 +6,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // LAN / mesh friends hit us by IP; keep host check off for local collab.
+    allowedHosts: true,
   },
   preview: {
     host: true,
-    port: 4173,
+    port: 8080,
+    allowedHosts: true,
   },
 });

@@ -2,6 +2,19 @@
 
 ReView is a static Vite build plus an optional websocket sync server. No cloud account.
 
+## Friends on the same Wi‑Fi / LAN
+
+This is the default collab path.
+
+1. Host runs `npm run dev` (or serves `dist/` + `npm run server`).
+2. Host opens the board, opens **Members** (top right) → **Copy link for friends**, or Settings → Connection → **On this network**.
+3. Friends open that `http://<lan-ip>:5173/board/<id>` link on the same network.
+4. Sync follows automatically (`ws://<same-ip>:1234`). No Sync URL paste needed.
+
+The sync server binds `0.0.0.0:1234` and exposes `GET /lan` with private IPv4 addresses so a host on `localhost` can still copy a usable invite. If phones cannot connect, allow Node through the OS firewall on private networks.
+
+Do **not** expose port `1234` to the public internet unprotected.
+
 ## Build
 
 ```bash
@@ -21,7 +34,7 @@ npm run preview   # local check of the production build
 npm run server
 ```
 
-Listens on port `1234`. Rooms are per board: `review-<boardId>`. The browser connects to `ws(s)://<same-host>:1234`.
+Listens on `0.0.0.0:1234`. Rooms are per board: `review-<boardId>`. The browser connects to `ws(s)://<same-host>:1234`.
 
 If the page is served over HTTPS, the client uses `wss://`. Put a reverse proxy in front of the websocket, or terminate TLS on the same host.
 
@@ -58,16 +71,11 @@ server {
 
 If you proxy the websocket under a path, point the client at that URL. In the app: **Settings → System → Connection**, set Sync URL (or build with `VITE_SYNC_URL`). You can also disconnect sync without clearing the board.
 
-## Virtual LAN (recommended for remote friends)
+## Remote friends (optional virtual LAN)
 
-Keep the same WebSocket hub — do **not** expose port `1234` to the public internet unprotected.
+Same hub — not required for same Wi‑Fi. Use Tailscale / ZeroTier only when friends are not on your LAN: join a mesh, then share the mesh IP the same way as a LAN invite (`http://<mesh-ip>:…`). Guests still should open the app from that IP so sync auto-targets it.
 
-1. Host and guests join a private mesh (Tailscale, ZeroTier, or similar).
-2. Host runs `npm run server` (or `npm run dev`).
-3. Guests open the app and set Sync URL to `ws://<host-mesh-ip>:1234` (or `wss://` if you terminate TLS).
-4. Share a board link; room name stays `review-<boardId>`.
-
-WebRTC / true browser P2P is out of scope for now — the mesh + local hub path is the supported side option.
+WebRTC / true browser P2P is out of scope.
 
 ## Persistence honesty
 

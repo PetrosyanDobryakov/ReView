@@ -29,11 +29,6 @@ import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
 import { hasFill } from '../core/shapes';
 
-const PEN_COLORS = ['#eceae4', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#c4b8a8', '#ff9fd0'];
-const FILL_COLORS = ['#ffffff', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#e8e2d6', '#ff9fd0'];
-const STROKE_COLORS = ['#6b6b66', '#1c1c1a', '#ffffff', '#ff6b6b', '#4cd964', '#ffa94d', '#c4b8a8', '#ff9fd0'];
-/** Free-text + sticky palette. Dark swatches are for stickies / light boards; free text auto-contrasts on dark boards. */
-const TEXT_COLORS = ['#eceae4', '#ffe27a', '#4cd964', '#ff6b6b', '#ffa94d', '#c4a35a', '#6b6b66', '#1c1c1a'];
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const ERASER_SIZES = [16, 32, 64];
 const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph'];
@@ -45,46 +40,6 @@ const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'paral
 type FormatPatch = Partial<
   Pick<TextSettings, 'bold' | 'italic' | 'underline' | 'strike' | 'align' | 'highlight' | 'color' | 'size'>
 >;
-
-function Swatches({
-  colors,
-  value,
-  onPick,
-  custom,
-}: {
-  colors: string[];
-  value: string;
-  onPick: (c: string) => void;
-  custom?: boolean;
-}) {
-  return (
-    <div className="swatches">
-      {colors.map((c) => (
-        <button
-          type="button"
-          key={c}
-          className={`swatch${value === c ? ' active' : ''}`}
-          style={{ background: c }}
-          title={c}
-          aria-label={c}
-          aria-pressed={value === c}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(c)}
-        />
-      ))}
-      {custom && (
-        <input
-          type="color"
-          className="swatch-custom"
-          value={value}
-          title={value}
-          onMouseDown={(e) => e.preventDefault()}
-          onChange={(e) => onPick(e.target.value)}
-        />
-      )}
-    </div>
-  );
-}
 
 function FormatBtn({
   label,
@@ -134,8 +89,8 @@ function formatFromShape(v: ShapeView): {
   };
 }
 
-/** Miro-style pen slots: quick slots + palette popup with shades and custom colors. */
-function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string; onPick: (c: string) => void }) {
+/** Miro-style quick slots + palette popup (shared across pen / fill / stroke / text). */
+function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string; onPick: (c: string) => void }) {
   const [slots, setSlots] = useState<string[]>(() => readPenSlots());
   const [customs, setCustoms] = useState<string[]>(() => readCustomColors());
   const [openIdx, setOpenIdx] = useState<number | null>(null);
@@ -195,6 +150,7 @@ function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: str
           title={c}
           aria-label={`color ${i + 1}`}
           aria-pressed={activeColor === c.toLowerCase()}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             if (openIdx === i) {
               setOpenIdx(null);
@@ -217,6 +173,7 @@ function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: str
                   style={{ background: c }}
                   title={c}
                   aria-label={c}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(c)}
                 />
               ))
@@ -236,6 +193,7 @@ function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: str
                     style={{ background: c }}
                     title={c}
                     aria-label={c}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => pick(c)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -257,12 +215,12 @@ function PenColorSlots({ locale, color, onPick }: { locale: LocaleId; color: str
             <input
               ref={addInputRef}
               type="color"
-              value={color}
+              value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#ffffff'}
               onPointerDown={() => {
                 lastAddAt.current = performance.now();
               }}
               onChange={(e) => {
-                // live: preview on slot/pen; customs list is committed on the native change event
+                // live: preview on slot; customs list is committed on the native change event
                 lastAddAt.current = performance.now();
                 if (openIdx !== null) {
                   writePenSlot(openIdx, e.target.value);
@@ -545,9 +503,9 @@ export function StyleBar({
           >
             <Icon name="noFill" size={16} />
           </button>
-          <Swatches
-            colors={FILL_COLORS}
-            value={fillOn ? fillValue : ''}
+          <ColorSlots
+            locale={locale}
+            color={fillOn ? fillValue : ''}
             onPick={(c) => {
               updateShapeSettings({ fill: c, filled: true });
               if (fillTargets.length) {
@@ -598,31 +556,21 @@ export function StyleBar({
       {view.showStroke && (
         <>
           <span className="panel-label">{t(locale, 'stroke')}</span>
-          {showPen && penTargets.length === 0 ? (
-            <PenColorSlots
-              locale={locale}
-              color={strokeValue}
-              onPick={(c) => {
-                updatePenSettings({ color: c });
-              }}
-            />
-          ) : (
-            <Swatches
-              colors={penTargets.length ? PEN_COLORS : STROKE_COLORS}
-              value={strokeValue}
-              custom
-              onPick={(c) => {
-                updatePenSettings({ color: c });
-                updateShapeSettings({ stroke: c });
-                const patches: Array<[string, Partial<ShapeView>]> = [];
-                for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
-                if (patches.length) {
-                  patchShapes(patches);
-                  onPatched();
-                }
-              }}
-            />
-          )}
+          <ColorSlots
+            locale={locale}
+            color={strokeValue}
+            onPick={(c) => {
+              updatePenSettings({ color: c });
+              updateShapeSettings({ stroke: c });
+              const patches: Array<[string, Partial<ShapeView>]> = [];
+              for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
+              for (const v of penTargets) patches.push([v.id, { stroke: c }]);
+              if (patches.length) {
+                patchShapes(patches);
+                onPatched();
+              }
+            }}
+          />
         </>
       )}
       {view.showOutlineWidth && (
@@ -727,10 +675,9 @@ export function StyleBar({
             />
           </div>
           <div className="toolbelt-sep" />
-          <Swatches
-            colors={TEXT_COLORS}
-            value={textValue}
-            custom
+          <ColorSlots
+            locale={locale}
+            color={textValue}
             onPick={(c) => {
               // With adapt-on: store the pick; each client remaps for their paper.
               // With adapt-off: bump low-contrast free-text picks so they stay readable.
