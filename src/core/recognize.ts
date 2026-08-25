@@ -71,13 +71,13 @@ function circleFitScore(pts: number[], box: { w: number; h: number; cx: number; 
     n++;
   }
   const mean = n ? err / n : Infinity;
-  return mean < r * 0.18 ? 1 - mean / (r * 0.18) : 0;
+  return mean < r * 0.28 ? 1 - mean / (r * 0.28) : 0;
 }
 
 function rectFitScore(pts: number[], box: { w: number; h: number; minX: number; minY: number }): number {
   if (box.w < 16 || box.h < 16) return 0;
   let onEdge = 0;
-  const tol = Math.max(8, Math.min(box.w, box.h) * 0.12);
+  const tol = Math.max(10, Math.min(box.w, box.h) * 0.16);
   for (let i = 0; i < pts.length; i += 2) {
     const x = pts[i];
     const y = pts[i + 1];
@@ -89,7 +89,7 @@ function rectFitScore(pts: number[], box: { w: number; h: number; minX: number; 
     else if ((nearT || nearB) && x >= box.minX - tol && x <= box.minX + box.w + tol) onEdge++;
   }
   const ratio = onEdge / (pts.length / 2);
-  return ratio > 0.72 ? ratio : 0;
+  return ratio > 0.55 ? ratio : 0;
 }
 
 /**
@@ -105,9 +105,11 @@ export function recognizeStroke(pts: number[]): RecognizedShape | null {
   const diag = Math.hypot(w, h);
   const lineErr = lineFitError(pts);
   const endDist = Math.hypot(pts[pts.length - 2] - pts[0], pts[pts.length - 1] - pts[1]);
+  const loopiness = st.len > 0 ? endDist / st.len : 1;
+  const looksClosed = st.closed || endDist < Math.max(24, diag * 0.35) || loopiness < 0.15;
 
   // Straight line / arrow: low deviation, not closed
-  if (!st.closed && lineErr < Math.max(6, diag * 0.04) && endDist > diag * 0.55) {
+  if (!looksClosed && lineErr < Math.max(6, diag * 0.04) && endDist > diag * 0.55) {
     const shape = {
       x0: pts[0],
       y0: pts[1],
@@ -129,7 +131,7 @@ export function recognizeStroke(pts: number[]): RecognizedShape | null {
     return { kind: 'line', ...shape };
   }
 
-  if (st.closed || endDist < Math.max(20, diag * 0.15)) {
+  if (looksClosed) {
     const box = {
       minX: st.minX,
       minY: st.minY,
@@ -140,14 +142,14 @@ export function recognizeStroke(pts: number[]): RecognizedShape | null {
     };
     const circ = circleFitScore(pts, box);
     const rect = rectFitScore(pts, box);
-    if (circ > 0.55 && circ >= rect) {
-      const s = Math.max(w, h);
-      return { kind: 'ellipse', x: box.cx - s / 2, y: box.cy - s / 2, w: s, h: s };
+    const aspect = w > 0 && h > 0 ? Math.max(w, h) / Math.min(w, h) : 99;
+    if (circ > 0.4 && circ >= rect && aspect < 2.2) {
+      return { kind: 'ellipse', x: st.minX, y: st.minY, w, h };
     }
-    if (rect > 0.55) {
+    if (rect > 0.5) {
       return { kind: 'rect', x: st.minX, y: st.minY, w, h };
     }
-    if (circ > 0.4) {
+    if (circ > 0.3 && aspect < 2.5) {
       return { kind: 'ellipse', x: st.minX, y: st.minY, w, h };
     }
   }
