@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "bundle:engine": "node scripts/bundle-engine.mjs",
-    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/board-size-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs"
+    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/board-size-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs",
+    "test:sync": "node scripts/sync-test.mjs"
   },
   "dependencies": {
     "@fontsource/onest": "^5.3.0",

@@ -3,5 +3,6 @@ dist
 .impeccable
 scripts/engine-bundle.mjs
 *.log
+logs/
 .DS_Store
 Thumbs.db

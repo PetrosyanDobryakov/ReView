@@ -23,20 +23,27 @@ import {
   metaBg,
   metaGrid,
   viewPaperBg,
-  onSyncStatus,
   persistence,
   setMeta,
   undoManager,
   initBoard,
   enableBoardPersistence,
-  tryGetProvider,
-  onSyncConfigChange,
-  onPeers,
-  publishPresence,
   onPageChange,
+  onBoardReady,
+  currentPageId,
 } from './core/store';
+import {
+  onSyncStatus,
+  onPeers,
+  peerRosterKey,
+  publishPresence,
+  publishTool,
+  publishPage,
+  onSyncLifecycle,
+  type SyncStatus,
+  type PeerCursor,
+} from './net';
 import { readPrefs, writePrefs } from './core/prefs';
-import type { SyncStatus, PeerCursor } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
 import { fileToDocPages } from './core/docImport';
@@ -236,44 +243,48 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, [locale, boardTitle]);
 
   useEffect(() => {
-    const user = loadUser();
-    publishPresence(user);
+    publishPresence(loadUser());
+    publishTool(tool);
+    publishPage(currentPageId());
     const offUser = onUserChange((u) => {
       setNick(u.name);
       publishPresence(u);
     });
-    const onStatus = (st: { status: string }) => {
-      if (st.status === 'connected') publishPresence(loadUser());
-    };
-    let bound: ReturnType<typeof tryGetProvider> = null;
-    const bind = () => {
-      if (bound) {
-        bound.off('status', onStatus);
-        bound = null;
-      }
-      const p = tryGetProvider();
-      if (!p) return;
-      bound = p;
-      p.on('status', onStatus);
-      if (p.ws?.readyState === WebSocket.OPEN) publishPresence(loadUser());
-    };
-    bind();
-    const offConfig = onSyncConfigChange(bind);
+    const offLife = onSyncLifecycle(() => {
+      publishPresence(loadUser());
+      publishTool(engineRef.current?.tool.id ?? 'select');
+      publishPage(currentPageId());
+    });
     return () => {
       offUser();
-      offConfig();
-      if (bound) bound.off('status', onStatus);
+      offLife();
     };
   }, [boardId]);
 
   useEffect(() => {
-    return onPeers((list) => {
+    let roster = '';
+    let lastList: PeerCursor[] = [];
+    const pushEngine = (list: PeerCursor[]) => {
+      const page = currentPageId();
+      engineRef.current?.setPeers(list.filter((p) => p.page == null || p.page === page));
+    };
+    const offPeers = onPeers((list) => {
+      lastList = list;
+      pushEngine(list);
+      const next = peerRosterKey(list);
+      if (next === roster) return;
+      roster = next;
       setPeers(list);
-      engineRef.current?.setPeers(list);
     });
+    const offPage = onPageChange(() => {
+      publishPage(currentPageId());
+      pushEngine(lastList);
+    });
+    return () => {
+      offPeers();
+      offPage();
+    };
   }, [boardId]);
-
-  useEffect(() => onPageChange(() => engineRef.current?.resetToPage()), [boardId]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -285,6 +296,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, []);
 
   useEffect(() => {
+    // Re-init if leaveBoard nulled the id (Strict Mode remount / HMR).
+    initBoard(boardId);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = new Engine(canvas);
@@ -303,8 +316,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onTool = (id) => setTool(id);
     engine.events.onEditText = (target) => setEditTarget(target);
-  engine.events.onEditGraph = (target) => setEditGraph(target);
+    engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
+    const reload = () => {
+      engine.ensureStoreBound();
+      engine.resetToPage();
+    };
+    const offBoardReady = onBoardReady(reload);
+    if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
     const curPersist = persistence;
     const curMeta = meta;
     const curUndo = undoManager;
@@ -338,6 +357,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     curUndo.on('stack-item-popped', syncUndo);
     curUndo.on('stack-cleared', syncUndo);
     return () => {
+      offBoardReady();
       if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
       offSettings();
       try { curMeta.unobserve(onMeta); } catch {}
@@ -485,7 +505,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
-        <PageBar locale={locale} />
         {editTarget && engine && (
           <TextOverlay
             target={editTarget}
@@ -608,6 +627,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             </>
           )}
         </div>
+        <PageBar locale={locale} />
         <div className="island meta-island">
           {errorShown && errorView && (
             <button
@@ -622,7 +642,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           )}
           <MembersMenu
             locale={locale}
+            boardId={boardId}
             online={sync.online}
+            syncEnabled={sync.enabled}
             peers={peers}
             onOpenConnection={() => {
               setSettingsFocus('connection');

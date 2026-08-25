@@ -158,6 +158,32 @@ function touchBoard(id: string): void {
   }
 }
 
+/** Debounce meta bumps — drag/patch floods used to rewrite localStorage every frame. */
+let bumpTimer: ReturnType<typeof setTimeout> | null = null;
+let bumpPendingId: string | null = null;
+
+export function bumpBoardUpdated(id: string): void {
+  bumpPendingId = id;
+  if (bumpTimer) return;
+  bumpTimer = setTimeout(() => {
+    bumpTimer = null;
+    const pending = bumpPendingId;
+    bumpPendingId = null;
+    if (pending) touchBoard(pending);
+  }, 400);
+}
+
+/** Flush a pending bump immediately (board leave / rename / delete). */
+export function flushBoardUpdated(): void {
+  if (bumpTimer) {
+    clearTimeout(bumpTimer);
+    bumpTimer = null;
+  }
+  const pending = bumpPendingId;
+  bumpPendingId = null;
+  if (pending) touchBoard(pending);
+}
+
 export function createBoard(name: string, teamId = 'default', status: BoardStatus = 'local'): BoardMeta {
   const teams = listTeams();
   if (!teams.find((team) => team.id === teamId)) teamId = 'default';
@@ -267,8 +293,4 @@ export function ensureBoardWithId(
   boards.push(b);
   writeBoards(boards);
   return b;
-}
-
-export function bumpBoardUpdated(id: string): void {
-  touchBoard(id);
 }
