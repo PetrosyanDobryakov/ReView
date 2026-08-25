@@ -18,6 +18,7 @@ import {
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
+import { cloneBoard } from '../core/boardClone';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
@@ -155,6 +156,16 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     if (!ok) {
       window.alert(t(locale, 'error') + ': IndexedDB');
     }
+  };
+
+  const handleCloneBoard = async (id: string) => {
+    const copy = await cloneBoard(id);
+    if (!copy) {
+      window.alert(t(locale, 'error'));
+      return;
+    }
+    refresh();
+    void refreshWeights(listBoards());
   };
 
   const toggleSaveRemote = () => {
@@ -430,6 +441,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         {t(locale, 'openBoard')}
                       </button>
                       <span className="board-row-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'duplicateBoard')}
+                          aria-label={t(locale, 'duplicateBoard')}
+                          onClick={() => void handleCloneBoard(b.id)}
+                        >
+                          <Icon name="duplicate" size={14} />
+                        </button>
                         <button
                           type="button"
                           className="icon-btn"

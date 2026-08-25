@@ -1,6 +1,8 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
+import { shapeRotation, worldToLocal, withShapeRotation } from './transform';
+import { drawRichBlock, parseStoredRich } from './richText';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
@@ -17,8 +19,14 @@ export interface ShapeView {
   stroke: string;
   strokeWidth: number;
   text?: string;
+  /** Character-level rich HTML from the text editor (optional). */
+  richHtml?: string;
   fontSize?: number;
   points?: number[];
+  /** Parallel to points (pairs): stylus pressure 0..1 per vertex for pens. */
+  pressures?: number[];
+  /** Degrees clockwise. Box shapes render rotated; pens/arrows bake into points. */
+  rotation?: number;
   alpha?: number;
   textColor?: string;
   bold?: boolean;
@@ -394,119 +402,125 @@ export function arrowBounds(v: ShapeView): ShapeBox {
 }
 
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
-  switch (v.type) {
+  // Pens/arrows store world-space points; rotation is baked in when applied.
+  if (v.type === 'pen') {
+    return pointNearPolyline(v.points ?? [], px, py, v.strokeWidth / 2 + 3);
+  }
+  if (v.type === 'arrow') {
+    const curve = arrowCurve(v);
+    return curve
+      ? pointNearPolyline(sampleArrowCurve(curve), px, py, v.strokeWidth / 2 + 3)
+      : false;
+  }
+  const rotated = Boolean(shapeRotation(v));
+  const box = rotated ? { ...v, x: 0, y: 0, rotation: 0 } : v;
+  const p = rotated ? worldToLocal(v, px, py) : { x: px, y: py };
+  const x = p.x;
+  const y = p.y;
+  switch (box.type) {
     case 'ellipse': {
-      const rx = v.w / 2;
-      const ry = v.h / 2;
+      const rx = box.w / 2;
+      const ry = box.h / 2;
       if (!rx || !ry) return false;
-      const dx = (px - (v.x + rx)) / rx;
-      const dy = (py - (v.y + ry)) / ry;
+      const dx = (x - (box.x + rx)) / rx;
+      const dy = (y - (box.y + ry)) / ry;
       return dx * dx + dy * dy <= 1;
     }
     case 'diamond': {
-      const cx = v.x + v.w / 2;
-      const cy = v.y + v.h / 2;
-      const dx = Math.abs(px - cx) / (v.w / 2);
-      const dy = Math.abs(py - cy) / (v.h / 2);
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      const dx = Math.abs(x - cx) / (box.w / 2);
+      const dy = Math.abs(y - cy) / (box.h / 2);
       return dx + dy <= 1;
     }
     case 'triangle': {
-      const ax = v.x + v.w / 2, ay = v.y;
-      const bx = v.x, by = v.y + v.h;
-      const cx = v.x + v.w, cy = v.y + v.h;
+      const ax = box.x + box.w / 2, ay = box.y;
+      const bx = box.x, by = box.y + box.h;
+      const cx = box.x + box.w, cy = box.y + box.h;
       const denom = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
       if (!denom) return false;
-      const a = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / denom;
-      const b = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / denom;
+      const a = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / denom;
+      const b = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / denom;
       const c = 1 - a - b;
       return a >= 0 && b >= 0 && c >= 0;
     }
     case 'parallelogram': {
-      const skew = v.w * 0.2;
+      const skew = box.w * 0.2;
       const pts = [
-        { x: v.x + skew, y: v.y },
-        { x: v.x + v.w, y: v.y },
-        { x: v.x + v.w - skew, y: v.y + v.h },
-        { x: v.x, y: v.y + v.h },
+        { x: box.x + skew, y: box.y },
+        { x: box.x + box.w, y: box.y },
+        { x: box.x + box.w - skew, y: box.y + box.h },
+        { x: box.x, y: box.y + box.h },
       ];
       let inside = false;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
         const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
-        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
       }
       return inside;
     }
     case 'hexagon': {
-      const cy = v.y + v.h / 2;
+      const cy = box.y + box.h / 2;
       const pts = [
-        { x: v.x + v.w * 0.25, y: v.y },
-        { x: v.x + v.w * 0.75, y: v.y },
-        { x: v.x + v.w, y: cy },
-        { x: v.x + v.w * 0.75, y: v.y + v.h },
-        { x: v.x + v.w * 0.25, y: v.y + v.h },
-        { x: v.x, y: cy },
+        { x: box.x + box.w * 0.25, y: box.y },
+        { x: box.x + box.w * 0.75, y: box.y },
+        { x: box.x + box.w, y: cy },
+        { x: box.x + box.w * 0.75, y: box.y + box.h },
+        { x: box.x + box.w * 0.25, y: box.y + box.h },
+        { x: box.x, y: cy },
       ];
       let inside = false;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
         const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
-        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
       }
       return inside;
     }
     case 'cylinder': {
-      // top ellipse + rect + bottom ellipse
-      const rx = v.w / 2, ry = Math.min(v.h * 0.15, 18);
-      if (py < v.y + ry) {
-        const dx = (px - (v.x + rx)) / rx;
-        const dy = (py - (v.y + ry)) / ry;
+      const rx = box.w / 2, ry = Math.min(box.h * 0.15, 18);
+      if (y < box.y + ry) {
+        const dx = (x - (box.x + rx)) / rx;
+        const dy = (y - (box.y + ry)) / ry;
         return dx * dx + dy * dy <= 1;
       }
-      if (py > v.y + v.h - ry) {
-        const dx = (px - (v.x + rx)) / rx;
-        const dy = (py - (v.y + v.h - ry)) / ry;
+      if (y > box.y + box.h - ry) {
+        const dx = (x - (box.x + rx)) / rx;
+        const dy = (y - (box.y + box.h - ry)) / ry;
         return dx * dx + dy * dy <= 1;
       }
-      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+      return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
     }
     case 'terminator': {
-      const r = v.h / 2;
-      if (px < v.x + r) {
-        const dx = px - (v.x + r), dy = py - (v.y + r);
+      const r = box.h / 2;
+      if (x < box.x + r) {
+        const dx = x - (box.x + r), dy = y - (box.y + r);
         return dx * dx + dy * dy <= r * r;
       }
-      if (px > v.x + v.w - r) {
-        const dx = px - (v.x + v.w - r), dy = py - (v.y + r);
+      if (x > box.x + box.w - r) {
+        const dx = x - (box.x + box.w - r), dy = y - (box.y + r);
         return dx * dx + dy * dy <= r * r;
       }
-      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+      return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
     }
     case 'subroutine':
-      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+      return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
     case 'display': {
       const pts = [
-        { x: v.x, y: v.y },
-        { x: v.x + v.w * 0.85, y: v.y },
-        { x: v.x + v.w, y: v.y + v.h / 2 },
-        { x: v.x + v.w * 0.85, y: v.y + v.h },
-        { x: v.x, y: v.y + v.h },
+        { x: box.x, y: box.y },
+        { x: box.x + box.w * 0.85, y: box.y },
+        { x: box.x + box.w, y: box.y + box.h / 2 },
+        { x: box.x + box.w * 0.85, y: box.y + box.h },
+        { x: box.x, y: box.y + box.h },
       ];
       let inside = false;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
         const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
-        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
       }
       return inside;
     }
-    case 'pen':
-      return pointNearPolyline(v.points ?? [], px, py, v.strokeWidth / 2 + 3);
-    case 'arrow': {
-      const curve = arrowCurve(v);
-      return curve
-        ? pointNearPolyline(sampleArrowCurve(curve), px, py, v.strokeWidth / 2 + 3)
-        : false;
-    }
     default:
-      return px >= v.x && px <= v.x + v.w && py >= v.y && py <= v.y + v.h;
+      return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
   }
 }
 
@@ -535,36 +549,54 @@ export function drawPenStroke(
   pts: number[],
   width: number,
   color: string,
-  alpha: number
+  alpha: number,
+  pressures?: number[]
 ): void {
   ctx.save();
   ctx.strokeStyle = color;
   ctx.globalAlpha = alpha;
   ctx.fillStyle = color;
-  ctx.lineWidth = width;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   if (pts.length === 2) {
+    const w = pressures?.length ? width * (0.35 + 0.65 * (pressures[0] ?? 0.5)) : width;
     ctx.beginPath();
-    ctx.arc(pts[0], pts[1], width / 2, 0, Math.PI * 2);
+    ctx.arc(pts[0], pts[1], w / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     return;
   }
-  ctx.beginPath();
-  ctx.moveTo(pts[0], pts[1]);
-  if (pts.length === 4) {
-    ctx.lineTo(pts[2], pts[3]);
-  } else {
-    for (let i = 2; i < pts.length - 2; i += 2) {
-      const xc = (pts[i] + pts[i + 2]) / 2;
-      const yc = (pts[i + 1] + pts[i + 3]) / 2;
-      ctx.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
+  const usePressure = Boolean(pressures && pressures.length >= pts.length / 2);
+  if (!usePressure) {
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(pts[0], pts[1]);
+    if (pts.length === 4) {
+      ctx.lineTo(pts[2], pts[3]);
+    } else {
+      for (let i = 2; i < pts.length - 2; i += 2) {
+        const xc = (pts[i] + pts[i + 2]) / 2;
+        const yc = (pts[i + 1] + pts[i + 3]) / 2;
+        ctx.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
+      }
+      const n = pts.length - 4;
+      ctx.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
     }
-    const n = pts.length - 4;
-    ctx.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
+    ctx.stroke();
+    ctx.restore();
+    return;
   }
-  ctx.stroke();
+  // Variable-width segments from stylus pressure.
+  for (let i = 0; i < pts.length - 2; i += 2) {
+    const p0 = pressures![i / 2] ?? 0.5;
+    const p1 = pressures![i / 2 + 1] ?? p0;
+    const w = width * (0.35 + 0.65 * ((p0 + p1) / 2));
+    ctx.beginPath();
+    ctx.lineWidth = Math.max(0.5, w);
+    ctx.moveTo(pts[i], pts[i + 1]);
+    ctx.lineTo(pts[i + 2], pts[i + 3]);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -701,6 +733,12 @@ export function drawShape(
   boardBg: string = COLORS.background,
   hideText = false
 ): void {
+  if (shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
+    withShapeRotation(ctx, v, () =>
+      drawShape(ctx, { ...v, rotation: 0 }, textColor, boardBg, hideText)
+    );
+    return;
+  }
   switch (v.type) {
     case 'rect': {
       ctx.fillStyle = v.fill;
@@ -906,20 +944,43 @@ export function drawShape(
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
         ctx.clip();
         const ink = v.textColor ?? '#3a2f00';
-        ctx.fillStyle = ink;
-        ctx.font = shapeFont(v, STICKY_FONT);
-        ctx.textBaseline = 'top';
         const size = v.fontSize ?? STICKY_FONT;
         const lineHeight = size * 1.25;
         const align = v.textAlign ?? 'left';
-        let lineY = v.y + 8;
-        for (const line of wrapText(ctx, v.text, v.w - 16)) {
-          const lw = ctx.measureText(line).width;
-          const lx = lineAnchorX(v.x + 8, v.w - 16, lw, align);
-          ctx.fillText(line, lx, lineY);
-          drawTextDecorations(ctx, lx, lineY, lw, size, ink, v.underline, v.strike);
-          lineY += lineHeight;
-          if (lineY > v.y + v.h - 8) break;
+        if (v.richHtml && v.richHtml.includes('<')) {
+          const spans = parseStoredRich(v.text, v.richHtml, {
+            bold: v.bold,
+            italic: v.italic,
+            underline: v.underline,
+            strike: v.strike,
+            highlight: v.highlight,
+          });
+          drawRichBlock(ctx, spans, v.x + 8, v.y + 8, Math.max(8, v.w - 16), {
+            fontSize: size,
+            color: ink,
+            align,
+            lineHeight,
+            fontFn: (s, style) =>
+              boardFont(s, {
+                bold: style.bold ?? v.bold,
+                italic: style.italic ?? v.italic,
+              }),
+            highlightFill: TEXT_HIGHLIGHT,
+            maxBottom: v.y + v.h - 8,
+          });
+        } else {
+          ctx.fillStyle = ink;
+          ctx.font = shapeFont(v, STICKY_FONT);
+          ctx.textBaseline = 'top';
+          let lineY = v.y + 8;
+          for (const line of wrapText(ctx, v.text, v.w - 16)) {
+            const lw = ctx.measureText(line).width;
+            const lx = lineAnchorX(v.x + 8, v.w - 16, lw, align);
+            ctx.fillText(line, lx, lineY);
+            drawTextDecorations(ctx, lx, lineY, lw, size, ink, v.underline, v.strike);
+            lineY += lineHeight;
+            if (lineY > v.y + v.h - 8) break;
+          }
         }
         ctx.restore();
       }
@@ -936,26 +997,47 @@ export function drawShape(
         ctx.roundRect(v.x - 4, v.y - 2, v.w + 8, v.h + 4, 4);
         ctx.fill();
       }
-      ctx.fillStyle = ink;
-      ctx.font = shapeFont(v, TEXT_FONT);
-      ctx.textBaseline = 'top';
       const align = v.textAlign ?? 'left';
-      let lineY = v.y;
-      // wrap to the frame width so canvas matches the editor overlay
-      for (const line of wrapText(ctx, v.text, Math.max(v.w, size * 2))) {
-        const lw = measureMixedLine(ctx, line, size);
-        const lx = lineAnchorX(v.x, v.w, lw, align);
-        drawMixedLine(ctx, line, lx, lineY, lineHeight, size, {
-          color: ink,
+      if (v.richHtml && v.richHtml.includes('<')) {
+        const spans = parseStoredRich(v.text, v.richHtml, {
+          bold: v.bold,
+          italic: v.italic,
           underline: v.underline,
           strike: v.strike,
+          highlight: v.highlight,
         });
-        lineY += lineHeight;
+        drawRichBlock(ctx, spans, v.x, v.y, Math.max(v.w, size * 2), {
+          fontSize: size,
+          color: ink,
+          align,
+          lineHeight,
+          fontFn: (s, style) =>
+            boardFont(s, {
+              bold: style.bold ?? v.bold,
+              italic: style.italic ?? v.italic,
+            }),
+          highlightFill: TEXT_HIGHLIGHT,
+        });
+      } else {
+        ctx.fillStyle = ink;
+        ctx.font = shapeFont(v, TEXT_FONT);
+        ctx.textBaseline = 'top';
+        let lineY = v.y;
+        for (const line of wrapText(ctx, v.text, Math.max(v.w, size * 2))) {
+          const lw = measureMixedLine(ctx, line, size);
+          const lx = lineAnchorX(v.x, v.w, lw, align);
+          drawMixedLine(ctx, line, lx, lineY, lineHeight, size, {
+            color: ink,
+            underline: v.underline,
+            strike: v.strike,
+          });
+          lineY += lineHeight;
+        }
       }
       break;
     }
     case 'pen':
-      drawPenStroke(ctx, v.points ?? [], v.strokeWidth, displayInk(v.stroke, boardBg), v.alpha ?? 1);
+      drawPenStroke(ctx, v.points ?? [], v.strokeWidth, displayInk(v.stroke, boardBg), v.alpha ?? 1, v.pressures);
       break;
     case 'arrow':
       drawArrow(ctx, v, boardBg);

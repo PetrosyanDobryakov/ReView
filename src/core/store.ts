@@ -357,6 +357,12 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     cropH: m.get('cropH') as number | undefined,
     expr: m.get('expr') as string | undefined,
     points: points instanceof Y.Array ? points.toArray() : undefined,
+    pressures: (() => {
+      const p = m.get('pressures');
+      return p instanceof Y.Array ? p.toArray() : undefined;
+    })(),
+    rotation: typeof m.get('rotation') === 'number' ? (m.get('rotation') as number) : undefined,
+    richHtml: typeof m.get('richHtml') === 'string' ? (m.get('richHtml') as string) : undefined,
     fromId: m.get('fromId') as string | undefined,
     fromPort: m.get('fromPort') as string | undefined,
     toId: m.get('toId') as string | undefined,
@@ -389,12 +395,19 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     if (v.strike) m.set('strike', true);
     if (v.textAlign && v.textAlign !== 'left') m.set('textAlign', v.textAlign);
     if (v.highlight) m.set('highlight', true);
+    if (v.richHtml) m.set('richHtml', v.richHtml);
   }
   if (v.points) {
     const arr = new Y.Array<number>();
     arr.insert(0, v.points);
     m.set('points', arr);
   }
+  if (v.pressures?.length) {
+    const arr = new Y.Array<number>();
+    arr.insert(0, v.pressures);
+    m.set('pressures', arr);
+  }
+  if (v.rotation) m.set('rotation', v.rotation);
   if (v.pages) {
     const arr = new Y.Array<string>();
     arr.insert(0, v.pages);
@@ -440,10 +453,18 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const arr = new Y.Array<number>();
       arr.insert(0, value as number[]);
       m.set('points', arr);
+    } else if (key === 'pressures' && Array.isArray(value)) {
+      const arr = new Y.Array<number>();
+      arr.insert(0, value as number[]);
+      m.set('pressures', arr);
     } else if (key === 'pages' && Array.isArray(value)) {
       const arr = new Y.Array<string>();
       arr.insert(0, value as string[]);
       m.set('pages', arr);
+    } else if (key === 'rotation' && value === 0) {
+      m.delete('rotation');
+    } else if (key === 'richHtml' && value === '') {
+      m.delete('richHtml');
     } else {
       m.set(key, value);
     }

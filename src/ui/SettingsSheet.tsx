@@ -634,6 +634,21 @@ export function SettingsSheet({
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'adaptInkHint')} />
                   </p>
+                  <button
+                    type="button"
+                    className={`sheet-switch${prefs.recognizeShapes ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={prefs.recognizeShapes}
+                    onClick={() => patchPrefs({ recognizeShapes: !prefs.recognizeShapes })}
+                  >
+                    <span>{t(locale, 'recognizeShapes')}</span>
+                    <span className="switch" aria-hidden="true">
+                      <span className="switch-thumb" />
+                    </span>
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'recognizeShapesHint')} />
+                  </p>
                 </section>
               )}
             </div>

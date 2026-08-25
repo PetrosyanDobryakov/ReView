@@ -461,8 +461,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <TextOverlay
             target={editTarget}
             engine={engine}
-            onDone={(value) => {
-              engine.commitText(editTarget.id, value, editTarget);
+            onDone={(value, html) => {
+              engine.commitText(editTarget.id, value, editTarget, html);
               setEditTarget(null);
             }}
             onCancel={() => {

@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
-import { boardFont, displayInk, TEXT_HIGHLIGHT } from '../core/shapes';
+import { boardFont, displayInk } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
+import { spansToHtml, plainToSpans } from '../core/richText';
 
 export function TextOverlay({
   target,
@@ -12,7 +13,7 @@ export function TextOverlay({
 }: {
   target: EditTarget;
   engine: Engine;
-  onDone: (text: string) => void;
+  onDone: (text: string, html: string) => void;
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -31,7 +32,21 @@ export function TextOverlay({
     if (!el) return;
     armedRef.current = false;
     doneRef.current = false;
-    el.innerText = target.text;
+    if (target.richHtml && target.richHtml.includes('<')) {
+      el.innerHTML = target.richHtml;
+    } else if (target.bold || target.italic || target.underline || target.strike || target.highlight) {
+      el.innerHTML = spansToHtml(
+        plainToSpans(target.text, {
+          bold: target.bold,
+          italic: target.italic,
+          underline: target.underline,
+          strike: target.strike,
+          highlight: target.highlight,
+        })
+      );
+    } else {
+      el.innerText = target.text;
+    }
     el.focus();
     const sel = window.getSelection();
     if (sel) {
@@ -41,8 +56,6 @@ export function TextOverlay({
     const arm = () => {
       armedRef.current = true;
     };
-    // Opened from pointerup / keyboard: arm on next frame. Also arm on next pointerup
-    // in case a trailing click from the same gesture still arrives.
     const raf = requestAnimationFrame(arm);
     window.addEventListener('pointerup', arm, { once: true });
     return () => {
@@ -80,8 +93,10 @@ export function TextOverlay({
   const finish = (commit: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    const raw = ref.current?.innerText ?? '';
-    if (commit) onDone(raw);
+    const el = ref.current;
+    const raw = el?.innerText ?? '';
+    const html = el?.innerHTML ?? '';
+    if (commit) onDone(raw, html);
     else onCancel();
   };
 
@@ -105,12 +120,15 @@ export function TextOverlay({
         caretColor: displayColor,
         display: isCentered ? 'flex' : 'block',
         alignItems: isCentered ? 'center' : undefined,
-        justifyContent: isCentered ? (align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center') : undefined,
+        justifyContent: isCentered
+          ? align === 'left'
+            ? 'flex-start'
+            : align === 'right'
+              ? 'flex-end'
+              : 'center'
+          : undefined,
         textAlign: align,
-        textDecoration: [target.underline ? 'underline' : '', target.strike ? 'line-through' : '']
-          .filter(Boolean)
-          .join(' ') || 'none',
-        background: target.highlight && target.type === 'text' ? TEXT_HIGHLIGHT : 'transparent',
+        background: 'transparent',
         borderRadius: target.highlight && target.type === 'text' ? 4 : undefined,
         padding: isCentered ? '0 8px' : target.type === 'sticky' ? '8px' : target.highlight ? '2px 4px' : '0',
         overflow: isCentered ? 'hidden' : undefined,
@@ -124,20 +142,29 @@ export function TextOverlay({
         } else if (e.key === 'Escape') {
           e.preventDefault();
           finish(false);
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+          e.preventDefault();
+          document.execCommand('bold');
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+          e.preventDefault();
+          document.execCommand('italic');
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+          e.preventDefault();
+          document.execCommand('underline');
         }
       }}
       onPaste={(e) => {
         e.preventDefault();
+        const html = e.clipboardData.getData('text/html');
         const text = e.clipboardData.getData('text/plain');
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return;
-        sel.deleteFromDocument();
-        sel.getRangeAt(0).insertNode(document.createTextNode(text));
-        sel.collapseToEnd();
+        if (html && html.includes('<')) {
+          document.execCommand('insertHTML', false, html);
+        } else {
+          document.execCommand('insertText', false, text);
+        }
       }}
       onBlur={() => {
         if (!armedRef.current) {
-          // Premature blur from the opening click — reclaim focus.
           requestAnimationFrame(() => {
             if (!doneRef.current) ref.current?.focus();
           });

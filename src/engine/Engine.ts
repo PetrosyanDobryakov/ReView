@@ -15,8 +15,10 @@ import {
   intersects,
   normalizeBox,
   arrowBounds,
+  measureMixedLine,
 } from '../core/shapes';
-import { measureMixedLine } from '../core/shapes';
+import { localToWorld, rotatedAabb, rotationHandleWorld, withShapeRotation } from '../core/transform';
+import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
 import { readLocale } from '../core/locale';
@@ -41,7 +43,9 @@ const CROP_CURSORS: Record<HandleId, string> = {
   e: 'ew-resize',
   w: 'ew-resize',
 };
+
 import { settings } from '../core/settings';
+import { spansAreRich, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
 
 export interface EditTarget {
   id: string | null;
@@ -50,6 +54,8 @@ export interface EditTarget {
   w: number;
   h: number;
   text: string;
+  /** Character-level HTML when the overlay has mixed formatting. */
+  richHtml?: string;
   fontSize: number;
   color: string;
   type: string | null;
@@ -238,7 +244,8 @@ export class Engine {
   }
 
   private spatialBox(v: ShapeView): ShapeBox {
-    return v.type === 'arrow' ? arrowBounds(v) : { x: v.x, y: v.y, w: v.w, h: v.h };
+    if (v.type === 'arrow') return arrowBounds(v);
+    return rotatedAabb(v);
   }
 
   private loadActivePage(): void {
@@ -279,7 +286,7 @@ export class Engine {
     for (const id of ids) {
       const v = this.views.get(id);
       if (!v) continue;
-      const b = v.type === 'arrow' ? arrowBounds(v) : { x: v.x, y: v.y, w: v.w, h: v.h };
+      const b = this.spatialBox(v);
       box = box
         ? {
             x: Math.min(box.x, b.x),
@@ -337,7 +344,7 @@ export class Engine {
         if (!store.isOnActivePage(id)) continue;
         const v = this.views.get(id);
         if (!v) continue;
-        const vb = v.type === 'arrow' ? arrowBounds(v) : v;
+        const vb = this.spatialBox(v);
         if (!intersects(vb, exportBox)) continue;
         drawShape(ctx, v, theme.text, store.viewPaperBg());
       }
@@ -345,6 +352,60 @@ export class Engine {
     } catch {
       return null;
     }
+  }
+
+  private viewsInBox(box: ShapeBox): ShapeView[] {
+    const pad = 4;
+    const exportBox = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 };
+    const out: ShapeView[] = [];
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      const id = ord.get(i);
+      if (!store.isOnActivePage(id)) continue;
+      const v = this.views.get(id);
+      if (!v) continue;
+      if (!intersects(this.spatialBox(v), exportBox)) continue;
+      out.push(v);
+    }
+    return out;
+  }
+
+  exportSvg(
+    box: ShapeBox,
+    opts: { background: string | null }
+  ): { blob: Blob; width: number; height: number } | null {
+    if (box.w <= 0 || box.h <= 0) return null;
+    const views = this.viewsInBox(box);
+    const { svg, width, height } = shapesToSvg(views, {
+      background: opts.background,
+      pad: 4,
+      clip: box,
+    });
+    return {
+      blob: new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+      width,
+      height,
+    };
+  }
+
+  async exportPdf(
+    box: ShapeBox,
+    opts: { scale: number; quality?: number; background: string | null }
+  ): Promise<{ blob: Blob; width: number; height: number } | null> {
+    const raster = await this.exportBlob(box, {
+      scale: opts.scale,
+      format: 'jpeg',
+      quality: opts.quality ?? 0.9,
+      background: opts.background ?? '#ffffff',
+    });
+    if (!raster) return null;
+    const jpeg = new Uint8Array(await raster.blob.arrayBuffer());
+    const pdf = jpegToPdf(jpeg, raster.width, raster.height);
+    return {
+      blob: new Blob([pdf], { type: 'application/pdf' }),
+      width: raster.width,
+      height: raster.height,
+    };
   }
 
   exportBlob(
@@ -458,13 +519,30 @@ export class Engine {
       if (!v || v.locked) continue;
       for (const handle of HANDLES) {
         const [fx, fy] = HANDLE_POS[handle];
-        const hx = (v.x + fx * v.w) * z + ox;
-        const hy = (v.y + fy * v.h) * z + oy;
+        const world = localToWorld(v, fx * v.w, fy * v.h);
+        const hx = world.x * z + ox;
+        const hy = world.y * z + oy;
         if (Math.hypot(hx - sx, hy - sy) <= 9) {
           return { shapeId: id, handle };
         }
       }
     }
+    return null;
+  }
+
+  /** Screen hit-test for the rotation knob (single selection). Returns shape id. */
+  hitRotateHandle(sx: number, sy: number): string | null {
+    if (this.selection.size !== 1) return null;
+    const id = [...this.selection][0];
+    const v = this.views.get(id);
+    if (!v || v.locked) return null;
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    const world = rotationHandleWorld(v, 28 / z);
+    const hx = world.x * z + ox;
+    const hy = world.y * z + oy;
+    if (Math.hypot(hx - sx, hy - sy) <= 10) return id;
     return null;
   }
 
@@ -778,14 +856,15 @@ export class Engine {
     for (const id of ids) {
       const v = this.views.get(id);
       if (!v) continue;
+      const b = this.spatialBox(v);
       box = box
         ? {
-            x: Math.min(box.x, v.x),
-            y: Math.min(box.y, v.y),
-            w: Math.max(box.x + box.w, v.x + v.w) - Math.min(box.x, v.x),
-            h: Math.max(box.y + box.h, v.y + v.h) - Math.min(box.y, v.y),
+            x: Math.min(box.x, b.x),
+            y: Math.min(box.y, b.y),
+            w: Math.max(box.x + box.w, b.x + b.w) - Math.min(box.x, b.x),
+            h: Math.max(box.y + box.h, b.y + b.h) - Math.min(box.y, b.y),
           }
-        : { x: v.x, y: v.y, w: v.w, h: v.h };
+        : { ...b };
     }
     if (!box) return null;
     const pad = 8;
@@ -1346,6 +1425,7 @@ export class Engine {
       w: v.w,
       h: v.h,
       text: v.text ?? '',
+      richHtml: v.richHtml,
       fontSize:
         v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
       color,
@@ -1421,7 +1501,7 @@ export class Engine {
     this.editing = false;
   }
 
-  commitText(id: string | null, text: string, target: EditTarget): void {
+  commitText(id: string | null, text: string, target: EditTarget, richHtml?: string): void {
     this.editing = false;
     this.editId = null;
     const bg = store.viewPaperBg();
@@ -1429,8 +1509,19 @@ export class Engine {
       target.type === 'text' && !readPrefs().adaptInkToPaper
         ? readableTextOn(target.color, bg)
         : target.color;
+    const baseStyle = {
+      bold: target.bold,
+      italic: target.italic,
+      underline: target.underline,
+      strike: target.strike,
+      highlight: target.highlight,
+    };
+    const spans = richHtml ? htmlToSpans(richHtml) : parseStoredRich(text, undefined, baseStyle);
+    const plain = spansToPlain(spans).replace(/\n+$/, '');
+    const storeRich =
+      richHtml && spansAreRich(spans, baseStyle) ? richHtml : undefined;
     if (id === null) {
-      const trimmed = text.trim();
+      const trimmed = plain.trim();
       if (!trimmed) return;
       const newId = store.addShape({
         type: 'text',
@@ -1442,6 +1533,7 @@ export class Engine {
         stroke: 'transparent',
         strokeWidth: 0,
         text: trimmed,
+        richHtml: storeRich,
         fontSize: target.fontSize,
         textColor: color,
         bold: target.bold || undefined,
@@ -1458,13 +1550,14 @@ export class Engine {
     } else {
       const v = this.views.get(id);
       if (!v) return;
-      if (!text.trim() && v.type === 'text') {
+      if (!plain.trim() && v.type === 'text') {
         store.removeShapes([id]);
         this.setSelection([]);
         return;
       }
       const patch: Partial<ShapeView> = {
-        text,
+        text: plain,
+        richHtml: storeRich ?? '',
         textColor: color,
         bold: target.bold,
         italic: target.italic,
@@ -1476,7 +1569,7 @@ export class Engine {
       if (v.type === 'text') {
         // keep the user's frame width; recompute height from wrapped lines
         const size = this.measureTextWrapped(
-          text,
+          plain,
           v.fontSize ?? TEXT_FONT,
           Math.max(v.w, (v.fontSize ?? TEXT_FONT) * 2),
           { bold: target.bold, italic: target.italic }
@@ -1635,6 +1728,7 @@ export class Engine {
       world: this.camera.screenToWorld(sx, sy, this.w / 2, this.h / 2),
       shift: e.shiftKey,
       alt: (e as PointerEvent).altKey ?? (e as MouseEvent).altKey ?? false,
+      pressure: 'pressure' in e ? (e as PointerEvent).pressure : undefined,
     };
   }
 
@@ -2666,31 +2760,47 @@ export class Engine {
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v) continue;
-      const x = v.x - pad;
-      const y = v.y - pad;
-      const w = v.w + pad * 2;
-      const h = v.h + pad * 2;
-      // Underlay so the accent ring reads on light fills and dark paper alike.
-      ctx.strokeStyle = 'rgba(28, 28, 26, 0.5)';
-      ctx.lineWidth = line + 1.25 * s;
-      ctx.strokeRect(x, y, w, h);
-      ctx.strokeStyle = COLORS.selection;
-      ctx.lineWidth = line;
-      ctx.strokeRect(x, y, w, h);
+      withShapeRotation(ctx, v, () => {
+        const x = v.x - pad;
+        const y = v.y - pad;
+        const w = v.w + pad * 2;
+        const h = v.h + pad * 2;
+        ctx.strokeStyle = 'rgba(28, 28, 26, 0.5)';
+        ctx.lineWidth = line + 1.25 * s;
+        ctx.strokeRect(x, y, w, h);
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = line;
+        ctx.strokeRect(x, y, w, h);
 
-      if (this.selection.size === 1 && !v.locked) {
-        for (const [fx, fy] of Object.values(HANDLE_POS)) {
-          const hx = v.x + fx * v.w;
-          const hy = v.y + fy * v.h;
+        if (this.selection.size === 1 && !v.locked) {
+          for (const [fx, fy] of Object.values(HANDLE_POS)) {
+            const hx = v.x + fx * v.w;
+            const hy = v.y + fy * v.h;
+            ctx.beginPath();
+            ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.strokeStyle = COLORS.selection;
+            ctx.lineWidth = 1.5 * s;
+            ctx.stroke();
+          }
+          // Rotation handle above top-center
+          const rx = v.x + v.w / 2;
+          const ry = v.y - 28 * s;
           ctx.beginPath();
-          ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+          ctx.moveTo(v.x + v.w / 2, v.y - pad);
+          ctx.lineTo(rx, ry);
+          ctx.strokeStyle = COLORS.selection;
+          ctx.lineWidth = 1.25 * s;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(rx, ry, hr * 1.15, 0, Math.PI * 2);
           ctx.fillStyle = '#ffffff';
           ctx.fill();
           ctx.strokeStyle = COLORS.selection;
-          ctx.lineWidth = 1.5 * s;
           ctx.stroke();
         }
-      }
+      });
     }
     ctx.restore();
   }

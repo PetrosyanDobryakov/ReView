@@ -373,6 +373,19 @@ export function StyleBar({
     }
 
     if (editing) {
+      const sel = window.getSelection();
+      const hasRange = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
+      if (hasRange && (patch.bold !== undefined || patch.italic !== undefined || patch.underline !== undefined || patch.strike !== undefined || patch.highlight !== undefined)) {
+        if (patch.bold !== undefined) document.execCommand('bold');
+        if (patch.italic !== undefined) document.execCommand('italic');
+        if (patch.underline !== undefined) document.execCommand('underline');
+        if (patch.strike !== undefined) document.execCommand('strikeThrough');
+        if (patch.highlight !== undefined) {
+          if (patch.highlight) document.execCommand('hiliteColor', false, '#ffe27a');
+          else document.execCommand('removeFormat');
+        }
+        return;
+      }
       const editPatch: Partial<EditTarget> = {};
       if (patch.bold !== undefined) editPatch.bold = patch.bold;
       if (patch.italic !== undefined) editPatch.italic = patch.italic;
