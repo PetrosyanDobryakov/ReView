@@ -6,11 +6,22 @@ export type RichStyle = {
   underline?: boolean;
   strike?: boolean;
   highlight?: boolean;
+  color?: string;
 };
 
 export type RichSpan = RichStyle & { text: string };
 
 const BLOCK_TAGS = new Set(['DIV', 'P', 'BR', 'LI']);
+
+function normalizeCssColor(raw: string): string | undefined {
+  const v = raw.trim();
+  if (!v) return undefined;
+  if (v.startsWith('#')) return v;
+  const m = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!m) return v;
+  const hex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+  return `#${hex(Number(m[1]))}${hex(Number(m[2]))}${hex(Number(m[3]))}`;
+}
 
 /** Flatten contentEditable HTML into styled spans (newlines preserved). */
 export function htmlToSpans(html: string): RichSpan[] {
@@ -40,6 +51,11 @@ export function htmlToSpans(html: string): RichSpan[] {
       next.strike = true;
     }
     if (tag === 'MARK' || el.style.backgroundColor) next.highlight = true;
+    if (tag === 'FONT') {
+      const c = el.getAttribute('color');
+      if (c) next.color = normalizeCssColor(c);
+    }
+    if (el.style.color) next.color = normalizeCssColor(el.style.color) ?? el.style.color;
     if (BLOCK_TAGS.has(tag) && spans.length && !spans[spans.length - 1].text.endsWith('\n')) {
       // block boundary
     }
@@ -81,6 +97,7 @@ export function spansToHtml(spans: RichSpan[]): string {
       if (s.underline) t = `<u>${t}</u>`;
       if (s.strike) t = `<s>${t}</s>`;
       if (s.highlight) t = `<mark>${t}</mark>`;
+      if (s.color) t = `<span style="color:${s.color}">${t}</span>`;
       return t;
     })
     .join('');
@@ -94,8 +111,17 @@ export function spansAreRich(spans: RichSpan[], base: RichStyle): boolean {
     if (Boolean(s.underline) !== Boolean(base.underline)) return true;
     if (Boolean(s.strike) !== Boolean(base.strike)) return true;
     if (Boolean(s.highlight) !== Boolean(base.highlight)) return true;
+    if (s.color) return true;
+    if (s.color && base.color && s.color.toLowerCase() !== base.color.toLowerCase()) return true;
   }
   return spans.length > 1;
+}
+
+/** Keep inline color markup even when it matches the shape-level ink. */
+export function htmlStoresRichMarkup(html: string | undefined, spans: RichSpan[], base: RichStyle): boolean {
+  if (!html || !html.includes('<')) return false;
+  if (spansAreRich(spans, base)) return true;
+  return /style\s*=\s*["'][^"']*color|<font[\s>]/i.test(html);
 }
 
 export function parseStoredRich(text: string | undefined, html: string | undefined, base: RichStyle): RichSpan[] {
@@ -174,11 +200,12 @@ export function drawRichBlock(
           ctx.fillStyle = opts.highlightFill;
           ctx.fillRect(x - 1, y - 1, rw + 2, opts.fontSize * 1.15);
         }
-        ctx.fillStyle = opts.color;
+        const runColor = r.color ?? opts.color;
+        ctx.fillStyle = runColor;
         ctx.textBaseline = 'top';
         ctx.fillText(r.text, x, y);
         if (r.underline || r.strike) {
-          ctx.strokeStyle = opts.color;
+          ctx.strokeStyle = runColor;
           ctx.lineWidth = Math.max(1, opts.fontSize / 16);
           if (r.underline) {
             const uy = y + opts.fontSize * 0.95;

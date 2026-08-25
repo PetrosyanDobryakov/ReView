@@ -31,10 +31,11 @@ export const ICON_PATHS = {
   file: 'M6 3h9l5 5v13H6zM15 3v5h5M9 13h6M9 17h4',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4',
   home: 'M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-  bold: 'M14 12a4 4 0 0 0 0-8H6v16h9a4 4 0 0 0 0-8 4 4 0 0 0-1-8zM10 6h3.5a2 2 0 1 1 0 4H10zm0 8h4.5a2 2 0 1 1 0 4H10z',
-  italic: 'M10 4h9M5 20h9M14 4l-5 16',
-  underline: 'M6 4v7a6 6 0 0 0 12 0V4M4 21h16',
-  strikethrough: 'M16 4H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6M4 12h16',
+  // Text format glyphs use ICON_MULTI (multi-stroke Lucide paths).
+  bold: '',
+  italic: '',
+  underline: '',
+  strikethrough: '',
   highlight: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
   alignLeft: 'M3 4v16M7 8h13M7 12h10M7 16h13',
   alignCenterH: 'M12 4v16M6 8h12M5 12h14M6 16h12',
@@ -65,6 +66,19 @@ export const ICON_PATHS = {
 
 export type IconName = keyof typeof ICON_PATHS;
 
+const ICON_MULTI: Partial<Record<IconName, readonly string[]>> = {
+  bold: ['M6 12h9a4 4 0 0 0 0-8H6v8', 'M6 12h10a4 4 0 0 1 0 8H6v-8'],
+  italic: ['M19 4L9 20', 'M4 20h10', 'M14 4h10'],
+  underline: ['M6 4v6a6 6 0 0 0 12 0V4', 'M4 20h16'],
+  strikethrough: ['M16 4H9a3 3 0 0 0-2.83 4', 'M14 12a4 4 0 0 1 0 8H6', 'M4 12h16'],
+};
+
+function iconPaths(name: IconName): readonly string[] {
+  const multi = ICON_MULTI[name];
+  if (multi) return multi;
+  return [ICON_PATHS[name]];
+}
+
 export const TOOLBELT_ICON_SIZE = 22;
 
 /** Shared with tool cursors so the canvas pointer matches the toolbelt glyph. */
@@ -91,6 +105,16 @@ export const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = 
   paste: [0, -0.5],
 };
 
+function PathInk({ paths }: { paths: readonly string[] }) {
+  return (
+    <>
+      {paths.map((d, i) => (
+        <path key={i} d={d} pathLength={1} />
+      ))}
+    </>
+  );
+}
+
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const nudge = ICON_NUDGE[name];
   const body =
@@ -111,7 +135,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       </>
     ) : (
       <>
-        <path d={ICON_PATHS[name]} pathLength={1} />
+        <PathInk paths={iconPaths(name)} />
         {name === 'lasso' ? <path d={LASSO_HANDLE} pathLength={1} /> : null}
         {name === 'home' ? <path d={HOME_DOOR} pathLength={1} /> : null}
       </>

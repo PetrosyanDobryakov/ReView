@@ -4,20 +4,26 @@ import type { Engine } from '../engine/Engine';
 import { boardFont, displayInk } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
 import { spansToHtml, plainToSpans } from '../core/richText';
+import { readLiveFormat, type LiveTextFormat } from '../core/textEditorFormat';
 
 export function TextOverlay({
   target,
   engine,
+  editorRef,
   onDone,
   onCancel,
+  onFormatChange,
 }: {
   target: EditTarget;
   engine: Engine;
+  editorRef?: (el: HTMLDivElement | null) => void;
   onDone: (text: string, html: string) => void;
   onCancel: () => void;
+  onFormatChange?: (format: LiveTextFormat) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
+  const blurTimer = useRef<number | null>(null);
   /** Ignore blur until the opening pointer gesture / first paint has settled. */
   const armedRef = useRef(false);
   const zoom = engine.camera.zoom;
@@ -26,6 +32,17 @@ export function TextOverlay({
   const isCentered = target.centered;
   const displayColor = target.type === 'text' ? displayInk(target.color, viewPaperBg()) : target.color;
   const align = target.textAlign ?? (isCentered ? 'center' : 'left');
+
+  const emitFormat = () => {
+    const el = ref.current;
+    if (!el || !onFormatChange) return;
+    onFormatChange(readLiveFormat(el, target.color));
+  };
+
+  useLayoutEffect(() => {
+    editorRef?.(ref.current);
+    return () => editorRef?.(null);
+  }, [editorRef]);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -47,12 +64,14 @@ export function TextOverlay({
     } else {
       el.innerText = target.text;
     }
+    el.style.color = displayColor;
     el.focus();
     const sel = window.getSelection();
     if (sel) {
       sel.selectAllChildren(el);
       sel.collapseToEnd();
     }
+    emitFormat();
     const arm = () => {
       armedRef.current = true;
     };
@@ -90,7 +109,34 @@ export function TextOverlay({
     return () => cancelAnimationFrame(raf);
   }, [engine, target, isCentered]);
 
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !onFormatChange) return;
+    const sync = () => emitFormat();
+    el.addEventListener('input', sync);
+    el.addEventListener('keyup', sync);
+    el.addEventListener('mouseup', sync);
+    document.addEventListener('selectionchange', sync);
+    return () => {
+      el.removeEventListener('input', sync);
+      el.removeEventListener('keyup', sync);
+      el.removeEventListener('mouseup', sync);
+      document.removeEventListener('selectionchange', sync);
+    };
+  }, [onFormatChange, target.color]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.color = displayColor;
+    if (target.textAlign) el.style.textAlign = target.textAlign;
+  }, [displayColor, target.textAlign, target.fontSize, target.bold, target.italic]);
+
   const finish = (commit: boolean) => {
+    if (blurTimer.current !== null) {
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
     if (doneRef.current) return;
     doneRef.current = true;
     const el = ref.current;
@@ -145,12 +191,19 @@ export function TextOverlay({
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
           e.preventDefault();
           document.execCommand('bold');
+          emitFormat();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
           e.preventDefault();
           document.execCommand('italic');
+          emitFormat();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
           e.preventDefault();
           document.execCommand('underline');
+          emitFormat();
+        } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') {
+          e.preventDefault();
+          document.execCommand('strikeThrough');
+          emitFormat();
         }
       }}
       onPaste={(e) => {
@@ -162,15 +215,37 @@ export function TextOverlay({
         } else {
           document.execCommand('insertText', false, text);
         }
+        emitFormat();
       }}
-      onBlur={() => {
+      onBlur={(e) => {
         if (!armedRef.current) {
           requestAnimationFrame(() => {
             if (!doneRef.current) ref.current?.focus();
           });
           return;
         }
-        finish(true);
+        const related = e.relatedTarget as HTMLElement | null;
+        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
+          requestAnimationFrame(() => ref.current?.focus());
+          return;
+        }
+        if (blurTimer.current !== null) window.clearTimeout(blurTimer.current);
+        blurTimer.current = window.setTimeout(() => {
+          blurTimer.current = null;
+          const active = document.activeElement;
+          if (ref.current && (active === ref.current || ref.current.contains(active))) return;
+          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
+            ref.current?.focus();
+            return;
+          }
+          finish(true);
+        }, 160);
+      }}
+      onFocus={() => {
+        if (blurTimer.current !== null) {
+          window.clearTimeout(blurTimer.current);
+          blurTimer.current = null;
+        }
       }}
     />
   );

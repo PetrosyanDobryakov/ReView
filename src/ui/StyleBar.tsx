@@ -23,6 +23,7 @@ import { readPrefs } from '../core/prefs';
 import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
+import { applyFormatToEditor, type LiveTextFormat } from '../core/textEditorFormat';
 import { t } from './i18n';
 import { Icon, type IconName } from './icons';
 import { ChromeSelect } from './ChromeSelect';
@@ -216,7 +217,9 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
               ref={addInputRef}
               type="color"
               value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#ffffff'}
-              onPointerDown={() => {
+              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                e.preventDefault();
                 lastAddAt.current = performance.now();
               }}
               onChange={(e) => {
@@ -246,8 +249,12 @@ export function StyleBar({
   eraser,
   editing,
   editTarget,
+  editLiveFormat,
+  getTextEditor,
   onPatched,
   onEditStyle,
+  onRemeasureText,
+  onSyncEditFormat,
 }: {
   locale: LocaleId;
   tool: ToolId;
@@ -258,8 +265,12 @@ export function StyleBar({
   eraser: EraserSettings;
   editing: boolean;
   editTarget: EditTarget | null;
+  editLiveFormat: LiveTextFormat | null;
+  getTextEditor: () => HTMLElement | null;
   onPatched: () => void;
   onEditStyle: (patch: Partial<EditTarget>) => void;
+  onRemeasureText: (ids: string[]) => void;
+  onSyncEditFormat?: (root: HTMLElement, fallbackColor: string) => void;
 }) {
   const drawing = selected.length === 0;
   const showEraser = tool === 'eraser';
@@ -314,7 +325,18 @@ export function StyleBar({
       : shape.rounded;
   const arrowHeadValue = arrowTargets[0]?.arrowHead ?? shape.arrowHead;
 
-  const live = editTarget
+  const live = editTarget && editLiveFormat
+    ? {
+        bold: editLiveFormat.bold,
+        italic: editLiveFormat.italic,
+        underline: editLiveFormat.underline,
+        strike: editLiveFormat.strike,
+        align: editTarget.textAlign,
+        highlight: editLiveFormat.highlight,
+        color: editLiveFormat.color,
+        size: editTarget.fontSize,
+      }
+    : editTarget
     ? {
         bold: editTarget.bold,
         italic: editTarget.italic,
@@ -360,22 +382,27 @@ export function StyleBar({
     if (textTargets.length && Object.keys(shapePatch).length) {
       patchShapes(textTargets.map((v) => [v.id, shapePatch]));
       onPatched();
+      if (patch.size !== undefined) {
+        onRemeasureText(textTargets.filter((v) => v.type === 'text').map((v) => v.id));
+      }
     }
 
     if (editing) {
-      const sel = window.getSelection();
-      const hasRange = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
-      if (hasRange && (patch.bold !== undefined || patch.italic !== undefined || patch.underline !== undefined || patch.strike !== undefined || patch.highlight !== undefined)) {
-        if (patch.bold !== undefined) document.execCommand('bold');
-        if (patch.italic !== undefined) document.execCommand('italic');
-        if (patch.underline !== undefined) document.execCommand('underline');
-        if (patch.strike !== undefined) document.execCommand('strikeThrough');
-        if (patch.highlight !== undefined) {
-          if (patch.highlight) document.execCommand('hiliteColor', false, '#ffe27a');
-          else document.execCommand('removeFormat');
+      const editor = getTextEditor();
+      if (editor instanceof HTMLElement) {
+        if (
+          patch.bold !== undefined ||
+          patch.italic !== undefined ||
+          patch.underline !== undefined ||
+          patch.strike !== undefined ||
+          patch.highlight !== undefined ||
+          patch.color !== undefined
+        ) {
+          applyFormatToEditor(editor, patch);
+          onSyncEditFormat?.(editor, editTarget?.color ?? text.color);
         }
-        return;
       }
+
       const editPatch: Partial<EditTarget> = {};
       if (patch.bold !== undefined) editPatch.bold = patch.bold;
       if (patch.italic !== undefined) editPatch.italic = patch.italic;
@@ -385,11 +412,20 @@ export function StyleBar({
       if (patch.highlight !== undefined) editPatch.highlight = patch.highlight;
       if (patch.size !== undefined) editPatch.fontSize = patch.size;
       if (patch.color !== undefined) editPatch.color = patch.color;
-      onEditStyle(editPatch);
+      if (Object.keys(editPatch).length) onEditStyle(editPatch);
+
       if (editTarget?.id && Object.keys(shapePatch).length) {
         patchShapes([[editTarget.id, shapePatch]]);
         onPatched();
+        if (patch.size !== undefined && editTarget.type === 'text') {
+          onRemeasureText([editTarget.id]);
+        }
       }
+      return;
+    }
+
+    if (!editing && patch.size !== undefined && textTargets.some((v) => v.type === 'text')) {
+      onRemeasureText(textTargets.filter((v) => v.type === 'text').map((v) => v.id));
     }
   };
 
@@ -679,8 +715,6 @@ export function StyleBar({
             locale={locale}
             color={textValue}
             onPick={(c) => {
-              // With adapt-on: store the pick; each client remaps for their paper.
-              // With adapt-off: bump low-contrast free-text picks so they stay readable.
               const onlyFreeText =
                 showTextDraw ||
                 editTarget?.type === 'text' ||

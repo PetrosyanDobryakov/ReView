@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { createBoard, getBoard, type BoardMeta } from './boards';
 import { readLocale } from './locale';
+import { getCurrentBoardId, doc } from './store';
 import { t } from '../ui/i18n';
 
 function dbName(boardId: string): string {
@@ -45,11 +46,18 @@ async function writeBoardUpdate(boardId: string, update: Uint8Array): Promise<vo
   }
 }
 
-/** Duplicate board metadata and IndexedDB document contents. */
+async function resolveSourceUpdate(sourceId: string): Promise<Uint8Array | null> {
+  if (getCurrentBoardId() === sourceId) {
+    return Y.encodeStateAsUpdate(doc);
+  }
+  return loadBoardUpdate(sourceId);
+}
+
+/** Duplicate board metadata and document contents (open session or IndexedDB). */
 export async function cloneBoard(sourceId: string): Promise<BoardMeta | null> {
   const src = getBoard(sourceId);
   if (!src) return null;
-  const update = await loadBoardUpdate(sourceId);
+  const update = await resolveSourceUpdate(sourceId);
   const locale = readLocale();
   const copy = createBoard(
     `${src.name} (${t(locale, 'duplicateBoard')})`,

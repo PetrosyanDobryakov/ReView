@@ -187,7 +187,7 @@ function paintPeerToolGlyph(
 }
 
 import { settings } from '../core/settings';
-import { spansAreRich, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
+import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
 
 export interface EditTarget {
   id: string | null;
@@ -1839,11 +1839,12 @@ export class Engine {
       underline: target.underline,
       strike: target.strike,
       highlight: target.highlight,
+      color: color,
     };
     const spans = richHtml ? htmlToSpans(richHtml) : parseStoredRich(text, undefined, baseStyle);
     const plain = spansToPlain(spans).replace(/\n+$/, '');
     const storeRich =
-      richHtml && spansAreRich(spans, baseStyle) ? richHtml : undefined;
+      richHtml && htmlStoresRichMarkup(richHtml, spans, baseStyle) ? richHtml : undefined;
     if (id === null) {
       const trimmed = plain.trim();
       if (!trimmed) return;
@@ -1948,6 +1949,21 @@ export class Engine {
     let w = 0;
     for (const line of lines) w = Math.max(w, measureMixedLine(this.ctx, line, fontSize));
     return { w: w + 4, h: lines.length * fontSize * 1.3 };
+  }
+
+  /** Reflow bounds after font / wrap changes on existing text shapes. */
+  remeasureTextShapes(ids: string[]): void {
+    for (const id of ids) {
+      const v = this.views.get(id);
+      if (!v || v.type !== 'text') continue;
+      const fontSize = v.fontSize ?? TEXT_FONT;
+      const size = this.measureTextWrapped(v.text ?? '', fontSize, Math.max(v.w, fontSize * 2), {
+        bold: v.bold,
+        italic: v.italic,
+      });
+      store.patchShape(id, { w: Math.max(v.w, size.w), h: size.h });
+    }
+    this.dirty = true;
   }
 
   /** World point under a client (viewport) coordinate — used by App file drops. */
@@ -2746,7 +2762,7 @@ export class Engine {
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
     }
-    if (document.querySelector('.sheet-root:not(.is-leaving), .ctx-menu, .info-modal, .export-root')) return;
+    if (document.querySelector('.sheet-root:not(.is-leaving), .ctx-menu, .info-modal, .export-root, .join-prompt-root')) return;
     if (this.crop) {
       if (e.key === 'Escape') {
         e.preventDefault();
