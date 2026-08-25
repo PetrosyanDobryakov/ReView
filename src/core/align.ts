@@ -276,18 +276,6 @@ export function alignViews(
     }
   }
 
-  // for points (pen/arrow) we need to shift points as well — caller will handle via patchShapes? Engine's translateSelection does points shift.
-  // Here we only move x/y; for pen/arrow we also need to shift points. So enrich patches:
-  for (const [id, patch] of patches) {
-    const v = targets.find((t) => t.id === id);
-    if (v?.points) {
-      const nx = patch.x ?? v.x;
-      const ny = patch.y ?? v.y;
-      const dx = nx - v.x;
-      const dy = ny - v.y;
-      patch.points = v.points.map((val, i) => val + (i % 2 === 0 ? dx : dy));
-    }
-  }
-
+  // Local-space polylines: x/y translation is enough — points follow on read.
   return patches;
 }

@@ -101,6 +101,11 @@ export function writeCustomColors(colors: CustomChromeColors): void {
   } catch {
     /* ignore */
   }
+  try {
+    import('./userProfile').then((m) => m.persistUserProfile());
+  } catch {
+    /* ignore */
+  }
 }
 
 function customVars(c: CustomChromeColors): Array<[string, string]> {
@@ -151,6 +156,11 @@ export function writeChromeTheme(id: ChromeThemeId): void {
     /* ignore */
   }
   applyChromeTheme(id);
+  try {
+    import('./userProfile').then((m) => m.persistUserProfile());
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Push the CSS `--chrome-selection` of the active theme into the canvas COLORS. */

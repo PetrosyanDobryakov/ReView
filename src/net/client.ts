@@ -1,11 +1,22 @@
+/**
+ * SyncClient — websocket + awareness for one board.
+ *
+ * Traffic posture:
+ * - Doc updates: coalesced in store writeGate; polylines stored local-space.
+ * - Cursors: ~25 Hz + trailing flush so the last pose always lands.
+ * - Draft strokes: awareness-only, downsampled, ~20 Hz.
+ * - Periodic resync heals rare stuck states without constant full dumps.
+ */
+
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import type { UserInfo } from '../core/user';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
+import { downsamplePolyline } from '../core/pointsSpace';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
 import { isNetLogEnabled, netLog } from './log';
-import type { CursorPos, PeerCursor, SyncStatus } from './types';
+import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 
 type StatusListener = (status: SyncStatus) => void;
 type PeerListener = (peers: PeerCursor[]) => void;
@@ -13,6 +24,29 @@ type LifecycleListener = () => void;
 
 const CURSOR_MIN_MS = 40;
 const CURSOR_LOG_SUMMARY_MS = 5000;
+const DRAFT_MIN_MS = 50;
+const DRAFT_MAX_VERTICES = 64;
+const ERASE_MIN_MS = 50;
+const ERASE_MAX_WHOLE = 48;
+const ERASE_MAX_PARTIAL_SHAPES = 16;
+const ERASE_MAX_PARTIAL_VERTS = 64;
+/** Quantize world coords to cut awareness churn from sub-pixel jitter. */
+const CURSOR_QUANT = 0.5;
+/** Self-heal rare desync without hammering the hub. */
+const RESYNC_INTERVAL_MS = 45_000;
+
+function quantizeCursor(pos: CursorPos): CursorPos {
+  return {
+    x: Math.round(pos.x / CURSOR_QUANT) * CURSOR_QUANT,
+    y: Math.round(pos.y / CURSOR_QUANT) * CURSOR_QUANT,
+  };
+}
+
+function sameCursor(a: CursorPos | null, b: CursorPos | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.x === b.x && a.y === b.y;
+}
 
 /**
  * One board’s websocket + awareness session.
@@ -27,9 +61,15 @@ export class SyncClient {
 
   private lastUser: UserInfo | null = null;
   private lastCursor: CursorPos | null = null;
+  private lastSentCursor: CursorPos | null = null;
   private lastTool: string | null = null;
   private lastPage: string | null = null;
+  private lastDraft: PeerDraft | null = null;
+  private lastErase: PeerErasePreview | null = null;
   private lastCursorSent = 0;
+  private lastDraftSent = 0;
+  private lastEraseSent = 0;
+  private cursorFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private lastEmittedStatus: SyncStatus | null = null;
   private lastLoggedRosterKey = '';
@@ -76,12 +116,17 @@ export class SyncClient {
       boardId: this.boardId,
       room: this.providerRoom ?? boardRoomName(this.boardId),
     }));
+    this.clearDraft();
+    this.clearErasePreview();
     this.teardownProvider();
     this.doc = null;
     this.boardId = null;
     this.lastCursor = null;
+    this.lastSentCursor = null;
     this.lastTool = null;
     this.lastPage = null;
+    this.lastDraft = null;
+    this.lastErase = null;
     this.lastEmittedStatus = null;
     this.lastLoggedRosterKey = '';
     this.lastCursorLogState = null;
@@ -130,7 +175,10 @@ export class SyncClient {
 
     this.teardownProvider();
     netLog.info('provider create', () => ({ url, room, boardId: this.boardId }));
-    const provider = new WebsocketProvider(url, room, this.doc);
+    const provider = new WebsocketProvider(url, room, this.doc, {
+      resyncInterval: RESYNC_INTERVAL_MS,
+      maxBackoffTime: 10_000,
+    });
     this.provider = provider;
     this.providerUrl = url;
     this.providerRoom = room;
@@ -141,6 +189,8 @@ export class SyncClient {
     if (this.lastCursor) this.writeCursor(this.lastCursor);
     if (this.lastTool) this.writeTool(this.lastTool);
     if (this.lastPage) this.writePage(this.lastPage);
+    if (this.lastDraft) this.writeDraft(this.lastDraft);
+    if (this.lastErase) this.writeErasePreview(this.lastErase);
 
     this.emitStatus();
     this.emitPeers();
@@ -152,6 +202,8 @@ export class SyncClient {
       room: this.providerRoom,
       url: this.providerUrl,
     }));
+    this.clearDraft();
+    this.clearErasePreview();
     this.teardownProvider();
     this.emitStatus();
     this.emitPeers();
@@ -199,6 +251,8 @@ export class SyncClient {
       const tool = typeof toolRaw === 'string' && toolRaw.trim() ? toolRaw.trim() : null;
       const pageRaw = state.page;
       const page = typeof pageRaw === 'string' && pageRaw.trim() ? pageRaw.trim() : null;
+      const draft = parseDraft(state.draft);
+      const erasePreview = parseErasePreview(state.erasePreview);
       peers.push({
         id,
         userId: userId || `client:${id}`,
@@ -211,6 +265,8 @@ export class SyncClient {
         y: cur?.y ?? null,
         tool,
         page,
+        draft,
+        erasePreview,
       });
     }
     return peers;
@@ -229,6 +285,7 @@ export class SyncClient {
   publishTool(tool: string): void {
     if (this.lastTool === tool) return;
     this.lastTool = tool;
+    if (tool !== 'eraser') this.clearErasePreview();
     netLog.info('publishTool', () => ({ tool }));
     this.writeTool(tool);
   }
@@ -241,16 +298,83 @@ export class SyncClient {
   }
 
   sendCursor(pos: CursorPos | null): void {
-    this.lastCursor = pos;
-    if (pos) {
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      if (now - this.lastCursorSent < CURSOR_MIN_MS) return;
-      this.lastCursorSent = now;
-      this.logCursorSend(pos, now);
-    } else {
-      this.logCursorSend(null, typeof performance !== 'undefined' ? performance.now() : Date.now());
+    this.lastCursor = pos ? quantizeCursor(pos) : null;
+    if (this.lastCursor && sameCursor(this.lastCursor, this.lastSentCursor)) {
+      return;
     }
-    this.writeCursor(pos);
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (this.lastCursor) {
+      const wait = CURSOR_MIN_MS - (now - this.lastCursorSent);
+      if (wait > 0) {
+        if (!this.cursorFlushTimer) {
+          this.cursorFlushTimer = setTimeout(() => {
+            this.cursorFlushTimer = null;
+            this.flushCursor();
+          }, wait);
+        }
+        return;
+      }
+    } else if (this.cursorFlushTimer) {
+      clearTimeout(this.cursorFlushTimer);
+      this.cursorFlushTimer = null;
+    }
+    this.flushCursor(now);
+  }
+
+  /**
+   * Publish an in-progress pen stroke to peers (awareness only).
+   * Pass null to clear after commit/cancel.
+   */
+  publishDraft(draft: PeerDraft | null): void {
+    if (!draft) {
+      this.clearDraft();
+      return;
+    }
+    const slim: PeerDraft = {
+      kind: 'pen',
+      points: downsamplePolyline(draft.points, DRAFT_MAX_VERTICES),
+      stroke: draft.stroke,
+      strokeWidth: draft.strokeWidth,
+      ...(draft.alpha !== undefined ? { alpha: draft.alpha } : {}),
+    };
+    this.lastDraft = slim;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastDraftSent < DRAFT_MIN_MS) return;
+    this.lastDraftSent = now;
+    this.writeDraft(slim);
+  }
+
+  /**
+   * Publish live eraser hover targets to peers (awareness only).
+   * Pass null to clear after commit/cancel/tool change.
+   */
+  publishErasePreview(preview: PeerErasePreview | null): void {
+    if (!preview) {
+      this.clearErasePreview();
+      return;
+    }
+    const slim: PeerErasePreview = {
+      x: Math.round(preview.x / CURSOR_QUANT) * CURSOR_QUANT,
+      y: Math.round(preview.y / CURSOR_QUANT) * CURSOR_QUANT,
+      r: preview.r,
+      mode: preview.mode,
+      whole: preview.whole.slice(0, ERASE_MAX_WHOLE),
+      ...(preview.partial
+        ? {
+            partial: Object.fromEntries(
+              Object.entries(preview.partial)
+                .slice(0, ERASE_MAX_PARTIAL_SHAPES)
+                .map(([id, indices]) => [id, indices.slice(0, ERASE_MAX_PARTIAL_VERTS)])
+            ),
+          }
+        : {}),
+    };
+    if (sameErasePreview(slim, this.lastErase)) return;
+    this.lastErase = slim;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastEraseSent < ERASE_MIN_MS) return;
+    this.lastEraseSent = now;
+    this.writeErasePreview(slim);
   }
 
   onStatus(cb: StatusListener): () => void {
@@ -274,6 +398,31 @@ export class SyncClient {
     return () => {
       this.lifecycleListeners.delete(cb);
     };
+  }
+
+  private clearErasePreview(): void {
+    if (this.lastErase === null && !this.provider) return;
+    this.lastErase = null;
+    this.writeErasePreview(null);
+  }
+
+  private clearDraft(): void {
+    if (this.lastDraft === null && !this.provider) return;
+    this.lastDraft = null;
+    this.writeDraft(null);
+  }
+
+  private flushCursor(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
+    if (this.cursorFlushTimer) {
+      clearTimeout(this.cursorFlushTimer);
+      this.cursorFlushTimer = null;
+    }
+    const pos = this.lastCursor;
+    if (pos && sameCursor(pos, this.lastSentCursor)) return;
+    this.lastCursorSent = now;
+    this.lastSentCursor = pos;
+    this.logCursorSend(pos, now);
+    this.writeCursor(pos);
   }
 
   private logCursorSend(pos: CursorPos | null, now: number): void {
@@ -333,6 +482,22 @@ export class SyncClient {
     }
   }
 
+  private writeDraft(draft: PeerDraft | null): void {
+    try {
+      this.provider?.awareness.setLocalStateField('draft', draft);
+    } catch (err) {
+      netLog.warn('writeDraft failed', () => ({ err }));
+    }
+  }
+
+  private writeErasePreview(preview: PeerErasePreview | null): void {
+    try {
+      this.provider?.awareness.setLocalStateField('erasePreview', preview);
+    } catch (err) {
+      netLog.warn('writeErasePreview failed', () => ({ err }));
+    }
+  }
+
   private bindProvider(provider: WebsocketProvider): void {
     const onStatus = (e: { status: string }) => {
       netLog.info('ws status', () => ({
@@ -346,6 +511,9 @@ export class SyncClient {
         else this.writePresence(loadUser());
         if (this.lastTool) this.writeTool(this.lastTool);
         if (this.lastPage) this.writePage(this.lastPage);
+        if (this.lastCursor) this.writeCursor(this.lastCursor);
+        if (this.lastDraft) this.writeDraft(this.lastDraft);
+        if (this.lastErase) this.writeErasePreview(this.lastErase);
       }
       this.emitStatus();
       this.emitPeers();
@@ -365,6 +533,10 @@ export class SyncClient {
   }
 
   private teardownProvider(): void {
+    if (this.cursorFlushTimer) {
+      clearTimeout(this.cursorFlushTimer);
+      this.cursorFlushTimer = null;
+    }
     this.offProviderStatus?.();
     this.offAwareness?.();
     this.offProviderStatus = null;
@@ -385,6 +557,7 @@ export class SyncClient {
     this.providerUrl = null;
     this.providerRoom = null;
     this.lastLoggedRosterKey = '';
+    this.lastSentCursor = null;
   }
 
   private emitStatus(): void {
@@ -425,6 +598,8 @@ export class SyncClient {
             tool: p.tool,
             page: p.page,
             hasCursor: p.x != null && p.y != null,
+            hasDraft: Boolean(p.draft),
+            hasErasePreview: Boolean(p.erasePreview),
           })),
         }));
       }
@@ -432,16 +607,90 @@ export class SyncClient {
     for (const l of [...this.peerListeners]) l(peers);
   }
 
-  /** Stable roster fingerprint (ignores cursor coords). */
+  /** Stable roster fingerprint (ignores cursor coords / draft geometry). */
   rosterKey(peers: PeerCursor[] = this.collectPeers()): string {
     return peers
-      .map((p) => `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}`)
+      .map(
+        (p) =>
+          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}`
+      )
       .join('\n');
   }
 
   private emitLifecycle(): void {
     for (const l of [...this.lifecycleListeners]) l();
   }
+}
+
+function sameErasePreview(a: PeerErasePreview | null, b: PeerErasePreview | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.x !== b.x || a.y !== b.y || a.r !== b.r || a.mode !== b.mode) return false;
+  if (a.whole.length !== b.whole.length) return false;
+  for (let i = 0; i < a.whole.length; i++) {
+    if (a.whole[i] !== b.whole[i]) return false;
+  }
+  const ap = a.partial ?? {};
+  const bp = b.partial ?? {};
+  const aKeys = Object.keys(ap);
+  const bKeys = Object.keys(bp);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    const ai = ap[k];
+    const bi = bp[k];
+    if (!bi || ai.length !== bi.length) return false;
+    for (let i = 0; i < ai.length; i++) {
+      if (ai[i] !== bi[i]) return false;
+    }
+  }
+  return true;
+}
+
+function parseDraft(raw: unknown): PeerDraft | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw as Record<string, unknown>;
+  if (d.kind !== 'pen') return null;
+  if (!Array.isArray(d.points) || d.points.length < 4) return null;
+  if (typeof d.stroke !== 'string' || typeof d.strokeWidth !== 'number') return null;
+  const points: number[] = [];
+  for (const n of d.points) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+    points.push(n);
+  }
+  if (points.length % 2 !== 0) return null;
+  return {
+    kind: 'pen',
+    points,
+    stroke: d.stroke,
+    strokeWidth: d.strokeWidth,
+    ...(typeof d.alpha === 'number' ? { alpha: d.alpha } : {}),
+  };
+}
+
+function parseErasePreview(raw: unknown): PeerErasePreview | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = raw as Record<string, unknown>;
+  if (typeof e.x !== 'number' || typeof e.y !== 'number' || typeof e.r !== 'number') return null;
+  if (e.mode !== 'whole' && e.mode !== 'partial') return null;
+  if (!Array.isArray(e.whole)) return null;
+  const whole: string[] = [];
+  for (const id of e.whole) {
+    if (typeof id === 'string' && id) whole.push(id);
+  }
+  let partial: Record<string, number[]> | undefined;
+  if (e.partial && typeof e.partial === 'object') {
+    partial = {};
+    for (const [id, indices] of Object.entries(e.partial as Record<string, unknown>)) {
+      if (!Array.isArray(indices)) continue;
+      const verts: number[] = [];
+      for (const n of indices) {
+        if (typeof n === 'number' && Number.isFinite(n)) verts.push(n);
+      }
+      if (verts.length) partial[id] = verts;
+    }
+    if (!Object.keys(partial).length) partial = undefined;
+  }
+  return { x: e.x, y: e.y, r: e.r, mode: e.mode, whole, ...(partial ? { partial } : {}) };
 }
 
 /** App-wide sync client (one active board at a time). */

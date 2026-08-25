@@ -4,12 +4,15 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { WebSocketServer } from 'ws';
-import { setupWSConnection } from 'y-websocket/bin/utils';
+import { setupWSConnection, docs } from 'y-websocket/bin/utils';
 
 const PORT = Number(process.env.REVIEW_SYNC_PORT) || 1234;
-const HOST = '0.0.0.0';
+const HOST = process.env.REVIEW_HOST || '0.0.0.0';
 const NET_LOG =
   process.env.REVIEW_NET_LOG === '1' || process.env.REVIEW_NET_LOG === 'true';
+/** Destroy empty in-memory rooms after this idle window (no YPERSISTENCE). */
+const EMPTY_ROOM_GC_MS = Number(process.env.REVIEW_ROOM_GC_MS) || 5 * 60 * 1000;
+const ROOM_GC_TICK_MS = 30_000;
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(ROOT, 'logs', 'net');
@@ -221,6 +224,35 @@ wss.on('connection', (conn, req) => {
   setupWSConnection(conn, req, { gc: true });
 });
 
+/** Track when rooms last became empty; destroy after EMPTY_ROOM_GC_MS. */
+const emptySince = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [name, doc] of docs) {
+    const conns = doc.conns;
+    if (!conns || conns.size > 0) {
+      emptySince.delete(name);
+      continue;
+    }
+    const since = emptySince.get(name);
+    if (since == null) {
+      emptySince.set(name, now);
+      continue;
+    }
+    if (now - since < EMPTY_ROOM_GC_MS) continue;
+    try {
+      doc.destroy();
+    } catch (err) {
+      fileLog('warn', 'room destroy failed', { room: name, err: String(err) });
+    }
+    docs.delete(name);
+    emptySince.delete(name);
+    console.log(`[review:net] room gc room=${name}`);
+    fileLog('info', 'room gc', { room: name });
+  }
+}, ROOM_GC_TICK_MS).unref?.();
+
 function onListenError(err) {
   if (err && typeof err === 'object' && 'code' in err && err.code === 'EADDRINUSE') {
     console.log(`[review] sync already running on :${PORT}`);
@@ -234,18 +266,24 @@ wss.on('error', onListenError);
 
 server.listen(PORT, HOST, () => {
   const addresses = listLanAddresses();
-  console.log(`[review] sync server on 0.0.0.0:${PORT}`);
-  console.log(`[review]   local:   ws://localhost:${PORT}`);
-  for (const ip of addresses) {
-    console.log(`[review]   network: ws://${ip}:${PORT}`);
+  console.log(`[review] sync server on ${HOST}:${PORT}`);
+  if (HOST === '0.0.0.0' || HOST === '::') {
+    console.log(`[review]   local:   ws://localhost:${PORT}`);
+    for (const ip of addresses) {
+      console.log(`[review]   network: ws://${ip}:${PORT}`);
+    }
+    if (!addresses.length) {
+      console.log(`[review]   (no private LAN IPv4 found)`);
+    }
+    console.log(`[review]   UI (dev): http://<lan-ip>:${process.env.REVIEW_UI_PORT || '5173'}  — friends open that, not localhost`);
+  } else {
+    console.log(`[review]   ws://${HOST}:${PORT}`);
+    console.log(`[review]   UI (dev): http://${HOST}:${process.env.REVIEW_UI_PORT || '5173'}`);
   }
-  if (!addresses.length) {
-    console.log(`[review]   (no private LAN IPv4 found)`);
-  }
-  console.log(`[review]   UI (dev): http://<lan-ip>:${process.env.REVIEW_UI_PORT || '5173'}  — friends open that, not localhost`);
   console.log(`[review:net] session log → ${SESSION_FILE}`);
+  console.log(`[review:net] empty-room GC after ${Math.round(EMPTY_ROOM_GC_MS / 1000)}s`);
   if (NET_LOG) {
     console.log(`[review:net] verbose HTTP logging on (REVIEW_NET_LOG)`);
   }
-  fileLog('info', 'listen', { addresses, port: PORT });
+  fileLog('info', 'listen', { addresses, port: PORT, host: HOST, emptyRoomGcMs: EMPTY_ROOM_GC_MS });
 });

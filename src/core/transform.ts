@@ -123,6 +123,47 @@ export function withShapeRotation(
   ctx.restore();
 }
 
+/** Opposite-edge fractions (0…1) kept fixed while dragging a resize handle. */
+export function resizeAnchorFractions(handle: string): { fx: number; fy: number } {
+  return {
+    fx: handle.includes('e') ? 0 : handle.includes('w') ? 1 : 0.5,
+    fy: handle.includes('s') ? 0 : handle.includes('n') ? 1 : 0.5,
+  };
+}
+
+/**
+ * After resizing the unrotated AABB of a rotated shape, shift x/y so the
+ * world position of the opposite edge/corner stays put. Without this, the
+ * box center drifts and handles feel like they resize the wrong way.
+ */
+export function reanchorRotatedResize(
+  orig: ShapeBox & { rotation?: number },
+  next: ShapeBox,
+  handle: string,
+  edges: { left: number; right: number; top: number; bottom: number }
+): ShapeBox {
+  const rot = shapeRotation(orig);
+  if (!rot) return next;
+  const { fx, fy } = resizeAnchorFractions(handle);
+  const fixedLocalX = fx * orig.w;
+  const fixedLocalY = fy * orig.h;
+  const fixedWorld = localToWorld(orig, fixedLocalX, fixedLocalY);
+  const sx = orig.w !== 0 ? (edges.right - edges.left) / orig.w : 1;
+  const sy = orig.h !== 0 ? (edges.bottom - edges.top) / orig.h : 1;
+  const mappedX = edges.left + fixedLocalX * sx;
+  const mappedY = edges.top + fixedLocalY * sy;
+  const placed = localToWorld(
+    { ...next, rotation: rot },
+    mappedX - next.x,
+    mappedY - next.y
+  );
+  return {
+    ...next,
+    x: next.x + (fixedWorld.x - placed.x),
+    y: next.y + (fixedWorld.y - placed.y),
+  };
+}
+
 /** Rotate point arrays around a center (used for pens/arrows). */
 export function rotatePointsAround(
   points: number[],

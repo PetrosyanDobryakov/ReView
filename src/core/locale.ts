@@ -25,6 +25,11 @@ export function writeLocale(id: LocaleId): void {
     /* ignore */
   }
   applyLocale(id);
+  try {
+    import('./userProfile').then((m) => m.persistUserProfile());
+  } catch {
+    /* ignore */
+  }
 }
 
 export function applyLocale(id: LocaleId): void {

@@ -90,6 +90,7 @@ const penId = store.addShape({
 });
 
 store.patchShape(id, { x: 999 });
+store.flushPendingPatches();
 assert.equal(engine.views.get(id).x, 999, 'views updated after direct patch');
 engine.onPointerDown({ clientX: 510, clientY: 360, button: 0, pointerId: 2, shiftKey: false });
 assert.equal(engine.selection.has(penId), true, 'pen line hit by its stroke');
@@ -99,6 +100,8 @@ const pv = store.readShape(store.board.get(penId));
 assert.equal(pv.x, 50, 'pen moved x');
 assert.equal(pv.points[0], 60, 'pen points moved x');
 assert.equal(pv.points[1], 60, 'pen points moved y');
+const rawPenPts = store.board.get(penId).get('points').toArray();
+assert.deepEqual(rawPenPts, [10, 10, 30, 40, 50, 10], 'stored points stay local after translate');
 
 engine.setTool('eraser');
 assert.equal(engine.tool.id, 'eraser', 'eraser tool active');
@@ -214,6 +217,8 @@ const newPen = pensAfterDraw[pensAfterDraw.length - 1][1];
 const pts = newPen.get('points').toArray();
 assert.equal(pts.length, 8, 'stroke keeps multiple points');
 assert.equal(newPen.get('strokeWidth'), 3, 'stroke uses pen width');
+const penWorld = store.readShape(newPen);
+assert.ok(penWorld.points && penWorld.points.length === 8, 'readShape expands local→world');
 
 // shift straight line
 const penCountBeforeShift = [...store.board].filter(([, m]) => m.get('type') === 'pen').length;
@@ -223,9 +228,9 @@ engine.onPointerUp({ clientX: 700, clientY: 500, button: 0, pointerId: 21, shift
 const pensAfterShift = [...store.board].filter(([, m]) => m.get('type') === 'pen');
 assert.equal(pensAfterShift.length, penCountBeforeShift + 1, 'shift stroke created');
 const shiftPen = pensAfterShift[pensAfterShift.length - 1][1];
-const shiftPts = shiftPen.get('points').toArray();
-assert.equal(shiftPts.length, 4, 'shift stroke is a 2-point straight line');
-assert.equal(shiftPts[2], 200, 'shift stroke ends at release point');
+const shiftWorld = store.readShape(shiftPen);
+assert.equal(shiftWorld.points?.length, 4, 'shift stroke is a 2-point straight line');
+assert.equal(shiftWorld.points?.[2], 200, 'shift stroke ends at release point');
 
 engine.setTool('select');
 const addA = store.addShape({

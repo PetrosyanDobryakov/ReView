@@ -91,6 +91,11 @@ function save(): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {}
   window.dispatchEvent(new CustomEvent('review-keybinds-changed'));
+  try {
+    import('./userProfile').then((m) => m.persistUserProfile());
+  } catch {
+    /* ignore */
+  }
 }
 
 export function getToolBinds(): ToolBinds {
@@ -136,6 +141,24 @@ export function setColorBind(color: string, code: string): void {
 export function resetKeybinds(): void {
   current = { tools: { ...DEFAULT_TOOL_BINDS }, colors: { ...DEFAULT_COLOR_BINDS } };
   save();
+}
+
+export function exportKeybinds(): Keybinds {
+  return {
+    tools: { ...current.tools },
+    colors: { ...current.colors },
+  };
+}
+
+export function applyKeybinds(next: Keybinds): void {
+  current = {
+    tools: { ...DEFAULT_TOOL_BINDS, ...(next.tools ?? {}) },
+    colors: { ...DEFAULT_COLOR_BINDS, ...(next.colors ?? {}) },
+  };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+  } catch {}
+  window.dispatchEvent(new CustomEvent('review-keybinds-changed'));
 }
 
 export function onKeybindsChange(cb: () => void): () => void {
