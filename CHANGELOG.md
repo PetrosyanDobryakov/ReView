@@ -2,6 +2,10 @@
 
 ## 0.12.0 — unreleased
 
+### Board & toolbar
+- Custom board paper color: color picker under the background presets in settings.
+- Insert-image button now uses an upload-style icon.
+
 ### Lock & context menu
 - Fixed inverted lock toggle: «Заблокировать» now actually locks, «Разблокировать» unlocks (headless `lock-test` added).
 - Unlock requires press-and-hold (0.8 s) in the context menu with a theme-colored progress fill and a «зажмите» hint.
