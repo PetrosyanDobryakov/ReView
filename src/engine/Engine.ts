@@ -199,6 +199,7 @@ export class Engine {
     this.canvas.addEventListener('dblclick', this.onDblClick);
     this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
+    this.canvas.addEventListener('auxclick', this.onAuxClick);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('paste', this.onPaste);
@@ -350,6 +351,7 @@ export class Engine {
     this.canvas.removeEventListener('dblclick', this.onDblClick);
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.canvas.removeEventListener('auxclick', this.onAuxClick);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('paste', this.onPaste);
@@ -1569,7 +1571,7 @@ export class Engine {
       this.cropPointerDown(e);
       return;
     }
-    if (e.button === 1 || e.button === 2) {
+    if (e.button === 1 || e.button === 2 || e.button === 4) {
       this.panDrag = true;
       this.panStart = { x: e.clientX, y: e.clientY };
       this.camera.instant = true;
@@ -1790,6 +1792,7 @@ export class Engine {
       this.panDrag = false;
       this.camera.instant = false;
       this.setCursor(this.toolCursor());
+      if (e.button === 4) e.preventDefault();
       if (
         e.button === 2 &&
         Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) < 5 &&
@@ -2135,6 +2138,11 @@ export class Engine {
 
   private onContextMenu = (e: Event): void => {
     e.preventDefault();
+  };
+
+  /** Block browser back/forward / middle-click defaults while using those buttons to pan. */
+  private onAuxClick = (e: MouseEvent): void => {
+    if (e.button === 1 || e.button === 4) e.preventDefault();
   };
 
   private openContextMenu(e: PointerEvent): void {

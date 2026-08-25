@@ -5,6 +5,30 @@ export type ColorBinds = Record<string, string>; // color hex -> code
 
 const STORAGE_KEY = 'review-keybinds';
 
+/** Toolbelt order for the binds settings list. */
+export const BIND_TOOL_ORDER: ToolId[] = [
+  'select',
+  'lasso',
+  'pan',
+  'pen',
+  'eraser',
+  'rect',
+  'ellipse',
+  'arrow',
+  'sticky',
+  'text',
+  'diamond',
+  'triangle',
+  'parallelogram',
+  'hexagon',
+  'cylinder',
+  'terminator',
+  'subroutine',
+  'display',
+  'frame',
+  'graph',
+];
+
 const DEFAULT_TOOL_BINDS: ToolBinds = {
   select: 'KeyV',
   lasso: 'KeyQ',
@@ -38,6 +62,8 @@ const DEFAULT_COLOR_BINDS: ColorBinds = {
   '#e8e2d6': 'Digit7',
   '#ff9fd0': 'Digit8',
 };
+
+export const BIND_COLOR_ORDER = Object.keys(DEFAULT_COLOR_BINDS);
 
 export interface Keybinds {
   tools: ToolBinds;

@@ -55,8 +55,8 @@ export const ICON_PATHS = {
   display: 'M3 5h11l5 7-5 7H3z',
   // Evenly spaced layers — closed top plate, open shelves (no stem).
   more: 'M12 2.5l8 4-8 4-8-4zM4 12.5l8 4 8-4M4 17.5l8 4 8-4',
-  // Two stacked process boxes + connector.
-  blockScheme: 'M7 3.5h10v6H7zM12 9.5v3M7 12.5h10v6H7z',
+  // Two stacked process boxes + connector — centered in 24² (ink ≈ y 4.5–19.5).
+  blockScheme: 'M7 4.5h10v6H7zM12 10.5v3M7 13.5h10v6H7z',
   chevronDown: 'M6 9l6 6 6-6',
 } as const;
 
@@ -79,7 +79,6 @@ export const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = 
   eraser: [-0.25, -0.75],
   sticky: [-0.5, 0],
   text: [0, -0.5],
-  blockScheme: [0, 1],
   triangle: [0, 0.5],
   parallelogram: [1.5, 0],
   terminator: [0, -2],
