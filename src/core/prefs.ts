@@ -10,6 +10,8 @@ export interface AppPrefs {
   adaptInkToPaper: boolean;
   /** Multiplier for on-canvas tool cursors (0.7–1.8). */
   toolCursorScale: number;
+  /** Per-tool hover motion on the toolbelt. */
+  toolHoverAnim: boolean;
   /**
    * Local board paper color. When set, overrides synced meta `bg` so collaborators
    * can use different papers on the same board.
@@ -23,6 +25,7 @@ const DEFAULTS: AppPrefs = {
   saveRemoteBoards: false,
   adaptInkToPaper: true,
   toolCursorScale: 1,
+  toolHoverAnim: true,
   paperBg: null,
 };
 
@@ -54,6 +57,7 @@ function parsePrefs(raw: unknown): AppPrefs {
       typeof parsed.adaptInkToPaper === 'boolean' ? parsed.adaptInkToPaper : DEFAULTS.adaptInkToPaper,
     toolCursorScale:
       typeof parsed.toolCursorScale === 'number' ? clampCursorScale(parsed.toolCursorScale) : DEFAULTS.toolCursorScale,
+    toolHoverAnim: typeof parsed.toolHoverAnim === 'boolean' ? parsed.toolHoverAnim : DEFAULTS.toolHoverAnim,
     paperBg: typeof parsed.paperBg === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.paperBg) ? parsed.paperBg : null,
   };
 }

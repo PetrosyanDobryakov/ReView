@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { ToolId } from '../engine/tools';
-import type { ShapeView } from '../core/shapes';
+import type { ShapeView, TextAlign } from '../core/shapes';
 import { readableTextOn } from '../core/shapes';
 import {
   effectivePen,
@@ -16,7 +16,9 @@ import {
 import { viewPaperBg, patchShapes } from '../core/store';
 import { readPrefs } from '../core/prefs';
 import type { LocaleId } from '../core/locale';
+import type { EditTarget } from '../engine/Engine';
 import { t } from './i18n';
+import { Icon, type IconName } from './icons';
 import { MOTION, useExitPresence } from './motion';
 
 const PEN_COLORS = ['#eceae4', '#ffe27a', '#ff6b6b', '#4cd964', '#c4a35a', '#ffa94d', '#c4b8a8', '#ff9fd0'];
@@ -30,6 +32,11 @@ const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 
 const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+
+type FormatPatch = Partial<
+  Pick<TextSettings, 'bold' | 'italic' | 'underline' | 'strike' | 'align' | 'highlight' | 'color' | 'size'>
+>;
 
 function Swatches({
   colors,
@@ -53,14 +60,70 @@ function Swatches({
           title={c}
           aria-label={c}
           aria-pressed={value === c}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onPick(c)}
         />
       ))}
       {custom && (
-        <input type="color" className="swatch-custom" value={value} title={value} onChange={(e) => onPick(e.target.value)} />
+        <input
+          type="color"
+          className="swatch-custom"
+          value={value}
+          title={value}
+          onMouseDown={(e) => e.preventDefault()}
+          onChange={(e) => onPick(e.target.value)}
+        />
       )}
     </div>
   );
+}
+
+function FormatBtn({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: IconName;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`style-btn style-btn-icon${active ? ' active' : ''}`}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+    >
+      <Icon name={icon} size={16} />
+    </button>
+  );
+}
+
+function formatFromShape(v: ShapeView): {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  align: TextAlign;
+  highlight: boolean;
+  color: string;
+  size: number;
+} {
+  return {
+    bold: !!v.bold,
+    italic: !!v.italic,
+    underline: !!v.underline,
+    strike: !!v.strike,
+    align: v.textAlign ?? (CENTERED_TYPES.has(v.type) ? 'center' : 'left'),
+    highlight: !!v.highlight,
+    color: v.textColor ?? '',
+    size: v.fontSize ?? 18,
+  };
 }
 
 export function StyleBar({
@@ -71,7 +134,10 @@ export function StyleBar({
   shape,
   text,
   eraser,
+  editing,
+  editTarget,
   onPatched,
+  onEditStyle,
 }: {
   locale: LocaleId;
   tool: ToolId;
@@ -80,13 +146,16 @@ export function StyleBar({
   shape: ShapeSettings;
   text: TextSettings;
   eraser: EraserSettings;
+  editing: boolean;
+  editTarget: EditTarget | null;
   onPatched: () => void;
+  onEditStyle: (patch: Partial<EditTarget>) => void;
 }) {
   const drawing = selected.length === 0;
   const showEraser = tool === 'eraser';
   const showPen = tool === 'pen' && drawing;
   const showShapeDraw = SHAPE_TOOLS.includes(tool) && drawing;
-  const showTextDraw = tool === 'text' && drawing;
+  const showTextDraw = (tool === 'text' && drawing) || editing;
   const fillTargets = selected.filter((v) => FILL_TYPES.has(v.type) && !v.locked);
   const strokeTargets = selected.filter((v) => STROKE_TYPES.has(v.type) && !v.locked);
   const textTargets = selected.filter((v) => TEXT_TYPES.has(v.type) && !v.locked);
@@ -109,8 +178,72 @@ export function StyleBar({
 
   const fillValue = fillTargets[0]?.fill ?? shape.fill;
   const strokeValue = strokeTargets[0]?.stroke ?? penTargets[0]?.stroke ?? (showPen ? pen.color : shape.stroke);
-  const textValue = textTargets[0]?.textColor ?? text.color;
-  const textSize = textTargets[0]?.fontSize ?? text.size;
+
+  const live = editTarget
+    ? {
+        bold: editTarget.bold,
+        italic: editTarget.italic,
+        underline: editTarget.underline,
+        strike: editTarget.strike,
+        align: editTarget.textAlign,
+        highlight: editTarget.highlight,
+        color: editTarget.color,
+        size: editTarget.fontSize,
+      }
+    : textTargets[0]
+      ? formatFromShape(textTargets[0])
+      : {
+          bold: text.bold,
+          italic: text.italic,
+          underline: text.underline,
+          strike: text.strike,
+          align: text.align,
+          highlight: text.highlight,
+          color: text.color,
+          size: text.size,
+        };
+
+  const textValue = live.color || text.color;
+  const textSize = live.size;
+  const showHighlight =
+    editTarget?.type === 'text' ||
+    (!editTarget && tool === 'text' && drawing) ||
+    (!editTarget && textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
+
+  const applyFormat = (patch: FormatPatch) => {
+    updateTextSettings(patch);
+    const shapePatch: Partial<ShapeView> = {};
+    if (patch.bold !== undefined) shapePatch.bold = patch.bold;
+    if (patch.italic !== undefined) shapePatch.italic = patch.italic;
+    if (patch.underline !== undefined) shapePatch.underline = patch.underline;
+    if (patch.strike !== undefined) shapePatch.strike = patch.strike;
+    if (patch.align !== undefined) shapePatch.textAlign = patch.align;
+    if (patch.highlight !== undefined) shapePatch.highlight = patch.highlight;
+    if (patch.size !== undefined) shapePatch.fontSize = patch.size;
+    if (patch.color !== undefined) shapePatch.textColor = patch.color;
+
+    if (textTargets.length && Object.keys(shapePatch).length) {
+      patchShapes(textTargets.map((v) => [v.id, shapePatch]));
+      onPatched();
+    }
+
+    if (editing) {
+      const editPatch: Partial<EditTarget> = {};
+      if (patch.bold !== undefined) editPatch.bold = patch.bold;
+      if (patch.italic !== undefined) editPatch.italic = patch.italic;
+      if (patch.underline !== undefined) editPatch.underline = patch.underline;
+      if (patch.strike !== undefined) editPatch.strike = patch.strike;
+      if (patch.align !== undefined) editPatch.textAlign = patch.align;
+      if (patch.highlight !== undefined) editPatch.highlight = patch.highlight;
+      if (patch.size !== undefined) editPatch.fontSize = patch.size;
+      if (patch.color !== undefined) editPatch.color = patch.color;
+      onEditStyle(editPatch);
+      if (editTarget?.id && Object.keys(shapePatch).length) {
+        patchShapes([[editTarget.id, shapePatch]]);
+        onPatched();
+      }
+    }
+  };
 
   return (
     <div className={`island style-island${want ? '' : ' is-leaving'}`}>
@@ -240,6 +373,61 @@ export function StyleBar({
       )}
       {view.showText && (
         <>
+          <div className="text-format" role="group" aria-label={t(locale, 'textFormat')}>
+            <FormatBtn
+              label={t(locale, 'textBold')}
+              icon="bold"
+              active={live.bold}
+              onClick={() => applyFormat({ bold: !live.bold })}
+            />
+            <FormatBtn
+              label={t(locale, 'textItalic')}
+              icon="italic"
+              active={live.italic}
+              onClick={() => applyFormat({ italic: !live.italic })}
+            />
+            <FormatBtn
+              label={t(locale, 'textUnderline')}
+              icon="underline"
+              active={live.underline}
+              onClick={() => applyFormat({ underline: !live.underline })}
+            />
+            <FormatBtn
+              label={t(locale, 'textStrike')}
+              icon="strikethrough"
+              active={live.strike}
+              onClick={() => applyFormat({ strike: !live.strike })}
+            />
+            <div className="toolbelt-sep" />
+            {showHighlight && (
+              <FormatBtn
+                label={t(locale, 'textHighlight')}
+                icon="highlight"
+                active={live.highlight}
+                onClick={() => applyFormat({ highlight: !live.highlight })}
+              />
+            )}
+            {showHighlight && <div className="toolbelt-sep" />}
+            <FormatBtn
+              label={t(locale, 'textAlignLeft')}
+              icon="alignLeft"
+              active={live.align === 'left'}
+              onClick={() => applyFormat({ align: 'left' })}
+            />
+            <FormatBtn
+              label={t(locale, 'textAlignCenter')}
+              icon="alignCenterH"
+              active={live.align === 'center'}
+              onClick={() => applyFormat({ align: 'center' })}
+            />
+            <FormatBtn
+              label={t(locale, 'textAlignRight')}
+              icon="alignRight"
+              active={live.align === 'right'}
+              onClick={() => applyFormat({ align: 'right' })}
+            />
+          </div>
+          <div className="toolbelt-sep" />
           <Swatches
             colors={TEXT_COLORS}
             value={textValue}
@@ -248,23 +436,13 @@ export function StyleBar({
               // With adapt-on: store the pick; each client remaps for their paper.
               // With adapt-off: bump low-contrast free-text picks so they stay readable.
               const onlyFreeText =
-                showTextDraw || (textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
+                showTextDraw ||
+                editTarget?.type === 'text' ||
+                (textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
               const bg = viewPaperBg();
               const next =
                 onlyFreeText && !readPrefs().adaptInkToPaper ? readableTextOn(c, bg) : c;
-              updateTextSettings({ color: next });
-              if (textTargets.length) {
-                patchShapes(
-                  textTargets.map((v) => [
-                    v.id,
-                    {
-                      textColor:
-                        v.type === 'text' && !readPrefs().adaptInkToPaper ? readableTextOn(c, bg) : c,
-                    },
-                  ])
-                );
-                onPatched();
-              }
+              applyFormat({ color: next });
             }}
           />
           <select
@@ -272,12 +450,7 @@ export function StyleBar({
             value={textSize}
             title={t(locale, 'textSize')}
             onChange={(e) => {
-              const size = Number(e.target.value);
-              updateTextSettings({ size });
-              if (textTargets.length) {
-                patchShapes(textTargets.map((v) => [v.id, { fontSize: size }]));
-                onPatched();
-              }
+              applyFormat({ size: Number(e.target.value) });
             }}
           >
             {TEXT_SIZES.map((s) => (

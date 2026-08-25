@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
-import { displayInk } from '../core/shapes';
+import { boardFont, displayInk, TEXT_HIGHLIGHT } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
 
 export function TextOverlay({
@@ -24,6 +24,7 @@ export function TextOverlay({
   const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
   const isCentered = target.centered;
   const displayColor = target.type === 'text' ? displayInk(target.color, viewPaperBg()) : target.color;
+  const align = target.textAlign ?? (isCentered ? 'center' : 'left');
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -48,7 +49,7 @@ export function TextOverlay({
       cancelAnimationFrame(raf);
       window.removeEventListener('pointerup', arm);
     };
-  }, [target, displayColor]);
+  }, [target.id, target.x, target.y]);
 
   useEffect(() => {
     const el = ref.current;
@@ -62,6 +63,7 @@ export function TextOverlay({
       el.style.top = `${p.y}px`;
       el.style.width = `${Math.max(isCentered ? 20 : 120, target.w * z)}px`;
       el.style.fontSize = `${size}px`;
+      el.style.font = boardFont(size, target);
       if (isCentered) {
         el.style.height = `${target.h * z}px`;
         el.style.minHeight = `${target.h * z}px`;
@@ -98,14 +100,19 @@ export function TextOverlay({
         width: Math.max(isCentered ? 20 : 120, target.w * zoom),
         height: isCentered ? target.h * zoom : undefined,
         minHeight: isCentered ? target.h * zoom : fontPx * 1.3,
-        fontSize: fontPx,
+        font: boardFont(fontPx, target),
         color: displayColor,
         caretColor: displayColor,
         display: isCentered ? 'flex' : 'block',
         alignItems: isCentered ? 'center' : undefined,
-        justifyContent: isCentered ? 'center' : undefined,
-        textAlign: isCentered ? 'center' : 'left',
-        padding: isCentered ? '0 8px' : '0',
+        justifyContent: isCentered ? (align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center') : undefined,
+        textAlign: align,
+        textDecoration: [target.underline ? 'underline' : '', target.strike ? 'line-through' : '']
+          .filter(Boolean)
+          .join(' ') || 'none',
+        background: target.highlight && target.type === 'text' ? TEXT_HIGHLIGHT : 'transparent',
+        borderRadius: target.highlight && target.type === 'text' ? 4 : undefined,
+        padding: isCentered ? '0 8px' : target.highlight ? '2px 4px' : '0',
         overflow: isCentered ? 'hidden' : undefined,
       }}
       onKeyDown={(e) => {

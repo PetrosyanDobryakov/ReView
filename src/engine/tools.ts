@@ -77,6 +77,11 @@ export class SelectTool extends Tool {
       engine.setCursor(HANDLE_CURSORS[h.handle]);
       return;
     }
+    const port = engine.hitPort(p.screen.x, p.screen.y);
+    if (port && engine.selection.has(port.shapeId)) {
+      engine.setCursor('crosshair');
+      return;
+    }
     engine.setCursor(engine.hitTest(p.world.x, p.world.y) ? 'move' : engine.toolCursor());
   }
 

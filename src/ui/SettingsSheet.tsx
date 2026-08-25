@@ -273,6 +273,21 @@ export function SettingsSheet({
               />
               <span className="sheet-range-value">{Math.round(prefs.toolCursorScale * 100)}%</span>
             </label>
+            <button
+              type="button"
+              className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
+              role="switch"
+              aria-checked={prefs.toolHoverAnim}
+              onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
+            >
+              <span>{t(locale, 'toolHoverAnim')}</span>
+              <span className="switch" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+            </button>
+            <p className="sheet-hint">
+              <SwapText text={t(locale, 'toolHoverAnimHint')} />
+            </p>
           </section>
 
           <section className="sheet-section">

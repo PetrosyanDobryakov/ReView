@@ -28,6 +28,11 @@ export const ICON_PATHS = {
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4',
   home: 'M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  bold: 'M14 12a4 4 0 0 0 0-8H6v16h9a4 4 0 0 0 0-8 4 4 0 0 0-1-8zM10 6h3.5a2 2 0 1 1 0 4H10zm0 8h4.5a2 2 0 1 1 0 4H10z',
+  italic: 'M10 4h9M5 20h9M14 4l-5 16',
+  underline: 'M6 4v7a6 6 0 0 0 12 0V4M4 21h16',
+  strikethrough: 'M16 4H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6M4 12h16',
+  highlight: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
   alignLeft: 'M3 4v16M7 8h13M7 12h10M7 16h13',
   alignCenterH: 'M12 4v16M6 8h12M5 12h14M6 16h12',
   alignRight: 'M21 4v16M4 8h13M7 12h10M4 16h13',
@@ -57,15 +62,18 @@ export type IconName = keyof typeof ICON_PATHS;
 
 export const TOOLBELT_ICON_SIZE = 22;
 
-const LASSO_HANDLE = 'M7.2 16.8c-1.3 2.2-2.9 3.8-3.6 3.8';
+/** Shared with tool cursors so the canvas pointer matches the toolbelt glyph. */
+export const LASSO_HANDLE = 'M7.2 16.8c-1.3 2.2-2.9 3.8-3.6 3.8';
+export const LASSO_NUDGE = [0.45, -0.8] as const;
+
 const HOME_DOOR = 'M9 21v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8';
 const PAN_FIT = 'translate(12 12) scale(0.88) translate(-13 -12.5)';
 const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
 /** Translate glyphs so their ink sits in the center of the 24² viewBox (tool circle). */
-const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = {
+export const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = {
   select: [-0.75, 0],
-  lasso: [0.45, -0.8],
+  lasso: LASSO_NUDGE,
   eraser: [-0.25, -0.75],
   sticky: [-0.5, 0],
   text: [0, -0.5],
@@ -84,17 +92,17 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const body =
     name === 'pan' ? (
       <g transform={PAN_FIT}>
-        <path d={ICON_PATHS.pan} />
+        <path d={ICON_PATHS.pan} pathLength={1} />
       </g>
     ) : name === 'pen' ? (
       <g transform={PEN_FIT}>
-        <path d={ICON_PATHS.pen} />
+        <path d={ICON_PATHS.pen} pathLength={1} />
       </g>
     ) : (
       <>
-        <path d={ICON_PATHS[name]} strokeDasharray={name === 'lasso' ? '3.25 2.7' : undefined} />
-        {name === 'lasso' ? <path d={LASSO_HANDLE} /> : null}
-        {name === 'home' ? <path d={HOME_DOOR} /> : null}
+        <path d={ICON_PATHS[name]} pathLength={1} />
+        {name === 'lasso' ? <path d={LASSO_HANDLE} pathLength={1} /> : null}
+        {name === 'home' ? <path d={HOME_DOOR} pathLength={1} /> : null}
       </>
     );
 
@@ -110,6 +118,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       strokeLinejoin="round"
       overflow="visible"
       aria-hidden="true"
+      data-icon={name}
     >
       {nudge ? <g transform={`translate(${nudge[0]} ${nudge[1]})`}>{body}</g> : body}
     </svg>
