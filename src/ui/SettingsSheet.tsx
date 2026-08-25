@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   CHROME_THEME_IDS,
   readCustomColors,
@@ -21,16 +21,27 @@ import {
   setToolBind,
 } from '../core/keybindings';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
-import type { SyncStatus } from '../core/store';
+import type {
+  SyncStatus,
+} from '../core/store';
+import {
+  defaultSyncUrl,
+  effectiveSyncUrl,
+  getBoardRoomName,
+  getCurrentBoardId,
+  reconnectSync,
+} from '../core/store';
 import {
   CURSOR_SCALE_MAX,
   CURSOR_SCALE_MIN,
   UI_SCALE_MAX,
   UI_SCALE_MIN,
+  parseSyncUrl,
   readPrefs,
   writePrefs,
   type AppPrefs,
 } from '../core/prefs';
+import { loadUser, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
 import type { ToolId } from '../engine/tools';
 import { Icon, type IconName } from './icons';
 import { BG_PRESETS, CHROME_LABEL, modKey, t } from './i18n';
@@ -142,6 +153,7 @@ export function SettingsSheet({
   nick,
   hideBoardSection = false,
   ephemeral = false,
+  focusSection = null,
   onNick,
   onLocale,
   onChromeTheme,
@@ -160,6 +172,7 @@ export function SettingsSheet({
   nick: string;
   hideBoardSection?: boolean;
   ephemeral?: boolean;
+  focusSection?: 'connection' | null;
   onNick: (value: string) => void;
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
@@ -172,6 +185,11 @@ export function SettingsSheet({
   const [tab, setTab] = useState<SettingsTab>('system');
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
+  const [userColor, setUserColor] = useState(() => loadUser().color);
+  const [syncUrlDraft, setSyncUrlDraft] = useState(() => readPrefs().syncUrl ?? '');
+  const [syncUrlError, setSyncUrlError] = useState(false);
+  const connectionRef = useRef<HTMLElement | null>(null);
+  const boardSession = Boolean(getCurrentBoardId());
   const [customBoardBg, setCustomBoardBg] = useState(() => {
     if (!BG_PRESETS.some((p) => p.value === bg) && /^#[0-9a-fA-F]{6}$/.test(bg)) return bg;
     try {
@@ -209,8 +227,25 @@ export function SettingsSheet({
       setColorBinds(getColorBinds());
     };
     syncBinds();
+    setPrefs(readPrefs());
+    setUserColor(loadUser().color);
+    setSyncUrlDraft(readPrefs().syncUrl ?? '');
+    setSyncUrlError(false);
     return onKeybindsChange(syncBinds);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || focusSection !== 'connection') return;
+    setTab('system');
+  }, [open, focusSection]);
+
+  useEffect(() => {
+    if (!open || focusSection !== 'connection' || tab !== 'system') return;
+    const id = requestAnimationFrame(() => {
+      connectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, focusSection, tab]);
 
   useEffect(() => {
     if (!listening) return;
@@ -318,15 +353,51 @@ export function SettingsSheet({
                     onChange={(e) => onNick(e.target.value)}
                   />
                 </label>
+                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
+                  {USER_COLOR_PALETTE.map((c) => (
+                    <button
+                      type="button"
+                      key={c}
+                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
+                      style={{ background: c }}
+                      title={c}
+                      aria-label={c}
+                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
+                      onClick={() => {
+                        const next = saveUserColor(c);
+                        setUserColor(next.color);
+                      }}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    className="members-swatch-custom"
+                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
+                    title={userColor}
+                    aria-label={t(locale, 'membersColor')}
+                    onChange={(e) => {
+                      const next = saveUserColor(e.target.value);
+                      setUserColor(next.color);
+                    }}
+                  />
+                </div>
               </section>
 
-              <section className="sheet-section">
+              <section className="sheet-section" ref={connectionRef}>
                 <h3>
                   <SwapText text={t(locale, 'connection')} />
                 </h3>
                 <p className="sheet-hint">
                   <SwapText text={t(locale, 'syncHint')} />
                 </p>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'syncLanHint')} />
+                </p>
+                {!boardSession ? (
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'syncBoardOnly')} />
+                  </p>
+                ) : null}
                 <ul className="sheet-keys">
                   <li>
                     <span className={`status-line${sync.online ? ' on' : ''}`}>
@@ -338,7 +409,91 @@ export function SettingsSheet({
                     <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
                     <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
                   </li>
+                  <li>
+                    <span>{t(locale, 'syncRoom')}</span>
+                    <span className="sheet-mono">{getBoardRoomName(getCurrentBoardId())}</span>
+                  </li>
+                  <li>
+                    <span>{t(locale, 'syncUrl')}</span>
+                    <span className="sheet-mono" title={effectiveSyncUrl()}>
+                      {effectiveSyncUrl()}
+                    </span>
+                  </li>
                 </ul>
+                <label className="nick-row">
+                  <span>{t(locale, 'syncUrl')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={syncUrlDraft}
+                    placeholder={defaultSyncUrl()}
+                    spellCheck={false}
+                    disabled={!boardSession}
+                    aria-invalid={syncUrlError}
+                    onChange={(e) => {
+                      setSyncUrlDraft(e.target.value);
+                      setSyncUrlError(false);
+                    }}
+                  />
+                </label>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, syncUrlError ? 'syncUrlInvalid' : 'syncUrlHint')} />
+                </p>
+                <div className="sheet-actions">
+                  <button
+                    type="button"
+                    className="style-btn active"
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const trimmed = syncUrlDraft.trim();
+                      if (trimmed) {
+                        const parsed = parseSyncUrl(trimmed);
+                        if (!parsed) {
+                          setSyncUrlError(true);
+                          return;
+                        }
+                        const next = writePrefs({ syncUrl: parsed });
+                        setPrefs(next);
+                        setSyncUrlDraft(next.syncUrl ?? '');
+                      } else {
+                        const next = writePrefs({ syncUrl: null });
+                        setPrefs(next);
+                        setSyncUrlDraft('');
+                      }
+                      setSyncUrlError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlApply')}
+                  </button>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const next = writePrefs({ syncUrl: null });
+                      setPrefs(next);
+                      setSyncUrlDraft('');
+                      setSyncUrlError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlReset')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`style-btn${prefs.syncEnabled ? '' : ' active'}`}
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const enabled = !prefs.syncEnabled;
+                      const next = writePrefs({ syncEnabled: enabled });
+                      setPrefs(next);
+                      reconnectSync();
+                    }}
+                  >
+                    {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
+                  </button>
+                </div>
               </section>
 
               <section className="sheet-section">

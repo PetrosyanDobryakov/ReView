@@ -5,7 +5,7 @@ import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
-import { Presence } from './ui/Presence';
+import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
@@ -17,17 +17,32 @@ import type { ShapeBox } from './core/shapes';
 import type { AlignKind } from './core/align';
 import { Icon } from './ui/icons';
 import { modKey, t, type MessageKey } from './ui/i18n';
-import { destroyProvider, meta, metaBg, metaGrid, viewPaperBg, onSyncStatus, persistence, setMeta, undoManager, initBoard, enableBoardPersistence } from './core/store';
+import {
+  leaveBoard,
+  meta,
+  metaBg,
+  metaGrid,
+  viewPaperBg,
+  onSyncStatus,
+  persistence,
+  setMeta,
+  undoManager,
+  initBoard,
+  enableBoardPersistence,
+  tryGetProvider,
+  onSyncConfigChange,
+  onPeers,
+  publishPresence,
+  onPageChange,
+} from './core/store';
 import { readPrefs, writePrefs } from './core/prefs';
-import type { SyncStatus } from './core/store';
+import type { SyncStatus, PeerCursor } from './core/store';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
 import { fileToDocPages } from './core/docImport';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
-import { getProvider, onPeers, publishPresence, onPageChange } from './core/store';
-import type { PeerCursor } from './core/store';
 import { MOTION, useExitPresence } from './ui/motion';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
@@ -114,7 +129,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [gridOn, setGridOn] = useState(metaGrid());
   const [cropActive, setCropActive] = useState(false);
   const [canCrop, setCanCrop] = useState(false);
-  const [sync, setSync] = useState<SyncStatus>({ online: false, users: 0 });
+  const [sync, setSync] = useState<SyncStatus>({ online: false, users: 0, enabled: true });
   const [menu, setMenu] = useState<BoardMenu | null>(null);
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
@@ -122,6 +137,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [nick, setNick] = useState(() => loadUser().name);
   const [peers, setPeers] = useState<PeerCursor[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsFocus, setSettingsFocus] = useState<'connection' | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const boardMeta = getBoard(boardId);
@@ -226,16 +242,29 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setNick(u.name);
       publishPresence(u);
     });
-    const p = getProvider();
     const onStatus = (st: { status: string }) => {
       if (st.status === 'connected') publishPresence(loadUser());
     };
-    p.on('status', onStatus);
+    let bound: ReturnType<typeof tryGetProvider> = null;
+    const bind = () => {
+      if (bound) {
+        bound.off('status', onStatus);
+        bound = null;
+      }
+      const p = tryGetProvider();
+      if (!p) return;
+      bound = p;
+      p.on('status', onStatus);
+      if (p.ws?.readyState === WebSocket.OPEN) publishPresence(loadUser());
+    };
+    bind();
+    const offConfig = onSyncConfigChange(bind);
     return () => {
       offUser();
-      p.off('status', onStatus);
+      offConfig();
+      if (bound) bound.off('status', onStatus);
     };
-  }, []);
+  }, [boardId]);
 
   useEffect(() => {
     return onPeers((list) => {
@@ -318,7 +347,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
-      destroyProvider();
+      leaveBoard();
     };
   }, [boardId]);
 
@@ -591,7 +620,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               {t(locale, 'error')}: {errorView}
             </button>
           )}
-          <Presence locale={locale} online={sync.online} names={peers.map((p) => p.name)} />
+          <MembersMenu
+            locale={locale}
+            online={sync.online}
+            peers={peers}
+            onOpenConnection={() => {
+              setSettingsFocus('connection');
+              setSettingsOpen(true);
+            }}
+          />
           <div className="island-sep" />
           <button
             type="button"
@@ -599,7 +636,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             title={t(locale, 'settings')}
             aria-label={t(locale, 'settings')}
             aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsFocus(null);
+              setSettingsOpen(true);
+            }}
           >
             <Icon name="settings" />
           </button>
@@ -692,7 +732,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           setBg(metaBg());
         }}
         onGrid={(on) => setMeta({ grid: on })}
-        onClose={() => setSettingsOpen(false)}
+        focusSection={settingsFocus}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsFocus(null);
+        }}
       />
 
       {menuShown && menuView && (

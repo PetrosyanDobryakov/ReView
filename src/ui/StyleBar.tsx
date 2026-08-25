@@ -25,6 +25,7 @@ import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
 import { t } from './i18n';
 import { Icon, type IconName } from './icons';
+import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
 import { hasFill } from '../core/shapes';
 
@@ -743,20 +744,20 @@ export function StyleBar({
               applyFormat({ color: next });
             }}
           />
-          <select
+          <ChromeSelect
             className="size-select"
-            value={textSize}
+            size="md"
+            preserveFocus
+            value={String(textSize)}
+            label={t(locale, 'textSize')}
             title={t(locale, 'textSize')}
-            onChange={(e) => {
-              applyFormat({ size: Number(e.target.value) });
+            options={(TEXT_SIZES.includes(textSize) ? TEXT_SIZES : [...TEXT_SIZES, textSize].sort((a, b) => a - b)).map(
+              (s) => ({ value: String(s), label: String(s) })
+            )}
+            onChange={(next) => {
+              applyFormat({ size: Number(next) });
             }}
-          >
-            {TEXT_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+          />
         </>
       )}
       </div>

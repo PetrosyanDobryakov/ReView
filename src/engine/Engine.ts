@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, boardFont, containedIn, withAlpha } from '../core/shapes';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, BOARD_TYPEFACE, boardFont, containedIn, withAlpha } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -43,6 +43,15 @@ const CROP_CURSORS: Record<HandleId, string> = {
   e: 'ew-resize',
   w: 'ew-resize',
 };
+
+function peerLabelInk(fill: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/i.test(fill)) return '#1c1c1a';
+  const r = parseInt(fill.slice(1, 3), 16);
+  const g = parseInt(fill.slice(3, 5), 16);
+  const b = parseInt(fill.slice(5, 7), 16);
+  const lum = (r * 299 + g * 587 + b * 114) / 1000;
+  return lum >= 160 ? '#1c1c1a' : '#f7f5f0';
+}
 
 import { settings } from '../core/settings';
 import { spansAreRich, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
@@ -147,9 +156,28 @@ export class Engine {
   editing = false;
   editId: string | null = null;
   remotePeers: PeerCursor[] = [];
+  /** Smoothed cursor positions keyed by awareness client id. */
+  private peerLerp = new Map<number, { x: number; y: number; tx: number; ty: number }>();
 
   setPeers(peers: PeerCursor[]): void {
     this.remotePeers = peers;
+    const live = new Set(peers.map((p) => p.id));
+    for (const id of [...this.peerLerp.keys()]) {
+      if (!live.has(id)) this.peerLerp.delete(id);
+    }
+    for (const peer of peers) {
+      if (peer.x === null || peer.y === null) {
+        this.peerLerp.delete(peer.id);
+        continue;
+      }
+      const cur = this.peerLerp.get(peer.id);
+      if (!cur) {
+        this.peerLerp.set(peer.id, { x: peer.x, y: peer.y, tx: peer.x, ty: peer.y });
+      } else {
+        cur.tx = peer.x;
+        cur.ty = peer.y;
+      }
+    }
     this.dirty = true;
   }
 
@@ -2692,30 +2720,66 @@ export class Engine {
   private drawPeers(ctx: CanvasRenderingContext2D): void {
     if (!this.remotePeers.length) return;
     const s = 1 / this.camera.zoom;
+    const dt = 0.18;
+    let stillMoving = false;
+
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
+      let pos = this.peerLerp.get(peer.id);
+      if (!pos) {
+        pos = { x: peer.x, y: peer.y, tx: peer.x, ty: peer.y };
+        this.peerLerp.set(peer.id, pos);
+      }
+      pos.x += (pos.tx - pos.x) * dt;
+      pos.y += (pos.ty - pos.y) * dt;
+      if (Math.abs(pos.tx - pos.x) > 0.15 || Math.abs(pos.ty - pos.y) > 0.15) stillMoving = true;
+
+      const x = pos.x;
+      const y = pos.y;
+      const fill = peer.color || '#7c8cff';
+      const ink = peerLabelInk(fill);
+
       ctx.save();
-      ctx.fillStyle = peer.color;
+      // Pointer: filled body + light outline (FigJam-ish).
       ctx.beginPath();
-      ctx.moveTo(peer.x, peer.y);
-      ctx.lineTo(peer.x + 13 * s, peer.y + 4.5 * s);
-      ctx.lineTo(peer.x + 7.5 * s, peer.y + 7.5 * s);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 14 * s, y + 5 * s);
+      ctx.lineTo(x + 10.5 * s, y + 9 * s);
+      ctx.lineTo(x + 16 * s, y + 18 * s);
+      ctx.lineTo(x + 12.5 * s, y + 19.5 * s);
+      ctx.lineTo(x + 7 * s, y + 10.5 * s);
       ctx.closePath();
+      ctx.fillStyle = fill;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 1 * s;
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 1.25 * s;
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
       ctx.stroke();
-      ctx.font = `${13 * s}px 'Segoe UI', system-ui, sans-serif`;
+      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      ctx.lineWidth = 0.75 * s;
+      ctx.stroke();
+
+      // Name chip
+      ctx.font = `600 ${12 * s}px ${BOARD_TYPEFACE}`;
       const label = peer.name;
+      const padX = 8 * s;
+      const padY = 5 * s;
       const tw = ctx.measureText(label).width;
+      const chipX = x + 18 * s;
+      const chipY = y - 8 * s;
+      const chipW = tw + padX * 2;
+      const chipH = 12 * s + padY * 2;
       ctx.beginPath();
-      ctx.roundRect(peer.x + 14 * s, peer.y - 22 * s, tw + 12 * s, 19 * s, 5 * s);
+      ctx.roundRect(chipX, chipY - chipH, chipW, chipH, 6 * s);
+      ctx.fillStyle = fill;
       ctx.fill();
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = ink;
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, peer.x + 20 * s, peer.y - 12 * s);
+      ctx.fillText(label, chipX + padX, chipY - chipH / 2);
       ctx.restore();
     }
+
+    if (stillMoving) this.dirty = true;
   }
 
   private drawGrid(ctx: CanvasRenderingContext2D, color: string): void {

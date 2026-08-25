@@ -491,7 +491,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         chromeTheme={chromeTheme}
         bg="#1c1c1a"
         gridOn
-        sync={{ online: false, users: 0 }}
+        sync={{ online: false, users: 0, enabled: false }}
         saved
         nick={nick}
         hideBoardSection
