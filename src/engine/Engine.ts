@@ -124,6 +124,7 @@ export class Engine {
   readonly selection = new Set<string>();
   events: EngineEvents = {};
   editing = false;
+  editId: string | null = null;
   remotePeers: PeerCursor[] = [];
 
   setPeers(peers: PeerCursor[]): void {
@@ -424,7 +425,7 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const off = 8 / z;
+    const off = 18 / z;
     const candidates: string[] = [...this.selection, ...[...this.views.keys()].filter((k) => !this.selection.has(k))];
     let best: { shapeId: string; port: PortId; dist: number } | null = null;
     for (const id of candidates) {
@@ -445,7 +446,7 @@ export class Engine {
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
     const v = this.views.get(shapeId);
     if (!v) return null;
-    return portPos(v, port, 8 / this.camera.zoom);
+    return portPos(v, port, 18 / this.camera.zoom);
   }
 
   updateConnectedArrows(movedIds: Set<string>): void {
@@ -1194,6 +1195,7 @@ export class Engine {
       color = v.textColor ?? themeFor(bg).text;
     }
     this.editing = true;
+    this.editId = id;
     this.events.onEditText?.({
       id,
       x: v.x,
@@ -1213,6 +1215,7 @@ export class Engine {
     const bg = store.metaBg();
     const readable = readableTextOn(color, bg);
     this.editing = true;
+    this.editId = null;
     this.events.onEditText?.({
       id: null,
       x,
@@ -1229,6 +1232,7 @@ export class Engine {
 
   cancelTextEdit(): void {
     this.editing = false;
+    this.editId = null;
   }
 
   openGraphEditor(id: string): void {
@@ -1262,6 +1266,7 @@ export class Engine {
 
   commitText(id: string | null, text: string, target: EditTarget): void {
     this.editing = false;
+    this.editId = null;
     const bg = store.metaBg();
     const color = target.type === 'text' ? readableTextOn(target.color, bg) : target.color;
     if (id === null) {
@@ -1294,8 +1299,9 @@ export class Engine {
       }
       const patch: Partial<ShapeView> = { text, textColor: color };
       if (v.type === 'text') {
-        const size = this.measureText(text, v.fontSize ?? TEXT_FONT);
-        patch.w = size.w;
+        // keep the user's frame width; recompute height from wrapped lines
+        const size = this.measureTextWrapped(text, v.fontSize ?? TEXT_FONT, Math.max(v.w, (v.fontSize ?? TEXT_FONT) * 2));
+        patch.w = Math.max(v.w, size.w);
         patch.h = size.h;
       }
       store.patchShape(id, patch);
@@ -1311,6 +1317,32 @@ export class Engine {
       maxW = Math.max(maxW, measureMixedLine(this.ctx, line, fontSize));
     }
     return { w: maxW + 4, h: lines.length * fontSize * 1.3 };
+  }
+
+  /** Height of `text` when wrapped to `maxW`, plus the widest wrapped line. */
+  measureTextWrapped(text: string, fontSize: number, maxW: number): { w: number; h: number } {
+    this.ctx.font = `${fontSize}px ${BOARD_TYPEFACE}`;
+    const lines: string[] = [];
+    for (const raw of text.split('\n')) {
+      if (!raw) {
+        lines.push('');
+        continue;
+      }
+      let line = '';
+      for (const word of raw.split(/\s+/)) {
+        const test = line ? line + ' ' + word : word;
+        if (line && measureMixedLine(this.ctx, test, fontSize) > maxW) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+    }
+    let w = 0;
+    for (const line of lines) w = Math.max(w, measureMixedLine(this.ctx, line, fontSize));
+    return { w: w + 4, h: lines.length * fontSize * 1.3 };
   }
 
   private onMeta = (): void => {
@@ -1696,7 +1728,22 @@ export class Engine {
         this.openGraphEditor(id);
         return;
       }
-      // no text editing on double click; use Enter or the text tool
+      const TEXT_TYPES = new Set([
+        'text',
+        'sticky',
+        'rect',
+        'ellipse',
+        'diamond',
+        'frame',
+        'triangle',
+        'parallelogram',
+        'hexagon',
+        'cylinder',
+        'terminator',
+        'subroutine',
+        'display',
+      ]);
+      if (type && TEXT_TYPES.has(type)) this.openTextEditor(id);
     }
   };
 
@@ -2201,6 +2248,8 @@ export class Engine {
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
     const draw = (v: ShapeView) => {
+      // hide canvas text of the shape being edited — the overlay renders it
+      const hideText = this.editing && this.editId === v.id;
       const partial = this.partialErase.get(v.id);
       if (partial && partial.size) {
         const pts = v.points ?? [];
@@ -2214,7 +2263,7 @@ export class Engine {
       if (this.erasing.has(v.id)) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, store.metaBg());
+        drawShape(ctx, v, theme.text, store.metaBg(), hideText);
         ctx.restore();
         // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
@@ -2226,7 +2275,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, store.metaBg());
+        drawShape(ctx, v, theme.text, store.metaBg(), hideText);
       }
     };
     const ord = store.order;
@@ -2403,8 +2452,8 @@ export class Engine {
         const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
         const dx = p.x - cx, dy = p.y - cy;
         const len = Math.hypot(dx, dy) || 1;
-        const ox = (dx / len) * (8 * s);
-        const oy = (dy / len) * (8 * s);
+        const ox = (dx / len) * (18 * s);
+        const oy = (dy / len) * (18 * s);
         const px = p.x + ox, py = p.y + oy;
         const isHover = this.hoverPort?.shapeId === id && this.hoverPort?.port === port;
         const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;

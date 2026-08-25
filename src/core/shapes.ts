@@ -438,7 +438,8 @@ export function drawShape(
   ctx: CanvasRenderingContext2D,
   v: ShapeView,
   textColor: string = COLORS.text,
-  boardBg: string = COLORS.background
+  boardBg: string = COLORS.background,
+  hideText = false
 ): void {
   const font = `${v.fontSize ?? TEXT_FONT}px ${BOARD_TYPEFACE}`;
   switch (v.type) {
@@ -450,7 +451,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, 6);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'ellipse': {
@@ -461,7 +462,7 @@ export function drawShape(
       ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w / 2, v.h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'diamond': {
@@ -542,7 +543,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'hexagon': {
@@ -560,7 +561,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'cylinder': {
@@ -583,7 +584,7 @@ export function drawShape(
       ctx.beginPath();
       ctx.ellipse(cx, v.y + ry, rx, ry, 0, 0, Math.PI * 2);
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'terminator': {
@@ -595,7 +596,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, r);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'subroutine': {
@@ -613,7 +614,7 @@ export function drawShape(
       ctx.moveTo(v.x + v.w - inset, v.y);
       ctx.lineTo(v.x + v.w - inset, v.y + v.h);
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'display': {
@@ -629,7 +630,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'sticky': {
@@ -640,7 +641,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, 8);
       ctx.fill();
       ctx.stroke();
-      if (v.text) {
+      if (v.text && !hideText) {
         ctx.save();
         ctx.beginPath();
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
@@ -660,14 +661,15 @@ export function drawShape(
       break;
     }
     case 'text': {
-      if (!v.text) break;
+      if (!v.text || hideText) break;
       ctx.fillStyle = readableTextOn(v.textColor ?? textColor, boardBg);
       ctx.font = font;
       ctx.textBaseline = 'top';
       const size = v.fontSize ?? TEXT_FONT;
       const lineHeight = size * 1.3;
       let lineY = v.y;
-      for (const line of v.text.split('\n')) {
+      // wrap to the frame width so canvas matches the editor overlay
+      for (const line of wrapText(ctx, v.text, Math.max(v.w, size * 2))) {
         drawMixedLine(ctx, line, v.x, lineY, lineHeight, size);
         lineY += lineHeight;
       }
