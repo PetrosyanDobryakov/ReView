@@ -11,6 +11,9 @@ export interface Team {
 
 export type BoardStatus = 'local' | 'shared' | 'remote';
 
+/** Where board content lives on this device. */
+export type BoardStorageKind = 'onDevice' | 'sessionOnly';
+
 export interface BoardMeta {
   id: string;
   name: string;
@@ -240,6 +243,10 @@ export function isBoardPersistedLocally(meta: BoardMeta | undefined): boolean {
   if (meta.status !== 'remote') return true;
   if (meta.savedLocally) return true;
   return readPrefs().saveRemoteBoards;
+}
+
+export function boardStorageKind(meta: BoardMeta | undefined): BoardStorageKind {
+  return isBoardPersistedLocally(meta) ? 'onDevice' : 'sessionOnly';
 }
 
 export function moveBoard(id: string, teamId: string): void {

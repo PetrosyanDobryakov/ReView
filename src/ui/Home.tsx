@@ -11,7 +11,6 @@ import {
   renameTeam,
   boardUrl,
   getBoard,
-  setBoardStatus,
   ensureBoardWithId,
   saveBoardLocally,
   isBoardPersistedLocally,
@@ -25,7 +24,7 @@ import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
-import { StatusSelect } from './StatusSelect';
+import { BoardStorageBadge } from './BoardStorageBadge';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
@@ -365,7 +364,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               <span className="board-col-idx">#</span>
               <span className="board-col-name">{t(locale, 'boardNameCol')}</span>
               <span className="board-col-team">{t(locale, 'boardTeamCol')}</span>
-              <span className="board-col-status">{t(locale, 'boardStatusCol')}</span>
+              <span className="board-col-status">{t(locale, 'boardStorageCol')}</span>
               <span className="board-col-weight">{t(locale, 'boardWeightCol')}</span>
               <span className="board-col-date">{t(locale, 'boardDateCol')}</span>
               <span className="board-col-actions">{t(locale, 'boardActionsCol')}</span>
@@ -412,18 +411,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     </span>
                     <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
                     <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
-                      <StatusSelect
-                        value={b.status}
-                        locale={locale}
-                        label={t(locale, 'boardStatusCol')}
-                        onChange={(status) => {
-                          if (status === 'remote' && b.status !== 'remote') {
-                            if (!confirm(t(locale, 'statusRemoteWarn'))) return;
-                          }
-                          setBoardStatus(b.id, status);
-                          refresh();
-                        }}
-                      />
+                      <BoardStorageBadge meta={b} locale={locale} />
                     </span>
                     <span
                       className="board-col-weight panel-label"
@@ -437,18 +425,18 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         <button
                           type="button"
                           className="style-btn board-row-cta"
-                          title={t(locale, 'saveBoardHint')}
+                          title={t(locale, 'keepOnDeviceHint')}
                           onClick={() => handleSaveBoard(b.id)}
                         >
-                          {t(locale, 'saveBoard')}
+                          {t(locale, 'keepOnDevice')}
                         </button>
                       )}
                       <span className="board-row-tools">
                         <button
                           type="button"
                           className="icon-btn"
-                          title={t(locale, 'duplicateBoard')}
-                          aria-label={t(locale, 'duplicateBoard')}
+                          title={t(locale, 'saveAsMyBoardHint')}
+                          aria-label={t(locale, 'saveAsMyBoard')}
                           onClick={() => void handleCloneBoard(b.id)}
                         >
                           <Icon name="duplicate" size={14} />

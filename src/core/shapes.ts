@@ -1043,6 +1043,7 @@ export function drawShape(
             underline: v.underline,
             strike: v.strike,
             highlight: v.highlight,
+            color: v.textColor,
           });
           drawRichBlock(ctx, spans, v.x + 8, v.y + 8, Math.max(8, v.w - 16), {
             fontSize: size,
@@ -1094,6 +1095,7 @@ export function drawShape(
           underline: v.underline,
           strike: v.strike,
           highlight: v.highlight,
+          color: v.textColor,
         });
         drawRichBlock(ctx, spans, v.x, v.y, Math.max(v.w, size * 2), {
           fontSize: size,
@@ -1556,11 +1558,40 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   ctx.restore();
 }
 
+function drawShapeRichText(
+  ctx: CanvasRenderingContext2D,
+  v: ShapeView,
+  ink: string,
+  x: number,
+  y: number,
+  maxW: number,
+  align: 'left' | 'center' | 'right',
+  maxBottom?: number
+): void {
+  const size = v.fontSize ?? SHAPE_FONT;
+  const spans = parseStoredRich(v.text, v.richHtml, {
+    bold: v.bold,
+    italic: v.italic,
+    underline: v.underline,
+    strike: v.strike,
+    highlight: v.highlight,
+    color: v.textColor,
+  });
+  drawRichBlock(ctx, spans, x, y, maxW, {
+    fontSize: size,
+    color: ink,
+    align,
+    lineHeight: size * 1.25,
+    fontFn: (s, style) => boardFont(s, { bold: style.bold ?? v.bold, italic: style.italic ?? v.italic }),
+    highlightFill: TEXT_HIGHLIGHT,
+    maxBottom,
+  });
+}
+
 function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
-  ctx.font = shapeFont(v, SHAPE_FONT);
-  const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w - 16));
-  if (!lines.length) return;
+  const text = v.text ?? '';
+  if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
   ctx.save();
   ctx.beginPath();
   if (v.type === 'ellipse') {
@@ -1572,14 +1603,31 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   }
   ctx.clip();
   const ink = v.textColor ?? textColor;
+  const align = v.textAlign ?? 'center';
+  const padX = 8;
+  const maxW = Math.max(20, v.w - 16);
+  const lineHeight = size * 1.25;
+
+  if (v.richHtml && v.richHtml.includes('<')) {
+    const estLines = Math.max(1, text.split('\n').length);
+    const startY = v.y + v.h / 2 - ((estLines - 1) * lineHeight) / 2 - size / 2;
+    drawShapeRichText(ctx, v, ink, v.x + padX, startY, maxW, align, v.y + v.h - padX);
+    ctx.restore();
+    return;
+  }
+
+  ctx.font = shapeFont(v, SHAPE_FONT);
+  const lines = wrapText(ctx, text, maxW);
+  if (!lines.length) {
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = ink;
   ctx.textBaseline = 'middle';
-  const align = v.textAlign ?? 'center';
-  const lineHeight = size * 1.25;
   const startY = v.y + v.h / 2 - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => {
     const lw = ctx.measureText(line).width;
-    const lx = lineAnchorX(v.x + 8, v.w - 16, lw, align);
+    const lx = lineAnchorX(v.x + padX, maxW, lw, align);
     const ly = startY + i * lineHeight - size / 2;
     ctx.fillText(line, lx, startY + i * lineHeight);
     drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
@@ -1589,9 +1637,8 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
 
 function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
-  ctx.font = shapeFont(v, SHAPE_FONT);
-  const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.55));
-  if (!lines.length) return;
+  const text = v.text ?? '';
+  if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
   ctx.save();
   const cx = v.x + v.w / 2;
   const cy = v.y + v.h / 2;
@@ -1603,13 +1650,28 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   ctx.closePath();
   ctx.clip();
   const ink = v.textColor ?? textColor;
-  ctx.fillStyle = ink;
-  ctx.textBaseline = 'middle';
   const align = v.textAlign ?? 'center';
-  const lineHeight = size * 1.25;
-  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
   const boxW = v.w * 0.55;
   const boxX = cx - boxW / 2;
+  const lineHeight = size * 1.25;
+
+  if (v.richHtml && v.richHtml.includes('<')) {
+    const estLines = Math.max(1, text.split('\n').length);
+    const startY = cy - ((estLines - 1) * lineHeight) / 2 - size / 2;
+    drawShapeRichText(ctx, v, ink, boxX, startY, boxW, align, cy + v.h * 0.35);
+    ctx.restore();
+    return;
+  }
+
+  ctx.font = shapeFont(v, SHAPE_FONT);
+  const lines = wrapText(ctx, text, Math.max(20, boxW));
+  if (!lines.length) {
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = ink;
+  ctx.textBaseline = 'middle';
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => {
     const lw = ctx.measureText(line).width;
     const lx = lineAnchorX(boxX, boxW, lw, align);
@@ -1622,9 +1684,8 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
 
 function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
-  ctx.font = shapeFont(v, SHAPE_FONT);
-  const lines = wrapText(ctx, v.text ?? '', Math.max(20, v.w * 0.6));
-  if (!lines.length) return;
+  const text = v.text ?? '';
+  if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(v.x + v.w / 2, v.y);
@@ -1633,14 +1694,29 @@ function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColo
   ctx.closePath();
   ctx.clip();
   const ink = v.textColor ?? textColor;
-  ctx.fillStyle = ink;
-  ctx.textBaseline = 'middle';
   const align = v.textAlign ?? 'center';
   const cy = v.y + v.h * 0.62;
-  const lineHeight = size * 1.25;
-  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
   const boxW = v.w * 0.6;
   const boxX = v.x + (v.w - boxW) / 2;
+  const lineHeight = size * 1.25;
+
+  if (v.richHtml && v.richHtml.includes('<')) {
+    const estLines = Math.max(1, text.split('\n').length);
+    const startY = cy - ((estLines - 1) * lineHeight) / 2 - size / 2;
+    drawShapeRichText(ctx, v, ink, boxX, startY, boxW, align, v.y + v.h - 8);
+    ctx.restore();
+    return;
+  }
+
+  ctx.font = shapeFont(v, SHAPE_FONT);
+  const lines = wrapText(ctx, text, Math.max(20, boxW));
+  if (!lines.length) {
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = ink;
+  ctx.textBaseline = 'middle';
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => {
     const lw = ctx.measureText(line).width;
     const lx = lineAnchorX(boxX, boxW, lw, align);

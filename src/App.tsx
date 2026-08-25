@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Engine } from './engine/Engine';
 import type { EditTarget, GraphEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
@@ -48,7 +49,8 @@ import {
 } from './net';
 import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
-import { getBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
+import { getBoard, saveBoardLocally, isBoardPersistedLocally, boardUrl } from './core/boards';
+import { cloneBoard } from './core/boardClone';
 import {
   boardRenameMode,
   commitBoardRename,
@@ -62,6 +64,8 @@ import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
 import { MOTION, useExitPresence } from './ui/motion';
+import { readLiveFormat, type LiveTextFormat } from './core/textEditorFormat';
+import { JoinSavePrompt } from './ui/JoinSavePrompt';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
@@ -125,6 +129,7 @@ function HoldCtxItem({
 }
 
 export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
+  const navigate = useNavigate();
   // init per-board store synchronously before any hooks that use it
   initBoard(boardId);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -136,6 +141,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [shapeCount, setShapeCount] = useState(0);
   const [saved, setSaved] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [editLiveFormat, setEditLiveFormat] = useState<LiveTextFormat | null>(null);
+  const textEditorRef = useRef<HTMLDivElement | null>(null);
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,13 +174,80 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [renameMode, setRenameMode] = useState(() => boardRenameMode(getBoard(boardId), metaOwnerId()));
   const [editingName, setEditingName] = useState(false);
   const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
+  const [joinPrompt, setJoinPrompt] = useState(false);
+  const [hostOffline, setHostOffline] = useState(false);
+  const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
     if (m) setBoardTitle(displayBoardTitle(m, metaTitle(), m.name));
     setBoardOwnerId(metaOwnerId());
     setRenameMode(boardRenameMode(m, metaOwnerId()));
     setEphemeral(!isBoardPersistedLocally(m));
+    syncWasOnline.current = false;
+    setHostOffline(false);
   }, [boardId]);
+
+  useEffect(() => {
+    const m = getBoard(boardId);
+    if (!isBoardPersistedLocally(m)) {
+      try {
+        if (!sessionStorage.getItem(`review-join-prompt-${boardId}`)) {
+          setJoinPrompt(true);
+        }
+      } catch {
+        setJoinPrompt(true);
+      }
+    } else {
+      setJoinPrompt(false);
+    }
+  }, [boardId]);
+
+  useEffect(() => {
+    if (!ephemeral || !sync.enabled) return;
+    const timer = window.setTimeout(() => {
+      setHostOffline((prev) => prev || !syncWasOnline.current);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [boardId, ephemeral, sync.enabled]);
+
+  useEffect(() => {
+    if (sync.online) {
+      syncWasOnline.current = true;
+      setHostOffline(false);
+    } else if (syncWasOnline.current && ephemeral) {
+      setHostOffline(true);
+    }
+  }, [sync.online, ephemeral]);
+
+  const dismissJoinPrompt = () => {
+    try {
+      sessionStorage.setItem(`review-join-prompt-${boardId}`, '1');
+    } catch {
+      /* ignore */
+    }
+    setJoinPrompt(false);
+  };
+
+  const handleKeepOnDevice = () => {
+    saveBoardLocally(boardId);
+    enableBoardPersistence();
+    setEphemeral(false);
+    setSaved(true);
+    setHostOffline(false);
+    setRenameMode(boardRenameMode(getBoard(boardId), boardOwnerId));
+    dismissJoinPrompt();
+  };
+
+  const handleSaveAsMyBoard = () => {
+    void cloneBoard(boardId).then((copy) => {
+      if (!copy) {
+        setError(t(readLocale(), 'error'));
+        return;
+      }
+      dismissJoinPrompt();
+      navigate(boardUrl(copy.id));
+    });
+  };
 
   useEffect(() => {
     const onReady = () => {
@@ -359,7 +433,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setShapeCount(s.shapes);
     };
     engine.events.onTool = (id) => setTool(id);
-    engine.events.onEditText = (target) => setEditTarget(target);
+    engine.events.onEditText = (target) => {
+      setEditLiveFormat(null);
+      setEditTarget(target);
+    };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
     const reload = () => {
@@ -562,13 +639,21 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <TextOverlay
             target={editTarget}
             engine={engine}
+            editorRef={(el) => {
+              textEditorRef.current = el;
+            }}
+            onFormatChange={setEditLiveFormat}
             onDone={(value, html) => {
               engine.commitText(editTarget.id, value, editTarget, html);
               setEditTarget(null);
+              setEditLiveFormat(null);
+              textEditorRef.current = null;
             }}
             onCancel={() => {
               engine.cancelTextEdit();
               setEditTarget(null);
+              setEditLiveFormat(null);
+              textEditorRef.current = null;
             }}
           />
         )}
@@ -670,22 +755,27 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               <button
                 type="button"
                 className="style-btn active save-board-btn"
-                title={t(locale, 'saveBoardHint')}
-                aria-label={t(locale, 'saveBoard')}
-                onClick={() => {
-                  saveBoardLocally(boardId);
-                  enableBoardPersistence();
-                  setEphemeral(false);
-                  setSaved(true);
-                  setRenameMode(boardRenameMode(getBoard(boardId), boardOwnerId));
-                }}
+                title={t(locale, 'keepOnDeviceHint')}
+                aria-label={t(locale, 'keepOnDevice')}
+                onClick={handleKeepOnDevice}
               >
-                {t(locale, 'saveBoard')}
+                {t(locale, 'keepOnDevice')}
               </button>
             </>
           )}
         </div>
         <div className="island meta-island">
+          {hostOffline && ephemeral && (
+            <button
+              type="button"
+              className="host-offline-banner"
+              title={t(locale, 'keepOnDeviceHint')}
+              onClick={handleKeepOnDevice}
+            >
+              <span>{t(locale, 'hostOfflineBanner')}</span>
+              <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
+            </button>
+          )}
           {errorShown && errorView && (
             <button
               type="button"
@@ -735,8 +825,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         eraser={eraser}
         editing={!!editTarget}
         editTarget={editTarget}
+        editLiveFormat={editLiveFormat}
+        getTextEditor={() => textEditorRef.current}
         onPatched={refreshSelected}
         onEditStyle={(patch) => setEditTarget((cur) => (cur ? { ...cur, ...patch } : null))}
+        onRemeasureText={(ids) => engineRef.current?.remeasureTextShapes(ids)}
+        onSyncEditFormat={(root, fallback) => setEditLiveFormat(readLiveFormat(root, fallback))}
       />
       <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
 
@@ -844,6 +938,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             )
           )}
         </div>
+      )}
+      {joinPrompt && (
+        <JoinSavePrompt
+          locale={locale}
+          onKeepOnDevice={handleKeepOnDevice}
+          onSaveAsMyBoard={handleSaveAsMyBoard}
+          onLater={dismissJoinPrompt}
+        />
       )}
       {infoShown && infoView && (
         <div className={`info-modal${info ? '' : ' is-leaving'}`}>
