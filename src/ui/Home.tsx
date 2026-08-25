@@ -377,7 +377,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                   bytes === undefined
                     ? t(locale, 'boardWeightLoading')
                     : formatBoardWeight(bytes, localeTag);
-                const needsSave = b.status === 'remote' && !isBoardPersistedLocally(b);
+                const needsSave =
+                  (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
+                  (Boolean(b.savedLocally) && known && bytes === 0);
                 return (
                   <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
                     <span className="board-col-idx">{idx + 1}</span>

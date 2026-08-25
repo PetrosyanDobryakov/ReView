@@ -1,7 +1,7 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
-import { shapeRotation, worldToLocal, withShapeRotation } from './transform';
+import { shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
 import { drawRichBlock, parseStoredRich } from './richText';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
@@ -69,16 +69,21 @@ export function portPos(v: ShapeView, port: PortId, offset = 0): { x: number; y:
     case 'sw': fx = 0; fy = 1; break;
     case 'w': fx = 0; fy = 0.5; break;
   }
-  let x = v.x + fx * v.w;
-  let y = v.y + fy * v.h;
+  let p = localToWorld(v, fx * v.w, fy * v.h);
   if (offset) {
-    const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
-    const dx = x - cx, dy = y - cy;
+    const cx = v.x + v.w / 2;
+    const cy = v.y + v.h / 2;
+    const dx = p.x - cx;
+    const dy = p.y - cy;
     const len = Math.hypot(dx, dy) || 1;
-    x += (dx / len) * offset;
-    y += (dy / len) * offset;
+    p = { x: p.x + (dx / len) * offset, y: p.y + (dy / len) * offset };
   }
-  return { x, y };
+  return p;
+}
+
+/** Bend sign for curved arrows: horizontal vs vertical dominance. */
+export function arrowBendSign(dx: number, dy: number): number {
+  return Math.abs(dx) > Math.abs(dy) ? 1 : -1;
 }
 
 export function portDir(port: PortId): { x: number; y: number } {
@@ -336,7 +341,7 @@ function arrowCurve(v: ShapeView): ArrowCurve | null {
     const dy = end.y - start.y;
     const len = Math.hypot(dx, dy) || 1;
     const normal = { x: -dy / len, y: dx / len };
-    const bend = Math.min(40, len * 0.18) * (Math.abs(dx) > Math.abs(dy) ? 1 : -1);
+    const bend = Math.min(40, len * 0.18) * arrowBendSign(dx, dy);
     const control = {
       x: midpoint.x + normal.x * bend * 0.5,
       y: midpoint.y + normal.y * bend * 0.5,
@@ -835,7 +840,7 @@ export function drawShape(
         ctx.fill();
       }
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'ellipse': {
@@ -848,7 +853,7 @@ export function drawShape(
         ctx.fill();
       }
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'diamond': {
@@ -865,7 +870,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawDiamondLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawDiamondLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'frame': {
@@ -913,7 +918,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawTriangleLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawTriangleLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'parallelogram': {
@@ -929,7 +934,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'hexagon': {
@@ -947,7 +952,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'cylinder': {
@@ -970,7 +975,7 @@ export function drawShape(
       ctx.beginPath();
       ctx.ellipse(cx, v.y + ry, rx, ry, 0, 0, Math.PI * 2);
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'terminator': {
@@ -982,7 +987,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, r);
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'subroutine': {
@@ -1000,7 +1005,7 @@ export function drawShape(
       ctx.moveTo(v.x + v.w - inset, v.y);
       ctx.lineTo(v.x + v.w - inset, v.y + v.h);
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'display': {
@@ -1016,7 +1021,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text && !hideText) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'sticky': {
@@ -1588,7 +1593,12 @@ function drawShapeRichText(
   });
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
+function labelInk(v: ShapeView, textColor: string, boardBg?: string): string {
+  const raw = v.textColor ?? textColor;
+  return boardBg && v.type !== 'sticky' ? readableTextOn(raw, boardBg) : raw;
+}
+
+function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string, boardBg?: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
   const text = v.text ?? '';
   if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
@@ -1602,7 +1612,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
     else ctx.rect(v.x, v.y, v.w, v.h);
   }
   ctx.clip();
-  const ink = v.textColor ?? textColor;
+  const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
   const padX = 8;
   const maxW = Math.max(20, v.w - 16);
@@ -1635,7 +1645,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   ctx.restore();
 }
 
-function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
+function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string, boardBg?: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
   const text = v.text ?? '';
   if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
@@ -1649,7 +1659,7 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   ctx.lineTo(v.x, cy);
   ctx.closePath();
   ctx.clip();
-  const ink = v.textColor ?? textColor;
+  const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
   const boxW = v.w * 0.55;
   const boxX = cx - boxW / 2;
@@ -1682,7 +1692,7 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   ctx.restore();
 }
 
-function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string): void {
+function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string, boardBg?: string): void {
   const size = v.fontSize ?? SHAPE_FONT;
   const text = v.text ?? '';
   if (!text && !(v.richHtml && v.richHtml.includes('<'))) return;
@@ -1693,7 +1703,7 @@ function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColo
   ctx.lineTo(v.x + v.w, v.y + v.h);
   ctx.closePath();
   ctx.clip();
-  const ink = v.textColor ?? textColor;
+  const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
   const cy = v.y + v.h * 0.62;
   const boxW = v.w * 0.6;

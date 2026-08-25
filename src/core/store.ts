@@ -168,7 +168,13 @@ export function persistBoardIfOpen(boardId: string): boolean {
 }
 
 export function initBoard(boardId: string): void {
-  if (currentBoardId === boardId) return;
+  if (currentBoardId === boardId) {
+    if (shouldPersist(boardId) && !persistence) {
+      attachPersistence(boardId);
+      if (persistence) void migrateLegacyBoard(persistence);
+    }
+    return;
+  }
   detachSync();
   try {
     persistence?.destroy();

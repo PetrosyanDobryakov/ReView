@@ -1,6 +1,6 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, readableTextOn, displayInk, withAlpha, hasFill, type PortId } from '../core/shapes';
+import { COLORS, portPos, readableTextOn, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, updateTextSettings } from '../core/settings';
@@ -1246,7 +1246,7 @@ export class ArrowTool extends Tool {
     const mx = (ax + bx) / 2, my = (ay + by) / 2;
     const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len, ny = dx / len;
-    const bend = Math.min(30, len * 0.15);
+    const bend = Math.min(30, len * 0.15) * arrowBendSign(dx, dy);
     const cx = mx + nx * bend * 0.5, cy = my + ny * bend * 0.5;
     const ang = Math.atan2(by - cy, bx - cx);
     const head = settings.shape.arrowHead;
