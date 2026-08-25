@@ -150,10 +150,10 @@ export function MembersMenu({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const width = 300;
+    const width = 280;
     const gap = 8;
     const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
-    const estimatedHeight = 440;
+    const estimatedHeight = 400;
     const below = rect.bottom + gap;
     const above = rect.top - gap - estimatedHeight;
     const flip = below + estimatedHeight > window.innerHeight - 8 && above >= 8;
@@ -239,10 +239,12 @@ export function MembersMenu({
             style={{ left: menuStyle.left, top: menuStyle.top }}
           >
             <section className="members-section">
-              <h3 className="members-section-title">{t(locale, 'membersInvite')}</h3>
-              <p className={`members-status${online && syncEnabled ? ' on' : ''}`}>
-                {statusLabel}
-              </p>
+              <div className="members-section-head">
+                <h3 className="members-section-title">{t(locale, 'membersInvite')}</h3>
+                <p className={`members-status${online && syncEnabled ? ' on' : ''}`}>
+                  {statusLabel}
+                </p>
+              </div>
               {lanLoading ? (
                 <p className="members-empty">{t(locale, 'syncLanLoading')}</p>
               ) : lanError || !primaryHost ? (
@@ -344,7 +346,7 @@ export function MembersMenu({
             <footer className="members-foot">
               <button
                 type="button"
-                className="style-btn"
+                className="style-btn members-foot-btn"
                 onClick={() => {
                   close();
                   onOpenConnection();

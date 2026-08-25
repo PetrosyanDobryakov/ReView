@@ -2,6 +2,8 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
 import App from './App';
 import { Home } from './ui/Home';
+import { loadUser } from './core/user';
+import { bootstrapUserProfile } from './core/userProfile';
 import { applyChromeTheme, readChromeTheme } from './core/chromeTheme';
 import { applyLocale, readLocale } from './core/locale';
 import { applyUiScale } from './core/prefs';
@@ -16,6 +18,9 @@ import '@fontsource/onest/cyrillic-500.css';
 import '@fontsource/onest/cyrillic-600.css';
 import '@fontsource/onest/cyrillic-700.css';
 import './index.css';
+
+loadUser();
+bootstrapUserProfile();
 
 const locale = readLocale();
 applyChromeTheme(readChromeTheme());

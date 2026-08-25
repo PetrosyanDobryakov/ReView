@@ -8,7 +8,8 @@ import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg } from '../core/transform';
+import { degToRad, reanchorRotatedResize, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg } from '../core/transform';
+import { publishDraft, publishErasePreview } from '../net';
 
 /** Square a drag box around the original anchor (handles upward / leftward Shift draws). */
 function squareFromAnchor(start: { x: number; y: number }, cur: { x: number; y: number }): ShapeBox {
@@ -80,6 +81,16 @@ const HANDLE_CURSORS: Record<HandleId, string> = {
   w: 'ew-resize',
 };
 
+/** Screen-space ring order (45° steps, clockwise from east). */
+const HANDLE_RING: HandleId[] = ['e', 'se', 's', 'sw', 'w', 'nw', 'n', 'ne'];
+
+function rotatedHandleCursor(handle: HandleId, rotDeg: number): string {
+  const idx = HANDLE_RING.indexOf(handle);
+  if (idx < 0) return HANDLE_CURSORS[handle];
+  const steps = ((Math.round(rotDeg / 45) % 8) + 8) % 8;
+  return HANDLE_CURSORS[HANDLE_RING[(idx + steps) % 8]];
+}
+
 export class SelectTool extends Tool {
   readonly id = 'select';
   cursor = 'default';
@@ -102,7 +113,8 @@ export class SelectTool extends Tool {
     }
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
-      engine.setCursor(HANDLE_CURSORS[h.handle]);
+      const v = engine.views.get(h.shapeId);
+      engine.setCursor(rotatedHandleCursor(h.handle, shapeRotation(v ?? {})));
       return;
     }
     const port = engine.hitPort(p.screen.x, p.screen.y);
@@ -213,11 +225,8 @@ export class SelectTool extends Tool {
       const patches: Array<[string, Partial<ShapeView>]> = [];
       for (const [id, o] of this.originals) {
         if (o.locked) continue;
-        if (o.points) {
-          patches.push([id, { x: o.x + dx, y: o.y + dy, points: o.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
-        } else {
-          patches.push([id, { x: o.x + dx, y: o.y + dy }]);
-        }
+        // Local-space polylines: translation is x/y only (no points rewrite).
+        patches.push([id, { x: o.x + dx, y: o.y + dy }]);
       }
       // also move connected arrows
       const movedIds = new Set(patches.map(([id]) => id));
@@ -235,11 +244,7 @@ export class SelectTool extends Tool {
             base = { ...sv, points: sv.points ? [...sv.points] : undefined };
             this.stuck.set(sid, base);
           }
-          if (base.points) {
-            patches.push([sid, { x: base.x + dx, y: base.y + dy, points: base.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
-          } else {
-            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
-          }
+          patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
           movedIds.add(sid);
         }
       }
@@ -255,11 +260,7 @@ export class SelectTool extends Tool {
             base = { ...sv, points: sv.points ? [...sv.points] : undefined };
             this.stuck.set(sid, base);
           }
-          if (base.points) {
-            patches.push([sid, { x: base.x + dx, y: base.y + dy, points: base.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy)) }]);
-          } else {
-            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
-          }
+          patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
           movedIds.add(sid);
         }
       }
@@ -435,6 +436,21 @@ export class SelectTool extends Tool {
         else x = Math.min(left, right);
         if (r.handle.includes('n')) y = Math.max(top, bottom) - h;
         else y = Math.min(top, bottom);
+        // Keep signed edges aligned with the aspect-corrected box for reanchor.
+        if (right >= left) {
+          left = x;
+          right = x + w;
+        } else {
+          right = x;
+          left = x + w;
+        }
+        if (bottom >= top) {
+          top = y;
+          bottom = y + h;
+        } else {
+          bottom = y;
+          top = y + h;
+        }
       }
     }
     if (orig.type === 'text') {
@@ -453,7 +469,18 @@ export class SelectTool extends Tool {
         const nh = orig.h * applied;
         if (r.handle.includes('w')) nx = orig.x + orig.w - nw;
         if (r.handle.includes('n')) ny = orig.y + orig.h - nh;
-        store.patchShape(r.shapeId, { x: nx, y: ny, w: nw, h: nh, fontSize });
+        const anchored = reanchorRotatedResize(
+          orig,
+          { x: nx, y: ny, w: nw, h: nh },
+          r.handle,
+          {
+            left: r.handle.includes('w') ? nx : orig.x,
+            right: r.handle.includes('w') ? nx + nw : orig.x + nw,
+            top: r.handle.includes('n') ? ny : orig.y,
+            bottom: r.handle.includes('n') ? ny + nh : orig.y + nh,
+          }
+        );
+        store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: nw, h: nh, fontSize });
         return;
       }
       // edge handles: E/W change wrap width; N/S keep wrap width and pad height
@@ -464,14 +491,32 @@ export class SelectTool extends Tool {
         italic: orig.italic,
       });
       if (r.handle === 'e' || r.handle === 'w') {
-        store.patchShape(r.shapeId, { x, y: orig.y, w: wrapW, h: measured.h });
+        const anchored = reanchorRotatedResize(orig, { x, y: orig.y, w: wrapW, h: measured.h }, r.handle, {
+          left,
+          right: left + wrapW,
+          top: orig.y,
+          bottom: orig.y + measured.h,
+        });
+        store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: wrapW, h: measured.h });
         return;
       }
       const pad = Math.max(0, h - measured.h);
       let ny = orig.y;
       if (r.handle === 'n') ny = orig.y + orig.h - (measured.h + pad);
-      store.patchShape(r.shapeId, { x: orig.x, y: ny, w: orig.w, h: measured.h + pad });
+      const textH = measured.h + pad;
+      const anchored = reanchorRotatedResize(orig, { x: orig.x, y: ny, w: orig.w, h: textH }, r.handle, {
+        left: orig.x,
+        right: orig.x + orig.w,
+        top: ny,
+        bottom: ny + textH,
+      });
+      store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: orig.w, h: textH });
       return;
+    }
+    {
+      const anchored = reanchorRotatedResize(orig, { x, y, w, h }, r.handle, { left, right, top, bottom });
+      x = anchored.x;
+      y = anchored.y;
     }
     if (orig.points) {
       // Signed scales from the live edges so crossing the opposite side flips geometry.
@@ -550,11 +595,20 @@ export class PenTool extends Tool {
     if (n >= 2 && Math.hypot(p.world.x - this.pts[n - 2], p.world.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
     this.pts.push(p.world.x, p.world.y);
     if (this.capturePressure) this.pressures.push(clampPressure(p.pressure));
+    const pen = effectivePen();
+    publishDraft({
+      kind: 'pen',
+      points: this.pts,
+      stroke: pen.color,
+      strokeWidth: pen.width,
+      alpha: pen.alpha,
+    });
   }
 
   onUp(_engine: Engine): void {
     if (!this.active) return;
     this.active = false;
+    publishDraft(null);
     const shift = this.shift;
     this.shift = false;
     const points = shift ? this.straightPoints() : this.pts;
@@ -666,6 +720,7 @@ export class PenTool extends Tool {
     this.pressures = [];
     this.capturePressure = false;
     this.last = null;
+    publishDraft(null);
     store.endGesture();
   }
 
@@ -1195,9 +1250,10 @@ export class ArrowTool extends Tool {
     const cx = mx + nx * bend * 0.5, cy = my + ny * bend * 0.5;
     const ang = Math.atan2(by - cy, bx - cx);
     const head = settings.shape.arrowHead;
+    const ink = displayInk(settings.shape.stroke, store.viewPaperBg());
     ctx.save();
-    ctx.strokeStyle = settings.shape.stroke;
-    ctx.fillStyle = settings.shape.stroke;
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = settings.shape.strokeWidth;
     ctx.lineCap = 'round';
@@ -1340,6 +1396,7 @@ export class EraserTool extends Tool {
     this.active = false;
     this.pos = null;
     engine.commitErase();
+    publishErasePreview(null);
     this.wholeHits.clear();
     this.partialHits.clear();
   }
@@ -1350,6 +1407,7 @@ export class EraserTool extends Tool {
     this.wholeHits.clear();
     this.partialHits.clear();
     engine.setErasePreview(new Set(), new Map());
+    publishErasePreview(null);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -1386,6 +1444,18 @@ export class EraserTool extends Tool {
       }
     }
     engine.setErasePreview(this.wholeHits, this.partialHits);
+    const partialMap: Record<string, number[]> = {};
+    for (const [id, indices] of this.partialHits) {
+      partialMap[id] = [...indices];
+    }
+    publishErasePreview({
+      x: world.x,
+      y: world.y,
+      r,
+      mode: settings.eraser.mode,
+      whole: [...this.wholeHits],
+      ...(Object.keys(partialMap).length ? { partial: partialMap } : {}),
+    });
   }
 }
 

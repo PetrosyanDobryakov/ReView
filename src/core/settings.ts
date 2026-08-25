@@ -85,6 +85,11 @@ function persist(): void {
   } catch {
     /* ignore */
   }
+  try {
+    import('./userProfile').then((m) => m.persistUserProfile());
+  } catch {
+    /* ignore */
+  }
 }
 
 function restore(): void {
@@ -182,6 +187,30 @@ export function onSettingsChange(l: Listener): () => void {
   return () => {
     listeners.delete(l);
   };
+}
+
+export type SettingsSnapshot = typeof settings;
+
+export function exportSettingsSnapshot(): SettingsSnapshot {
+  return {
+    pen: { ...settings.pen },
+    shape: { ...settings.shape },
+    text: { ...settings.text },
+    eraser: { ...settings.eraser },
+  };
+}
+
+/** Replace in-memory tool settings from a saved profile snapshot. */
+export function applySettingsSnapshot(raw: SettingsSnapshot): void {
+  if (raw.pen && typeof raw.pen === 'object') Object.assign(settings.pen, raw.pen);
+  if (raw.shape && typeof raw.shape === 'object') Object.assign(settings.shape, raw.shape);
+  if (raw.text && typeof raw.text === 'object') Object.assign(settings.text, raw.text);
+  if (raw.eraser && typeof raw.eraser === 'object') Object.assign(settings.eraser, raw.eraser);
+  if (settings.shape.fill === 'transparent' || settings.shape.fill === 'none') {
+    settings.shape.filled = false;
+  }
+  persist();
+  emit();
 }
 
 /** Fill string for newly drawn shapes (honours the no-fill toggle). */

@@ -19,6 +19,8 @@ import {
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
+import { canRenameBoardOnHome } from '../core/boardTitle';
+import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
@@ -152,6 +154,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const handleSaveBoard = (id: string) => {
     saveBoardLocally(id);
+    persistBoardIfOpen(id);
     refresh();
     void refreshWeights(listBoards());
   };
@@ -464,7 +467,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           className="icon-btn"
                           title={t(locale, 'rename')}
                           aria-label={t(locale, 'rename')}
+                          disabled={!canRenameBoardOnHome(b)}
                           onClick={() => {
+                            if (!canRenameBoardOnHome(b)) return;
                             setEditingBoard(b.id);
                             setBoardName(b.name);
                           }}

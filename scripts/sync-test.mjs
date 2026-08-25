@@ -71,6 +71,17 @@ docB.getMap('shapes').get('sync1').set('x', 777);
 await new Promise((r) => setTimeout(r, 600));
 assert.equal(boardA.get('sync1').get('x'), 777, 'client A received change from client B');
 
+// --- synced board title in meta ---
+const metaA = docA.getMap('meta');
+metaA.set('ownerId', 'user-a');
+metaA.set('title', 'Alpha board');
+await new Promise((r) => setTimeout(r, 600));
+const metaB = docB.getMap('meta');
+assert.equal(metaB.get('title'), 'Alpha board', 'client B received synced board title');
+metaA.set('title', 'Renamed live');
+await new Promise((r) => setTimeout(r, 600));
+assert.equal(metaB.get('title'), 'Renamed live', 'title rename propagates');
+
 // --- awareness user + cursor ---
 pa.awareness.setLocalStateField('user', {
   id: 'user-a',
@@ -101,6 +112,19 @@ pb.awareness.setLocalStateField('user', {
   color: '#4cd964',
 });
 pb.awareness.setLocalStateField('cursor', { x: 7, y: 8 });
+pb.awareness.setLocalStateField('draft', {
+  kind: 'pen',
+  points: [1, 2, 3, 4, 5, 6],
+  stroke: '#4cd964',
+  strokeWidth: 3,
+});
+pb.awareness.setLocalStateField('erasePreview', {
+  x: 50,
+  y: 60,
+  r: 32,
+  mode: 'whole',
+  whole: ['sync1'],
+});
 
 await waitAware(
   pa,
@@ -109,16 +133,29 @@ await waitAware(
       if (id === pa.awareness.clientID) continue;
       const user = state.user;
       const cur = state.cursor;
-      if (user?.id === 'user-b' && user?.name === 'Bob' && cur?.x === 7 && cur?.y === 8) {
+      const draft = state.draft;
+      const erasePreview = state.erasePreview;
+      if (
+        user?.id === 'user-b' &&
+        user?.name === 'Bob' &&
+        cur?.x === 7 &&
+        cur?.y === 8 &&
+        draft?.kind === 'pen' &&
+        Array.isArray(draft.points) &&
+        draft.points.length === 6 &&
+        erasePreview?.mode === 'whole' &&
+        Array.isArray(erasePreview.whole) &&
+        erasePreview.whole.includes('sync1')
+      ) {
         return true;
       }
     }
     return false;
   },
-  'A sees Bob cursor'
+  'A sees Bob cursor + draft + erase preview'
 );
 
 pa.destroy();
 pb.destroy();
-console.log('sync-test: shapes + awareness verified');
+console.log('sync-test: shapes + awareness + draft + erase preview verified');
 process.exit(0);

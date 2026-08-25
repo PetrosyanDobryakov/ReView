@@ -274,7 +274,7 @@ export function StyleBar({
   const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
   const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
 
-  const showFill = showShapeDraw || fillTargets.length > 0;
+  const showFill = (showShapeDraw && tool !== 'arrow') || fillTargets.length > 0;
   const showStroke = showShapeDraw || showPen || strokeTargets.length > 0 || penTargets.length > 0;
   const showText = showTextDraw || textTargets.length > 0;
   const showPenStyle = showPen || (penTargets.length > 0 && fillTargets.length === 0 && textTargets.length === 0);

@@ -219,7 +219,7 @@ export async function deleteBoardData(id: string): Promise<boolean> {
   return deleteBoardDatabase(id);
 }
 
-/** Mark a remote board as kept on this device (local copy). */
+/** Mark a remote board as kept on this device (local copy). Keeps remote status. */
 export function saveBoardLocally(id: string): BoardMeta | undefined {
   const boards = readBoards();
   const idx = boards.findIndex((b) => b.id === id);
@@ -228,7 +228,6 @@ export function saveBoardLocally(id: string): BoardMeta | undefined {
   const next: BoardMeta = {
     ...prev,
     savedLocally: true,
-    status: prev.status === 'remote' ? 'local' : prev.status,
     updatedAt: Date.now(),
   };
   boards[idx] = next;

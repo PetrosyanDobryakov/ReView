@@ -22,12 +22,15 @@ import {
   meta,
   metaBg,
   metaGrid,
+  metaTitle,
+  metaOwnerId,
   viewPaperBg,
   persistence,
   setMeta,
   undoManager,
   initBoard,
   enableBoardPersistence,
+  persistBoardIfOpen,
   onPageChange,
   onBoardReady,
   currentPageId,
@@ -43,9 +46,17 @@ import {
   type SyncStatus,
   type PeerCursor,
 } from './net';
-import { readPrefs, writePrefs } from './core/prefs';
+import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
-import { getBoard, renameBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
+import { getBoard, saveBoardLocally, isBoardPersistedLocally } from './core/boards';
+import {
+  boardRenameMode,
+  commitBoardRename,
+  displayBoardTitle,
+  mirrorSyncedTitle,
+  reconcileBoardTitleOnOpen,
+  usesLocalBoardName,
+} from './core/boardTitle';
 import { fileToDocPages } from './core/docImport';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
@@ -148,13 +159,42 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const boardMeta = getBoard(boardId);
-  const [boardTitle, setBoardTitle] = useState(() => boardMeta?.name ?? 'ReView');
+  const [boardTitle, setBoardTitle] = useState(() => {
+    const m = getBoard(boardId);
+    return displayBoardTitle(m, null, m?.name ?? 'ReView');
+  });
+  const [boardOwnerId, setBoardOwnerId] = useState<string | null>(() => metaOwnerId());
+  const [renameMode, setRenameMode] = useState(() => boardRenameMode(getBoard(boardId), metaOwnerId()));
   const [editingName, setEditingName] = useState(false);
   const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
   useEffect(() => {
     const m = getBoard(boardId);
-    if (m) setBoardTitle(m.name);
+    if (m) setBoardTitle(displayBoardTitle(m, metaTitle(), m.name));
+    setBoardOwnerId(metaOwnerId());
+    setRenameMode(boardRenameMode(m, metaOwnerId()));
     setEphemeral(!isBoardPersistedLocally(m));
+  }, [boardId]);
+
+  useEffect(() => {
+    const onReady = () => {
+      const title = reconcileBoardTitleOnOpen(boardId, boardMeta?.name ?? 'ReView');
+      setBoardTitle(title);
+      setBoardOwnerId(metaOwnerId());
+      setRenameMode(boardRenameMode(getBoard(boardId), metaOwnerId()));
+    };
+    onReady();
+    return onBoardReady(onReady);
+  }, [boardId, boardMeta?.name]);
+
+  useEffect(() => {
+    return onPrefsChange(() => {
+      const m = getBoard(boardId);
+      if (m && isBoardPersistedLocally(m)) {
+        enableBoardPersistence();
+        setEphemeral(false);
+        setSaved(true);
+      }
+    });
   }, [boardId]);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
@@ -345,6 +385,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       // Paper is local once chosen; until then follow synced meta.
       if (readPrefs().paperBg == null) setBg(metaBg());
       setGridOn(metaGrid());
+      const m = getBoard(boardId);
+      const ownerId = metaOwnerId();
+      setBoardOwnerId(ownerId);
+      setRenameMode(boardRenameMode(m, ownerId));
+      const synced = metaTitle();
+      if (synced && m && !usesLocalBoardName(m)) {
+        mirrorSyncedTitle(boardId, synced);
+        setBoardTitle(displayBoardTitle(m, synced, m.name));
+      }
     };
     curMeta.observe(onMeta);
     const offSync = onSyncStatus(setSync);
@@ -548,7 +597,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <Icon name="home" />
           </button>
           <div className="island-sep" />
-          {editingName ? (
+          {editingName && renameMode ? (
             <input
               className="brand-edit"
               value={boardTitle}
@@ -557,21 +606,20 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               aria-label={t(locale, 'renameBoard')}
               onChange={(e) => setBoardTitle(e.target.value)}
               onBlur={() => {
-                const v = boardTitle.trim().slice(0, 40) || 'ReView';
-                renameBoard(boardId, v);
+                const v = commitBoardRename(boardId, boardTitle, boardOwnerId, boardMeta?.name ?? 'ReView');
                 setBoardTitle(v);
                 setEditingName(false);
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === 'Enter') {
-                  const v = boardTitle.trim().slice(0, 40) || 'ReView';
-                  renameBoard(boardId, v);
+                  const v = commitBoardRename(boardId, boardTitle, boardOwnerId, boardMeta?.name ?? 'ReView');
                   setBoardTitle(v);
                   setEditingName(false);
                 }
                 if (e.key === 'Escape') {
-                  setBoardTitle(getBoard(boardId)?.name ?? 'ReView');
+                  const m = getBoard(boardId);
+                  setBoardTitle(displayBoardTitle(m, metaTitle(), m?.name ?? 'ReView'));
                   setEditingName(false);
                 }
               }}
@@ -581,12 +629,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <button
               type="button"
               className="brand"
-              title={t(locale, 'renameBoard')}
-              onClick={() => setEditingName(true)}
+              title={renameMode ? t(locale, 'renameBoard') : t(locale, 'boardTitleReadOnly')}
+              onClick={() => {
+                if (renameMode) setEditingName(true);
+              }}
+              style={renameMode ? undefined : { cursor: 'default' }}
             >
               {boardTitle}
             </button>
           )}
+          <div className="island-sep" />
+          <PageBar locale={locale} />
           <div className="island-sep" />
           <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} disabled={!canUndo} onClick={() => undoManager.undo()}>
             <Icon name="undo" />
@@ -620,6 +673,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
                   enableBoardPersistence();
                   setEphemeral(false);
                   setSaved(true);
+                  setRenameMode(boardRenameMode(getBoard(boardId), boardOwnerId));
                 }}
               >
                 {t(locale, 'saveBoard')}
@@ -627,7 +681,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             </>
           )}
         </div>
-        <PageBar locale={locale} />
         <div className="island meta-island">
           {errorShown && errorView && (
             <button

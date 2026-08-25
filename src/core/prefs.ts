@@ -162,6 +162,22 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     /* ignore */
   }
   if (next.uiScale !== cur.uiScale) applyUiScale(next.uiScale);
+  const userFields: (keyof AppPrefs)[] = [
+    'adaptInkToPaper',
+    'toolCursorScale',
+    'uiScale',
+    'toolHoverAnim',
+    'paperBg',
+    'recognizeShapes',
+    'rotateSnap',
+  ];
+  if (userFields.some((k) => patch[k] !== undefined)) {
+    try {
+      import('./userProfile').then((m) => m.persistUserProfile());
+    } catch {
+      /* ignore */
+    }
+  }
   emit();
   return next;
 }

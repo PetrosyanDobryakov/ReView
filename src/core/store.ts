@@ -3,8 +3,24 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
+import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync } from '../net';
+import {
+  POINTS_SPACE_LOCAL,
+  POINTS_SPACE_META,
+  toLocalPoints,
+  toWorldPoints,
+} from './pointsSpace';
+import {
+  beginWriteGesture,
+  configureWriteGate,
+  endWriteGesture,
+  enqueuePatch,
+  enqueuePatches,
+  flushNow as flushWriteGate,
+  type PatchBatch,
+} from './writeGate';
 
 export const LOCAL_ORIGIN = 'local';
 const LEGACY_MIGRATION_KEY = 'review-v1-migrated';
@@ -47,6 +63,7 @@ function attachPersistence(boardId: string): void {
     syncActivePageFromStorage();
     ensureOrder();
     migratePaper();
+    migratePointsSpace();
     emitBoardReady();
   };
   if ((persistence as unknown as { synced: boolean }).synced) {
@@ -141,6 +158,13 @@ export function enableBoardPersistence(): void {
   attachPersistence(currentBoardId);
 }
 
+/** Attach IndexedDB when this board is open and not yet persisted (home save, etc.). */
+export function persistBoardIfOpen(boardId: string): boolean {
+  if (currentBoardId !== boardId || persistence) return false;
+  attachPersistence(boardId);
+  return true;
+}
+
 export function initBoard(boardId: string): void {
   if (currentBoardId === boardId) return;
   detachSync();
@@ -187,12 +211,16 @@ export function initBoard(boardId: string): void {
   });
   // Ephemeral boards never get an IDB 'synced' — still notify the engine.
   if (!persistence) queueMicrotask(() => {
-    if (currentBoardId === boardId) emitBoardReady();
+    if (currentBoardId === boardId) {
+      migratePointsSpace();
+      emitBoardReady();
+    }
   });
 }
 
 /** Tear down sync and clear the active board id (e.g. leaving `/board/:id`). */
 export function leaveBoard(): void {
+  flushWriteGate();
   flushBoardUpdated();
   detachSync();
   currentBoardId = null;
@@ -243,6 +271,58 @@ const PAPER_MIGRATE: Record<string, string> = {
   '#2b3040': '#2c2a26',
 };
 
+export const META_TITLE = 'title';
+export const META_OWNER_ID = 'ownerId';
+
+export function metaTitle(): string | null {
+  const raw = meta.get(META_TITLE);
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim().slice(0, 40);
+  return v || null;
+}
+
+export function metaOwnerId(): string | null {
+  const raw = meta.get(META_OWNER_ID);
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v || null;
+}
+
+export function setSyncedBoardTitle(title: string): void {
+  const v = title.trim().slice(0, 40);
+  if (!v) return;
+  setMeta({ [META_TITLE]: v });
+}
+
+/**
+ * First open on the creator device claims ownership and seeds synced title.
+ * Joiners never write ownerId — they inherit it from the CRDT doc.
+ */
+export function seedBoardMeta(local: { name: string; status: string }): void {
+  const userId = loadUser().id;
+  transact(() => {
+    const ownerRaw = meta.get(META_OWNER_ID);
+    const hasOwner = typeof ownerRaw === 'string' && ownerRaw.trim().length > 0;
+    if (!hasOwner && local.status === 'local') {
+      meta.set(META_OWNER_ID, userId);
+      const titleRaw = meta.get(META_TITLE);
+      if (typeof titleRaw !== 'string' || !titleRaw.trim()) {
+        meta.set(META_TITLE, local.name.trim().slice(0, 40) || 'ReView');
+      }
+      return;
+    }
+    const titleRaw = meta.get(META_TITLE);
+    if (
+      (typeof titleRaw !== 'string' || !titleRaw.trim()) &&
+      hasOwner &&
+      ownerRaw === userId &&
+      local.status === 'local'
+    ) {
+      meta.set(META_TITLE, local.name.trim().slice(0, 40) || 'ReView');
+    }
+  });
+}
+
 export function setMeta(patch: Record<string, unknown>): void {
   transact(() => {
     for (const [key, value] of Object.entries(patch)) meta.set(key, value);
@@ -270,6 +350,32 @@ export function migratePaper(): void {
   if (typeof raw !== 'string') return;
   const next = PAPER_MIGRATE[raw];
   if (next) setMeta({ bg: next });
+}
+
+/**
+ * One-shot: convert legacy world-space polylines to shape-local storage.
+ * Idempotent via meta.pointsSpace === 'local'.
+ */
+export function migratePointsSpace(): void {
+  if (meta.get(POINTS_SPACE_META) === POINTS_SPACE_LOCAL) return;
+  let converted = 0;
+  transact(() => {
+    if (meta.get(POINTS_SPACE_META) === POINTS_SPACE_LOCAL) return;
+    for (const [, m] of board.entries()) {
+      const pts = m.get('points');
+      if (!(pts instanceof Y.Array) || pts.length < 2) continue;
+      const x = (m.get('x') as number) ?? 0;
+      const y = (m.get('y') as number) ?? 0;
+      const world = pts.toArray() as number[];
+      const local = toLocalPoints(world, x, y);
+      const arr = new Y.Array<number>();
+      arr.insert(0, local);
+      m.set('points', arr);
+      converted += 1;
+    }
+    meta.set(POINTS_SPACE_META, POINTS_SPACE_LOCAL);
+  });
+  if (converted > 0) bumpCurrentBoard();
 }
 
 export function metaGrid(): boolean {
@@ -324,21 +430,32 @@ export function transact(fn: () => void): void {
 
 export function beginGesture(): void {
   undoManager.stopCapturing();
+  beginWriteGesture();
 }
 
 export function endGesture(): void {
+  endWriteGesture();
   undoManager.stopCapturing();
 }
 
 export function readShape(m: Y.Map<unknown>): ShapeView {
   const type = m.get('type') as ShapeType;
+  const x = (m.get('x') as number) ?? 0;
+  const y = (m.get('y') as number) ?? 0;
   const points = m.get('points');
   const pagesArr = m.get('pages');
+  const localPts = points instanceof Y.Array ? (points.toArray() as number[]) : undefined;
+  const worldPts =
+    localPts && localPts.length
+      ? meta.get(POINTS_SPACE_META) === POINTS_SPACE_LOCAL
+        ? toWorldPoints(localPts, x, y)
+        : localPts
+      : undefined;
   return {
     id: m.get('id') as string,
     type,
-    x: (m.get('x') as number) ?? 0,
-    y: (m.get('y') as number) ?? 0,
+    x,
+    y,
     w: (m.get('w') as number) ?? 0,
     h: (m.get('h') as number) ?? 0,
     fill: (m.get('fill') as string) ?? COLORS.fill,
@@ -363,7 +480,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     cropW: m.get('cropW') as number | undefined,
     cropH: m.get('cropH') as number | undefined,
     expr: m.get('expr') as string | undefined,
-    points: points instanceof Y.Array ? points.toArray() : undefined,
+    points: worldPts,
     pressures: (() => {
       const p = m.get('pressures');
       return p instanceof Y.Array ? p.toArray() : undefined;
@@ -408,7 +525,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   }
   if (v.points) {
     const arr = new Y.Array<number>();
-    arr.insert(0, v.points);
+    arr.insert(0, toLocalPoints(v.points, v.x, v.y));
     m.set('points', arr);
   }
   if (v.pressures?.length) {
@@ -446,7 +563,12 @@ export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
   const id = v.id ?? makeId();
   const m = createShapeYMap({ ...v, id } as ShapeView);
   const key = currentPagePrefix() + id;
+  // Structural adds flush any coalesced gesture patches first so order stays sane.
+  flushWriteGate();
   transact(() => {
+    if (meta.get(POINTS_SPACE_META) !== POINTS_SPACE_LOCAL) {
+      meta.set(POINTS_SPACE_META, POINTS_SPACE_LOCAL);
+    }
     ensureOrder();
     board.set(key, m);
     order.push([key]);
@@ -458,11 +580,17 @@ export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
 function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
   const m = board.get(id);
   if (!m) return;
+  // Apply scalar geometry first so points can be stored relative to the new origin.
+  if (patch.x !== undefined) m.set('x', patch.x);
+  if (patch.y !== undefined) m.set('y', patch.y);
+  const originX = (m.get('x') as number) ?? 0;
+  const originY = (m.get('y') as number) ?? 0;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
+    if (key === 'x' || key === 'y') continue;
     if (key === 'points' && Array.isArray(value)) {
       const arr = new Y.Array<number>();
-      arr.insert(0, value as number[]);
+      arr.insert(0, toLocalPoints(value as number[], originX, originY));
       m.set('points', arr);
     } else if (key === 'pressures' && Array.isArray(value)) {
       const arr = new Y.Array<number>();
@@ -482,23 +610,47 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
   }
 }
 
-export function patchShape(id: string, patch: Partial<ShapeView>): void {
+function flushPatchesToDoc(batch: PatchBatch): void {
+  if (!batch.length) return;
   transact(() => {
-    patchShapeInternal(id, patch);
+    if (meta.get(POINTS_SPACE_META) !== POINTS_SPACE_LOCAL) {
+      meta.set(POINTS_SPACE_META, POINTS_SPACE_LOCAL);
+    }
+    for (const [id, patch] of batch) patchShapeInternal(id, patch);
   });
   bumpCurrentBoard();
 }
 
-export function patchShapes(patches: Array<[string, Partial<ShapeView>]>): void {
-  if (!patches.length) return;
-  transact(() => {
-    for (const [id, patch] of patches) patchShapeInternal(id, patch);
+let liveViewApplier: ((batch: PatchBatch) => void) | null = null;
+
+/** Engine registers this so coalesced gestures still paint at pointer rate. */
+export function setLiveViewApplier(fn: ((batch: PatchBatch) => void) | null): void {
+  liveViewApplier = fn;
+  configureWriteGate({
+    flush: flushPatchesToDoc,
+    live: (batch) => liveViewApplier?.(batch),
   });
-  bumpCurrentBoard();
+}
+
+// Default gate wiring (live applier attached when Engine mounts).
+configureWriteGate({ flush: flushPatchesToDoc, live: null });
+
+export function patchShape(id: string, patch: Partial<ShapeView>): void {
+  enqueuePatch(id, patch);
+}
+
+export function patchShapes(patches: Array<[string, Partial<ShapeView>]>): void {
+  enqueuePatches(patches);
+}
+
+/** Force pending coalesced patches into the doc (tests / before structural ops). */
+export function flushPendingPatches(): void {
+  flushWriteGate();
 }
 
 export function removeShapes(ids: string[]): void {
   if (!ids.length) return;
+  flushWriteGate();
   transact(() => {
     for (const id of ids) board.delete(id);
     for (const id of ids) {

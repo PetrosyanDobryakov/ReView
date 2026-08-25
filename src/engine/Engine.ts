@@ -27,6 +27,7 @@ import { HANDLES, Tools, pointInPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
 import { sendCursor, publishTool } from '../net';
+import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
 import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
@@ -46,16 +47,6 @@ const CROP_CURSORS: Record<HandleId, string> = {
   w: 'ew-resize',
 };
 
-function peerLabelInk(fill: string): string {
-  if (!/^#[0-9a-fA-F]{6}$/i.test(fill)) return '#1c1c1a';
-  const r = parseInt(fill.slice(1, 3), 16);
-  const g = parseInt(fill.slice(3, 5), 16);
-  const b = parseInt(fill.slice(5, 7), 16);
-  const lum = (r * 299 + g * 587 + b * 114) / 1000;
-  return lum >= 160 ? '#1c1c1a' : '#f7f5f0';
-}
-
-/** Outline ink for peer tool cursors — follows this client's paper theme. */
 function peerToolOutline(paperBg: string): string {
   return themeFor(paperBg).text;
 }
@@ -88,12 +79,43 @@ function peerToolIcon(tool: string | null | undefined): IconName {
   return 'select';
 }
 
+/** Game-style SmoothDamp — frame-rate independent, no overshoot. */
+function smoothDamp(
+  current: number,
+  target: number,
+  currentVelocity: number,
+  smoothTime: number,
+  dt: number,
+  maxSpeed = Infinity
+): { value: number; velocity: number } {
+  const st = Math.max(0.0001, smoothTime);
+  const omega = 2 / st;
+  const x = omega * dt;
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  let change = current - target;
+  const maxChange = maxSpeed * st;
+  change = Math.max(-maxChange, Math.min(maxChange, change));
+  const temp = (currentVelocity + omega * change) * dt;
+  let velocity = (currentVelocity - omega * temp) * exp;
+  let value = target + (change + temp) * exp;
+  // Prevent overshoot when crossing the target.
+  if (target - current > 0 === value > target) {
+    value = target;
+    velocity = 0;
+  }
+  return { value, velocity };
+}
+
 /**
  * Peer cursor = their tool glyph.
  * Fill = peer color; outline = local paper theme (black on light / light on dark).
+ * Open stroke icons (pan/hand, etc.) must not be filled — canvas fill() invents garbage regions.
  */
 const peerPathCache = new Map<IconName, Path2D>();
 let peerHandlePath: Path2D | null = null;
+
+/** Icons that are line art only (same as UI `fill="none"`). */
+const PEER_STROKE_ONLY = new Set<IconName>(['pan', 'text', 'arrow', 'graph', 'eraser']);
 
 function peerPath(icon: IconName): Path2D {
   let p = peerPathCache.get(icon);
@@ -116,29 +138,50 @@ function paintPeerToolGlyph(
   ctx.translate(-size / 2, -size / 2);
   const scale = size / 24;
   ctx.scale(scale, scale);
+  // Match toolbelt pan fit so the hand isn't clipped/odd in the 24² box.
+  if (icon === 'pan') {
+    ctx.translate(12, 12);
+    ctx.scale(0.88, 0.88);
+    ctx.translate(-13, -12.5);
+  } else if (icon === 'pen') {
+    ctx.translate(12, 12);
+    ctx.scale(0.86, 0.86);
+    ctx.translate(-12, -12);
+  }
   const path = peerPath(icon);
   if (icon === 'lasso' && !peerHandlePath) peerHandlePath = new Path2D(LASSO_HANDLE);
   const handle = icon === 'lasso' ? peerHandlePath : null;
   const lw = worldStroke / scale;
+  const strokeOnly = PEER_STROKE_ONLY.has(icon);
+  // Pan uses a thinner stroke in the toolbelt; keep that proportion.
+  const bodyMul = icon === 'pan' ? 0.85 : 1;
 
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Theme outline (wider)
-  ctx.strokeStyle = outline;
-  ctx.lineWidth = lw * 2.55;
-  ctx.stroke(path);
-  if (handle) ctx.stroke(handle);
+  if (strokeOnly) {
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = lw * 2.6 * bodyMul;
+    ctx.stroke(path);
+    if (handle) ctx.stroke(handle);
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = lw * 1.35 * bodyMul;
+    ctx.stroke(path);
+    if (handle) ctx.stroke(handle);
+  } else {
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = lw * 2.15;
+    ctx.stroke(path);
+    if (handle) ctx.stroke(handle);
 
-  // Peer fill for closed glyphs
-  ctx.fillStyle = fill;
-  ctx.fill(path);
+    ctx.fillStyle = fill;
+    ctx.fill(path);
 
-  // Peer body stroke
-  ctx.strokeStyle = fill;
-  ctx.lineWidth = lw;
-  ctx.stroke(path);
-  if (handle) ctx.stroke(handle);
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = lw;
+    ctx.stroke(path);
+    if (handle) ctx.stroke(handle);
+  }
 
   ctx.restore();
 }
@@ -246,12 +289,32 @@ export class Engine {
   editing = false;
   editId: string | null = null;
   remotePeers: PeerCursor[] = [];
-  /** Smoothed cursor positions keyed by awareness client id. */
-  private peerLerp = new Map<number, { x: number; y: number; tx: number; ty: number }>();
+  /**
+   * Critically-damped peer cursor state (display pose + velocity + samples).
+   * Purely local — awareness rate unchanged.
+   */
+  private peerLerp = new Map<
+    number,
+    {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      tx: number;
+      ty: number;
+      prevTx: number;
+      prevTy: number;
+      sampleAt: number;
+      prevSampleAt: number;
+    }
+  >();
+  private peersAnimating = false;
+  private frameDt = 1 / 60;
 
   setPeers(peers: PeerCursor[]): void {
     const prevById = new Map(this.remotePeers.map((p) => [p.id, p]));
     let shouldPaint = peers.length !== this.remotePeers.length;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
     const live = new Set(peers.map((p) => p.id));
     for (const id of [...this.peerLerp.keys()]) {
@@ -268,7 +331,14 @@ export class Engine {
         old.color !== peer.color ||
         old.name !== peer.name ||
         old.tool !== peer.tool ||
-        old.page !== peer.page
+        old.page !== peer.page ||
+        Boolean(old.draft) !== Boolean(peer.draft) ||
+        (peer.draft &&
+          old.draft &&
+          (old.draft.points.length !== peer.draft.points.length ||
+            old.draft.stroke !== peer.draft.stroke ||
+            old.draft.strokeWidth !== peer.draft.strokeWidth)) ||
+        JSON.stringify(old.erasePreview ?? null) !== JSON.stringify(peer.erasePreview ?? null)
       ) {
         shouldPaint = true;
       }
@@ -281,11 +351,26 @@ export class Engine {
       }
       const cur = this.peerLerp.get(peer.id);
       if (!cur) {
-        this.peerLerp.set(peer.id, { x: peer.x, y: peer.y, tx: peer.x, ty: peer.y });
+        this.peerLerp.set(peer.id, {
+          x: peer.x,
+          y: peer.y,
+          vx: 0,
+          vy: 0,
+          tx: peer.x,
+          ty: peer.y,
+          prevTx: peer.x,
+          prevTy: peer.y,
+          sampleAt: now,
+          prevSampleAt: now,
+        });
         shouldPaint = true;
       } else if (cur.tx !== peer.x || cur.ty !== peer.y) {
+        cur.prevTx = cur.tx;
+        cur.prevTy = cur.ty;
+        cur.prevSampleAt = cur.sampleAt;
         cur.tx = peer.x;
         cur.ty = peer.y;
+        cur.sampleAt = now;
         shouldPaint = true;
       }
     }
@@ -364,6 +449,7 @@ export class Engine {
     window.addEventListener('paste', this.onPaste);
     // File drops are owned by App (images + PDF/TXT) so we don't double-insert.
     this.bindStore();
+    store.setLiveViewApplier((batch) => this.applyLivePatches(batch));
     this.offPageChange = store.onPageChange(() => {
       const page = store.currentPageId();
       if (page === this.boundPageId) return;
@@ -663,6 +749,7 @@ export class Engine {
     this.observedBoard = null;
     this.observedMeta = null;
     this.observedOrder = null;
+    store.setLiveViewApplier(null);
     this.offPageChange();
     this.offImageLoad();
     this.offFormulaLoad();
@@ -694,6 +781,29 @@ export class Engine {
   }
 
   setDirty(): void {
+    this.dirty = true;
+  }
+
+  /**
+   * Instant local paint while writeGate coalesces Yjs commits.
+   * When only x/y move, shift world-space points so pens stay under the cursor.
+   */
+  private applyLivePatches(batch: PatchBatch): void {
+    if (!batch.length) return;
+    for (const [id, patch] of batch) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      const nx = patch.x ?? v.x;
+      const ny = patch.y ?? v.y;
+      const next: ShapeView = { ...v, ...patch, x: nx, y: ny };
+      if (v.points && patch.points === undefined && (nx !== v.x || ny !== v.y)) {
+        const dx = nx - v.x;
+        const dy = ny - v.y;
+        next.points = v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy));
+      }
+      this.views.set(id, next);
+      this.grid.upsert(id, next);
+    }
     this.dirty = true;
   }
 
@@ -834,14 +944,7 @@ export class Engine {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       moved.add(id);
-      if (v.points) {
-        patches.push([
-          id,
-          { x: v.x + dx, y: v.y + dy, points: v.points.map((val, i) => val + (i % 2 === 0 ? dx : dy)) },
-        ]);
-      } else {
-        patches.push([id, { x: v.x + dx, y: v.y + dy }]);
-      }
+      patches.push([id, { x: v.x + dx, y: v.y + dy }]);
     }
     // update connected arrows
     for (const [aid, av] of this.views) {
@@ -2804,12 +2907,13 @@ export class Engine {
     try {
       const dt = Math.min((t - this.lastT) / 1000 || 0.016, 0.05);
       this.lastT = t;
+      this.frameDt = dt;
       this.camera.update(dt);
       const moved =
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
-      if (moved || this.dirty) this.render();
+      if (moved || this.dirty || this.peersAnimating) this.render();
       this.emitStats();
     } catch (err) {
       console.error('[review] render loop error:', err);
@@ -2850,11 +2954,35 @@ export class Engine {
     if (store.metaGrid()) this.drawGrid(ctx, theme.grid);
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
+    const pageId = store.currentPageId();
+    const peerWhole = new Set<string>();
+    const peerPartial = new Map<string, Set<number>>();
+    for (const peer of this.remotePeers) {
+      if (peer.page != null && peer.page !== pageId) continue;
+      const ep = peer.erasePreview;
+      if (!ep) continue;
+      for (const id of ep.whole) {
+        if (!this.erasing.has(id)) peerWhole.add(id);
+      }
+      if (ep.partial) {
+        for (const [id, indices] of Object.entries(ep.partial)) {
+          if (this.erasing.has(id) || this.partialErase.has(id)) continue;
+          let set = peerPartial.get(id);
+          if (!set) {
+            set = new Set<number>();
+            peerPartial.set(id, set);
+          }
+          for (const i of indices) set.add(i);
+        }
+      }
+    }
+    const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it
       const hideText = this.editing && this.editId === v.id;
-      const partial = this.partialErase.get(v.id);
-      if (partial && partial.size) {
+      const partial = this.partialErase.get(v.id) ?? peerPartial.get(v.id);
+      const wholeErase = this.erasing.has(v.id) || peerWhole.has(v.id);
+      if (partial && partial.size && !wholeErase) {
         const pts = v.points ?? [];
         const segments: number[][] = [];
         let cur: number[] = [];
@@ -2874,19 +3002,18 @@ export class Engine {
         }
         return;
       }
-      if (this.erasing.has(v.id)) {
+      if (wholeErase) {
         ctx.save();
         ctx.globalAlpha = 0.32;
         drawShape(ctx, v, theme.text, paperBg, hideText);
         ctx.restore();
-        // ponytail: highlight erasing target — red dashed frame + tint so whole-erase is obvious
         ctx.save();
         ctx.strokeStyle = '#c96a62';
-        ctx.lineWidth = 2.2 * (1 / this.camera.zoom);
-        ctx.setLineDash([7 / this.camera.zoom, 5 / this.camera.zoom]);
-        ctx.strokeRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
+        ctx.lineWidth = 2.2 * zInv;
+        ctx.setLineDash([7 * zInv, 5 * zInv]);
+        ctx.strokeRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
         ctx.fillStyle = 'rgba(201,106,98,0.14)';
-        ctx.fillRect(v.x - 3 / this.camera.zoom, v.y - 3 / this.camera.zoom, v.w + 6 / this.camera.zoom, v.h + 6 / this.camera.zoom);
+        ctx.fillRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
         ctx.restore();
       } else {
         drawShape(ctx, v, theme.text, paperBg, hideText);
@@ -2926,63 +3053,120 @@ export class Engine {
     }
     ctx.restore();
     this.lastCam = { x: cx, y: cy, z };
-    this.dirty = u < 1;
+    this.dirty = u < 1 || this.peersAnimating;
   }
 
   private drawPeers(ctx: CanvasRenderingContext2D): void {
+    this.peersAnimating = false;
     if (!this.remotePeers.length) return;
     const s = 1 / this.camera.zoom;
-    const dt = 0.22;
-    let stillMoving = false;
+    const dt = this.frameDt;
+    const reduce = this.reduceMotion;
+    // Smooth-damp time constant (~follows 25 Hz samples without rubber-banding).
+    const smoothTime = 0.055;
+    // Dead-reckon slightly past the last sample to bridge the next packet.
+    const leadSec = 0.045;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
     const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
-    const glyph = 22 * s;
+    const glyph = 20 * s;
+    const boardBg = this.paperFill || store.viewPaperBg();
 
     for (const peer of this.remotePeers) {
       // Hide cursors of people on another sub-page (missing page → show everywhere).
       if (peer.page != null && peer.page !== myPage) continue;
+
+      if (peer.draft && peer.draft.points.length >= 4) {
+        const d = peer.draft;
+        drawPenStroke(
+          ctx,
+          d.points,
+          d.strokeWidth,
+          displayInk(d.stroke, boardBg),
+          d.alpha ?? 0.85
+        );
+        this.peersAnimating = true;
+      }
+
+      if (peer.erasePreview) {
+        const ep = peer.erasePreview;
+        ctx.save();
+        ctx.strokeStyle = peer.color;
+        ctx.lineWidth = 2 * s;
+        ctx.setLineDash([4 * s, 3 * s]);
+        ctx.beginPath();
+        ctx.arc(ep.x, ep.y, ep.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        this.peersAnimating = true;
+      }
+
       if (peer.x === null || peer.y === null) continue;
       let pos = this.peerLerp.get(peer.id);
       if (!pos) {
-        pos = { x: peer.x, y: peer.y, tx: peer.x, ty: peer.y };
+        pos = {
+          x: peer.x,
+          y: peer.y,
+          vx: 0,
+          vy: 0,
+          tx: peer.x,
+          ty: peer.y,
+          prevTx: peer.x,
+          prevTy: peer.y,
+          sampleAt: now,
+          prevSampleAt: now,
+        };
         this.peerLerp.set(peer.id, pos);
       }
-      pos.x += (pos.tx - pos.x) * dt;
-      pos.y += (pos.ty - pos.y) * dt;
-      if (Math.abs(pos.tx - pos.x) > 0.12 || Math.abs(pos.ty - pos.y) > 0.12) stillMoving = true;
 
-      const x = pos.x;
-      const y = pos.y;
+      let aimX = pos.tx;
+      let aimY = pos.ty;
+      if (!reduce) {
+        const sampleDt = Math.max(0.001, (pos.sampleAt - pos.prevSampleAt) / 1000);
+        const svx = (pos.tx - pos.prevTx) / sampleDt;
+        const svy = (pos.ty - pos.prevTy) / sampleDt;
+        const age = Math.max(0, (now - pos.sampleAt) / 1000);
+        // Cap extrapolation so idle cursors don't drift after the peer stops.
+        const lead = Math.min(leadSec, Math.max(0, leadSec - age * 0.5));
+        const speed = Math.hypot(svx, svy);
+        if (speed > 8) {
+          aimX = pos.tx + svx * lead;
+          aimY = pos.ty + svy * lead;
+        }
+        const dampX = smoothDamp(pos.x, aimX, pos.vx, smoothTime, dt);
+        const dampY = smoothDamp(pos.y, aimY, pos.vy, smoothTime, dt);
+        pos.x = dampX.value;
+        pos.vx = dampX.velocity;
+        pos.y = dampY.value;
+        pos.vy = dampY.velocity;
+      } else {
+        pos.x = pos.tx;
+        pos.y = pos.ty;
+        pos.vx = 0;
+        pos.vy = 0;
+      }
+
+      const err = Math.hypot(aimX - pos.x, aimY - pos.y);
+      const speed = Math.hypot(pos.vx, pos.vy);
+      if (err > 0.15 || speed > 2) this.peersAnimating = true;
+
       const fill = peer.color || '#7c8cff';
-      const ink = peerLabelInk(fill);
       const icon = peerToolIcon(peer.tool);
 
       ctx.save();
-      ctx.translate(x, y);
+      ctx.translate(pos.x, pos.y);
 
-      // Soft contact shadow under the tool tip
-      ctx.beginPath();
-      ctx.ellipse(1.2 * s, glyph * 0.42, glyph * 0.38, glyph * 0.14, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.16)';
-      ctx.fill();
-
-      paintPeerToolGlyph(ctx, icon, glyph, fill, outline, 2.1 * s);
+      paintPeerToolGlyph(ctx, icon, glyph, fill, outline, 1.4 * s);
 
       const label = peer.name;
       ctx.font = `500 ${11 * s}px ${BOARD_TYPEFACE}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      const ly = glyph * 0.55;
-      ctx.lineWidth = 2.5 * s;
-      ctx.strokeStyle = ink === '#f7f5f0' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.55)';
-      ctx.strokeText(label, 0, ly);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
       ctx.fillStyle = fill;
-      ctx.fillText(label, 0, ly);
+      ctx.fillText(label, glyph * 0.62, -glyph * 0.48);
 
       ctx.restore();
     }
-
-    if (stillMoving) this.dirty = true;
   }
 
   private drawGrid(ctx: CanvasRenderingContext2D, color: string): void {

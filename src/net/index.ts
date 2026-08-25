@@ -5,7 +5,7 @@ export {
   boardRoomName,
 } from './config';
 export { SyncClient, syncClient } from './client';
-export type { SyncStatus, PeerCursor, CursorPos, AwarenessUser } from './types';
+export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser } from './types';
 export { isNetLogEnabled, setNetLogEnabled, netLog, syncHttpBase } from './log';
 export type { NetLogLevel } from './log';
 export {
@@ -20,7 +20,7 @@ export type { LanInfo } from './lan';
 
 import { syncClient } from './client';
 import { boardRoomName } from './config';
-import type { CursorPos, PeerCursor, SyncStatus } from './types';
+import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
 import type * as Y from 'yjs';
 
@@ -53,6 +53,14 @@ export function publishPage(page: string): void {
 
 export function sendCursor(pos: CursorPos | null): void {
   syncClient.sendCursor(pos);
+}
+
+export function publishDraft(draft: PeerDraft | null): void {
+  syncClient.publishDraft(draft);
+}
+
+export function publishErasePreview(preview: PeerErasePreview | null): void {
+  syncClient.publishErasePreview(preview);
 }
 
 export function onSyncStatus(cb: (status: SyncStatus) => void): () => void {

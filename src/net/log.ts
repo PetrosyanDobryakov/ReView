@@ -6,8 +6,8 @@ export type NetLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const PREFIX = '[review:net]';
 const STORAGE_KEY = 'review-net-log';
-/** Default ON while we harden LAN sync — Settings / ?netLog=0 still disable. */
-const DEFAULT_ENABLED = true;
+/** Default OFF — enable via Settings / ?netLog=1 while debugging LAN sync. */
+const DEFAULT_ENABLED = false;
 
 type LogData = unknown | (() => unknown);
 
