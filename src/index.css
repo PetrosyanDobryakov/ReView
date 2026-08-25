@@ -737,6 +737,96 @@ button.brand {
   cursor: pointer;
 }
 
+/* --- pen color slots (Miro-style) --- */
+.pen-slots {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pen-slot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--chrome-border);
+  padding: 0;
+  cursor: pointer;
+  transition: transform var(--chrome-dur-fast) var(--chrome-ease), box-shadow var(--chrome-dur-fast) var(--chrome-ease);
+}
+
+.pen-slot:hover {
+  transform: scale(1.14);
+}
+
+.pen-slot.active {
+  box-shadow: 0 0 0 2px var(--chrome-accent-strong);
+  transform: scale(1.08);
+}
+
+.pen-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--chrome-panel);
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  box-shadow: var(--chrome-shadow);
+  animation: pop-in var(--chrome-dur) var(--chrome-ease);
+}
+
+.pen-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 20px);
+  gap: 6px;
+}
+
+.pen-pop-grid.customs {
+  grid-template-columns: repeat(8, 20px);
+}
+
+.pen-pop-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  padding: 0;
+  cursor: pointer;
+  transition: transform var(--chrome-dur-fast) var(--chrome-ease);
+}
+
+.pen-pop-swatch:hover {
+  transform: scale(1.18);
+}
+
+.pen-pop-swatch.active {
+  box-shadow: 0 0 0 2px var(--chrome-accent-strong);
+}
+
+.pen-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--chrome-type-label);
+  color: var(--chrome-accent-strong);
+  cursor: pointer;
+}
+
+.pen-add input {
+  width: 22px;
+  height: 22px;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
 .size-select {
   height: 32px;
   background: var(--chrome-panel-2);

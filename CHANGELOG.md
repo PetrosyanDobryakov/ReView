@@ -9,6 +9,11 @@
 - Single upload button now accepts images and documents; files can also be dragged onto the window (drop overlay included).
 - Double-click no longer opens the text editor (image crop and graph editor keep their double-click actions).
 
+### Pen colors
+- Miro-style pen color system: 5 quick slots (white, black, red, green, blue) that remember their colors.
+- Clicking a slot opens a shade palette (8 hues × 4 shades) plus a custom colors section.
+- Custom colors are added via the native picker (committed on confirm) and removed with right-click; the palette stays open while adding.
+
 ### Text editing
 - Fixed text ghosting: the canvas hides the edited shape's text while the overlay is open.
 - Text now wraps to the frame width on canvas; committing keeps the frame and recomputes height from wrapped lines.
