@@ -1,14 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ToolId } from '../engine/tools';
 import { onPrefsChange, readPrefs } from '../core/prefs';
-import { Icon, TOOLBELT_ICON_SIZE } from './icons';
+import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
-import { t } from './i18n';
+import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
 
 const NAV: ToolId[] = ['select', 'lasso', 'pan'];
 const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text', 'graph'];
-const SCHEME: ToolId[] = ['diamond', 'triangle', 'parallelogram', 'hexagon', 'terminator', 'subroutine', 'display', 'frame'];
+const SCHEME: ToolId[] = [
+  'diamond',
+  'triangle',
+  'parallelogram',
+  'hexagon',
+  'cylinder',
+  'terminator',
+  'subroutine',
+  'display',
+  'frame',
+];
+const DEFAULT_SCHEME: ToolId = 'diamond';
+
+function isSchemeTool(id: ToolId): boolean {
+  return SCHEME.includes(id);
+}
 
 export interface ToolbarProps {
   locale: LocaleId;
@@ -52,11 +67,20 @@ function ToolButtons({
           aria-pressed={tool === id}
           onClick={() => onTool(id)}
         >
-          <Icon name={id} size={TOOLBELT_ICON_SIZE} />
+          <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
         </button>
       ))}
     </SlideTrack>
   );
+}
+
+function actionLabel(
+  locale: LocaleId,
+  enabled: MessageKey,
+  disabled: MessageKey,
+  ok: boolean
+): string {
+  return t(locale, ok ? enabled : disabled);
 }
 
 export function Toolbar({
@@ -76,10 +100,67 @@ export function Toolbar({
   onCancelCrop,
   onExport,
 }: ToolbarProps) {
+  const menuId = useId();
+  const schemeRootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
   const [schemeOpen, setSchemeOpen] = useState(false);
+  const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>(DEFAULT_SCHEME);
   const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
+
   useEffect(() => onPrefsChange((p) => setToolHoverAnim(p.toolHoverAnim)), []);
-  const isSchemeActive = SCHEME.includes(tool);
+
+  useEffect(() => {
+    if (isSchemeTool(tool)) setLastSchemeTool(tool);
+  }, [tool]);
+
+  const prevTool = useRef(tool);
+  useEffect(() => {
+    if (isSchemeTool(prevTool.current) && !isSchemeTool(tool)) setSchemeOpen(false);
+    prevTool.current = tool;
+  }, [tool]);
+
+  useEffect(() => {
+    if (!schemeOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (schemeRootRef.current?.contains(target)) return;
+      setSchemeOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSchemeOpen(false);
+      chevronRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [schemeOpen]);
+
+  useEffect(() => {
+    if (!schemeOpen) return;
+    const active = menuRef.current?.querySelector<HTMLButtonElement>(
+      '[data-scheme-active="true"], [role="menuitem"]'
+    );
+    active?.focus();
+  }, [schemeOpen]);
+
+  const isSchemeActive = isSchemeTool(tool);
+  const schemeIcon = (isSchemeActive ? tool : lastSchemeTool) as IconName;
+  const hasSelection = selectionCount > 0;
+
+  const pickScheme = (id: ToolId) => {
+    setLastSchemeTool(id);
+    onTool(id);
+    setSchemeOpen(false);
+    chevronRef.current?.focus();
+  };
+
   return (
     <div
       className="toolbelt"
@@ -87,99 +168,158 @@ export function Toolbar({
       aria-label={t(locale, 'tools')}
       data-tool-anim={toolHoverAnim ? 'on' : undefined}
     >
-      <ToolButtons ids={NAV} tool={tool} locale={locale} onTool={onTool} />
-      <div className="toolbelt-sep" />
-      <ToolButtons ids={CREATE} tool={tool} locale={locale} onTool={onTool} />
-      <div className="toolbelt-sep" />
-      <div className="tool-group" style={{ position: 'relative' }}>
-        <button
-          type="button"
-          className="tool-btn"
-          data-slide-active={isSchemeActive ? 'true' : undefined}
-          title={t(locale, 'blockScheme')}
-          aria-label={t(locale, 'blockScheme')}
-          aria-pressed={isSchemeActive}
-          aria-expanded={schemeOpen}
-          onClick={() => setSchemeOpen((v) => !v)}
-        >
-          <Icon name="blockScheme" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        {schemeOpen && (
-          <div
-            className="island"
-            style={{
-              position: 'absolute',
-              bottom: '44px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '8px',
-              gap: '6px',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 34px)',
-              zIndex: 30,
+      <div className="toolbelt-scroll">
+        <ToolButtons ids={NAV} tool={tool} locale={locale} onTool={onTool} />
+        <div className="toolbelt-sep" />
+        <ToolButtons ids={CREATE} tool={tool} locale={locale} onTool={onTool} />
+        <div className="toolbelt-sep" />
+        <div className="tool-group scheme-group" ref={schemeRootRef}>
+          <button
+            type="button"
+            className={`tool-btn${isSchemeActive ? ' active' : ''}`}
+            title={t(locale, lastSchemeTool)}
+            aria-label={t(locale, lastSchemeTool)}
+            aria-pressed={isSchemeActive}
+            onClick={() => {
+              onTool(lastSchemeTool);
+              setSchemeOpen(false);
             }}
-            onMouseLeave={() => setSchemeOpen(false)}
           >
-            <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--chrome-text-dim)', textAlign: 'center', padding: '0 0 4px' }}>{t(locale, 'blockScheme')}</div>
-            {SCHEME.map((id) => (
+            <Icon name={schemeIcon} size={TOOLBELT_ICON_SIZE} />
+          </button>
+          <button
+            ref={chevronRef}
+            type="button"
+            className={`tool-btn scheme-chevron${schemeOpen ? ' active' : ''}`}
+            title={t(locale, 'blockScheme')}
+            aria-label={t(locale, 'blockScheme')}
+            aria-haspopup="menu"
+            aria-controls={menuId}
+            aria-expanded={schemeOpen}
+            onClick={() => setSchemeOpen((v) => !v)}
+          >
+            <Icon name="chevronDown" size={14} />
+          </button>
+          {schemeOpen && (
+            <div
+              ref={menuRef}
+              id={menuId}
+              className="island block-scheme-popover"
+              role="menu"
+              aria-label={t(locale, 'blockScheme')}
+            >
+              <div className="block-scheme-popover-title">{t(locale, 'blockScheme')}</div>
+              {SCHEME.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="menuitemradio"
+                  className={`tool-btn${tool === id ? ' active' : ''}`}
+                  data-scheme-active={tool === id ? 'true' : undefined}
+                  title={t(locale, id)}
+                  aria-label={t(locale, id)}
+                  aria-checked={tool === id}
+                  onClick={() => pickScheme(id)}
+                >
+                  <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="toolbelt-sep" />
+        <div className="tool-group">
+          <button
+            type="button"
+            className="tool-btn"
+            title={actionLabel(locale, 'delete', 'deleteDisabled', hasSelection)}
+            aria-label={actionLabel(locale, 'delete', 'deleteDisabled', hasSelection)}
+            disabled={!hasSelection}
+            onClick={onDelete}
+          >
+            <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
+          </button>
+          <button
+            type="button"
+            className="tool-btn"
+            title={actionLabel(locale, 'copy', 'copyDisabled', hasSelection)}
+            aria-label={actionLabel(locale, 'copy', 'copyDisabled', hasSelection)}
+            disabled={!hasSelection}
+            onClick={onCopy}
+          >
+            <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
+          </button>
+          <button type="button" className="tool-btn" title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
+            <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
+          </button>
+          <button
+            type="button"
+            className="tool-btn"
+            title={actionLabel(locale, 'duplicate', 'duplicateDisabled', hasSelection)}
+            aria-label={actionLabel(locale, 'duplicate', 'duplicateDisabled', hasSelection)}
+            disabled={!hasSelection}
+            onClick={onDuplicate}
+          >
+            <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
+          </button>
+        </div>
+        <div className="toolbelt-sep" />
+        <div className="tool-group">
+          <button type="button" className="tool-btn" title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
+            <Icon name="download" size={TOOLBELT_ICON_SIZE} />
+          </button>
+          <div className="tool-media-slot">
+            {cropActive ? (
               <button
-                key={id}
+                key="apply"
+                type="button"
+                className="tool-btn crop-apply tool-pop"
+                title={t(locale, 'cropApply')}
+                aria-label={t(locale, 'cropApply')}
+                onClick={onApplyCrop}
+              >
+                <Icon name="check" size={TOOLBELT_ICON_SIZE} />
+              </button>
+            ) : (
+              <button
+                key="file"
                 type="button"
                 className="tool-btn"
-                data-slide-active={tool === id ? 'true' : undefined}
-                title={t(locale, id)}
-                aria-label={t(locale, id)}
-                aria-pressed={tool === id}
-                onClick={() => {
-                  onTool(id);
-                  setSchemeOpen(false);
-                }}
+                title={t(locale, 'insertFile')}
+                aria-label={t(locale, 'insertFile')}
+                onClick={onInsertImage}
               >
-                <Icon name={id} size={TOOLBELT_ICON_SIZE} />
+                <Icon name="upload" size={TOOLBELT_ICON_SIZE} />
               </button>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-      <div className="toolbelt-sep" />
-      <div className="tool-group">
-        <button type="button" className="tool-btn" title={t(locale, 'delete')} aria-label={t(locale, 'delete')} disabled={!selectionCount} onClick={onDelete}>
-          <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        <button type="button" className="tool-btn" title={t(locale, 'copy')} aria-label={t(locale, 'copy')} disabled={!selectionCount} onClick={onCopy}>
-          <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        <button type="button" className="tool-btn" title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
-          <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        <button type="button" className="tool-btn" title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} disabled={!selectionCount} onClick={onDuplicate}>
-          <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
-        </button>
-      </div>
-      <div className="toolbelt-sep" />
-      <div className="tool-group">
-        <button type="button" className="tool-btn" title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
-          <Icon name="download" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        {cropActive ? (
-          <>
-            <button key="apply" type="button" className="tool-btn crop-apply tool-pop" title={t(locale, 'cropApply')} aria-label={t(locale, 'cropApply')} onClick={onApplyCrop}>
-              <Icon name="check" size={TOOLBELT_ICON_SIZE} />
-            </button>
-            <button key="cancel" type="button" className="tool-btn tool-pop" title={t(locale, 'cropCancel')} aria-label={t(locale, 'cropCancel')} onClick={onCancelCrop}>
-              <Icon name="close" size={TOOLBELT_ICON_SIZE} />
-            </button>
-          </>
-        ) : (
-          <>
-            <button key="image" type="button" className="tool-btn" title={t(locale, 'insertImage')} aria-label={t(locale, 'insertImage')} onClick={onInsertImage}>
-              <Icon name="upload" size={TOOLBELT_ICON_SIZE} />
-            </button>
-            <button key="crop" type="button" className="tool-btn" title={t(locale, 'crop')} aria-label={t(locale, 'crop')} disabled={!canCrop} onClick={onCrop}>
-              <Icon name="crop" size={TOOLBELT_ICON_SIZE} />
-            </button>
-          </>
-        )}
+          <div className="tool-media-slot">
+            {cropActive ? (
+              <button
+                key="cancel"
+                type="button"
+                className="tool-btn tool-pop"
+                title={t(locale, 'cropCancel')}
+                aria-label={t(locale, 'cropCancel')}
+                onClick={onCancelCrop}
+              >
+                <Icon name="close" size={TOOLBELT_ICON_SIZE} />
+              </button>
+            ) : (
+              <button
+                key="crop"
+                type="button"
+                className="tool-btn"
+                title={actionLabel(locale, 'crop', 'cropDisabled', canCrop)}
+                aria-label={actionLabel(locale, 'crop', 'cropDisabled', canCrop)}
+                disabled={!canCrop}
+                onClick={onCrop}
+              >
+                <Icon name="crop" size={TOOLBELT_ICON_SIZE} />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

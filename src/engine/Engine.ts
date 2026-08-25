@@ -1547,7 +1547,6 @@ export class Engine {
       const size = this.measureText(trimmed, target.fontSize, target);
       store.patchShape(newId, { w: size.w, h: size.h });
       this.setSelection([]);
-      this.setTool('select');
     } else {
       const v = this.views.get(id);
       if (!v) return;
