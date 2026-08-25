@@ -29,7 +29,7 @@ const DEFAULTS: AppPrefs = {
   toolCursorScale: 1,
   toolHoverAnim: true,
   paperBg: null,
-  recognizeShapes: true,
+  recognizeShapes: false,
 };
 
 const CURSOR_SCALE_MIN = 0.7;
