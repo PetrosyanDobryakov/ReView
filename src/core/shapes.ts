@@ -2,7 +2,7 @@ import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
 export type TextAlign = 'left' | 'center' | 'right';
 
@@ -28,6 +28,8 @@ export interface ShapeView {
   textAlign?: TextAlign;
   highlight?: boolean;
   src?: string;
+  pages?: string[];
+  page?: number;
   locked?: boolean;
   cropX?: number;
   cropY?: number;
@@ -245,6 +247,16 @@ export function intersects(a: ShapeBox, b: ShapeBox): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+/** `inner` lies fully inside `outer` (with tolerance). */
+export function containedIn(inner: ShapeBox, outer: ShapeBox, tol = 2): boolean {
+  return (
+    inner.x >= outer.x - tol &&
+    inner.y >= outer.y - tol &&
+    inner.x + inner.w <= outer.x + outer.w + tol &&
+    inner.y + inner.h <= outer.y + outer.h + tol
+  );
+}
+
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   switch (v.type) {
     case 'ellipse': {
@@ -417,6 +429,9 @@ export function drawPenStroke(
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const lines: string[] = [];
+  // Use measureMixedLine so $formula$ width matches drawMixedLine / commit height.
+  const sizeMatch = /([\d.]+)px/.exec(ctx.font);
+  const fontSize = sizeMatch ? Number(sizeMatch[1]) : 16;
   for (const raw of text.split('\n')) {
     if (!raw) {
       lines.push('');
@@ -425,7 +440,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     let line = '';
     for (const word of raw.split(/\s+/)) {
       const test = line ? line + ' ' + word : word;
-      if (line && ctx.measureText(test).width > maxWidth) {
+      if (line && measureMixedLine(ctx, test, fontSize) > maxWidth) {
         lines.push(line);
         line = word;
       } else {
@@ -511,7 +526,8 @@ export function drawShape(
   ctx: CanvasRenderingContext2D,
   v: ShapeView,
   textColor: string = COLORS.text,
-  boardBg: string = COLORS.background
+  boardBg: string = COLORS.background,
+  hideText = false
 ): void {
   switch (v.type) {
     case 'rect': {
@@ -522,7 +538,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, 6);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'ellipse': {
@@ -533,7 +549,7 @@ export function drawShape(
       ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w / 2, v.h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'diamond': {
@@ -550,7 +566,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawDiamondLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawDiamondLabel(ctx, v, textColor);
       break;
     }
     case 'frame': {
@@ -572,7 +588,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, headerH, [8, 8, 0, 0] as unknown as number);
       ctx.fill();
       ctx.restore();
-      if (v.text) {
+      if (v.text && !hideText) {
         ctx.save();
         ctx.fillStyle = v.textColor ?? textColor;
         ctx.font = `${Math.max(12, (v.fontSize ?? SHAPE_FONT) - 1)}px ${BOARD_TYPEFACE}`;
@@ -598,7 +614,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawTriangleLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawTriangleLabel(ctx, v, textColor);
       break;
     }
     case 'parallelogram': {
@@ -614,7 +630,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'hexagon': {
@@ -632,7 +648,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'cylinder': {
@@ -655,7 +671,7 @@ export function drawShape(
       ctx.beginPath();
       ctx.ellipse(cx, v.y + ry, rx, ry, 0, 0, Math.PI * 2);
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'terminator': {
@@ -667,7 +683,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, r);
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'subroutine': {
@@ -685,7 +701,7 @@ export function drawShape(
       ctx.moveTo(v.x + v.w - inset, v.y);
       ctx.lineTo(v.x + v.w - inset, v.y + v.h);
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'display': {
@@ -701,7 +717,7 @@ export function drawShape(
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      if (v.text) drawLabel(ctx, v, textColor);
+      if (v.text && !hideText) drawLabel(ctx, v, textColor);
       break;
     }
     case 'sticky': {
@@ -712,7 +728,7 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, v.h, 8);
       ctx.fill();
       ctx.stroke();
-      if (v.text) {
+      if (v.text && !hideText) {
         ctx.save();
         ctx.beginPath();
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
@@ -738,7 +754,7 @@ export function drawShape(
       break;
     }
     case 'text': {
-      if (!v.text) break;
+      if (!v.text || hideText) break;
       const ink = displayInk(v.textColor ?? textColor, boardBg);
       const size = v.fontSize ?? TEXT_FONT;
       const lineHeight = size * 1.3;
@@ -753,7 +769,8 @@ export function drawShape(
       ctx.textBaseline = 'top';
       const align = v.textAlign ?? 'left';
       let lineY = v.y;
-      for (const line of v.text.split('\n')) {
+      // wrap to the frame width so canvas matches the editor overlay
+      for (const line of wrapText(ctx, v.text, Math.max(v.w, size * 2))) {
         const lw = measureMixedLine(ctx, line, size);
         const lx = lineAnchorX(v.x, v.w, lw, align);
         drawMixedLine(ctx, line, lx, lineY, lineHeight, size, {
@@ -785,6 +802,21 @@ export function drawShape(
         }
       } else {
         ctx.fillStyle = '#2e2e2b';
+        ctx.fillRect(v.x, v.y, v.w, v.h);
+        ctx.strokeStyle = '#454540';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(v.x, v.y, v.w, v.h);
+      }
+      break;
+    }
+    case 'doc': {
+      const pages = v.pages ?? [];
+      const src = pages[Math.min(v.page ?? 0, pages.length - 1)] ?? '';
+      const img = src ? getImage(src) : null;
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, v.x, v.y, v.w, v.h);
+      } else {
+        ctx.fillStyle = '#ffffff';
         ctx.fillRect(v.x, v.y, v.w, v.h);
         ctx.strokeStyle = '#454540';
         ctx.lineWidth = 1;

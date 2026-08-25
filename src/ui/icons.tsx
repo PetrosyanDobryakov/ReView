@@ -26,6 +26,8 @@ export const ICON_PATHS = {
   close: 'M18 6L6 18M6 6l12 12',
    person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  upload: 'M12 20V9M7 14l5-5 5 5M5 4h14',
+  file: 'M6 3h9l5 5v13H6zM15 3v5h5M9 13h6M9 17h4',
   settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4',
   home: 'M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   bold: 'M14 12a4 4 0 0 0 0-8H6v16h9a4 4 0 0 0 0-8 4 4 0 0 0-1-8zM10 6h3.5a2 2 0 1 1 0 4H10zm0 8h4.5a2 2 0 1 1 0 4H10z',

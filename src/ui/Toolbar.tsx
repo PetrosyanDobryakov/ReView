@@ -228,7 +228,7 @@ export function Toolbar({
         ) : (
           <>
             <button key="image" type="button" className="tool-btn" title={t(locale, 'insertImage')} aria-label={t(locale, 'insertImage')} onClick={onInsertImage}>
-              <Icon name="image" size={TOOLBELT_ICON_SIZE} />
+              <Icon name="upload" size={TOOLBELT_ICON_SIZE} />
             </button>
             <button key="crop" type="button" className="tool-btn" title={t(locale, 'crop')} aria-label={t(locale, 'crop')} disabled={!canCrop} onClick={onCrop}>
               <Icon name="crop" size={TOOLBELT_ICON_SIZE} />

@@ -227,6 +227,20 @@ export function SettingsSheet({
                 </button>
               ))}
             </SlideTrack>
+            <div className="custom-theme-row">
+              <label
+                className={`custom-color${BG_PRESETS.some((p) => p.value === bg) ? '' : ' active'}`}
+                title={t(locale, 'bgCustom')}
+                aria-label={t(locale, 'bgCustom')}
+              >
+                <input
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(bg) ? bg : '#1c1c1a'}
+                  onChange={(e) => onBg(e.target.value)}
+                />
+              </label>
+              <span className="panel-label">{t(locale, 'bgCustom')}</span>
+            </div>
             <button
               type="button"
               className={`sheet-switch${gridOn ? ' on' : ''}`}
