@@ -2,6 +2,11 @@
 
 ## 0.12.0 — unreleased
 
+### Lock & context menu
+- Fixed inverted lock toggle: «Заблокировать» now actually locks, «Разблокировать» unlocks (headless `lock-test` added).
+- Unlock requires press-and-hold (0.8 s) in the context menu with a theme-colored progress fill and a «зажмите» hint.
+- Alignment moved from the bottom island into the context menu; entries appear only for text/sticky selections (distribute at 3+). Bottom align island removed.
+
 ### Persistence
 - Home toggle «Save others’ boards» (default off): remote boards stay session-only and are not written to IndexedDB until you save.
 - Explicit «Save locally» on home and on the board chrome for remote boards.

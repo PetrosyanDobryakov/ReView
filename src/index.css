@@ -464,18 +464,6 @@ button.brand {
   animation: island-in var(--chrome-dur) var(--chrome-ease);
 }
 
-.align-island {
-  pointer-events: auto;
-  position: absolute;
-  z-index: 20;
-  left: 50%;
-  bottom: 122px;
-  transform: translateX(-50%);
-  padding: 6px;
-  gap: 2px;
-  animation: island-in var(--chrome-dur) var(--chrome-ease);
-}
-
 .style-island-body {
   display: flex;
   align-items: center;
@@ -1312,6 +1300,7 @@ button.brand {
 }
 
 .ctx-item {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1329,6 +1318,26 @@ button.brand {
   transition:
     background-color var(--chrome-dur-fast) var(--chrome-ease),
     transform var(--chrome-dur-press) var(--chrome-ease);
+}
+
+.ctx-item > span:not(.hold-fill) {
+  position: relative;
+  z-index: 1;
+}
+
+.hold-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+  width: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--chrome-selection) 30%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--chrome-active-ring);
+  transition:
+    width 80ms linear,
+    background-color var(--chrome-dur-fast) var(--chrome-ease);
 }
 
 .ctx-menu.is-leaving .ctx-item {

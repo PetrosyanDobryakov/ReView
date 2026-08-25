@@ -683,7 +683,8 @@ export class Engine {
       const v = this.views.get(id);
       if (v && !v.locked) anyUnlocked = true;
     }
-    const locked = !anyUnlocked;
+    // any unlocked shape in the selection → lock everything, otherwise unlock
+    const locked = anyUnlocked;
     const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const id of this.selection) patches.push([id, { locked }]);
     store.patchShapes(patches);
