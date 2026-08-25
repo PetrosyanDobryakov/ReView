@@ -362,6 +362,8 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
       return p instanceof Y.Array ? p.toArray() : undefined;
     })(),
     rotation: typeof m.get('rotation') === 'number' ? (m.get('rotation') as number) : undefined,
+    cornerRadius: typeof m.get('cornerRadius') === 'number' ? (m.get('cornerRadius') as number) : undefined,
+    arrowHead: typeof m.get('arrowHead') === 'number' ? (m.get('arrowHead') as number) : undefined,
     richHtml: typeof m.get('richHtml') === 'string' ? (m.get('richHtml') as string) : undefined,
     fromId: m.get('fromId') as string | undefined,
     fromPort: m.get('fromPort') as string | undefined,
@@ -408,6 +410,8 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('pressures', arr);
   }
   if (v.rotation) m.set('rotation', v.rotation);
+  if (v.cornerRadius !== undefined) m.set('cornerRadius', v.cornerRadius);
+  if (v.arrowHead !== undefined) m.set('arrowHead', v.arrowHead);
   if (v.pages) {
     const arr = new Y.Array<string>();
     arr.insert(0, v.pages);

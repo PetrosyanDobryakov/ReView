@@ -17,7 +17,7 @@ import {
   arrowBounds,
   measureMixedLine,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, rotationHandleWorld, withShapeRotation } from '../core/transform';
+import { localToWorld, rotatedAabb, rotationHandleWorld, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
@@ -539,10 +539,11 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const world = rotationHandleWorld(v, 28 / z);
+    const world = rotationHandleWorld(v, ROTATE_HANDLE_OFFSET_PX / z);
     const hx = world.x * z + ox;
     const hy = world.y * z + oy;
-    if (Math.hypot(hx - sx, hy - sy) <= 10) return id;
+    // Generous hit so the knob wins over the nearby north connect port.
+    if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
     return null;
   }
 
@@ -1729,6 +1730,7 @@ export class Engine {
       shift: e.shiftKey,
       alt: (e as PointerEvent).altKey ?? (e as MouseEvent).altKey ?? false,
       pressure: 'pressure' in e ? (e as PointerEvent).pressure : undefined,
+      pointerType: 'pointerType' in e ? (e as PointerEvent).pointerType : 'mouse',
     };
   }
 
@@ -1777,9 +1779,10 @@ export class Engine {
     try {
       const info = this.pointerInfo(e);
       if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) return;
-      // Resize wins over connect when both sit near the same edge.
-      const onHandle = this.hitHandle(info.screen.x, info.screen.y);
-      if (!onHandle) {
+      // Rotate knob wins over connect ports (north port sits near the stem).
+      const onRotate = this.hitRotateHandle(info.screen.x, info.screen.y);
+      const onHandle = onRotate ? null : this.hitHandle(info.screen.x, info.screen.y);
+      if (!onRotate && !onHandle) {
         const portHit = this.hitPort(info.screen.x, info.screen.y);
         if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
           this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
@@ -1876,7 +1879,8 @@ export class Engine {
     }
     if (!this.pointerDown && !this.connecting && this.selection.size) {
       const info = this.pointerInfo(e);
-      if (this.hitHandle(info.screen.x, info.screen.y)) {
+      // Keep connect ports quiet while the pointer is on resize or rotate chrome.
+      if (this.hitRotateHandle(info.screen.x, info.screen.y) || this.hitHandle(info.screen.x, info.screen.y)) {
         if (this.hoverPort) {
           this.hoverPort = null;
           this.dirty = true;
@@ -1945,7 +1949,7 @@ export class Engine {
           const a = portPos(fromV, fromPort, 0);
           const b = portPos(toV, toPort, 0);
           const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
-          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: 2, points: [a.x, a.y, b.x, b.y], fromId, fromPort, toId, toPort } as ShapeView);
+          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: settings.shape.strokeWidth, arrowHead: settings.shape.arrowHead, points: [a.x, a.y, b.x, b.y], fromId, fromPort, toId, toPort } as ShapeView);
           this.setSelection([id]);
         }
       } else {
@@ -1954,7 +1958,7 @@ export class Engine {
           const a = portPos(fromV, fromPort, 0);
           const b = info.world;
           const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
-          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: 2, points: [a.x, a.y, b.x, b.y] } as ShapeView);
+          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: settings.shape.strokeWidth, arrowHead: settings.shape.arrowHead, points: [a.x, a.y, b.x, b.y] } as ShapeView);
           this.setSelection([id]);
         }
       }
@@ -2011,18 +2015,8 @@ export class Engine {
     const rect = this.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    // Pinch (ctrl/meta) and discrete mouse wheels zoom; pixel trackpad scrolls pan.
-    const zoomGesture =
-      e.ctrlKey ||
-      e.metaKey ||
-      e.deltaMode === WheelEvent.DOM_DELTA_LINE ||
-      e.deltaMode === WheelEvent.DOM_DELTA_PAGE;
-    if (!zoomGesture) {
-      this.camera.panBy(-e.deltaX, -e.deltaY);
-      this.dirty = true;
-      return;
-    }
-    const dy = e.shiftKey && Math.abs(e.deltaY) < 0.01 ? e.deltaX : e.deltaY;
+    // Wheel / trackpad scroll always zooms (pan is Space/MMB/hand only).
+    const dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
     this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-dy * 0.0022));
     this.dirty = true;
   };
@@ -2784,9 +2778,9 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // Rotation handle above top-center
+          // Rotation handle above top-center (clear of the north connect port)
           const rx = v.x + v.w / 2;
-          const ry = v.y - 28 * s;
+          const ry = v.y - ROTATE_HANDLE_OFFSET_PX * s;
           ctx.beginPath();
           ctx.moveTo(v.x + v.w / 2, v.y - pad);
           ctx.lineTo(rx, ry);
@@ -2794,7 +2788,7 @@ export class Engine {
           ctx.lineWidth = 1.25 * s;
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(rx, ry, hr * 1.15, 0, Math.PI * 2);
+          ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
           ctx.fillStyle = '#ffffff';
           ctx.fill();
           ctx.strokeStyle = COLORS.selection;

@@ -6,7 +6,7 @@ export const ICON_PATHS = {
   ellipse: 'M12 5a7 7 0 1 0 0 14 7 7 0 1 0 0-14z',
   sticky: 'M5 4h10l5 5v11H5zM15 4v5h5M8 13h8M8 17h5',
   text: 'M5 6h14M12 6v13',
-  graph: 'M3 20c2.5-1 4-6.5 6-9s3 5 5 2 3.5-7 7-8M4 20h17',
+  graph: 'M4 19V5M4 19h16M7 14c2-4 3-1 5-5s3 2 5-3',
   arrow: 'M5 12h14M13 6l6 6-6 6',
   eraser: 'M3 16.5l5.5 5.5 13-13-5.5-5.5zM10 22h11',
   lasso: 'M12 5c4.2 0 7.5 2.8 7.5 6.2S16.2 17.4 12 17.4 4.5 14.6 4.5 11.2 7.8 5 12 5z',
@@ -24,7 +24,8 @@ export const ICON_PATHS = {
   crop: 'M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2',
   check: 'M5 12l5 5L20 7',
   close: 'M18 6L6 18M6 6l12 12',
-   person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
+  noFill: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM7 7l10 10',
+  person: 'M18 21v-2a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   upload: 'M12 20V9M7 14l5-5 5 5M5 4h14',
   file: 'M6 3h9l5 5v13H6zM15 3v5h5M9 13h6M9 17h4',
@@ -55,8 +56,8 @@ export const ICON_PATHS = {
   display: 'M3 5h11l5 7-5 7H3z',
   // Evenly spaced layers — closed top plate, open shelves (no stem).
   more: 'M12 2.5l8 4-8 4-8-4zM4 12.5l8 4 8-4M4 17.5l8 4 8-4',
-  // Two stacked process boxes + connector — centered in 24² (ink ≈ y 4.5–19.5).
-  blockScheme: 'M7 4.5h10v6H7zM12 10.5v3M7 13.5h10v6H7z',
+  // Flowchart: top node + two branches (rects drawn separately in Icon).
+  blockScheme: 'M12 6V10.5H4V14M12 10.5H20V14',
   chevronDown: 'M6 9l6 6 6-6',
 } as const;
 
@@ -99,6 +100,13 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       <g transform={PEN_FIT}>
         <path d={ICON_PATHS.pen} pathLength={1} />
       </g>
+    ) : name === 'blockScheme' ? (
+      <>
+        <rect x="9.5" y="2" width="5" height="4" rx="1" />
+        <rect x="1.5" y="14" width="5" height="4" rx="1" />
+        <rect x="17.5" y="14" width="5" height="4" rx="1" />
+        <path d={ICON_PATHS.blockScheme} pathLength={1} />
+      </>
     ) : (
       <>
         <path d={ICON_PATHS[name]} pathLength={1} />
@@ -107,6 +115,8 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       </>
     );
 
+  const thin = name === 'pan' || name === 'blockScheme';
+
   return (
     <svg
       width={size}
@@ -114,7 +124,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={name === 'pan' ? 1.5 : 2}
+      strokeWidth={thin ? 1.5 : 2}
       strokeLinecap="round"
       strokeLinejoin="round"
       overflow="visible"

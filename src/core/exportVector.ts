@@ -83,7 +83,7 @@ export function shapesToSvg(
     }
     if (v.type === 'ellipse') {
       parts.push(
-        `<ellipse cx="${x + v.w / 2}" cy="${y + v.h / 2}" rx="${v.w / 2}" ry="${v.h / 2}" fill="${esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`
+        `<ellipse cx="${x + v.w / 2}" cy="${y + v.h / 2}" rx="${v.w / 2}" ry="${v.h / 2}" fill="${v.fill === 'transparent' || v.fill === 'none' ? 'none' : esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`
       );
     } else if (v.type === 'image' && v.src) {
       parts.push(
@@ -109,7 +109,7 @@ export function shapesToSvg(
       );
     } else {
       parts.push(
-        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="6" fill="${esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${v.cornerRadius === undefined ? 6 : Math.max(0, v.cornerRadius)}" fill="${v.fill === 'transparent' || v.fill === 'none' ? 'none' : esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`
       );
       if (v.text) {
         parts.push(

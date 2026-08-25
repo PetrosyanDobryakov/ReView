@@ -7,9 +7,8 @@ import { t } from './i18n';
 import { SlideTrack } from './SlideTrack';
 
 const NAV: ToolId[] = ['select', 'lasso', 'pan'];
-const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
+const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text', 'graph'];
 const SCHEME: ToolId[] = ['diamond', 'triangle', 'parallelogram', 'hexagon', 'terminator', 'subroutine', 'display', 'frame'];
-const MORE: ToolId[] = ['graph'];
 
 export interface ToolbarProps {
   locale: LocaleId;
@@ -78,11 +77,9 @@ export function Toolbar({
   onExport,
 }: ToolbarProps) {
   const [schemeOpen, setSchemeOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
   useEffect(() => onPrefsChange((p) => setToolHoverAnim(p.toolHoverAnim)), []);
   const isSchemeActive = SCHEME.includes(tool);
-  const isMoreActive = MORE.includes(tool);
   return (
     <div
       className="toolbelt"
@@ -136,58 +133,6 @@ export function Toolbar({
                 onClick={() => {
                   onTool(id);
                   setSchemeOpen(false);
-                }}
-              >
-                <Icon name={id} size={TOOLBELT_ICON_SIZE} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="tool-group" style={{ position: 'relative' }}>
-        <button
-          type="button"
-          className="tool-btn"
-          data-slide-active={isMoreActive ? 'true' : undefined}
-          title={t(locale, 'more')}
-          aria-label={t(locale, 'more')}
-          aria-pressed={isMoreActive}
-          aria-expanded={moreOpen}
-          onClick={() => setMoreOpen((v) => !v)}
-        >
-          <Icon name="more" size={TOOLBELT_ICON_SIZE} />
-        </button>
-        {moreOpen && (
-          <div
-            className="island"
-            style={{
-              position: 'absolute',
-              bottom: '44px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '8px 12px',
-              gap: '6px',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(1, 34px)',
-              justifyContent: 'center',
-              minWidth: '60px',
-              zIndex: 30,
-            }}
-            onMouseLeave={() => setMoreOpen(false)}
-          >
-            <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--chrome-text-dim)', textAlign: 'center', padding: '0 0 4px', whiteSpace: 'nowrap' }}>{t(locale, 'more')}</div>
-            {MORE.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className="tool-btn"
-                data-slide-active={tool === id ? 'true' : undefined}
-                title={t(locale, id)}
-                aria-label={t(locale, id)}
-                aria-pressed={tool === id}
-                onClick={() => {
-                  onTool(id);
-                  setMoreOpen(false);
                 }}
               >
                 <Icon name={id} size={TOOLBELT_ICON_SIZE} />

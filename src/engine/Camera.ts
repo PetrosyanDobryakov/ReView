@@ -22,11 +22,20 @@ export class Camera {
     this.x += (this.tx - this.x) * k;
     this.y += (this.ty - this.y) * k;
     this.zoom += (this.tz - this.zoom) * k;
+    // Snap leftovers so the render loop stops thrashing after a pan/zoom settles.
+    if (Math.abs(this.tx - this.x) < 0.02) this.x = this.tx;
+    if (Math.abs(this.ty - this.y) < 0.02) this.y = this.ty;
+    if (Math.abs(this.tz - this.zoom) < 0.00008) this.zoom = this.tz;
   }
 
+  /** Pan in screen pixels — applied immediately (no ease) so trackpad/wheel feel 1:1. */
   panBy(dx: number, dy: number): void {
-    this.tx -= dx / this.zoom;
-    this.ty -= dy / this.zoom;
+    const wx = dx / this.zoom;
+    const wy = dy / this.zoom;
+    this.tx -= wx;
+    this.ty -= wy;
+    this.x -= wx;
+    this.y -= wy;
   }
 
   zoomAt(sx: number, sy: number, halfW: number, halfH: number, factor: number): void {
