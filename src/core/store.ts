@@ -419,6 +419,70 @@ export function migratePaper(): void {
 }
 
 /**
+ * One-time: bake current display adaptation into stored colors.
+ * Only pure black↔white is swapped: dark paper black→white, light paper white→black.
+ * Returns number of shapes mutated.
+ */
+export function adaptInkOnce(): number {
+  const bg = viewPaperBg();
+  // inline luminance to avoid circular import
+  const lum = (hex: string): number | null => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+    const lin = (c: number) => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const r = lin(parseInt(hex.slice(1, 3), 16));
+    const g = lin(parseInt(hex.slice(3, 5), 16));
+    const b = lin(parseInt(hex.slice(5, 7), 16));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const bgL = lum(bg);
+  if (bgL == null) return 0;
+  const isDarkBg = bgL < 0.12;
+  const isLightBg = bgL > 0.7;
+  if (!isDarkBg && !isLightBg) return 0;
+  const target = isDarkBg ? '#eceae4' : '#1c1c1a'; // theme text opposite
+  let changed = 0;
+  const patches: Array<[string, Partial<import('./shapes').ShapeView>]> = [];
+  for (const [key, m] of board.entries()) {
+    const stroke = m.get('stroke') as string | undefined;
+    const textColor = m.get('textColor') as string | undefined;
+    const patch: Record<string, unknown> = {};
+    if (typeof stroke === 'string') {
+      const l = lum(stroke);
+      if (l != null) {
+        if ((isDarkBg && l < 0.05) || (isLightBg && l > 0.82)) {
+          patch.stroke = target;
+          // also fix textColor if it matches stroke or is same extreme
+          if (typeof textColor === 'string' && lum(textColor) != null) {
+            const tl = lum(textColor)!;
+            if ((isDarkBg && tl < 0.05) || (isLightBg && tl > 0.82)) patch.textColor = target;
+          }
+        }
+      }
+    } else if (typeof textColor === 'string') {
+      const l = lum(textColor);
+      if (l != null && ((isDarkBg && l < 0.05) || (isLightBg && l > 0.82))) patch.textColor = target;
+    }
+    // sticky yellow / other fills are not touched — only ink
+    if (Object.keys(patch).length) {
+      patches.push([key, patch as Partial<import('./shapes').ShapeView>]);
+      changed++;
+    }
+  }
+  if (patches.length) transact(() => {
+    for (const [id, p] of patches) {
+      const mm = board.get(id);
+      if (!mm) continue;
+      for (const [k, v] of Object.entries(p)) mm.set(k, v);
+    }
+  });
+  if (changed) bumpCurrentBoard();
+  return changed;
+}
+
+/**
  * One-shot: convert legacy world-space polylines to shape-local storage.
  * Idempotent via meta.pointsSpace === 'local'.
  */

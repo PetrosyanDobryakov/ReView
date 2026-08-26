@@ -279,11 +279,21 @@ export function readableTextOn(fg: string, bg: string): string {
 
 /**
  * Display color for ink (pen / arrow / free text) on this client's paper.
- * Honors the Adapt ink preference — stored colors stay as authored.
+ * Stored colors stay as authored — only pure black↔white is swapped.
+ * Dark paper + near-black → near-white, light paper + near-white → near-black.
  */
 export function displayInk(color: string, boardBg: string): string {
   if (!readPrefs().adaptInkToPaper) return color;
-  return readableTextOn(color, boardBg);
+  const fg = relativeLuminance(color);
+  const bg = relativeLuminance(boardBg);
+  if (fg == null || bg == null) return color;
+  const isDarkBg = bg < 0.12;
+  const isLightBg = bg > 0.7;
+  const isBlack = fg < 0.05; // #000000, #1c1c1a, #121110
+  const isWhite = fg > 0.82; // #ffffff, #eceae4, #f8f9fa
+  if (isDarkBg && isBlack) return themeFor(boardBg).text;
+  if (isLightBg && isWhite) return themeFor(boardBg).text;
+  return color;
 }
 
 export function intersects(a: ShapeBox, b: ShapeBox): boolean {
