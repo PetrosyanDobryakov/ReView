@@ -41,7 +41,8 @@ export interface UserProfileData {
 type ProfileStore = Record<string, UserProfileData>;
 
 function isChromeThemeId(value: string): value is ChromeThemeId {
-  return CHROME_THEME_IDS.some((id) => id === value);
+  if (CHROME_THEME_IDS.some((id) => id === value)) return true;
+  return value === 'ocean' || value === 'forest' || value === 'sunset' || value === 'orbit';
 }
 
 function readStore(): ProfileStore {

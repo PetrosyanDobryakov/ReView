@@ -1,5 +1,8 @@
 import type { LocaleId } from '../core/locale';
 import type { ChromeThemeId } from '../core/chromeTheme';
+import { ORBIT_PAPER } from '../core/orbit';
+
+export { ORBIT_PAPER };
 
 const ru = {
   title: 'ReView — локальная онлайн-доска',
@@ -21,6 +24,7 @@ const ru = {
   bindPress: 'Нажми…',
   bindReset: 'Сбросить бинды',
   bindsColors: 'Цвета пера',
+  bindColor: 'Цвет №{n}',
   profile: 'Профиль',
   nickname: 'Никнейм',
   nicknameHint: 'Как тебя видят другие',
@@ -60,7 +64,6 @@ const ru = {
   docTruncated: 'Документ обрезан до 60 страниц',
   exportFailed: 'Не удалось экспортировать — уменьши масштаб или область',
   exportPage: 'Текущая страница',
-  paperUseBoard: 'Как у доски',
   duplicateBoard: 'Дублировать доску',
   statusRemoteWarn: 'Чужая = без локального сохранения. Данные на устройстве останутся, но доска откроется пустой, пока не сохранишь.',
   bindCleared: 'Очищено',
@@ -239,7 +242,11 @@ const ru = {
   chromeOcean: 'Океан',
   chromeForest: 'Лес',
   chromeSunset: 'Закат',
+  chromeOrbit: 'Орбита',
   chromeCustom: 'Своя',
+  orbitUnlock: 'Орбита',
+  orbitUnlockHint: 'Разблокировать скин как Futuristic Hero: чёрный фон, белый текст, красный скан. Только внешний вид.',
+  aiSlopTag: 'AI slop',
   customBg: 'Фон',
   customPanel: 'Панели',
   customText: 'Текст',
@@ -249,6 +256,7 @@ const ru = {
   bgGraphite: 'Графит',
   bgLight: 'Светлый',
   bgCream: 'Кремовый',
+  bgOrbit: 'Орбита',
   bgCustom: 'Своя',
   ctxCopy: 'Копировать',
   ctxCopyImage: 'Копировать как картинку',
@@ -329,6 +337,7 @@ const en: typeof ru = {
   bindPress: 'Press…',
   bindReset: 'Reset binds',
   bindsColors: 'Pen colors',
+  bindColor: 'Color #{n}',
   profile: 'Profile',
   nickname: 'Nickname',
   nicknameHint: 'How others see you',
@@ -368,7 +377,6 @@ const en: typeof ru = {
   docTruncated: 'Document trimmed to 60 pages',
   exportFailed: 'Export failed — try a lower scale or smaller region',
   exportPage: 'Current page',
-  paperUseBoard: 'Match board',
   duplicateBoard: 'Duplicate board',
   statusRemoteWarn: 'Remote skips local save. Data stays on disk, but the board opens empty until you save.',
   bindCleared: 'Cleared',
@@ -547,7 +555,11 @@ const en: typeof ru = {
   chromeOcean: 'Ocean',
   chromeForest: 'Forest',
   chromeSunset: 'Sunset',
+  chromeOrbit: 'Orbit',
   chromeCustom: 'Custom',
+  orbitUnlock: 'Orbit',
+  orbitUnlockHint: 'Unlock the Futuristic Hero skin: black void, white type, crimson scan. Look only.',
+  aiSlopTag: 'AI slop',
   customBg: 'Background',
   customPanel: 'Panels',
   customText: 'Text',
@@ -557,6 +569,7 @@ const en: typeof ru = {
   bgGraphite: 'Graphite',
   bgLight: 'Light',
   bgCream: 'Cream',
+  bgOrbit: 'Orbit',
   bgCustom: 'Custom',
   ctxCopy: 'Copy',
   ctxCopyImage: 'Copy as image',
@@ -637,6 +650,7 @@ const zh: typeof ru = {
   bindPress: '按下…',
   bindReset: '重置快捷键',
   bindsColors: '笔触颜色',
+  bindColor: '颜色 #{n}',
   profile: '个人资料',
   nickname: '昵称',
   nicknameHint: '别人如何看到你',
@@ -676,7 +690,6 @@ const zh: typeof ru = {
   docTruncated: '文档已截断为 60 页',
   exportFailed: '导出失败 — 请降低缩放或缩小区域',
   exportPage: '当前页',
-  paperUseBoard: '跟随画板',
   duplicateBoard: '复制画板',
   statusRemoteWarn: '设为「外部」会跳过本地保存。磁盘数据仍在，但打开时为空，直到你保存。',
   bindCleared: '已清除',
@@ -855,7 +868,11 @@ const zh: typeof ru = {
   chromeOcean: '海洋',
   chromeForest: '森林',
   chromeSunset: '日落',
+  chromeOrbit: '轨道',
   chromeCustom: '自定义',
+  orbitUnlock: '轨道',
+  orbitUnlockHint: '解锁 Futuristic Hero 皮肤：纯黑、白字、红色扫描。仅外观。',
+  aiSlopTag: 'AI slop',
   customBg: '背景',
   customPanel: '面板',
   customText: '文本',
@@ -865,6 +882,7 @@ const zh: typeof ru = {
   bgGraphite: '石墨',
   bgLight: '浅色',
   bgCream: '奶油色',
+  bgOrbit: '轨道',
   bgCustom: '自定义',
   ctxCopy: '复制',
   ctxCopyImage: '复制为图片',
@@ -949,6 +967,7 @@ export const CHROME_LABEL: Record<ChromeThemeId, MessageKey> = {
   ocean: 'chromeOcean',
   forest: 'chromeForest',
   sunset: 'chromeSunset',
+  orbit: 'chromeOrbit',
   custom: 'chromeCustom',
 };
 
@@ -959,3 +978,16 @@ export const BG_PRESETS: Array<{ value: string; label: MessageKey }> = [
   { value: '#fffdf5', label: 'bgCream' },
   { value: '#f4f4f5', label: 'bgLight' },
 ];
+
+/** Board paper cards — Orbit void paper only when the Orbit unlock is on. */
+export function pickerPaperPresets(orbitUnlocked: boolean): Array<{ value: string; label: MessageKey }> {
+  if (!orbitUnlocked) return BG_PRESETS;
+  return [
+    { value: '#1c1c1a', label: 'bgDark' },
+    { value: '#2c2a26', label: 'bgGraphite' },
+    { value: '#121110', label: 'bgBlack' },
+    { value: ORBIT_PAPER, label: 'bgOrbit' },
+    { value: '#fffdf5', label: 'bgCream' },
+    { value: '#f4f4f5', label: 'bgLight' },
+  ];
+}

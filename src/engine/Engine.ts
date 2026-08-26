@@ -35,6 +35,7 @@ import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import { onPrefsChange, readPrefs } from '../core/prefs';
+import { drawOrbitPaperField, drawOrbitPaperScreen, orbitPaperActive } from './orbitField';
 
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
@@ -844,6 +845,36 @@ export class Engine {
       if (v && pointInShape(v, x, y)) return id;
     }
     return null;
+  }
+
+  /** Selected shape under a point — uses bounds, not stroke geometry (for context menu). */
+  private hitSelectedBounds(x: number, y: number): string | null {
+    if (!this.selection.size) return null;
+    const pad = 4 / this.camera.zoom;
+    const ord = store.order;
+    for (let i = ord.length - 1; i >= 0; i--) {
+      const id = ord.get(i);
+      if (!this.selection.has(id)) continue;
+      const v = this.views.get(id);
+      if (!v) continue;
+      const b = this.spatialBox(v);
+      if (x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) return id;
+    }
+    const box = this.selectionBounds();
+    if (
+      box &&
+      x >= box.x - pad &&
+      x <= box.x + box.w + pad &&
+      y >= box.y - pad &&
+      y <= box.y + box.h + pad
+    ) {
+      return [...this.selection][0] ?? null;
+    }
+    return null;
+  }
+
+  private clampCameraToContent(): void {
+    this.camera.clampCenter(this.contentBox(), this.w, this.h);
   }
 
   hitHandle(sx: number, sy: number): { shapeId: string; handle: HandleId } | null {
@@ -2248,6 +2279,7 @@ export class Engine {
     }
     if (this.panDrag) {
       this.camera.panBy(e.movementX, e.movementY);
+      this.clampCameraToContent();
       return;
     }
     if (!this.pointerDown && !this.connecting && this.selection.size) {
@@ -2362,6 +2394,7 @@ export class Engine {
     if (this.panDrag) {
       this.panDrag = false;
       this.camera.instant = false;
+      this.clampCameraToContent();
       this.setCursor(this.toolCursor());
       if (e.button === 4) e.preventDefault();
       if (
@@ -2391,6 +2424,7 @@ export class Engine {
     // Wheel / trackpad scroll always zooms (pan is Space/MMB/hand only).
     const dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
     this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-dy * 0.0022));
+    this.clampCameraToContent();
     this.dirty = true;
   };
 
@@ -2446,6 +2480,7 @@ export class Engine {
         this.camera.zoomAt(mx, my, this.w / 2, this.h / 2, dist / this.gesture.dist);
       }
       this.camera.panBy(mid.x - this.gesture.mid.x, mid.y - this.gesture.mid.y);
+      this.clampCameraToContent();
     }
     this.gesture = { dist, mid };
     this.dirty = true;
@@ -2748,7 +2783,8 @@ export class Engine {
 
   private openContextMenu(e: PointerEvent): void {
     const p = this.pointerInfo(e);
-    const id = this.hitTest(p.world.x, p.world.y);
+    let id = this.hitTest(p.world.x, p.world.y);
+    if (!id) id = this.hitSelectedBounds(p.world.x, p.world.y);
     const sp = this.worldToScreen(p.world.x, p.world.y);
     if (id) {
       if (!this.selection.has(id)) this.setSelection([id]);
@@ -2973,11 +3009,25 @@ export class Engine {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = paperBg;
     ctx.fillRect(0, 0, w, h);
+    const orbitLive = orbitPaperActive(this.paperTo, paperBg);
     ctx.save();
     ctx.translate(w / 2, h / 2);
     ctx.scale(z, z);
     ctx.translate(-cx, -cy);
-    if (store.metaGrid()) this.drawGrid(ctx, theme.grid);
+    if (orbitLive) {
+      drawOrbitPaperField(ctx, {
+        cx,
+        cy,
+        zoom: z,
+        viewW: w,
+        viewH: h,
+        now: performance.now(),
+        reduceMotion: reduce,
+      });
+    }
+    if (store.metaGrid()) {
+      this.drawGrid(ctx, orbitLive ? 'rgba(255, 60, 60, 0.07)' : theme.grid);
+    }
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
     const pageId = store.currentPageId();
@@ -3078,9 +3128,12 @@ export class Engine {
       ctx.restore();
     }
     ctx.restore();
+    if (orbitLive) {
+      drawOrbitPaperScreen(ctx, w, h, performance.now(), reduce);
+    }
     this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
-    this.dirty = u < 1 || this.peersAnimating;
+    this.dirty = u < 1 || this.peersAnimating || (orbitLive && !reduce);
   }
 
   private drawPeers(ctx: CanvasRenderingContext2D): void {

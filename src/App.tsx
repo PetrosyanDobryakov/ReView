@@ -61,6 +61,7 @@ import {
 } from './core/boardTitle';
 import { fileToDocPages } from './core/docImport';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
+import { OrbitAtmosphere } from './ui/OrbitAtmosphere';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
 import { MOTION, useExitPresence } from './ui/motion';
@@ -634,6 +635,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
+      {chromeTheme === 'orbit' && <OrbitAtmosphere />}
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
@@ -902,10 +904,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onBg={(value) => {
           writePrefs({ paperBg: value });
           setBg(value);
-        }}
-        onPaperReset={() => {
-          writePrefs({ paperBg: null });
-          setBg(metaBg());
         }}
         onGrid={(on) => setMeta({ grid: on })}
         focusSection={settingsFocus}

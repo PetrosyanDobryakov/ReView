@@ -70,4 +70,28 @@ export class Camera {
       y: (sy - halfH) / this.zoom + this.y,
     };
   }
+
+  /** Keep the viewport center near board content so panning cannot drift into empty space. */
+  clampCenter(box: ShapeBox | null, viewW: number, viewH: number): void {
+    if (!box || box.w <= 0 || box.h <= 0) return;
+    const halfW = viewW / (2 * this.tz);
+    const halfH = viewH / (2 * this.tz);
+    const span = Math.max(box.w, box.h);
+    // ~3 viewports of slack past content, scaled up on large boards.
+    const margin = Math.max(halfW * 3, halfH * 3, span * 0.75, 2400);
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    let minX = box.x - margin + halfW;
+    let maxX = box.x + box.w + margin - halfW;
+    let minY = box.y - margin + halfH;
+    let maxY = box.y + box.h + margin - halfH;
+    if (minX > maxX) minX = maxX = cx;
+    if (minY > maxY) minY = maxY = cy;
+    this.tx = clamp(this.tx, minX, maxX);
+    this.ty = clamp(this.ty, minY, maxY);
+    if (this.instant) {
+      this.x = this.tx;
+      this.y = this.ty;
+    }
+  }
 }
