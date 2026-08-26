@@ -21,6 +21,7 @@ import {
   setToolBind,
 } from '../core/keybindings';
 import { readPenSlots } from '../core/penColors';
+import { adaptInkOnce } from '../core/store';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import {
@@ -981,6 +982,21 @@ export function SettingsSheet({
                   </button>
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'adaptInkHint')} />
+                  </p>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    onClick={() => {
+                      const n = adaptInkOnce();
+                      if (n) {
+                        try { window.dispatchEvent(new CustomEvent('review-toast', { detail: { msg: `${n} — готово` } })); } catch {}
+                      }
+                    }}
+                  >
+                    {locale === 'ru' ? 'Конвертировать существующие (ч/б ↔)' : locale === 'zh' ? '转换现有墨迹' : 'Convert existing ink (b/w)'}
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={locale === 'ru' ? 'Одноразово: чёрный на тёмной → белый, белый на светлой → чёрный. Остальные цвета не трогает.' : locale === 'zh' ? '一次性：深底黑变白，浅底白变黑。其他颜色不变。' : 'One-time: black on dark → white, white on light → black. Other colors unchanged.'} />
                   </p>
                   <button
                     type="button"
