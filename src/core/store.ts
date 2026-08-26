@@ -6,6 +6,7 @@ import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally 
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { syncClient } from '../net/client';
 import { netLog } from '../net/log';
 import {
   POINTS_SPACE_LOCAL,
@@ -800,6 +801,15 @@ export function listPages(): string[] {
     }
   }
   if (dup) {
+    // ponytail: only leader dedups to avoid 3-peer ping-pong
+    try {
+      const peers = syncClient.collectPeers();
+      const selfAwareness =
+        (syncClient as unknown as { provider?: { awareness: { clientID: number } } }).provider?.awareness.clientID ??
+        doc.clientID;
+      const min = Math.min(selfAwareness, ...peers.map((p) => p.id));
+      if (selfAwareness !== min) return uniq;
+    } catch {}
     queueMicrotask(() => {
       doc.transact(() => {
         const cur = a.toArray();
