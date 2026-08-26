@@ -1649,7 +1649,8 @@ function drawShapeRichText(
 
 function labelInk(v: ShapeView, textColor: string, boardBg?: string): string {
   const raw = v.textColor ?? textColor;
-  return boardBg && v.type !== 'sticky' ? readableTextOn(raw, boardBg) : raw;
+  // ponytail: shape labels are inside fills (except sticky), adapt only when viewer wants it
+  return boardBg && v.type !== 'sticky' ? displayInk(raw, boardBg) : raw;
 }
 
 function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string, boardBg?: string): void {

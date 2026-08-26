@@ -1,11 +1,11 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, readableTextOn, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
+import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
-import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, updateTextSettings } from '../core/settings';
+import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue } from '../core/settings';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
@@ -1299,11 +1299,8 @@ export class TextTool extends Tool {
   onUp(engine: Engine, p: PointerInfo): void {
     const at = this.down ?? p.world;
     this.down = null;
-    const bg = store.viewPaperBg();
-    // With adapt-on, keep the authored pick; viewers remap. With adapt-off, force contrast now.
-    const color = readPrefs().adaptInkToPaper ? settings.text.color : readableTextOn(settings.text.color, bg);
-    if (color !== settings.text.color) updateTextSettings({ color });
-    engine.openTextEditorAt(at.x, at.y, settings.text.size, color);
+    // ponytail: stored color never mutates — display adapts via displayInk per viewer paper
+    engine.openTextEditorAt(at.x, at.y, settings.text.size, settings.text.color);
   }
 
   cancel(_engine: Engine): void {
