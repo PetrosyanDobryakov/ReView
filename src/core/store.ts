@@ -43,27 +43,32 @@ export let undoManager = new Y.UndoManager([board, order, pages], {
 });
 export let persistence: IndexeddbPersistence | null = null;
 
-let docUpdateOff: (() => void) | null = null;
-function attachDocUpdateLog(): void {
-  docUpdateOff?.();
-  const onUpdate = (update: Uint8Array, origin: unknown) => {
-    // ponytail: log only remote or large local updates to avoid spam
-    const isLocal = origin === LOCAL_ORIGIN;
-    if (isLocal && update.length < 1024) return;
-    try {
-      netLog.debug('yjs doc update', () => ({
-        size: update.length,
-        origin: String(origin ?? 'remote'),
-        boardId: currentBoardId,
-        shapes: board.size,
-        orderLen: order.length,
-      }));
-    } catch {}
-  };
-  doc.on('update', onUpdate);
-  docUpdateOff = () => doc.off('update', onUpdate);
+let lastDocLog = 0;
+function logDocUpdate(size: number, origin: unknown, tr?: unknown): void {
+  const now = Date.now();
+  if (now - lastDocLog < 1000) return;
+  lastDocLog = now;
+  try {
+    const changed =
+      tr && typeof (tr as { changedParentTypes?: Map<unknown, unknown> }).changedParentTypes !== 'undefined'
+        ? Array.from((tr as { changedParentTypes: Map<unknown, unknown> }).changedParentTypes.values()).map((v) => String((v as { constructor?: { name?: string } })?.constructor?.name ?? v))
+        : [];
+    netLog.debug('yjs doc update (throttled)', () => ({
+      size,
+      origin: String(origin ?? 'remote'),
+      boardId: currentBoardId,
+      shapes: board.size,
+      orderLen: order.length,
+      pagesLen: pages.length,
+      metaKeys: Array.from(meta.keys()).join(','),
+      changed: changed.join(','),
+    }));
+  } catch {}
 }
-attachDocUpdateLog();
+function attachDocLog(): void {
+  doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
+}
+attachDocLog();
 
 function boardPersistenceKey(id: string): string {
   return `review-v1-${id}`;
@@ -215,7 +220,7 @@ export function initBoard(boardId: string): void {
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
   pages = doc.getArray<string>('pages');
-  attachDocUpdateLog();
+  doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
   undoManager = new Y.UndoManager([board, order, pages], {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
     captureTimeout: 200,
@@ -277,6 +282,7 @@ export function ensureOrder(): void {
     if (!seen.has(id)) next.push(id);
   }
   if (next.length === order.length && next.every((id, i) => order.get(i) === id)) return;
+  try { netLog.debug('ensureOrder repair', () => ({ before: order.toArray().join(','), after: next.join(','), boardSize: board.size })); } catch {}
   doc.transact(() => {
     order.delete(0, order.length);
     if (next.length) order.push(next);
