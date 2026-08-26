@@ -99,6 +99,12 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
   const lastAddAt = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const syncSlots = () => setSlots(readPenSlots());
+    window.addEventListener('review-pen-slots', syncSlots);
+    return () => window.removeEventListener('review-pen-slots', syncSlots);
+  }, []);
+
   // native 'change' fires once on dialog confirm — use it to commit to custom colors
   // (synthetic onChange fires continuously while dragging in the native picker)
   useEffect(() => {

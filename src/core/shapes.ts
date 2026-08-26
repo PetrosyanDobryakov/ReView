@@ -3,6 +3,12 @@ import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 import { shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
 import { drawRichBlock, parseStoredRich } from './richText';
+import { isOrbitPaper } from './orbit';
+import {
+  isClassicStickyText,
+  ORBIT_DRAW,
+  shouldUseOrbitDraw,
+} from './orbitDraw';
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
 
@@ -220,6 +226,9 @@ export interface BoardTheme {
 }
 
 export function themeFor(bg: string): BoardTheme {
+  if (isOrbitPaper(bg)) {
+    return { text: ORBIT_DRAW.text, grid: ORBIT_DRAW.grid };
+  }
   if (!/^#[0-9a-fA-F]{6}$/.test(bg)) {
     return { text: COLORS.text, grid: COLORS.grid };
   }
@@ -663,6 +672,22 @@ export function drawPenStroke(
   width: number,
   color: string,
   alpha: number,
+  pressures?: number[],
+  opts?: { bloom?: boolean }
+): void {
+  if (opts?.bloom && alpha > 0.04 && pts.length >= 2) {
+    paintPenStroke(ctx, pts, width * 2.6, color, Math.min(1, alpha * 0.2), pressures);
+    paintPenStroke(ctx, pts, width * 1.45, color, Math.min(1, alpha * 0.35), pressures);
+  }
+  paintPenStroke(ctx, pts, width, color, alpha, pressures);
+}
+
+function paintPenStroke(
+  ctx: CanvasRenderingContext2D,
+  pts: number[],
+  width: number,
+  color: string,
+  alpha: number,
   pressures?: number[]
 ): void {
   ctx.save();
@@ -1025,8 +1050,26 @@ export function drawShape(
       break;
     }
     case 'sticky': {
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
+      const orbit = shouldUseOrbitDraw(boardBg);
+      const drawFill =
+        orbit && v.fill.trim().toLowerCase() === COLORS.sticky.toLowerCase()
+          ? ORBIT_DRAW.sticky
+          : v.fill;
+      const drawStroke =
+        orbit && v.stroke.trim().toLowerCase() === COLORS.stickyStroke.toLowerCase()
+          ? ORBIT_DRAW.stickyStroke
+          : v.stroke;
+      if (orbit) {
+        ctx.save();
+        ctx.strokeStyle = withAlpha(ORBIT_DRAW.lilac, 0.28);
+        ctx.lineWidth = Math.max(v.strokeWidth + 2.5, 3.5);
+        ctx.beginPath();
+        ctx.roundRect(v.x, v.y, v.w, v.h, 8);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = drawFill;
+      ctx.strokeStyle = drawStroke;
       ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, 8);
@@ -1037,7 +1080,10 @@ export function drawShape(
         ctx.beginPath();
         ctx.roundRect(v.x, v.y, v.w, v.h, 8);
         ctx.clip();
-        const ink = v.textColor ?? '#3a2f00';
+        const ink =
+          orbit && isClassicStickyText(v.textColor)
+            ? ORBIT_DRAW.stickyText
+            : (v.textColor ?? '#3a2f00');
         const size = v.fontSize ?? STICKY_FONT;
         const lineHeight = size * 1.25;
         const align = v.textAlign ?? 'left';
@@ -1133,7 +1179,15 @@ export function drawShape(
       break;
     }
     case 'pen':
-      drawPenStroke(ctx, v.points ?? [], v.strokeWidth, displayInk(v.stroke, boardBg), v.alpha ?? 1, v.pressures);
+      drawPenStroke(
+        ctx,
+        v.points ?? [],
+        v.strokeWidth,
+        displayInk(v.stroke, boardBg),
+        v.alpha ?? 1,
+        v.pressures,
+        { bloom: shouldUseOrbitDraw(boardBg) }
+      );
       break;
     case 'arrow':
       drawArrow(ctx, v, boardBg);

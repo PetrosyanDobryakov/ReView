@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  CHROME_THEME_IDS,
+  pickerChromeThemeIds,
   readCustomColors,
   writeChromeTheme,
   writeCustomColors,
@@ -49,7 +49,9 @@ import {
 import { loadUser, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
 import type { ToolId } from '../engine/tools';
 import { Icon, type IconName } from './icons';
-import { BG_PRESETS, CHROME_LABEL, modKey, t } from './i18n';
+import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t } from './i18n';
+import { isOrbitPaper } from '../core/orbit';
+import { PACKET_PAPER } from '../core/orbitDraw';
 import { MOTION, useExitPresence } from './motion';
 import { SlideTrack } from './SlideTrack';
 import { SwapText } from './SwapText';
@@ -60,7 +62,7 @@ type BindTarget =
   | { kind: 'tool'; id: ToolId }
   | { kind: 'color'; color: string };
 
-const TABS: SettingsTab[] = ['system', 'binds', 'customize'];
+const TABS: SettingsTab[] = ['customize', 'system', 'binds'];
 
 const TAB_LABEL: Record<SettingsTab, 'tabSystem' | 'tabBinds' | 'tabCustomize'> = {
   system: 'tabSystem',
@@ -163,7 +165,6 @@ export function SettingsSheet({
   onLocale,
   onChromeTheme,
   onBg,
-  onPaperReset,
   onGrid,
   onClose,
 }: {
@@ -182,12 +183,11 @@ export function SettingsSheet({
   onLocale: (id: LocaleId) => void;
   onChromeTheme: (id: ChromeThemeId) => void;
   onBg: (value: string) => void;
-  onPaperReset?: () => void;
   onGrid: (on: boolean) => void;
   onClose: () => void;
 }) {
   const mounted = useExitPresence(open, MOTION.sheetOut);
-  const [tab, setTab] = useState<SettingsTab>('system');
+  const [tab, setTab] = useState<SettingsTab>('customize');
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
   const [userColor, setUserColor] = useState(() => loadUser().color);
@@ -214,7 +214,17 @@ export function SettingsSheet({
   const [colorBinds, setColorBinds] = useState(() => getColorBinds());
   const [listening, setListening] = useState<BindTarget | null>(null);
 
-  const isCustomBg = !BG_PRESETS.some((p) => p.value === bg);
+  const paperPresets = pickerPaperPresets(prefs.orbitUnlocked);
+  const orbitPaperSelected = isOrbitPaper(bg);
+  const isCustomBg = !orbitPaperSelected && !paperPresets.some((p) => p.value === bg);
+
+  const enterOrbit = () => {
+    onBg(ORBIT_PAPER);
+  };
+
+  const leaveOrbitPaper = () => {
+    if (orbitPaperSelected) onBg(PACKET_PAPER);
+  };
 
   useEffect(() => {
     if (isCustomBg && /^#[0-9a-fA-F]{6}$/.test(bg)) {
@@ -734,20 +744,21 @@ export function SettingsSheet({
                   <SwapText text={t(locale, 'bindsColors')} />
                 </h3>
                 <ul className="bind-list">
-                  {BIND_COLOR_ORDER.map((color) => {
+                  {BIND_COLOR_ORDER.map((color, index) => {
                     const target: BindTarget = { kind: 'color', color };
                     const code = colorBinds[color] ?? getColorBind(color);
                     const active = isListeningTarget(listening, target);
+                    const colorLabel = t(locale, 'bindColor').replace('{n}', String(index + 1));
                     return (
                       <li key={color} className="bind-row">
                         <span className="bind-label">
                           <span className="bind-swatch" style={{ background: color }} aria-hidden="true" />
-                          <span className="bind-hex">{color}</span>
+                          <span>{colorLabel}</span>
                         </span>
                         <button
                           type="button"
                           className={`bind-key${active ? ' listening' : ''}${code ? '' : ' empty'}`}
-                          aria-label={`${color}: ${active ? t(locale, 'bindPress') : codeToDisplay(code)}`}
+                          aria-label={`${colorLabel}: ${active ? t(locale, 'bindPress') : codeToDisplay(code)}`}
                           aria-pressed={active}
                           onClick={() => toggleListen(target)}
                         >
@@ -781,8 +792,36 @@ export function SettingsSheet({
                 <p className="sheet-hint">
                   <SwapText text={t(locale, 'uiHint')} />
                 </p>
+                <button
+                  type="button"
+                  className={`sheet-switch${prefs.orbitUnlocked ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={prefs.orbitUnlocked}
+                  onClick={() => {
+                    const next = !prefs.orbitUnlocked;
+                    patchPrefs({ orbitUnlocked: next });
+                    if (!next && (chromeTheme === 'orbit' || orbitPaperSelected)) {
+                      leaveOrbitPaper();
+                      if (chromeTheme === 'orbit') {
+                        onChromeTheme('packet');
+                        writeChromeTheme('packet');
+                      }
+                    }
+                  }}
+                >
+                  <span className="sheet-switch-label">
+                    <span>{t(locale, 'orbitUnlock')}</span>
+                    <span className="orbit-slop-tag">{t(locale, 'orbitSlopTag')}</span>
+                  </span>
+                  <span className="switch" aria-hidden="true">
+                    <span className="switch-thumb" />
+                  </span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'orbitUnlockHint')} />
+                </p>
                 <SlideTrack className="theme-grid" active={chromeTheme}>
-                  {CHROME_THEME_IDS.map((id) => (
+                  {pickerChromeThemeIds(prefs.orbitUnlocked).map((id) => (
                     <button
                       type="button"
                       key={id}
@@ -797,6 +836,15 @@ export function SettingsSheet({
                       }
                       onClick={() => {
                         if (id === chromeTheme) return;
+                        if (id === 'orbit') {
+                          onChromeTheme(id);
+                          writeChromeTheme(id);
+                          enterOrbit();
+                          return;
+                        }
+                        if (chromeTheme === 'orbit' || orbitPaperSelected) {
+                          leaveOrbitPaper();
+                        }
                         onChromeTheme(id);
                         writeChromeTheme(id);
                       }}
@@ -829,18 +877,37 @@ export function SettingsSheet({
                   <h3>
                     <SwapText text={t(locale, 'board')} />
                   </h3>
-                  <SlideTrack className="bg-grid" active={isCustomBg ? 'custom' : bg}>
-                    {BG_PRESETS.map((p) => (
+                  <SlideTrack className="bg-grid" active={isCustomBg ? 'custom' : orbitPaperSelected ? ORBIT_PAPER : bg}>
+                    {paperPresets.map((p) => (
                       <button
                         type="button"
                         key={p.value}
                         className={`bg-card${isLightPaper(p.value) ? ' light' : ''}`}
-                        data-slide-active={bg === p.value ? 'true' : undefined}
+                        data-slide-active={
+                          (p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value)
+                            ? 'true'
+                            : undefined
+                        }
+                        data-paper-preview={p.value === ORBIT_PAPER ? 'orbit' : undefined}
                         style={{ background: p.value }}
                         title={t(locale, p.label)}
                         aria-label={t(locale, p.label)}
-                        aria-pressed={bg === p.value}
-                        onClick={() => onBg(p.value)}
+                        aria-pressed={p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value}
+                        onClick={() => {
+                          if (p.value === ORBIT_PAPER) {
+                            if (chromeTheme !== 'orbit') {
+                              onChromeTheme('orbit');
+                              writeChromeTheme('orbit');
+                            }
+                            enterOrbit();
+                            return;
+                          }
+                          onBg(p.value);
+                          if (chromeTheme === 'orbit') {
+                            onChromeTheme('packet');
+                            writeChromeTheme('packet');
+                          }
+                        }}
                       >
                         <span>{t(locale, p.label)}</span>
                       </button>
@@ -853,7 +920,13 @@ export function SettingsSheet({
                       title={t(locale, 'bgCustom')}
                       aria-label={t(locale, 'bgCustom')}
                       aria-pressed={isCustomBg}
-                      onClick={() => onBg(customBoardBg)}
+                      onClick={() => {
+                        onBg(customBoardBg);
+                        if (chromeTheme === 'orbit') {
+                          onChromeTheme('packet');
+                          writeChromeTheme('packet');
+                        }
+                      }}
                     >
                       <span>{t(locale, 'bgCustom')}</span>
                     </button>
@@ -871,15 +944,14 @@ export function SettingsSheet({
                         onChange={(e) => {
                           setCustomBoardBg(e.target.value);
                           onBg(e.target.value);
+                          if (chromeTheme === 'orbit') {
+                            onChromeTheme('packet');
+                            writeChromeTheme('packet');
+                          }
                         }}
                       />
                     </label>
                   </CustomSwatchRollout>
-                  {onPaperReset && (
-                    <button type="button" className="style-btn" onClick={onPaperReset}>
-                      {t(locale, 'paperUseBoard')}
-                    </button>
-                  )}
                   <button
                     type="button"
                     className={`sheet-switch${gridOn ? ' on' : ''}`}

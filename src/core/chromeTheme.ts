@@ -1,18 +1,41 @@
 import { COLORS, readableTextOn } from './shapes';
 
-export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'white' | 'ink' | 'ocean' | 'forest' | 'sunset' | 'custom';
+export type ChromeThemeId =
+  | 'packet'
+  | 'archive'
+  | 'studio'
+  | 'white'
+  | 'ink'
+  | 'ocean'
+  | 'forest'
+  | 'sunset'
+  | 'orbit'
+  | 'custom';
 
+/** Themes shown in Settings → Customize. Ocean / forest / sunset stay in the
+ *  type + CSS + labels but are hidden from the picker — uncomment to restore.
+ *  Orbit is gated behind prefs.orbitUnlocked (see pickerChromeThemeIds). */
 export const CHROME_THEME_IDS: ChromeThemeId[] = [
   'packet',
   'archive',
   'ink',
   'studio',
   'white',
-  'ocean',
-  'forest',
-  'sunset',
+  // 'ocean',
+  // 'forest',
+  // 'sunset',
   'custom',
 ];
+
+/** Visible theme cards — Orbit only when the Customize unlock is on. */
+export function pickerChromeThemeIds(orbitUnlocked: boolean): ChromeThemeId[] {
+  if (!orbitUnlocked) return CHROME_THEME_IDS;
+  const ids = [...CHROME_THEME_IDS];
+  const customAt = ids.indexOf('custom');
+  if (customAt >= 0) ids.splice(customAt, 0, 'orbit');
+  else ids.push('orbit');
+  return ids;
+}
 
 const STORAGE_KEY = 'review-chrome-theme';
 const CUSTOM_KEY = 'review-chrome-theme-custom';
@@ -24,8 +47,9 @@ const THEME_COLORS: Record<Exclude<ChromeThemeId, 'custom'>, string> = {
   white: '#f4f4f5',
   ink: '#0e0e0e',
   ocean: '#16202b',
-  forest: '#17201a',
+  forest: '#0e1410',
   sunset: '#241a20',
+  orbit: '#02010A',
 };
 
 export interface CustomChromeColors {
@@ -141,7 +165,9 @@ function customVars(c: CustomChromeColors): Array<[string, string]> {
 const CUSTOM_VAR_NAMES = customVars(DEFAULT_CUSTOM_COLORS).map(([name]) => name);
 
 function isChromeThemeId(value: string): value is ChromeThemeId {
-  return CHROME_THEME_IDS.some((id) => id === value);
+  if (CHROME_THEME_IDS.some((id) => id === value)) return true;
+  // Still honor a previously saved hidden / gated skin so it keeps applying.
+  return value === 'ocean' || value === 'forest' || value === 'sunset' || value === 'orbit';
 }
 
 export function readChromeTheme(): ChromeThemeId {
@@ -196,4 +222,9 @@ export function applyChromeTheme(id: ChromeThemeId): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && metaColor) meta.setAttribute('content', metaColor);
   syncSelectionColor();
+  try {
+    window.dispatchEvent(new CustomEvent('review-chrome-theme', { detail: id }));
+  } catch {
+    /* ignore */
+  }
 }

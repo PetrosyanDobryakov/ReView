@@ -3,6 +3,8 @@ import * as store from '../core/store';
 import { COLORS, portPos, readableTextOn, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
+import { isOrbitPaper } from '../core/orbit';
+import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
 import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, updateTextSettings } from '../core/settings';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
@@ -736,7 +738,8 @@ export class PenTool extends Tool {
       pen.width,
       displayInk(pen.color, bg),
       pen.alpha * 0.9,
-      this.shift || !this.capturePressure ? undefined : this.pressures
+      this.shift || !this.capturePressure ? undefined : this.pressures,
+      { bloom: shouldUseOrbitDraw(bg) }
     );
   }
 
@@ -899,13 +902,12 @@ export class StickyTool extends BoxTool {
     } else {
       box = normalizeBox(this.start, this.cur);
     }
-    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
-    const stroke = settings.shape.stroke === COLORS.stroke ? COLORS.stickyStroke : settings.shape.stroke;
     const id = store.addShape({
       type: 'sticky',
       ...box,
-      fill,
-      stroke,
+      // Always store classic sticky colors — Orbit remaps at draw time.
+      fill: COLORS.sticky,
+      stroke: COLORS.stickyStroke,
       strokeWidth: 2,
       textColor: '#3a2f00',
     });
@@ -918,10 +920,11 @@ export class StickyTool extends BoxTool {
     if (!this.start || !this.cur) return;
     const box = normalizeBox(this.start, this.cur);
     const s = 1 / engine.camera.zoom;
-    const fill = settings.shape.fill === COLORS.fill ? COLORS.sticky : settings.shape.fill;
+    const orbit = isOrbitPaper(store.viewPaperBg());
+    const fill = orbit ? ORBIT_DRAW.sticky : COLORS.sticky;
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
-    ctx.fillStyle = fill + '55';
+    ctx.fillStyle = fill + '88';
     ctx.lineWidth = 1.5 * s;
     ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();

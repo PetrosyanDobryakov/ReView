@@ -1,15 +1,20 @@
 import { createRoot } from 'react-dom/client';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
 import App from './App';
 import { Home } from './ui/Home';
 import { loadUser } from './core/user';
 import { bootstrapUserProfile } from './core/userProfile';
-import { applyChromeTheme, readChromeTheme } from './core/chromeTheme';
+import { applyChromeTheme, readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale } from './core/locale';
 import { applyUiScale } from './core/prefs';
+import { migrateLegacyOrbitPaper } from './core/orbit';
 import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
+import { OrbitAtmosphere } from './ui/OrbitAtmosphere';
+import { OrbitTactile } from './ui/OrbitTactile';
+import { navigateThemed } from './ui/navTransition';
 import '@fontsource/space-grotesk/400.css';
 import '@fontsource/space-grotesk/500.css';
 import '@fontsource/space-grotesk/600.css';
@@ -24,7 +29,9 @@ loadUser();
 bootstrapUserProfile();
 
 const locale = readLocale();
-applyChromeTheme(readChromeTheme());
+const chromeId = readChromeTheme();
+migrateLegacyOrbitPaper(chromeId === 'orbit');
+applyChromeTheme(chromeId);
 applyLocale(locale);
 applyUiScale();
 document.title = t(locale, 'title');
@@ -61,21 +68,51 @@ function BoardRoute() {
   if (!getBoard(boardId)) {
     ensureBoardWithId(boardId);
   }
-  return <App boardId={boardId} onBack={() => navigate('/')} />;
+  return <App boardId={boardId} onBack={() => navigateThemed(navigate, '/')} />;
 }
 
 function HomeRoute() {
   return <Home locale={readLocale()} />;
 }
 
-try {
-  createRoot(document.getElementById('root')!).render(
-    <BrowserRouter>
+/** Persistent Orbit chrome — survives home ↔ board so the shader doesn't remount. */
+function OrbitChrome() {
+  const [theme, setTheme] = useState<ChromeThemeId>(() => readChromeTheme());
+  useEffect(() => {
+    const sync = () => setTheme(readChromeTheme());
+    window.addEventListener('review-chrome-theme', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('review-chrome-theme', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+  if (theme !== 'orbit') return null;
+  return (
+    <>
+      <OrbitAtmosphere />
+      <OrbitTactile />
+    </>
+  );
+}
+
+function AppShell() {
+  return (
+    <>
+      <OrbitChrome />
       <Routes>
         <Route path="/" element={<HomeRoute />} />
         <Route path="/board/:boardId" element={<BoardRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    </>
+  );
+}
+
+try {
+  createRoot(document.getElementById('root')!).render(
+    <BrowserRouter>
+      <AppShell />
     </BrowserRouter>
   );
 } catch (err) {
