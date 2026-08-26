@@ -552,9 +552,21 @@ export class SyncClient {
       this.emitStatus();
       this.emitPeers();
     };
+    const onSync = (isSynced: boolean) => {
+      netLog.info('yjs provider sync', () => ({
+        isSynced,
+        room: this.providerRoom,
+        boardId: this.boardId,
+        docSize: this.doc ? Y.encodeStateAsUpdate(this.doc).length : 0,
+      }));
+    };
     provider.on('status', onStatus);
+    provider.on('sync', onSync);
     provider.awareness.on('change', onAware);
-    this.offProviderStatus = () => provider.off('status', onStatus);
+    this.offProviderStatus = () => {
+      provider.off('status', onStatus);
+      provider.off('sync', onSync);
+    };
     this.offAwareness = () => provider.awareness.off('change', onAware);
 
     if (!this.offPeerDisplay) {
