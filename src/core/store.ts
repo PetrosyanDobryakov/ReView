@@ -6,6 +6,7 @@ import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally 
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { netLog } from '../net/log';
 import {
   POINTS_SPACE_LOCAL,
   POINTS_SPACE_META,
@@ -41,6 +42,28 @@ export let undoManager = new Y.UndoManager([board, order, pages], {
   captureTimeout: 200,
 });
 export let persistence: IndexeddbPersistence | null = null;
+
+let docUpdateOff: (() => void) | null = null;
+function attachDocUpdateLog(): void {
+  docUpdateOff?.();
+  const onUpdate = (update: Uint8Array, origin: unknown) => {
+    // ponytail: log only remote or large local updates to avoid spam
+    const isLocal = origin === LOCAL_ORIGIN;
+    if (isLocal && update.length < 1024) return;
+    try {
+      netLog.debug('yjs doc update', () => ({
+        size: update.length,
+        origin: String(origin ?? 'remote'),
+        boardId: currentBoardId,
+        shapes: board.size,
+        orderLen: order.length,
+      }));
+    } catch {}
+  };
+  doc.on('update', onUpdate);
+  docUpdateOff = () => doc.off('update', onUpdate);
+}
+attachDocUpdateLog();
 
 function boardPersistenceKey(id: string): string {
   return `review-v1-${id}`;
@@ -192,6 +215,7 @@ export function initBoard(boardId: string): void {
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
   pages = doc.getArray<string>('pages');
+  attachDocUpdateLog();
   undoManager = new Y.UndoManager([board, order, pages], {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
     captureTimeout: 200,
