@@ -11,7 +11,7 @@ import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const URL = process.env.REVIEW_SYNC_URL || 'ws://127.0.0.1:1234';
 const ROOM = 'sync-test-' + Date.now();
