@@ -32,6 +32,7 @@ import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } fr
 import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
+import { readPenSlots } from '../core/penColors';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import { onPrefsChange } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
@@ -2938,10 +2939,13 @@ export class Engine {
           return;
         }
       }
-      // color binds — 1..8 etc
+      // color binds — Digit1..5 = color №1..5 (slot index -> pen slot color)
       const colorBinds = getColorBinds();
-      for (const [color, bind] of Object.entries(colorBinds)) {
+      for (const [slot, bind] of Object.entries(colorBinds)) {
         if (bind === e.code) {
+          const slots = readPenSlots();
+          const idx = Number(slot);
+          const color = slots[idx] ?? slots[0];
           updatePenSettings({ color });
           updateShapeSettings({ stroke: color, fill: color });
           // also patch selected shapes
