@@ -241,7 +241,7 @@ wss.on('connection', (conn, req) => {
     console.log(`[review:net] ws disconnect room=${room} from=${remote}`);
     fileLog('info', 'ws disconnect', { room, from: remote });
   });
-  setupWSConnection(conn, req, { gc: true });
+  setupWSConnection(conn, req, { gc: false });
 });
 
 /** Track when rooms last became empty; destroy after EMPTY_ROOM_GC_MS. */

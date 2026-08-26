@@ -27,7 +27,7 @@ const LEGACY_MIGRATION_KEY = 'review-v1-migrated';
 
 // --- per-board state ---
 let currentBoardId: string | null = null;
-export let doc = new Y.Doc();
+export let doc = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
 export let board = doc.getMap<Y.Map<unknown>>('shapes');
 export let meta = doc.getMap('meta');
 export let order = doc.getArray<string>('order');
@@ -175,6 +175,8 @@ export function initBoard(boardId: string): void {
     }
     return;
   }
+  try { undoManager.clear(); } catch {}
+  try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
   try {
     persistence?.destroy();
@@ -185,7 +187,7 @@ export function initBoard(boardId: string): void {
   try {
     doc.destroy();
   } catch {}
-  doc = new Y.Doc();
+  doc = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
   board = doc.getMap<Y.Map<unknown>>('shapes');
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
@@ -200,7 +202,7 @@ export function initBoard(boardId: string): void {
     attachPersistence(boardId);
     if (persistence) void migrateLegacyBoard(persistence);
   } else {
-    // ephemeral session — still need pages
+    // ephemeral session ��� still need pages
     ensurePages();
   }
   // Attach observer on the fresh array and refresh page UIs.
@@ -219,7 +221,7 @@ export function initBoard(boardId: string): void {
   queueMicrotask(() => {
     if (currentBoardId === boardId) attachSync(doc, boardId);
   });
-  // Ephemeral boards never get an IDB 'synced' — still notify the engine.
+  // Ephemeral boards never get an IDB 'synced' ��� still notify the engine.
   if (!persistence) queueMicrotask(() => {
     if (currentBoardId === boardId) {
       migratePointsSpace();
@@ -258,10 +260,10 @@ export function ensureOrder(): void {
     if (!seen.has(id)) next.push(id);
   }
   if (next.length === order.length && next.every((id, i) => order.get(i) === id)) return;
-  transact(() => {
+  doc.transact(() => {
     order.delete(0, order.length);
     if (next.length) order.push(next);
-  });
+  }, null);
 }
 
 export function moveOrderToFront(ids: string[]): void {
@@ -315,7 +317,7 @@ export function setSyncedBoardTitle(title: string): void {
 
 /**
  * First open on the creator device claims ownership and seeds synced title.
- * Joiners never write ownerId — they inherit it from the CRDT doc.
+ * Joiners never write ownerId ��� they inherit it from the CRDT doc.
  */
 export function seedBoardMeta(local: { name: string; status: string }): void {
   const userId = loadUser().id;
@@ -404,15 +406,15 @@ export function metaGrid(): boolean {
 function ensurePages(): void {
   const a = pagesArray();
   if (a.length === 0) {
-    transact(() => {
+    doc.transact(() => {
       if (a.length === 0) a.push(['main']);
-    });
+    }, null);
   }
 }
 
-/** In-memory active page — never read localStorage from the render loop. */
+/** In-memory active page ��� never read localStorage from the render loop. */
 let activePageId = 'main';
-/** Fingerprints — skip no-op storms from Yjs observe noise. */
+/** Fingerprints ��� skip no-op storms from Yjs observe noise. */
 let lastPageListEmitKey = '';
 let lastActivePageEmitKey = '';
 let lastPagesEmitKey = '';
@@ -723,7 +725,7 @@ export function onPageChange(cb: () => void): () => void {
   };
 }
 
-/** Synced page list changed (count / ids) — does not switch anyone's active page. */
+/** Synced page list changed (count / ids) ��� does not switch anyone's active page. */
 export function onPageListChange(cb: () => void): () => void {
   pageListListeners.add(cb);
   return () => {
@@ -731,7 +733,7 @@ export function onPageListChange(cb: () => void): () => void {
   };
 }
 
-/** Local active page changed — canvas should reload that page only. */
+/** Local active page changed ��� canvas should reload that page only. */
 export function onActivePageChange(cb: () => void): () => void {
   activePageListeners.add(cb);
   return () => {
@@ -774,7 +776,7 @@ export function listPages(): string[] {
   }
   if (dup) {
     queueMicrotask(() => {
-      transact(() => {
+      doc.transact(() => {
         const cur = a.toArray();
         const s = new Set<string>();
         const u: string[] = [];
@@ -783,7 +785,7 @@ export function listPages(): string[] {
           a.delete(0, a.length);
           if (u.length) a.push(u);
         }
-      });
+      }, null);
     });
     return uniq;
   }
@@ -803,7 +805,7 @@ export function currentPagePrefix(): string {
   return id === 'main' ? '' : id + ':';
 }
 
-/** Hot-path page filter — uses in-memory activePageId only (no storage / Y reads). */
+/** Hot-path page filter ��� uses in-memory activePageId only (no storage / Y reads). */
 export function isOnActivePage(key: string): boolean {
   if (activePageId === 'main') return !key.includes(':');
   return key.startsWith(activePageId + ':');
@@ -831,9 +833,9 @@ export function setCurrentPage(id: string): void {
 export function addPage(): void {
   const a = pagesArray();
   if (a.length === 0) {
-    transact(() => {
+    doc.transact(() => {
       if (a.length === 0) a.push(['main']);
-    });
+    }, null);
   }
   const pid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   transact(() => pagesArray().push([pid]));
