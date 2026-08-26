@@ -21,6 +21,8 @@ import { cloneBoard } from '../core/boardClone';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
+import { isOrbitPaper } from '../core/orbit';
+import { applyOrbitToolDefaults, PACKET_PAPER, restoreOrbitToolDefaults } from '../core/orbitDraw';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
@@ -32,11 +34,13 @@ import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
 import { APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { resolveInviteBoardUrl } from '../net';
+import { navigateThemed } from './navTransition';
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
   const [locale, setLocale] = useState<LocaleId>(localeProp);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
+  const [paperBg, setPaperBg] = useState(() => readPrefs().paperBg ?? PACKET_PAPER);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nick, setNick] = useState(() => loadUser().name);
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
@@ -106,7 +110,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const handleCreateBoard = () => {
     const b = createBoard(t(locale, 'newBoard'), activeTeam);
-    navigate(boardUrl(b.id));
+    navigateThemed(navigate, boardUrl(b.id));
   };
 
   const handleCreateTeam = () => {
@@ -148,7 +152,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       const def = curTeams[0]?.id ?? 'default';
       ensureBoardWithId(id, t(locale, 'remoteBoardName'), def, 'remote');
     }
-    navigate(boardUrl(id));
+    navigateThemed(navigate, boardUrl(id));
   };
 
   const handleSaveBoard = (id: string) => {
@@ -381,7 +385,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                   (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
                   (Boolean(b.savedLocally) && known && bytes === 0);
                 return (
-                  <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
+                  <div key={b.id} className="island board-row" onClick={() => navigateThemed(navigate, boardUrl(b.id))}>
                     <span className="board-col-idx">{idx + 1}</span>
                     <span className="board-col-name">
                       {editingBoard === b.id ? (
@@ -414,15 +418,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
                     <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
                       <BoardStorageBadge meta={b} locale={locale} />
-                    </span>
-                    <span
-                      className="board-col-weight panel-label"
-                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
-                    >
-                      {weightLabel}
-                    </span>
-                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
-                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
                       {needsSave && (
                         <button
                           type="button"
@@ -433,7 +428,27 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           {t(locale, 'keepOnDevice')}
                         </button>
                       )}
+                    </span>
+                    <span
+                      className="board-col-weight panel-label"
+                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
+                    >
+                      {weightLabel}
+                    </span>
+                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
+                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
                       <span className="board-row-tools">
+                        {needsSave && (
+                          <button
+                            type="button"
+                            className="icon-btn board-row-cta-icon"
+                            title={t(locale, 'keepOnDeviceHint')}
+                            aria-label={t(locale, 'keepOnDevice')}
+                            onClick={() => handleSaveBoard(b.id)}
+                          >
+                            <Icon name="download" size={20} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="icon-btn"
@@ -441,7 +456,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'saveAsMyBoard')}
                           onClick={() => void handleCloneBoard(b.id)}
                         >
-                          <Icon name="duplicate" size={14} />
+                          <Icon name="duplicate" size={20} />
                         </button>
                         <button
                           type="button"
@@ -450,7 +465,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'copyLink')}
                           onClick={() => handleCopyLink(b.id)}
                         >
-                          <Icon name="copy" size={14} />
+                          <Icon name="copy" size={20} />
                         </button>
                         <button
                           type="button"
@@ -464,7 +479,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                             setBoardName(b.name);
                           }}
                         >
-                          <Icon name="pen" size={14} />
+                          <Icon name="pen" size={20} />
                         </button>
                         <button
                           type="button"
@@ -473,7 +488,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'ctxDelete')}
                           onClick={() => void handleDeleteBoard(b.id)}
                         >
-                          <Icon name="trash" size={14} />
+                          <Icon name="trash" size={20} />
                         </button>
                       </span>
                     </span>
@@ -491,7 +506,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         open={settingsOpen}
         locale={locale}
         chromeTheme={chromeTheme}
-        bg="#1c1c1a"
+        bg={paperBg}
         gridOn
         sync={{ online: false, users: 0, enabled: false }}
         saved
@@ -509,7 +524,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           writeChromeTheme(id);
           setChromeTheme(id);
         }}
-        onBg={() => {}}
+        onBg={(value) => {
+          const wasOrbit = isOrbitPaper(paperBg);
+          const nextOrbit = isOrbitPaper(value);
+          writePrefs({ paperBg: value });
+          setPaperBg(value);
+          if (nextOrbit && !wasOrbit) applyOrbitToolDefaults();
+          else if (!nextOrbit && wasOrbit) restoreOrbitToolDefaults();
+        }}
         onGrid={() => {}}
         onClose={() => setSettingsOpen(false)}
       />

@@ -33,6 +33,11 @@ export interface AppPrefs {
   syncUrl: string | null;
   /** When false, the websocket provider is destroyed and peers are offline. */
   syncEnabled: boolean;
+  /**
+   * Unlock the Orbit chrome skin in Customize. Visual-only alternate world;
+   * off by default so Packet stays the everyday look.
+   */
+  orbitUnlocked: boolean;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -48,6 +53,7 @@ const DEFAULTS: AppPrefs = {
   rotateSnap: true,
   syncUrl: null,
   syncEnabled: true,
+  orbitUnlocked: false,
 };
 
 function normalizeSyncUrl(raw: unknown): string | null {
@@ -113,6 +119,7 @@ function parsePrefs(raw: unknown): AppPrefs {
       ? normalizeSyncUrl(parsed.syncUrl)
       : DEFAULTS.syncUrl,
     syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
+    orbitUnlocked: typeof parsed.orbitUnlocked === 'boolean' ? parsed.orbitUnlocked : DEFAULTS.orbitUnlocked,
   };
 }
 
@@ -154,6 +161,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
           : normalizeSyncUrl(patch.syncUrl) ?? cur.syncUrl
         : cur.syncUrl,
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
+    orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
   };
   cached = next;
   try {
