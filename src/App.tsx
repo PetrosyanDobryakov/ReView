@@ -8,7 +8,6 @@ import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
-import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { GraphEditor } from './ui/GraphEditor';
 import { PageBar } from './ui/PageBar';
@@ -841,7 +840,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onRemeasureText={(ids) => engineRef.current?.remeasureTextShapes(ids)}
         onSyncEditFormat={(root, fallback) => setEditLiveFormat(readLiveFormat(root, fallback))}
       />
-      <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
+      {/* ponytail: removed align panel from top per user — was broken in Orbit and unwanted */}
+      {/* <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} /> */}
 
       <input
         ref={fileRef}
