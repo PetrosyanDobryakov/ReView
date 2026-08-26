@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView, TextAlign } from '../core/shapes';
-import { readableTextOn } from '../core/shapes';
 import {
   effectivePen,
   updateEraserSettings,
@@ -18,8 +17,7 @@ import {
   type ShapeSettings,
   type TextSettings,
 } from '../core/settings';
-import { viewPaperBg, patchShapes } from '../core/store';
-import { readPrefs } from '../core/prefs';
+import { patchShapes } from '../core/store';
 import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
@@ -721,14 +719,8 @@ export function StyleBar({
             locale={locale}
             color={textValue}
             onPick={(c) => {
-              const onlyFreeText =
-                showTextDraw ||
-                editTarget?.type === 'text' ||
-                (textTargets.length > 0 && textTargets.every((v) => v.type === 'text'));
-              const bg = viewPaperBg();
-              const next =
-                onlyFreeText && !readPrefs().adaptInkToPaper ? readableTextOn(c, bg) : c;
-              applyFormat({ color: next });
+              // ponytail: never mutate stored color — display adapts via displayInk
+              applyFormat({ color: c });
             }}
           />
           <ChromeSelect

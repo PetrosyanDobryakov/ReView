@@ -9,7 +9,6 @@ import {
   getImage,
   onImageLoad,
   pointInShape,
-  readableTextOn,
   displayInk,
   themeFor,
   intersects,
@@ -34,7 +33,7 @@ import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
-import { onPrefsChange, readPrefs } from '../core/prefs';
+import { onPrefsChange } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
 import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
 
@@ -1781,14 +1780,12 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
     const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
-    const bg = store.viewPaperBg();
     let color: string;
     if (v.type === 'sticky') {
       color = v.textColor ?? '#3a2f00';
-    } else if (v.type === 'text') {
-      color = v.textColor ?? themeFor(bg).text;
     } else {
-      color = readableTextOn(v.textColor ?? themeFor(bg).text, bg);
+      // ponytail: stored color never mutates — TextOverlay will displayInk per viewer paper
+      color = v.textColor ?? themeFor(store.viewPaperBg()).text;
     }
     this.editing = true;
     this.editId = id;
@@ -1815,9 +1812,8 @@ export class Engine {
   }
 
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
-    const bg = store.viewPaperBg();
-    const { adaptInkToPaper } = readPrefs();
-    const editorColor = adaptInkToPaper ? color : readableTextOn(color, bg);
+    // ponytail: never mutate stored color — editor shows displayInk via TextOverlay
+    const editorColor = color;
     const fmt = settings.text;
     this.editing = true;
     this.editId = null;
@@ -1881,11 +1877,8 @@ export class Engine {
   commitText(id: string | null, text: string, target: EditTarget, richHtml?: string): void {
     this.editing = false;
     this.editId = null;
-    const bg = store.viewPaperBg();
-    const color =
-      target.type === 'text' && !readPrefs().adaptInkToPaper
-        ? readableTextOn(target.color, bg)
-        : target.color;
+    // ponytail: stored color never mutates — display adapts per viewer paper
+    const color = target.color;
     const baseStyle = {
       bold: target.bold,
       italic: target.italic,
