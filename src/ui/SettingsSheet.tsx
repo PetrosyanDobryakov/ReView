@@ -20,6 +20,7 @@ import {
   setColorBind,
   setToolBind,
 } from '../core/keybindings';
+import { readPenSlots } from '../core/penColors';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import {
@@ -744,15 +745,17 @@ export function SettingsSheet({
                   <SwapText text={t(locale, 'bindsColors')} />
                 </h3>
                 <ul className="bind-list">
-                  {BIND_COLOR_ORDER.map((color, index) => {
-                    const target: BindTarget = { kind: 'color', color };
-                    const code = colorBinds[color] ?? getColorBind(color);
+                  {BIND_COLOR_ORDER.map((slot, index) => {
+                    const slots = readPenSlots();
+                    const swatch = slots[Number(slot)] ?? slots[index] ?? '#ffffff';
+                    const target: BindTarget = { kind: 'color', color: slot };
+                    const code = colorBinds[slot] ?? getColorBind(slot);
                     const active = isListeningTarget(listening, target);
                     const colorLabel = t(locale, 'bindColor').replace('{n}', String(index + 1));
                     return (
-                      <li key={color} className="bind-row">
+                      <li key={slot} className="bind-row">
                         <span className="bind-label">
-                          <span className="bind-swatch" style={{ background: color }} aria-hidden="true" />
+                          <span className="bind-swatch" style={{ background: swatch }} aria-hidden="true" />
                           <span>{colorLabel}</span>
                         </span>
                         <button
