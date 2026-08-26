@@ -176,6 +176,21 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // ponytail: compaction helper — client cleared IndexedDB but server still holds huge in-memory Y.Doc
+  if (url.startsWith('/room/') && req.method === 'DELETE') {
+    const room = decodeURIComponent(url.slice(6).split('?')[0] || '');
+    const d = docs.get(room);
+    if (d) {
+      try { d.destroy(); } catch {}
+      docs.delete(room);
+      emptySince.delete(room);
+      console.log(`[review:net] room cleared via DELETE room=${room}`);
+      fileLog('info', 'room cleared', { room });
+    }
+    sendJson(res, 200, { ok: true, cleared: Boolean(d), room });
+    return;
+  }
+
   if (url === '/lan') {
     if (NET_LOG) {
       console.log(`[review:net] GET /lan from=${remoteFromReq(req)}`);
@@ -235,7 +250,7 @@ const server = createServer(async (req, res) => {
 
 const wss = new WebSocketServer({
   server,
-  maxPayload: 128 * 1024 * 1024,
+  maxPayload: 512 * 1024 * 1024,
   perMessageDeflate: false,
 });
 
