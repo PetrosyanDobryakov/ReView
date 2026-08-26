@@ -233,18 +233,32 @@ const server = createServer(async (req, res) => {
   res.end('ReView — sync server');
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 128 * 1024 * 1024,
+  perMessageDeflate: false,
+});
 
 wss.on('connection', (conn, req) => {
   const room = roomFromReq(req);
   const remote = remoteFromReq(req);
   console.log(`[review:net] ws connect room=${room} from=${remote}`);
   fileLog('info', 'ws connect', { room, from: remote });
-  conn.on('close', () => {
-    console.log(`[review:net] ws disconnect room=${room} from=${remote}`);
-    fileLog('info', 'ws disconnect', { room, from: remote });
+  conn.on('close', (code, reason) => {
+    console.log(`[review:net] ws disconnect room=${room} from=${remote} code=${code} reason=${reason?.toString() ?? ''}`);
+    fileLog('info', 'ws disconnect', { room, from: remote, code, reason: reason?.toString() });
   });
-  setupWSConnection(conn, req, { gc: false });
+  conn.on('error', (err) => {
+    console.error(`[review:net] ws error room=${room} from=${remote}`, err);
+    fileLog('warn', 'ws error', { room, from: remote, err: String(err?.message ?? err) });
+  });
+  try {
+    setupWSConnection(conn, req, { gc: false });
+  } catch (err) {
+    console.error(`[review:net] setupWSConnection failed room=${room}`, err);
+    fileLog('warn', 'setupWSConnection failed', { room, from: remote, err: String(err) });
+    try { conn.close(1011, 'setup failed'); } catch {}
+  }
 });
 
 /** Track when rooms last became empty; destroy after EMPTY_ROOM_GC_MS. */
@@ -280,6 +294,11 @@ function onListenError(err) {
   if (err && typeof err === 'object' && 'code' in err && err.code === 'EADDRINUSE') {
     console.log(`[review] sync already running on :${PORT}`);
     process.exit(0);
+  }
+  if (err && typeof err === 'object' && 'code' in err && String(err.code).includes('WS_ERR')) {
+    console.error('[review:net] ws payload error (ignored)', err);
+    fileLog('warn', 'ws payload error', { err: String(err) });
+    return;
   }
   throw err;
 }
