@@ -27,6 +27,7 @@ import { Icon } from './icons';
 import { BoardStorageBadge } from './BoardStorageBadge';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
+import { OrbitAtmosphere } from './OrbitAtmosphere';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
@@ -187,6 +188,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   return (
     <div className="home-root">
+      {chromeTheme === 'orbit' && <OrbitAtmosphere />}
       <header className="file-bar">
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
