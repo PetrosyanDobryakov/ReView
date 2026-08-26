@@ -76,9 +76,8 @@ export class Camera {
     if (!box || box.w <= 0 || box.h <= 0) return;
     const halfW = viewW / (2 * this.tz);
     const halfH = viewH / (2 * this.tz);
-    const span = Math.max(box.w, box.h);
-    // ~3 viewports of slack past content, scaled up on large boards.
-    const margin = Math.max(halfW * 3, halfH * 3, span * 0.75, 2400);
+    // tight: ~1 viewport slack past content — don't let fly far from records
+    const margin = Math.max(halfW * 1.1, halfH * 1.1, 800);
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
     let minX = box.x - margin + halfW;
