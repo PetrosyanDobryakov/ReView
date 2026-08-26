@@ -3,7 +3,7 @@
 const SLOTS_KEY = 'review-pen-slots';
 const CUSTOM_KEY = 'review-pen-custom-colors';
 
-export const DEFAULT_SLOTS: string[] = ['#ffffff', '#1c1c1a', '#e03131', '#2f9e44', '#1c7ed6'];
+export const DEFAULT_SLOTS: string[] = ['#ffffff', '#1c1c1a', '#e03131', '#ffe27a', '#2f9e44', '#1c7ed6'];
 
 /** Hue columns, light → dark. Rendered transposed: rows are shades, columns are hues (Miro-like). */
 export const PALETTE_HUES: string[][] = [
