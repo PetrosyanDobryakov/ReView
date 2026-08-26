@@ -6,6 +6,7 @@ import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally 
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { effectiveSyncUrl } from '../net/config';
 import { syncClient } from '../net/client';
 import { netLog } from '../net/log';
 import {
@@ -96,11 +97,31 @@ function attachPersistence(boardId: string): void {
     migratePaper();
     migratePointsSpace();
     emitBoardReady();
+    // ponytail: auto-compact huge tombstone-bloated boards (gc:false never frees deletes)
+    // e.g. bmtag6hutf6x9 was 372MB with 8 shapes after mass delete
+    void maybeAutoCompact();
   };
   if ((persistence as unknown as { synced: boolean }).synced) {
     onSynced();
   }
   persistence.on('synced', onSynced);
+}
+
+/** Heuristic: trigger compaction when Y.Doc is bloated vs live content. */
+async function maybeAutoCompact(): Promise<void> {
+  if (!currentBoardId || !persistence) return;
+  try {
+    const before = Y.encodeStateAsUpdate(doc).length;
+    const liveShapes = board.size;
+    // thresholds: compact if >4MB total, or empty board with >1MB tombstones
+    const should = before > 4 * 1024 * 1024 || (liveShapes === 0 && before > 1 * 1024 * 1024) || (liveShapes < 20 && before > 8 * 1024 * 1024);
+    if (!should) return;
+    netLog.info('autoCompact check', () => ({ boardId: currentBoardId, before, liveShapes }));
+    const res = await compactBoard();
+    if (res.didCompact) netLog.info('autoCompact done', () => res);
+  } catch (e) {
+    netLog.warn('autoCompact failed', () => ({ err: String(e) }));
+  }
 }
 
 const boardReadyListeners = new Set<() => void>();
@@ -732,6 +753,126 @@ export function removeShapes(ids: string[]): void {
 
 function bumpCurrentBoard(): void {
   if (currentBoardId) bumpBoardUpdated(currentBoardId);
+}
+
+/**
+ * Forever fix for 355MB ghost boards (gc:false tombstones).
+ * Rebuilds a fresh Y.Doc with only live shapes/meta/order/pages,
+ * wipes IndexedDB `review-v1-*` and in-memory server room.
+ */
+export async function compactBoard(): Promise<{ before: number; after: number; didCompact: boolean }> {
+  if (!currentBoardId) return { before: 0, after: 0, didCompact: false };
+  const boardId = currentBoardId;
+  let before = 0;
+  try {
+    before = Y.encodeStateAsUpdate(doc).length;
+  } catch {
+    return { before: 0, after: 0, didCompact: false };
+  }
+  // Build compact doc
+  const compact = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
+  const cBoard = compact.getMap<Y.Map<unknown>>('shapes');
+  const cMeta = compact.getMap('meta');
+  const cOrder = compact.getArray<string>('order');
+  const cPages = compact.getArray<string>('pages');
+  for (const [k, v] of meta.entries()) cMeta.set(k, v);
+  for (const [key, m] of board.entries()) {
+    const nm = new Y.Map<unknown>();
+    for (const [k, v] of (m as Y.Map<unknown>).entries()) {
+      if (v instanceof Y.Array) {
+        const arr = new Y.Array<unknown>();
+        arr.insert(0, v.toArray() as unknown[]);
+        nm.set(k, arr);
+      } else if (v instanceof Y.Map) {
+        const sub = new Y.Map<unknown>();
+        for (const [sk, sv] of (v as Y.Map<unknown>).entries()) sub.set(sk, sv);
+        nm.set(k, sub);
+      } else {
+        nm.set(k, v as unknown);
+      }
+    }
+    cBoard.set(key, nm);
+  }
+  cOrder.push(order.toArray());
+  cPages.push(pages.toArray());
+  let after = 0;
+  try {
+    after = Y.encodeStateAsUpdate(compact).length;
+  } catch {
+    compact.destroy();
+    return { before, after: before, didCompact: false };
+  }
+  // only replace if meaningful saving or before huge
+  if (after >= before * 0.7 && before < 8 * 1024 * 1024) {
+    compact.destroy();
+    return { before, after, didCompact: false };
+  }
+  netLog.info('compactBoard start', () => ({ boardId, before, after, shapes: board.size, orderLen: order.length }));
+  // detach before destroying
+  detachSync();
+  // clear old IndexedDB database content
+  try {
+    await persistence?.clearData();
+  } catch {}
+  try {
+    persistence?.destroy();
+  } catch {}
+  try {
+    doc.destroy();
+  } catch {}
+  try {
+    undoManager.clear();
+    (undoManager as unknown as { destroy?: () => void })?.destroy?.();
+  } catch {}
+  // rewire globals to compact doc
+  doc = compact;
+  board = cBoard;
+  meta = cMeta;
+  order = cOrder;
+  pages = cPages;
+  pagesObserved = false;
+  undoManager = new Y.UndoManager([board, order, pages], {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: 200,
+  });
+  doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
+  pagesArray();
+  lastPageListEmitKey = '';
+  lastActivePageEmitKey = '';
+  lastPagesEmitKey = '';
+  emitPageList();
+  emitActivePage();
+  // new persistence will write compact state to IndexedDB
+  persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
+  try {
+    await (persistence as unknown as { whenSynced: Promise<void> }).whenSynced;
+  } catch {}
+  // clear server in-memory room (it still holds 372MB Y.Doc)
+  try {
+    const syncUrl = effectiveSyncUrl();
+    const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
+    const room = `review-${boardId}`;
+    await fetch(`${base}/room/${encodeURIComponent(room)}`, { method: 'DELETE' });
+    fileLogFallback('info', 'compact cleared server room', { room });
+  } catch (e) {
+    netLog.warn('compact clear server room failed', () => ({ err: String(e) }));
+  }
+  attachSync(doc, boardId);
+  bumpCurrentBoard();
+  netLog.info('compactBoard done', () => ({ boardId, before, after }));
+  return { before, after, didCompact: true };
+}
+
+function fileLogFallback(level: string, msg: string, data?: unknown): void {
+  try {
+    netLog.info(msg, () => data as unknown as never);
+  } catch {}
+  void level;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__compactBoard = compactBoard;
+  (window as unknown as Record<string, unknown>).__maybeAutoCompact = maybeAutoCompact;
 }
 
 export function clearShapeKeys(id: string, keys: string[]): void {
