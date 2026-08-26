@@ -9,7 +9,10 @@ import { setupWSConnection, docs } from 'y-websocket/bin/utils';
 const PORT = Number(process.env.REVIEW_SYNC_PORT) || 1234;
 const HOST = process.env.REVIEW_HOST || '0.0.0.0';
 const NET_LOG =
-  process.env.REVIEW_NET_LOG === '1' || process.env.REVIEW_NET_LOG === 'true';
+  process.env.REVIEW_NET_LOG === '1' ||
+  process.env.REVIEW_NET_LOG === 'true' ||
+  process.argv.includes('--log') ||
+  process.argv.includes('--net-log');
 /** Destroy empty in-memory rooms after this idle window (no YPERSISTENCE). */
 const EMPTY_ROOM_GC_MS = Number(process.env.REVIEW_ROOM_GC_MS) || 5 * 60 * 1000;
 const ROOM_GC_TICK_MS = 30_000;

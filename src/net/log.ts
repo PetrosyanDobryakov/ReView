@@ -6,8 +6,10 @@ export type NetLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const PREFIX = '[review:net]';
 const STORAGE_KEY = 'review-net-log';
-/** Default OFF — enable via Settings / ?netLog=1 while debugging LAN sync. */
-const DEFAULT_ENABLED = false;
+/** Default OFF — enable via Settings / ?netLog=1 / `npm run dev:log` (VITE_NET_LOG). */
+const DEFAULT_ENABLED =
+  typeof import.meta !== 'undefined' &&
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_NET_LOG === '1';
 
 type LogData = unknown | (() => unknown);
 

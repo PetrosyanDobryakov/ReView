@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "server": "node server.mjs",
+    "server:log": "node server.mjs --log",
     "dev": "node scripts/dev.mjs",
+    "dev:log": "node scripts/dev.mjs --log",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "bundle:engine": "node scripts/bundle-engine.mjs",
