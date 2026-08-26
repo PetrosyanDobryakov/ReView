@@ -2,15 +2,17 @@ import { COLORS, readableTextOn } from './shapes';
 
 export type ChromeThemeId = 'packet' | 'archive' | 'studio' | 'white' | 'ink' | 'ocean' | 'forest' | 'sunset' | 'custom';
 
+/** Themes shown in Settings → Customize. Ocean / forest / sunset stay in the
+ *  type + CSS + labels but are hidden from the picker — uncomment to restore. */
 export const CHROME_THEME_IDS: ChromeThemeId[] = [
   'packet',
   'archive',
   'ink',
   'studio',
   'white',
-  'ocean',
-  'forest',
-  'sunset',
+  // 'ocean',
+  // 'forest',
+  // 'sunset',
   'custom',
 ];
 
@@ -24,7 +26,7 @@ const THEME_COLORS: Record<Exclude<ChromeThemeId, 'custom'>, string> = {
   white: '#f4f4f5',
   ink: '#0e0e0e',
   ocean: '#16202b',
-  forest: '#17201a',
+  forest: '#0e1410',
   sunset: '#241a20',
 };
 
@@ -141,7 +143,9 @@ function customVars(c: CustomChromeColors): Array<[string, string]> {
 const CUSTOM_VAR_NAMES = customVars(DEFAULT_CUSTOM_COLORS).map(([name]) => name);
 
 function isChromeThemeId(value: string): value is ChromeThemeId {
-  return CHROME_THEME_IDS.some((id) => id === value);
+  if (CHROME_THEME_IDS.some((id) => id === value)) return true;
+  // Still honor a previously saved hidden skin so it keeps applying.
+  return value === 'ocean' || value === 'forest' || value === 'sunset';
 }
 
 export function readChromeTheme(): ChromeThemeId {

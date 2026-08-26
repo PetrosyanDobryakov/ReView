@@ -414,15 +414,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
                     <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
                       <BoardStorageBadge meta={b} locale={locale} />
-                    </span>
-                    <span
-                      className="board-col-weight panel-label"
-                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
-                    >
-                      {weightLabel}
-                    </span>
-                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
-                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
                       {needsSave && (
                         <button
                           type="button"
@@ -433,7 +424,27 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           {t(locale, 'keepOnDevice')}
                         </button>
                       )}
+                    </span>
+                    <span
+                      className="board-col-weight panel-label"
+                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
+                    >
+                      {weightLabel}
+                    </span>
+                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
+                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
                       <span className="board-row-tools">
+                        {needsSave && (
+                          <button
+                            type="button"
+                            className="icon-btn board-row-cta-icon"
+                            title={t(locale, 'keepOnDeviceHint')}
+                            aria-label={t(locale, 'keepOnDevice')}
+                            onClick={() => handleSaveBoard(b.id)}
+                          >
+                            <Icon name="download" size={20} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="icon-btn"
@@ -441,7 +452,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'saveAsMyBoard')}
                           onClick={() => void handleCloneBoard(b.id)}
                         >
-                          <Icon name="duplicate" size={14} />
+                          <Icon name="duplicate" size={20} />
                         </button>
                         <button
                           type="button"
@@ -450,7 +461,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'copyLink')}
                           onClick={() => handleCopyLink(b.id)}
                         >
-                          <Icon name="copy" size={14} />
+                          <Icon name="copy" size={20} />
                         </button>
                         <button
                           type="button"
@@ -464,7 +475,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                             setBoardName(b.name);
                           }}
                         >
-                          <Icon name="pen" size={14} />
+                          <Icon name="pen" size={20} />
                         </button>
                         <button
                           type="button"
@@ -473,7 +484,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           aria-label={t(locale, 'ctxDelete')}
                           onClick={() => void handleDeleteBoard(b.id)}
                         >
-                          <Icon name="trash" size={14} />
+                          <Icon name="trash" size={20} />
                         </button>
                       </span>
                     </span>

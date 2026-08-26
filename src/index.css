@@ -146,24 +146,29 @@
 }
 
 [data-chrome-theme='forest'] {
-  --chrome-bg: #17201a;
-  --chrome-panel: #1f2b22;
-  --chrome-panel-2: #29382d;
-  --chrome-border: #36493b;
-  --chrome-border-soft: #2d4033;
-  --chrome-text: #e2ecdf;
-  --chrome-text-dim: #97ab94;
-  --chrome-accent: #7fb069;
-  --chrome-accent-strong: #aad49a;
-  --chrome-active-bg: rgba(127, 176, 105, 0.15);
-  --chrome-active-ring: rgba(170, 212, 154, 0.42);
-  --chrome-selection: #7fb069;
+  --chrome-bg: #0e1410;
+  --chrome-panel: #151c17;
+  --chrome-panel-2: #1b241e;
+  --chrome-border: #27342a;
+  --chrome-border-soft: #212b23;
+  --chrome-text: #d8e4d4;
+  --chrome-text-dim: #7a8f78;
+  --chrome-accent: #5d9a54;
+  --chrome-accent-strong: #82b878;
+  --chrome-active-bg: rgba(93, 154, 84, 0.12);
+  --chrome-active-ring: rgba(130, 184, 120, 0.34);
+  --chrome-selection: #5d9a54;
   --chrome-success: #6fae7a;
   --chrome-success-dim: rgba(111, 174, 122, 0.35);
   --chrome-warn: #c9a84a;
   --chrome-danger: #c96a62;
   --chrome-danger-bg: #4a2826;
   --chrome-danger-border: #7a4038;
+}
+
+[data-chrome-theme='forest'] body,
+[data-chrome-theme='forest'] .canvas-wrap {
+  background: linear-gradient(165deg, #080d0a 0%, #0e1410 46%, #111812 100%);
 }
 
 [data-chrome-theme='sunset'] {
@@ -1793,10 +1798,11 @@ button.brand {
   z-index: 1;
   flex: 1 1 0;
   min-width: 0;
-  height: 32px;
-  padding: 0 4px;
+  height: 36px;
+  padding: 0 6px;
   justify-content: center;
-  font-size: var(--chrome-type-meta);
+  font-size: var(--chrome-type-title);
+  font-weight: 500;
   letter-spacing: -0.02em;
 }
 
@@ -1992,8 +1998,8 @@ button.brand {
 }
 
 .theme-card[data-theme-preview='forest'] {
-  background: #17201a;
-  color: #aad49a;
+  background: linear-gradient(145deg, #080d0a, #111812);
+  color: #82b878;
 }
 
 .theme-card[data-theme-preview='sunset'] {
@@ -3257,15 +3263,16 @@ h3 .swap-text,
 }
 .board-row {
   display: grid;
-  /* Shared fixed tracks so header labels sit on the same columns as cells. */
+  /* Shared fixed tracks so header labels sit on the same columns as cells.
+     Actions stay icon-only (~4×28); Keep on device lives under STORAGE. */
   grid-template-columns:
     28px
     minmax(0, 1fr)
     minmax(72px, 96px)
-    104px
-    40px
-    minmax(100px, 128px)
-    120px;
+    minmax(108px, 140px)
+    minmax(48px, 56px)
+    minmax(0, 128px)
+    160px;
   align-items: center;
   column-gap: 10px;
   row-gap: 0;
@@ -3343,12 +3350,16 @@ h3 .swap-text,
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding-left: 0;
 }
 .board-col-status {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
-  justify-content: flex-start;
 }
 .status-select {
   /* Pull border left by the same amount as trigger padding so label text
@@ -3483,21 +3494,28 @@ h3 .swap-text,
   min-width: 0;
 }
 .board-row-cta {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
-  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-row-cta-icon {
+  display: none;
 }
 .board-row-tools {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex-shrink: 0;
 }
 .board-row-tools .icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
 }
 .board-row-head .board-col-idx {
@@ -3529,10 +3547,12 @@ h3 .swap-text,
   font-size: 12px;
   white-space: nowrap;
 }
-/* Collapse by list width, not viewport — sidebar eats horizontal space. */
+/* Collapse by list width, not viewport — sidebar eats horizontal space.
+   Max list ≈852px (home-body 1180 − side 280 − gaps/padding), so keep the
+   full 7-col layout available near the top of that range. */
 @container home-list (max-width: 720px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 104px 40px 120px;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(108px, 140px) minmax(48px, 56px) 160px;
   }
   .board-col-team,
   .board-col-date {
@@ -3541,28 +3561,28 @@ h3 .swap-text,
 }
 @container home-list (max-width: 520px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 120px;
+    /* Fifth tool (keep-on-device icon) appears when STORAGE is hidden. */
+    grid-template-columns: 28px minmax(0, 1fr) minmax(48px, 56px) 198px;
   }
   .board-col-team,
   .board-col-date,
-  .board-col-status,
+  .board-col-status {
+    display: none;
+  }
+  /* Status column (and its text CTA) gone — keep save as an icon in tools. */
+  .board-row-cta-icon {
+    display: inline-flex;
+  }
+}
+@container home-list (max-width: 400px) {
+  .board-row {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(160px, 198px);
+  }
   .board-col-weight {
     display: none;
   }
-}
-@container home-list (max-width: 420px) {
-  .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) 112px;
-  }
   .board-row-head {
     display: none;
-  }
-  .board-row-cta {
-    padding: 0 8px;
-  }
-  .board-row-tools .icon-btn {
-    width: 26px;
-    height: 26px;
   }
 }
 .home-title {
