@@ -240,13 +240,16 @@ export class SyncClient {
     const p = this.provider;
     if (!p || p.ws?.readyState !== WebSocket.OPEN) return [];
     const selfId = loadUser().id;
-    const peers: PeerCursor[] = [];
+    const byUser = new Map<string, PeerCursor>();
     for (const [id, state] of p.awareness.getStates()) {
       if (id === p.awareness.clientID) continue;
       const user = state.user as UserInfo | undefined;
       if (!user || !user.name) continue;
       const userId = typeof user.id === 'string' && user.id.trim() ? user.id.trim() : '';
       if (userId && userId === selfId) continue;
+      const key = userId || `client:${id}`;
+      // ponytail: dedup by userId — keep freshest entry, drop stale reconnect
+      if (byUser.has(key)) continue;
       const published = { name: user.name, color: user.color || '#7c8cff' };
       const display = userId ? getPeerDisplay(userId, published) : { ...published, overridden: false };
       const cur = state.cursor as CursorPos | null | undefined;
@@ -258,7 +261,7 @@ export class SyncClient {
       const viewing = viewingRaw !== false;
       const draft = parseDraft(state.draft);
       const erasePreview = parseErasePreview(state.erasePreview);
-      peers.push({
+      byUser.set(key, {
         id,
         userId: userId || `client:${id}`,
         name: display.name,
@@ -275,7 +278,7 @@ export class SyncClient {
         erasePreview,
       });
     }
-    return peers;
+    return [...byUser.values()];
   }
 
   publishPresence(user: UserInfo): void {
@@ -576,6 +579,10 @@ export class SyncClient {
         room: this.providerRoom,
         boardId: this.boardId,
       }));
+      try {
+        // ponytail: clear awareness state so stale clientID doesn't linger as duplicate peer
+        this.provider.awareness.setLocalState(null);
+      } catch {}
       try {
         this.provider.destroy();
       } catch (err) {
