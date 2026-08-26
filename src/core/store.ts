@@ -235,23 +235,16 @@ export function initBoard(boardId: string): void {
   lastPageListEmitKey = '';
   lastActivePageEmitKey = '';
   lastPagesEmitKey = '';
-  queueMicrotask(() => {
-    if (currentBoardId === boardId) {
-      emitPageList();
-      emitActivePage();
-    }
-  });
-  // Defer attach so React finish the render that called initBoard.
-  queueMicrotask(() => {
-    if (currentBoardId === boardId) attachSync(doc, boardId);
-  });
-  // Ephemeral boards never get an IDB 'synced' ��� still notify the engine.
-  if (!persistence) queueMicrotask(() => {
-    if (currentBoardId === boardId) {
-      migratePointsSpace();
-      emitBoardReady();
-    }
-  });
+  // ponytail: was queueMicrotask — caused race where 3rd peer attached sync before local doc ready → desync/flapping.
+  // Now sync attach is synchronous so Yjs can start merging immediately; UI emits are immediate too.
+  emitPageList();
+  emitActivePage();
+  attachSync(doc, boardId);
+  // Ephemeral boards never get an IDB 'synced' — still notify the engine immediately.
+  if (!persistence) {
+    migratePointsSpace();
+    emitBoardReady();
+  }
 }
 
 /** Tear down sync and clear the active board id (tab close / switch board). */
