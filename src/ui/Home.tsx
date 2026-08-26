@@ -21,23 +21,26 @@ import { cloneBoard } from '../core/boardClone';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
+import { isOrbitPaper } from '../core/orbit';
+import { applyOrbitToolDefaults, PACKET_PAPER, restoreOrbitToolDefaults } from '../core/orbitDraw';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
 import { BoardStorageBadge } from './BoardStorageBadge';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
-import { OrbitAtmosphere } from './OrbitAtmosphere';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
 import { APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { resolveInviteBoardUrl } from '../net';
+import { navigateThemed } from './navTransition';
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
   const [locale, setLocale] = useState<LocaleId>(localeProp);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
+  const [paperBg, setPaperBg] = useState(() => readPrefs().paperBg ?? PACKET_PAPER);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nick, setNick] = useState(() => loadUser().name);
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
@@ -107,7 +110,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const handleCreateBoard = () => {
     const b = createBoard(t(locale, 'newBoard'), activeTeam);
-    navigate(boardUrl(b.id));
+    navigateThemed(navigate, boardUrl(b.id));
   };
 
   const handleCreateTeam = () => {
@@ -149,7 +152,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       const def = curTeams[0]?.id ?? 'default';
       ensureBoardWithId(id, t(locale, 'remoteBoardName'), def, 'remote');
     }
-    navigate(boardUrl(id));
+    navigateThemed(navigate, boardUrl(id));
   };
 
   const handleSaveBoard = (id: string) => {
@@ -188,7 +191,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   return (
     <div className="home-root">
-      {chromeTheme === 'orbit' && <OrbitAtmosphere />}
       <header className="file-bar">
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
@@ -383,7 +385,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                   (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
                   (Boolean(b.savedLocally) && known && bytes === 0);
                 return (
-                  <div key={b.id} className="island board-row" onClick={() => navigate(boardUrl(b.id))}>
+                  <div key={b.id} className="island board-row" onClick={() => navigateThemed(navigate, boardUrl(b.id))}>
                     <span className="board-col-idx">{idx + 1}</span>
                     <span className="board-col-name">
                       {editingBoard === b.id ? (
@@ -504,7 +506,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         open={settingsOpen}
         locale={locale}
         chromeTheme={chromeTheme}
-        bg="#1c1c1a"
+        bg={paperBg}
         gridOn
         sync={{ online: false, users: 0, enabled: false }}
         saved
@@ -522,7 +524,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           writeChromeTheme(id);
           setChromeTheme(id);
         }}
-        onBg={() => {}}
+        onBg={(value) => {
+          const wasOrbit = isOrbitPaper(paperBg);
+          const nextOrbit = isOrbitPaper(value);
+          writePrefs({ paperBg: value });
+          setPaperBg(value);
+          if (nextOrbit && !wasOrbit) applyOrbitToolDefaults();
+          else if (!nextOrbit && wasOrbit) restoreOrbitToolDefaults();
+        }}
         onGrid={() => {}}
         onClose={() => setSettingsOpen(false)}
       />

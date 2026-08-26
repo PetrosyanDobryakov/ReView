@@ -49,7 +49,7 @@ const THEME_COLORS: Record<Exclude<ChromeThemeId, 'custom'>, string> = {
   ocean: '#16202b',
   forest: '#0e1410',
   sunset: '#241a20',
-  orbit: '#000000',
+  orbit: '#02010A',
 };
 
 export interface CustomChromeColors {
@@ -222,4 +222,9 @@ export function applyChromeTheme(id: ChromeThemeId): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && metaColor) meta.setAttribute('content', metaColor);
   syncSelectionColor();
+  try {
+    window.dispatchEvent(new CustomEvent('review-chrome-theme', { detail: id }));
+  } catch {
+    /* ignore */
+  }
 }

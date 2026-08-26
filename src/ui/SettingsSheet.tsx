@@ -50,6 +50,8 @@ import { loadUser, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
 import type { ToolId } from '../engine/tools';
 import { Icon, type IconName } from './icons';
 import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t } from './i18n';
+import { isOrbitPaper } from '../core/orbit';
+import { PACKET_PAPER } from '../core/orbitDraw';
 import { MOTION, useExitPresence } from './motion';
 import { SlideTrack } from './SlideTrack';
 import { SwapText } from './SwapText';
@@ -212,7 +214,17 @@ export function SettingsSheet({
   const [colorBinds, setColorBinds] = useState(() => getColorBinds());
   const [listening, setListening] = useState<BindTarget | null>(null);
 
-  const isCustomBg = !pickerPaperPresets(prefs.orbitUnlocked).some((p) => p.value === bg);
+  const paperPresets = pickerPaperPresets(prefs.orbitUnlocked);
+  const orbitPaperSelected = isOrbitPaper(bg);
+  const isCustomBg = !orbitPaperSelected && !paperPresets.some((p) => p.value === bg);
+
+  const enterOrbit = () => {
+    onBg(ORBIT_PAPER);
+  };
+
+  const leaveOrbitPaper = () => {
+    if (orbitPaperSelected) onBg(PACKET_PAPER);
+  };
 
   useEffect(() => {
     if (isCustomBg && /^#[0-9a-fA-F]{6}$/.test(bg)) {
@@ -788,15 +800,18 @@ export function SettingsSheet({
                   onClick={() => {
                     const next = !prefs.orbitUnlocked;
                     patchPrefs({ orbitUnlocked: next });
-                    if (!next && chromeTheme === 'orbit') {
-                      onChromeTheme('packet');
-                      writeChromeTheme('packet');
+                    if (!next && (chromeTheme === 'orbit' || orbitPaperSelected)) {
+                      leaveOrbitPaper();
+                      if (chromeTheme === 'orbit') {
+                        onChromeTheme('packet');
+                        writeChromeTheme('packet');
+                      }
                     }
                   }}
                 >
                   <span className="sheet-switch-label">
                     <span>{t(locale, 'orbitUnlock')}</span>
-                    <span className="orbit-slop-tag">{t(locale, 'aiSlopTag')}</span>
+                    <span className="orbit-slop-tag">{t(locale, 'orbitSlopTag')}</span>
                   </span>
                   <span className="switch" aria-hidden="true">
                     <span className="switch-thumb" />
@@ -821,15 +836,20 @@ export function SettingsSheet({
                       }
                       onClick={() => {
                         if (id === chromeTheme) return;
+                        if (id === 'orbit') {
+                          onChromeTheme(id);
+                          writeChromeTheme(id);
+                          enterOrbit();
+                          return;
+                        }
+                        if (chromeTheme === 'orbit' || orbitPaperSelected) {
+                          leaveOrbitPaper();
+                        }
                         onChromeTheme(id);
                         writeChromeTheme(id);
-                        if (id === 'orbit') onBg(ORBIT_PAPER);
                       }}
                     >
                       {t(locale, CHROME_LABEL[id])}
-                      {id === 'orbit' && (
-                        <span className="orbit-slop-tag orbit-slop-tag--card">{t(locale, 'aiSlopTag')}</span>
-                      )}
                     </button>
                   ))}
                 </SlideTrack>
@@ -857,24 +877,39 @@ export function SettingsSheet({
                   <h3>
                     <SwapText text={t(locale, 'board')} />
                   </h3>
-                  <SlideTrack className="bg-grid" active={isCustomBg ? 'custom' : bg}>
-                    {pickerPaperPresets(prefs.orbitUnlocked).map((p) => (
+                  <SlideTrack className="bg-grid" active={isCustomBg ? 'custom' : orbitPaperSelected ? ORBIT_PAPER : bg}>
+                    {paperPresets.map((p) => (
                       <button
                         type="button"
                         key={p.value}
                         className={`bg-card${isLightPaper(p.value) ? ' light' : ''}`}
-                        data-slide-active={bg === p.value ? 'true' : undefined}
+                        data-slide-active={
+                          (p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value)
+                            ? 'true'
+                            : undefined
+                        }
                         data-paper-preview={p.value === ORBIT_PAPER ? 'orbit' : undefined}
                         style={{ background: p.value }}
                         title={t(locale, p.label)}
                         aria-label={t(locale, p.label)}
-                        aria-pressed={bg === p.value}
-                        onClick={() => onBg(p.value)}
+                        aria-pressed={p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value}
+                        onClick={() => {
+                          if (p.value === ORBIT_PAPER) {
+                            if (chromeTheme !== 'orbit') {
+                              onChromeTheme('orbit');
+                              writeChromeTheme('orbit');
+                            }
+                            enterOrbit();
+                            return;
+                          }
+                          onBg(p.value);
+                          if (chromeTheme === 'orbit') {
+                            onChromeTheme('packet');
+                            writeChromeTheme('packet');
+                          }
+                        }}
                       >
                         <span>{t(locale, p.label)}</span>
-                        {p.value === ORBIT_PAPER && (
-                          <span className="orbit-slop-tag orbit-slop-tag--paper">{t(locale, 'aiSlopTag')}</span>
-                        )}
                       </button>
                     ))}
                     <button
@@ -885,7 +920,13 @@ export function SettingsSheet({
                       title={t(locale, 'bgCustom')}
                       aria-label={t(locale, 'bgCustom')}
                       aria-pressed={isCustomBg}
-                      onClick={() => onBg(customBoardBg)}
+                      onClick={() => {
+                        onBg(customBoardBg);
+                        if (chromeTheme === 'orbit') {
+                          onChromeTheme('packet');
+                          writeChromeTheme('packet');
+                        }
+                      }}
                     >
                       <span>{t(locale, 'bgCustom')}</span>
                     </button>
@@ -903,6 +944,10 @@ export function SettingsSheet({
                         onChange={(e) => {
                           setCustomBoardBg(e.target.value);
                           onBg(e.target.value);
+                          if (chromeTheme === 'orbit') {
+                            onChromeTheme('packet');
+                            writeChromeTheme('packet');
+                          }
                         }}
                       />
                     </label>
