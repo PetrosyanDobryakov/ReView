@@ -13,7 +13,7 @@ This is the default collab path.
 
 The sync server binds `0.0.0.0:1234` and exposes `GET /lan` with private IPv4 addresses so a host on `localhost` can still copy a usable invite. If phones cannot connect, allow Node through the OS firewall on private networks.
 
-Do **not** expose port `1234` to the public internet unprotected.
+Do **not** expose port `1234` to the public internet unprotected. File logging (`GET`/`POST /net-log`) is off unless `REVIEW_NET_LOG=1`.
 
 ## Build
 

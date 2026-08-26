@@ -17,19 +17,31 @@ const ROOM_GC_TICK_MS = 30_000;
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(ROOT, 'logs', 'net');
 const SESSION_STAMP = new Date().toISOString().replace(/[:.]/g, '-');
+const SESSION_REL = `logs/net/session-${SESSION_STAMP}.log`;
+const LATEST_REL = 'logs/net/latest.log';
 const SESSION_FILE = join(LOG_DIR, `session-${SESSION_STAMP}.log`);
 const LATEST_FILE = join(LOG_DIR, 'latest.log');
 const CURRENT_POINTER = join(LOG_DIR, 'CURRENT');
 
-mkdirSync(LOG_DIR, { recursive: true });
-writeFileSync(CURRENT_POINTER, SESSION_FILE + '\n', 'utf8');
-writeFileSync(LATEST_FILE, '', 'utf8');
+let logDirReady = false;
+
+/** Create logs/net only when REVIEW_NET_LOG is on. */
+function ensureLogDir() {
+  if (!NET_LOG || logDirReady) return;
+  mkdirSync(LOG_DIR, { recursive: true });
+  writeFileSync(CURRENT_POINTER, SESSION_REL + '\n', 'utf8');
+  writeFileSync(LATEST_FILE, '', 'utf8');
+  logDirReady = true;
+}
 
 /**
  * Append one line to the active session file (+ mirror latest.log).
+ * No-op unless REVIEW_NET_LOG is enabled.
  * @param {string} line
  */
 function appendSession(line) {
+  if (!NET_LOG) return;
+  ensureLogDir();
   const text = line.endsWith('\n') ? line : line + '\n';
   try {
     appendFileSync(SESSION_FILE, text, 'utf8');
@@ -46,6 +58,7 @@ function appendSession(line) {
  * @param {string} [source]
  */
 function fileLog(level, msg, data, source = 'server') {
+  if (!NET_LOG) return;
   const row = {
     t: new Date().toISOString(),
     level,
@@ -56,7 +69,7 @@ function fileLog(level, msg, data, source = 'server') {
   appendSession(JSON.stringify(row));
 }
 
-fileLog('info', 'session start', { file: SESSION_FILE, port: PORT });
+fileLog('info', 'session start', { file: SESSION_REL, port: PORT });
 
 /** @param {string} addr */
 function isPrivateV4(addr) {
@@ -169,12 +182,19 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (url === '/net-log' && (req.method === 'GET' || req.method === 'POST')) {
+    if (!NET_LOG) {
+      req.resume();
+      sendJson(res, 404, { ok: false });
+      return;
+    }
+  }
+
   if (url === '/net-log' && req.method === 'GET') {
     sendJson(res, 200, {
       ok: true,
-      file: SESSION_FILE,
-      latest: LATEST_FILE,
-      relative: `logs/net/session-${SESSION_STAMP}.log`,
+      file: SESSION_REL,
+      latest: LATEST_REL,
     });
     return;
   }
@@ -195,7 +215,7 @@ const server = createServer(async (req, res) => {
         };
         appendSession(JSON.stringify(row));
       }
-      sendJson(res, 200, { ok: true, file: SESSION_FILE, written: lines.length });
+      sendJson(res, 200, { ok: true, file: SESSION_REL, written: lines.length });
     } catch (err) {
       fileLog('warn', 'net-log POST failed', { err: String(err) });
       sendJson(res, 400, { ok: false, error: String(err) });
@@ -280,9 +300,9 @@ server.listen(PORT, HOST, () => {
     console.log(`[review]   ws://${HOST}:${PORT}`);
     console.log(`[review]   UI (dev): http://${HOST}:${process.env.REVIEW_UI_PORT || '5173'}`);
   }
-  console.log(`[review:net] session log → ${SESSION_FILE}`);
   console.log(`[review:net] empty-room GC after ${Math.round(EMPTY_ROOM_GC_MS / 1000)}s`);
   if (NET_LOG) {
+    console.log(`[review:net] session log → ${SESSION_REL}`);
     console.log(`[review:net] verbose HTTP logging on (REVIEW_NET_LOG)`);
   }
   fileLog('info', 'listen', { addresses, port: PORT, host: HOST, emptyRoomGcMs: EMPTY_ROOM_GC_MS });
