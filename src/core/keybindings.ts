@@ -58,6 +58,7 @@ const DEFAULT_COLOR_BINDS: ColorBinds = {
   '2': 'Digit3',
   '3': 'Digit4',
   '4': 'Digit5',
+  '5': 'Digit6',
 };
 
 export const BIND_COLOR_ORDER = Object.keys(DEFAULT_COLOR_BINDS);
