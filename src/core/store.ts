@@ -773,7 +773,9 @@ function emitPages(): void {
 
 function pagesArray(): Y.Array<string> {
   if (!pagesObserved) {
-    pages.observe(() => {
+    pages.observe((ev: Y.YArrayEvent<string>) => {
+      // ponytail: ignore dedup repairs to avoid ping-pong with 3 peers
+      if ((ev as unknown as { transaction?: { origin?: unknown } }).transaction?.origin === 'dedup') return;
       emitPageList();
     });
     pagesObserved = true;
@@ -808,7 +810,7 @@ export function listPages(): string[] {
           a.delete(0, a.length);
           if (u.length) a.push(u);
         }
-      }, null);
+      }, 'dedup');
     });
     return uniq;
   }
