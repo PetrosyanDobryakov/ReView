@@ -5,6 +5,13 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
+import { readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const URL = process.env.REVIEW_SYNC_URL || 'ws://127.0.0.1:1234';
 const ROOM = 'sync-test-' + Date.now();
@@ -186,4 +193,141 @@ await waitAware(
 pa.destroy();
 pb.destroy();
 console.log('sync-test: shapes + awareness + pages + away presence verified');
+
+// --- HTTP: /lan stays up; /net-log is gated on REVIEW_NET_LOG ---
+const liveHttp = URL.replace(/^ws/i, 'http');
+const liveLan = await fetch(`${liveHttp}/lan`);
+assert.equal(liveLan.status, 200, 'GET /lan on live sync server');
+const liveLanBody = await liveLan.json();
+assert.equal(liveLanBody.ok, true, 'GET /lan body ok');
+assert.ok(Array.isArray(liveLanBody.addresses), 'GET /lan addresses array');
+
+function httpBase(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = createNetServer();
+    s.listen(0, '127.0.0.1', () => {
+      const addr = s.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      s.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    s.on('error', reject);
+  });
+}
+
+async function waitHealth(port, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${httpBase(port)}/health`);
+      if (res.ok) return;
+      lastErr = new Error(`health ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw lastErr ?? new Error(`health timeout :${port}`);
+}
+
+function startSyncServer({ port, netLog }) {
+  return spawn(process.execPath, ['server.mjs'], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      REVIEW_SYNC_PORT: String(port),
+      REVIEW_HOST: '127.0.0.1',
+      REVIEW_NET_LOG: netLog ? '1' : '0',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+async function withServer({ netLog }, fn) {
+  const port = await freePort();
+  const child = startSyncServer({ port, netLog });
+  try {
+    await waitHealth(port);
+    await fn(port);
+  } finally {
+    child.kill('SIGTERM');
+    await new Promise((resolve) => {
+      const t = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+        resolve();
+      }, 2000);
+      child.once('exit', () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  }
+}
+
+async function listSessionLogs() {
+  try {
+    const names = await readdir(path.join(ROOT, 'logs', 'net'));
+    return names.filter((n) => n.startsWith('session-') && n.endsWith('.log')).sort();
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+const beforeDisabled = await listSessionLogs();
+await withServer({ netLog: false }, async (port) => {
+  const lan = await fetch(`${httpBase(port)}/lan`);
+  assert.equal(lan.status, 200, 'GET /lan when net-log off');
+  const lanBody = await lan.json();
+  assert.equal(lanBody.ok, true);
+  assert.ok(Array.isArray(lanBody.addresses));
+
+  const get = await fetch(`${httpBase(port)}/net-log`);
+  assert.equal(get.status, 404, 'GET /net-log 404 when REVIEW_NET_LOG off');
+
+  const post = await fetch(`${httpBase(port)}/net-log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lines: [{ t: new Date().toISOString(), level: 'info', msg: 'should-not-write' }],
+    }),
+  });
+  assert.equal(post.status, 404, 'POST /net-log 404 when REVIEW_NET_LOG off');
+});
+const afterDisabled = await listSessionLogs();
+assert.deepEqual(afterDisabled, beforeDisabled, 'disabled net-log must not create session files');
+
+await withServer({ netLog: true }, async (port) => {
+  const get = await fetch(`${httpBase(port)}/net-log`);
+  assert.equal(get.status, 200, 'GET /net-log 200 when REVIEW_NET_LOG on');
+  const info = await get.json();
+  assert.equal(info.ok, true);
+  assert.match(String(info.file), /^logs\/net\/session-.+\.log$/);
+  assert.equal(info.latest, 'logs/net/latest.log');
+  const dumped = JSON.stringify(info);
+  assert.ok(!dumped.includes(ROOT), 'GET /net-log must not leak absolute paths');
+
+  const marker = `sync-test-${Date.now()}`;
+  const post = await fetch(`${httpBase(port)}/net-log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lines: [{ t: new Date().toISOString(), level: 'info', msg: marker }],
+    }),
+  });
+  assert.equal(post.status, 200, 'POST /net-log 200 when REVIEW_NET_LOG on');
+  const posted = await post.json();
+  assert.equal(posted.ok, true);
+  assert.ok(!JSON.stringify(posted).includes(ROOT), 'POST /net-log must not leak absolute paths');
+});
+
+console.log('sync-test: HTTP /lan + gated /net-log verified');
 process.exit(0);

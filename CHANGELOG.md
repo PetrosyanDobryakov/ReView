@@ -2,6 +2,10 @@
 
 ## 0.12.0 — unreleased
 
+### Security
+- Sync server no longer creates `logs/net/` or accepts `GET`/`POST /net-log` unless `REVIEW_NET_LOG=1`. When enabled, `/net-log` returns relative paths only.
+- `scripts/open-firewall.ps1` friend-URL hint uses `<lan-ip>` instead of a hardcoded machine address.
+
 ### Functional review pass
 - Align/distribute: multi-select aligns within the selection; distribute no longer no-ops.
 - Clipboard: paste/duplicate remaps connector `fromId`/`toId`; plain-text paste creates a text object.
