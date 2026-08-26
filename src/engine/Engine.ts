@@ -35,8 +35,12 @@ import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import { onPrefsChange, readPrefs } from '../core/prefs';
-import { drawOrbitPaperField, drawOrbitPaperScreen, orbitPaperActive } from './orbitField';
+import { ORBIT_PAPER } from '../core/orbit';
+import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
 
+function isOrbitChromeLive(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.chromeTheme === 'orbit';
+}
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
   se: 'nwse-resize',
@@ -393,6 +397,9 @@ export class Engine {
   private lastT = 0;
   private lastCam = { x: 0, y: 0, z: 1 };
   private dirty = true;
+  /** Next time Orbit paper ambient may force a paint (~12fps when idle). */
+  private orbitAmbientDue = 0;
+  private orbitPaperLive = false;
   private paperFrom = '';
   private paperTo = '';
   private paperFill = '';
@@ -418,6 +425,10 @@ export class Engine {
   } | null = null;
   private panStart = { x: 0, y: 0 };
   private reduceMotion = false;
+  private reduceMotionMq: MediaQueryList | null = null;
+  private onReduceMotionChange = (e: MediaQueryListEvent) => {
+    this.reduceMotion = e.matches;
+  };
   private exportPick = false;
   private exportRect: ShapeBox | null = null;
   private exportAnchor: { x: number; y: number } | null = null;
@@ -433,7 +444,7 @@ export class Engine {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.ctx = canvas.getContext('2d', { alpha: true })!;
     this.resize();
     this.resizer = new ResizeObserver(this.resize);
     this.resizer.observe(canvas);
@@ -467,11 +478,9 @@ export class Engine {
     });
     this.dragTool = this.tool;
     if (typeof matchMedia === 'function') {
-      const mq = matchMedia('(prefers-reduced-motion: reduce)');
-      this.reduceMotion = mq.matches;
-      mq.addEventListener('change', (e) => {
-        this.reduceMotion = e.matches;
-      });
+      this.reduceMotionMq = matchMedia('(prefers-reduced-motion: reduce)');
+      this.reduceMotion = this.reduceMotionMq.matches;
+      this.reduceMotionMq.addEventListener('change', this.onReduceMotionChange);
     }
     this.offPrefs = onPrefsChange(() => {
       clearToolCursorCache();
@@ -623,9 +632,11 @@ export class Engine {
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
       ctx.setTransform(opts.scale, 0, 0, opts.scale, -exportBox.x * opts.scale, -exportBox.y * opts.scale);
-      const theme = themeFor(store.viewPaperBg());
-      if (opts.background) {
-        ctx.fillStyle = opts.background;
+      const paper = store.viewPaperBg();
+      const theme = themeFor(paper);
+      const bgFill = opts.background ?? (orbitPaperActive(paper, paper) ? ORBIT_PAPER : null);
+      if (bgFill) {
+        ctx.fillStyle = bgFill;
         ctx.fillRect(exportBox.x, exportBox.y, exportBox.w, exportBox.h);
       }
       const ord = store.order;
@@ -636,7 +647,7 @@ export class Engine {
         if (!v) continue;
         const vb = this.spatialBox(v);
         if (!intersects(vb, exportBox)) continue;
-        drawShape(ctx, v, theme.text, store.viewPaperBg());
+        drawShape(ctx, v, theme.text, paper);
       }
       return canvas;
     } catch {
@@ -762,6 +773,8 @@ export class Engine {
     this.offImageLoad();
     this.offFormulaLoad();
     this.offPrefs();
+    this.reduceMotionMq?.removeEventListener('change', this.onReduceMotionChange);
+    this.reduceMotionMq = null;
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
   }
@@ -2975,6 +2988,10 @@ export class Engine {
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
+      if (this.orbitPaperLive && !this.reduceMotion && t >= this.orbitAmbientDue) {
+        this.orbitAmbientDue = t + 80;
+        this.dirty = true;
+      }
       if (moved || this.dirty || this.peersAnimating) this.render();
       this.emitStats();
     } catch (err) {
@@ -3007,9 +3024,18 @@ export class Engine {
     const paperBg = this.paperFill;
     const theme = themeFor(paperBg);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = paperBg;
-    ctx.fillRect(0, 0, w, h);
-    const orbitLive = orbitPaperActive(this.paperTo, paperBg);
+    const orbitPaper = orbitPaperActive(this.paperTo, paperBg);
+    const orbitLive = orbitPaper && isOrbitChromeLive();
+    // Transparent only when Warp atmosphere is under the canvas; otherwise solid void / paper.
+    if (orbitLive) {
+      ctx.clearRect(0, 0, w, h);
+    } else if (orbitPaper) {
+      ctx.fillStyle = ORBIT_PAPER;
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      ctx.fillStyle = paperBg;
+      ctx.fillRect(0, 0, w, h);
+    }
     ctx.save();
     ctx.translate(w / 2, h / 2);
     ctx.scale(z, z);
@@ -3025,8 +3051,9 @@ export class Engine {
         reduceMotion: reduce,
       });
     }
+    // Grid stays optional via meta — Orbit only retints the lines.
     if (store.metaGrid()) {
-      this.drawGrid(ctx, orbitLive ? 'rgba(255, 60, 60, 0.07)' : theme.grid);
+      this.drawGrid(ctx, orbitLive ? orbitGridColor() : theme.grid);
     }
     const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
     const visible = this.grid.query(vis);
@@ -3073,7 +3100,9 @@ export class Engine {
         if (cur.length >= 2) segments.push(cur);
         for (const seg of segments) {
           if (seg.length >= 2) {
-            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1);
+            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1, undefined, {
+              bloom: orbitLive,
+            });
           }
         }
         return;
@@ -3133,7 +3162,8 @@ export class Engine {
     }
     this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
-    this.dirty = u < 1 || this.peersAnimating || (orbitLive && !reduce);
+    this.orbitPaperLive = orbitLive;
+    this.dirty = u < 1 || this.peersAnimating;
   }
 
   private drawPeers(ctx: CanvasRenderingContext2D): void {
@@ -3163,7 +3193,9 @@ export class Engine {
           d.points,
           d.strokeWidth,
           displayInk(d.stroke, boardBg),
-          d.alpha ?? 0.85
+          d.alpha ?? 0.85,
+          undefined,
+          { bloom: orbitPaperActive(boardBg, boardBg) }
         );
         this.peersAnimating = true;
       }
@@ -3397,6 +3429,8 @@ export class Engine {
     const pad = 2 * s;
     const line = 1.5 * s;
     const hr = 4.25 * s;
+    const orbit = orbitPaperActive(this.paperTo || store.viewPaperBg(), this.paperFill || store.viewPaperBg());
+    const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
     for (const id of this.selection) {
@@ -3407,7 +3441,7 @@ export class Engine {
         const y = v.y - pad;
         const w = v.w + pad * 2;
         const h = v.h + pad * 2;
-        ctx.strokeStyle = 'rgba(28, 28, 26, 0.5)';
+        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.65)' : 'rgba(28, 28, 26, 0.5)';
         ctx.lineWidth = line + 1.25 * s;
         ctx.strokeRect(x, y, w, h);
         ctx.strokeStyle = COLORS.selection;
@@ -3420,7 +3454,7 @@ export class Engine {
             const hy = v.y + fy * v.h;
             ctx.beginPath();
             ctx.arc(hx, hy, hr, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = handleFill;
             ctx.fill();
             ctx.strokeStyle = COLORS.selection;
             ctx.lineWidth = 1.5 * s;
@@ -3437,7 +3471,7 @@ export class Engine {
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = handleFill;
           ctx.fill();
           ctx.strokeStyle = COLORS.selection;
           ctx.stroke();

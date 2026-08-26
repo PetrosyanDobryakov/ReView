@@ -61,12 +61,14 @@ import {
 } from './core/boardTitle';
 import { fileToDocPages } from './core/docImport';
 import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
-import { OrbitAtmosphere } from './ui/OrbitAtmosphere';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
 import { MOTION, useExitPresence } from './ui/motion';
 import { readLiveFormat, type LiveTextFormat } from './core/textEditorFormat';
 import { JoinSavePrompt } from './ui/JoinSavePrompt';
+import { navigateThemed } from './ui/navTransition';
+import { isOrbitPaper } from './core/orbit';
+import { applyOrbitToolDefaults, restoreOrbitToolDefaults } from './core/orbitDraw';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
@@ -245,7 +247,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         return;
       }
       dismissJoinPrompt();
-      navigate(boardUrl(copy.id));
+      navigateThemed(navigate, boardUrl(copy.id));
     });
   };
 
@@ -417,6 +419,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     // Re-init if leaveBoard nulled the id (Strict Mode remount / HMR).
     initBoard(boardId);
     setEphemeral(!persistence);
+    if (isOrbitPaper(viewPaperBg()) || isOrbitPaper(readPrefs().paperBg ?? '')) {
+      applyOrbitToolDefaults();
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = new Engine(canvas);
@@ -635,7 +640,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
-      {chromeTheme === 'orbit' && <OrbitAtmosphere />}
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
@@ -902,8 +906,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onLocale={setLocale}
         onChromeTheme={setChromeTheme}
         onBg={(value) => {
+          const wasOrbit = isOrbitPaper(bg);
+          const nextOrbit = isOrbitPaper(value);
           writePrefs({ paperBg: value });
           setBg(value);
+          if (nextOrbit && !wasOrbit) applyOrbitToolDefaults();
+          else if (!nextOrbit && wasOrbit) restoreOrbitToolDefaults();
         }}
         onGrid={(on) => setMeta({ grid: on })}
         focusSection={settingsFocus}

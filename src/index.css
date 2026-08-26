@@ -202,41 +202,47 @@
   --chrome-danger-border: #7a4038;
 }
 
-/* Orbit — hero-futuristic remaster: black void, white type, crimson scan bloom. */
+/* Orbit — liquid glass + Glowing Shadow loop (indigo→violet→cyan). No crimson. */
+@property --orbit-spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
 [data-chrome-theme='orbit'] {
-  --chrome-bg: #000000;
-  --chrome-panel: rgba(8, 8, 8, 0.72);
-  --chrome-panel-2: rgba(18, 18, 18, 0.9);
-  --chrome-border: rgba(255, 255, 255, 0.12);
-  --chrome-border-soft: rgba(255, 255, 255, 0.08);
-  --chrome-text: #ffffff;
-  --chrome-text-dim: rgba(255, 255, 255, 0.5);
-  --chrome-accent: #e84545;
+  --chrome-bg: #02010a;
+  --chrome-panel: rgba(4, 5, 46, 0.55);
+  --chrome-panel-2: rgba(2, 1, 10, 0.78);
+  --chrome-border: rgba(145, 107, 191, 0.22);
+  --chrome-border-soft: rgba(145, 107, 191, 0.12);
+  --chrome-text: #f4f7ff;
+  --chrome-text-dim: rgba(232, 240, 255, 0.55);
+  --chrome-accent: #916bbf;
   --chrome-accent-strong: #ffffff;
-  --chrome-active-bg: rgba(255, 42, 42, 0.12);
-  --chrome-active-ring: rgba(255, 70, 70, 0.38);
-  --chrome-selection: #e84545;
+  --chrome-active-bg: rgba(61, 44, 141, 0.22);
+  --chrome-active-ring: rgba(145, 107, 191, 0.42);
+  --chrome-selection: #916bbf;
   --chrome-success: #6fae7a;
   --chrome-success-dim: rgba(111, 174, 122, 0.35);
   --chrome-warn: #c9a84a;
-  --chrome-danger: #ff4d4d;
-  --chrome-danger-bg: #3a1010;
-  --chrome-danger-border: #7a2020;
+  --chrome-danger: #ff6b8a;
+  --chrome-danger-bg: #2a1420;
+  --chrome-danger-border: #6a3048;
   --chrome-shadow:
-    0 0 0 1px rgba(255, 40, 40, 0.08),
-    0 0 28px rgba(255, 0, 0, 0.07),
-    0 18px 52px rgba(0, 0, 0, 0.7);
+    0 0 0 1px rgba(145, 107, 191, 0.12),
+    0 0 28px rgba(61, 44, 141, 0.16),
+    0 18px 52px rgba(0, 0, 0, 0.55);
   --orbit-px: 0.5;
   --orbit-py: 0.5;
-  --orbit-scan: 0.5;
 }
 
 [data-chrome-theme='orbit'] body,
 [data-chrome-theme='orbit'] .canvas-wrap,
 [data-chrome-theme='orbit'] .home-root {
-  background: #000000;
+  background: #02010a;
 }
 
+/* Frosted panels + looping outer glow — opaque enough that Warp doesn't read as panel glint. */
 [data-chrome-theme='orbit'] .island,
 [data-chrome-theme='orbit'] .toolbelt,
 [data-chrome-theme='orbit'] .sheet,
@@ -244,36 +250,55 @@
 [data-chrome-theme='orbit'] .info-modal,
 [data-chrome-theme='orbit'] .members-menu,
 [data-chrome-theme='orbit'] .pages-menu {
-  background: rgba(6, 6, 6, 0.68);
-  backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(4, 5, 46, 0.82);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  border-color: rgba(145, 107, 191, 0.2);
   box-shadow: var(--chrome-shadow);
-  isolation: isolate;
+  overflow: visible;
 }
 
-/* Islands need a positioning context for the sheen; toolbelt/sheet/menus already position themselves. */
-[data-chrome-theme='orbit'] .island {
+/* Glow ::after needs a positioned ancestor. Only force relative on static
+   file/meta islands — never on .style-island / .sheet / .align-island
+   (those are position:absolute and break if overridden to relative). */
+[data-chrome-theme='orbit'] .file-island,
+[data-chrome-theme='orbit'] .meta-island {
   position: relative;
 }
 
-/* Pointer-keyed crimson edge sheen on floating chrome. */
+/* Soft outer bloom — spin the conic ANGLE only. Never transform:rotate the box
+   (that sweeps rectangular blur bars across the whole screen). */
+[data-chrome-theme='orbit'] .island::after,
+[data-chrome-theme='orbit'] .toolbelt::after,
+[data-chrome-theme='orbit'] .sheet::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--orbit-spin),
+    #3d2c8d,
+    #916bbf,
+    #5b8cff,
+    #3d2c8d
+  );
+  filter: blur(10px);
+  opacity: 0.34;
+  z-index: -1;
+  pointer-events: none;
+  animation: orbit-glow-spin 7s linear infinite;
+}
+
 [data-chrome-theme='orbit'] .island::before,
 [data-chrome-theme='orbit'] .toolbelt::before,
 [data-chrome-theme='orbit'] .sheet::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(
-    120% 80% at calc(var(--orbit-px) * 100%) calc(var(--orbit-py) * 100%),
-    rgba(255, 50, 50, 0.14),
-    transparent 55%
-  );
-  opacity: 0.85;
-  mix-blend-mode: screen;
+  content: none;
+}
+
+[data-chrome-theme='orbit'] .island:hover::after,
+[data-chrome-theme='orbit'] .toolbelt:hover::after,
+[data-chrome-theme='orbit'] .sheet:hover::after {
+  opacity: 0.48;
 }
 
 [data-chrome-theme='orbit'] .island > *,
@@ -288,121 +313,97 @@
 [data-chrome-theme='orbit'] .home-team-btn.on,
 [data-chrome-theme='orbit'] .sheet-switch.on .switch {
   box-shadow:
-    0 0 0 1px rgba(255, 60, 60, 0.32),
-    0 0 16px rgba(255, 0, 0, 0.22);
+    0 0 0 1px rgba(145, 107, 191, 0.4),
+    0 0 16px rgba(61, 44, 141, 0.28);
 }
 
 [data-chrome-theme='orbit'] .board-row:hover {
   box-shadow:
-    0 0 0 1px rgba(255, 70, 70, 0.28),
-    0 0 18px rgba(255, 0, 0, 0.14);
-  background: rgba(255, 30, 30, 0.04);
+    0 0 0 1px rgba(145, 107, 191, 0.32),
+    0 0 18px rgba(61, 44, 141, 0.16);
+  background: rgba(61, 44, 141, 0.1);
 }
 
 [data-chrome-theme='orbit'] .brand,
 [data-chrome-theme='orbit'] .home-main-head h2,
 [data-chrome-theme='orbit'] .board-name-text {
   letter-spacing: -0.02em;
-  text-shadow:
-    0 0 22px rgba(255, 40, 40, 0.22),
-    0 0 1px rgba(255, 255, 255, 0.35);
+  text-shadow: 0 0 22px rgba(145, 107, 191, 0.28);
 }
 
-/* Sliding pill — scan trail + breathing crimson core. */
+/* Sliding pill — solid accent core, no shine/glint. */
 [data-chrome-theme='orbit'] .slide-thumb {
-  background: rgba(255, 42, 42, 0.16);
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 90, 90, 0.42),
-    0 0 14px rgba(255, 0, 0, 0.2);
+  background: rgba(61, 44, 141, 0.4);
+  box-shadow: none;
   overflow: hidden;
-}
-
-[data-chrome-theme='orbit'] .slide-thumb[data-on='true']::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    105deg,
-    transparent 30%,
-    rgba(255, 120, 120, 0.28) 48%,
-    transparent 66%
-  );
-  background-size: 220% 100%;
-  animation: orbit-thumb-scan 2.4s var(--chrome-ease) infinite;
-  pointer-events: none;
 }
 
 [data-chrome-theme='orbit'] .tool-btn[aria-pressed='true'] {
   color: #fff;
-  text-shadow: 0 0 12px rgba(255, 60, 60, 0.45);
+  text-shadow: 0 0 12px rgba(145, 107, 191, 0.45);
 }
 
 [data-chrome-theme='orbit'] .icon-btn:hover:not(:disabled),
 [data-chrome-theme='orbit'] .tool-btn:hover:not(:disabled),
 [data-chrome-theme='orbit'] .style-btn:hover:not(:disabled) {
-  box-shadow: 0 0 0 1px rgba(255, 60, 60, 0.18);
+  box-shadow: 0 0 0 1px rgba(145, 107, 191, 0.28);
 }
 
 [data-chrome-theme='orbit'] .icon-btn:active:not(:disabled),
 [data-chrome-theme='orbit'] .tool-btn:active:not(:disabled),
 [data-chrome-theme='orbit'] .style-btn:active:not(:disabled) {
   box-shadow:
-    0 0 0 1px rgba(255, 80, 80, 0.4),
-    0 0 18px rgba(255, 0, 0, 0.28);
+    0 0 0 1px rgba(145, 107, 191, 0.45),
+    0 0 14px rgba(61, 44, 141, 0.3);
 }
 
-/* Sheet opens as a vertical scan wipe. */
 [data-chrome-theme='orbit'] .sheet-root:not(.is-leaving) .sheet {
-  animation: orbit-sheet-in 380ms var(--chrome-ease) both;
+  animation: orbit-sheet-in 340ms var(--chrome-ease) both;
 }
 
 [data-chrome-theme='orbit'] .sheet-root.is-leaving .sheet {
-  animation: orbit-sheet-out 220ms var(--chrome-ease) both;
+  animation: orbit-sheet-out 200ms var(--chrome-ease) both;
 }
 
 [data-chrome-theme='orbit'] .sheet-section {
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(4, 5, 46, 0.55);
   border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 60, 60, 0.06);
+  box-shadow: none;
 }
 
 [data-chrome-theme='orbit'] .sheet-section:hover {
-  border-color: rgba(255, 70, 70, 0.22);
+  border-color: rgba(91, 140, 255, 0.28);
 }
 
 [data-chrome-theme='orbit'] .sheet-switch.on .switch {
-  background: #e84545;
-  box-shadow: 0 0 14px rgba(255, 40, 40, 0.45);
+  background: linear-gradient(135deg, #3d2c8d, #916bbf);
+  box-shadow: 0 0 14px rgba(61, 44, 141, 0.45);
 }
 
 [data-chrome-theme='orbit'] .sheet-switch.on .switch::after {
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 8px rgba(145, 107, 191, 0.35);
 }
 
-/* Focus — crimson bloom ring. */
 [data-chrome-theme='orbit'] button:focus-visible,
 [data-chrome-theme='orbit'] select:focus-visible,
 [data-chrome-theme='orbit'] .theme-card:focus-visible,
 [data-chrome-theme='orbit'] .bg-card:focus-visible {
-  outline-color: #e84545;
-  box-shadow: 0 0 0 3px rgba(232, 69, 69, 0.28);
+  outline-color: #916bbf;
+  box-shadow: 0 0 0 3px rgba(61, 44, 141, 0.32);
 }
 
-/* Presence online — keep success, add tiny crimson breath on orbit. */
 [data-chrome-theme='orbit'] .presence.online .presence-face {
   box-shadow:
     0 0 0 1.5px var(--chrome-success),
-    0 0 12px rgba(255, 40, 40, 0.25);
+    0 0 12px rgba(91, 140, 255, 0.28);
 }
 
-/* Theme card preview — animated scan band. */
 .theme-card[data-theme-preview='orbit'] {
   position: relative;
   background:
-    linear-gradient(180deg, transparent 40%, rgba(255, 0, 0, 0.35) 50%, transparent 60%),
-    radial-gradient(ellipse at 50% 35%, rgba(255, 40, 40, 0.22), transparent 58%),
-    #000000;
+    radial-gradient(ellipse at 30% 20%, rgba(61, 44, 141, 0.55), transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(145, 107, 191, 0.4), transparent 50%),
+    #02010a;
   color: #ffffff;
   overflow: hidden;
   isolation: isolate;
@@ -411,24 +412,33 @@
 .theme-card[data-theme-preview='orbit']::after {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -0.5px;
   border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    rgba(255, 60, 60, 0.35) 50%,
-    transparent 100%
+  padding: 0.7px;
+  background: conic-gradient(
+    from var(--orbit-spin, 0deg),
+    #3d2c8d,
+    #916bbf,
+    #5b8cff,
+    #3d2c8d
   );
-  background-size: 100% 220%;
-  animation: orbit-card-scan 2.8s linear infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: orbit-glow-spin 4s linear infinite;
   pointer-events: none;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 .bg-card[data-paper-preview='orbit'] {
   position: relative;
   overflow: hidden;
-  box-shadow: inset 0 0 24px rgba(255, 20, 20, 0.18);
+  box-shadow: inset 0 0 28px rgba(61, 44, 141, 0.3);
 }
 
 .bg-card[data-paper-preview='orbit']::after {
@@ -436,16 +446,9 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    transparent 35%,
-    rgba(255, 40, 40, 0.4) 50%,
-    transparent 65%
-  );
-  background-size: 100% 200%;
-  animation: orbit-card-scan 3.2s linear infinite;
+  background: radial-gradient(ellipse at 50% 40%, rgba(145, 107, 191, 0.35), transparent 65%);
   pointer-events: none;
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 .orbit-atmosphere {
@@ -455,6 +458,76 @@
   pointer-events: none;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  contain: strict;
+}
+
+.orbit-atmosphere-shader {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Orbit home ↔ board — void aperture (clip-path iris), no blur, soft settle. */
+@supports (view-transition-name: none) {
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-old(root),
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-new(root) {
+    mix-blend-mode: normal;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+  }
+
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-old(root) {
+    animation-name: orbit-nav-out;
+    animation-duration: 620ms;
+  }
+
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-new(root) {
+    animation-name: orbit-nav-in;
+    animation-duration: 780ms;
+  }
+
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-group(root) {
+    animation-duration: 780ms;
+  }
+}
+
+@keyframes orbit-nav-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    clip-path: circle(140% at 50% 46%);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+    clip-path: circle(0% at 50% 46%);
+  }
+}
+
+@keyframes orbit-nav-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.06);
+    clip-path: circle(0% at 50% 48%);
+  }
+  42% {
+    opacity: 1;
+    transform: scale(1.015);
+    clip-path: circle(58% at 50% 48%);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    clip-path: circle(145% at 50% 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-old(root),
+  [data-chrome-theme='orbit'][data-orbit-nav]::view-transition-new(root) {
+    animation: none !important;
+  }
 }
 
 [data-chrome-theme='orbit'] .home-root {
@@ -471,7 +544,6 @@
   background: transparent;
 }
 
-/* Context / menus — crimson hairline on enter. */
 [data-chrome-theme='orbit'] .ctx-menu,
 [data-chrome-theme='orbit'] .info-modal,
 [data-chrome-theme='orbit'] .members-menu,
@@ -481,69 +553,36 @@
 
 [data-chrome-theme='orbit'] .ctx-item:hover,
 [data-chrome-theme='orbit'] .menu-item:hover {
-  background: rgba(255, 40, 40, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(255, 60, 60, 0.18);
+  background: rgba(61, 70, 232, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(177, 140, 255, 0.22);
 }
 
-/* Locale / style chips when active under Orbit. */
 [data-chrome-theme='orbit'] .style-btn.active {
   color: #fff;
-  text-shadow: 0 0 10px rgba(255, 60, 60, 0.35);
+  text-shadow: 0 0 10px rgba(177, 140, 255, 0.4);
 }
 
-/* Slow ambient breath on the toolbelt island while Orbit is live. */
-[data-chrome-theme='orbit'] .toolbelt {
-  animation: orbit-island-breath 5.5s ease-in-out infinite;
-}
-
-[data-chrome-theme='orbit'] .file-island,
-[data-chrome-theme='orbit'] .meta-island {
-  animation: orbit-island-breath 6.2s ease-in-out infinite;
-  animation-delay: -1.4s;
-}
-
-@keyframes orbit-thumb-scan {
-  0% {
-    background-position: 120% 0;
-  }
-  100% {
-    background-position: -40% 0;
-  }
-}
-
-@keyframes orbit-card-scan {
-  0% {
-    background-position: 0 -80%;
-  }
-  100% {
-    background-position: 0 180%;
+@keyframes orbit-glow-spin {
+  to {
+    --orbit-spin: 360deg;
   }
 }
 
 @keyframes orbit-sheet-in {
   from {
     opacity: 0;
-    transform: translate(8px, -8px) scale(0.985);
-    clip-path: inset(0 0 100% 0);
-    filter: brightness(1.4);
-  }
-  55% {
-    filter: brightness(1.08);
+    transform: translate(14px, -4px) scale(0.985);
   }
   to {
     opacity: 1;
     transform: none;
-    clip-path: inset(0 0 0 0);
-    filter: none;
   }
 }
 
 @keyframes orbit-sheet-out {
   to {
     opacity: 0;
-    transform: translate(8px, -8px) scale(0.985);
-    clip-path: inset(0 0 92% 0);
-    filter: brightness(1.2);
+    transform: translate(14px, -4px) scale(0.985);
   }
 }
 
@@ -552,8 +591,8 @@
     opacity: 0;
     transform: translateY(-4px) scale(0.98);
     box-shadow:
-      0 0 0 1px rgba(255, 60, 60, 0.35),
-      0 0 24px rgba(255, 0, 0, 0.2);
+      0 0 0 1px rgba(177, 140, 255, 0.35),
+      0 0 24px rgba(61, 70, 232, 0.22);
   }
   to {
     opacity: 1;
@@ -561,19 +600,63 @@
   }
 }
 
-@keyframes orbit-island-breath {
-  0%,
+/* Tactile press feedback — Orbit only. */
+[data-chrome-theme='orbit'] button,
+[data-chrome-theme='orbit'] .board-row,
+[data-chrome-theme='orbit'] .theme-card,
+[data-chrome-theme='orbit'] .bg-card,
+[data-chrome-theme='orbit'] .home-team-btn,
+[data-chrome-theme='orbit'] .ctx-item,
+[data-chrome-theme='orbit'] .menu-item,
+[data-chrome-theme='orbit'] .sheet-switch {
+  transition:
+    transform 90ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 140ms var(--chrome-ease),
+    background 140ms var(--chrome-ease),
+    filter 140ms var(--chrome-ease);
+  transform-origin: center center;
+}
+
+[data-chrome-theme='orbit'] button:active:not(:disabled),
+[data-chrome-theme='orbit'] .board-row:active,
+[data-chrome-theme='orbit'] .theme-card:active,
+[data-chrome-theme='orbit'] .bg-card:active,
+[data-chrome-theme='orbit'] .home-team-btn:active,
+[data-chrome-theme='orbit'] .ctx-item:active,
+[data-chrome-theme='orbit'] .menu-item:active,
+[data-chrome-theme='orbit'] .sheet-switch:active {
+  transform: scale(0.965);
+  filter: brightness(1.08);
+}
+
+[data-chrome-theme='orbit'] .icon-btn:active:not(:disabled),
+[data-chrome-theme='orbit'] .tool-btn:active:not(:disabled),
+[data-chrome-theme='orbit'] .style-btn:active:not(:disabled) {
+  transform: scale(0.92);
+  box-shadow:
+    0 0 0 1px rgba(177, 140, 255, 0.5),
+    0 0 14px rgba(61, 70, 232, 0.35);
+}
+
+[data-chrome-theme='orbit'] .orbit-tactile-pulse {
+  animation: orbit-tactile-pulse 280ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
+}
+
+@keyframes orbit-tactile-pulse {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(177, 140, 255, 0.45),
+      0 0 0 0 rgba(61, 70, 232, 0);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px rgba(177, 140, 255, 0.35),
+      0 0 18px rgba(61, 70, 232, 0.35);
+  }
   100% {
     box-shadow:
-      0 0 0 1px rgba(255, 40, 40, 0.07),
-      0 0 22px rgba(255, 0, 0, 0.05),
-      0 16px 48px rgba(0, 0, 0, 0.65);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px rgba(255, 60, 60, 0.14),
-      0 0 32px rgba(255, 0, 0, 0.12),
-      0 18px 52px rgba(0, 0, 0, 0.7);
+      0 0 0 0 rgba(177, 140, 255, 0),
+      0 0 0 0 rgba(61, 70, 232, 0);
   }
 }
 
@@ -583,28 +666,35 @@
   [data-chrome-theme='orbit'] .sheet {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: #0a0a0a;
+    background: #02010a;
   }
 
   [data-chrome-theme='orbit'] .island::before,
   [data-chrome-theme='orbit'] .toolbelt::before,
   [data-chrome-theme='orbit'] .sheet::before,
-  [data-chrome-theme='orbit'] .slide-thumb[data-on='true']::after,
+  [data-chrome-theme='orbit'] .island::after,
+  [data-chrome-theme='orbit'] .toolbelt::after,
+  [data-chrome-theme='orbit'] .sheet::after,
   .theme-card[data-theme-preview='orbit']::after {
     animation: none !important;
-    opacity: 0.35;
   }
 
-  [data-chrome-theme='orbit'] .toolbelt,
-  [data-chrome-theme='orbit'] .file-island,
-  [data-chrome-theme='orbit'] .meta-island {
-    animation: none !important;
+  [data-chrome-theme='orbit'] .island::after,
+  [data-chrome-theme='orbit'] .toolbelt::after,
+  [data-chrome-theme='orbit'] .sheet::after {
+    opacity: 0.2;
   }
 
   [data-chrome-theme='orbit'] .sheet-root:not(.is-leaving) .sheet,
   [data-chrome-theme='orbit'] .sheet-root.is-leaving .sheet {
     animation: none !important;
-    clip-path: none;
+  }
+
+  [data-chrome-theme='orbit'] button:active:not(:disabled),
+  [data-chrome-theme='orbit'] .orbit-tactile-pulse {
+    transform: none !important;
+    animation: none !important;
+    filter: none !important;
   }
 }
 
@@ -623,6 +713,17 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+  z-index: 1;
+}
+
+[data-chrome-theme='orbit'] .home-root,
+[data-chrome-theme='orbit'] .app {
+  isolation: isolate;
 }
 
 body {
@@ -2389,33 +2490,13 @@ button.brand {
   padding: 0 7px;
   border-radius: 999px;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   line-height: 1;
-  color: #ff8e8e;
-  background: rgba(255, 40, 40, 0.12);
-  border: 1px solid rgba(255, 70, 70, 0.35);
-  box-shadow: 0 0 10px rgba(255, 0, 0, 0.12);
-}
-
-.orbit-slop-tag--card {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 1;
-  pointer-events: none;
-}
-
-.orbit-slop-tag--paper {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 1;
-  pointer-events: none;
-  height: 16px;
-  padding: 0 6px;
-  font-size: 9px;
+  text-transform: lowercase;
+  color: #c4b0e8;
+  background: rgba(61, 44, 141, 0.45);
+  border: 1px solid rgba(145, 107, 191, 0.4);
 }
 
 .theme-card[data-theme-preview='packet'] {
