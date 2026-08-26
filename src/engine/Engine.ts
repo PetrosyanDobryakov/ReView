@@ -2203,9 +2203,6 @@ export class Engine {
         }
       }
       let target = this.tool;
-      if (target.id !== 'select' && target.id !== 'pan' && target.id !== 'pen' && target.id !== 'eraser') {
-        if (this.hitTest(info.world.x, info.world.y)) target = this.tools.select;
-      }
       this.dragTool = target;
       target.onDown(this, info);
     } catch (err) {
