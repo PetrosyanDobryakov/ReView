@@ -16,5 +16,5 @@ foreach ($r in $ports) {
 }
 
 Write-Host ""
-Write-Host "Friend should open:  http://10.242.0.2:8080"
-Write-Host "Then on THEIR PC:    Test-NetConnection 10.242.0.2 -Port 8080"
+Write-Host "Friend should open:  http://<lan-ip>:8080"
+Write-Host "Then on THEIR PC:    Test-NetConnection <lan-ip> -Port 8080"
