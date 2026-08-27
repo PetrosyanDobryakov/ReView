@@ -1394,33 +1394,72 @@ export class Engine {
   }
 
   private async copyAsImage(ids: string[]): Promise<boolean> {
-    let dataUrl: string | null = null;
+    let blob: Blob | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      // raw fast path only when nothing is drawn on top of the image
       if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
-        dataUrl = v.src;
+        try { blob = await (await fetch(v.src)).blob(); } catch {}
       }
     }
-    if (!dataUrl) {
+    if (!blob) {
       const canvas = this.selectionCanvas(ids);
-      if (canvas) dataUrl = canvas.toDataURL('image/png');
+      if (!canvas) return false;
+      blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/png'));
+      if (!blob) return false;
     }
-    if (!dataUrl) return false;
+    // modern clipboard (secure context + ClipboardItem)
     try {
-      const blob = await (await fetch(dataUrl)).blob();
       const CI = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
-      if (navigator.clipboard && CI) {
+      if (navigator.clipboard && CI && (window.isSecureContext ?? true)) {
         await navigator.clipboard.write([new CI({ 'image/png': blob })]);
         this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
         return true;
       }
-    } catch {
-      /* clipboard write failed */
+    } catch (e) {
+      console.warn('[review] clipboard.write image failed', e);
     }
-    // ponytail: do not auto-download on copy — user asked for clipboard; show hint
+    // fallback: hidden contenteditable + execCommand (works on http LAN)
+    try {
+      const ok = await this.copyBlobViaExecCommand(blob);
+      if (ok) {
+        this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
+        return true;
+      }
+    } catch (e) {
+      console.warn('[review] execCommand copy image failed', e);
+    }
     this.events.onError?.(t(readLocale(), 'error') + ': clipboard');
     return false;
+  }
+
+  private async copyBlobViaExecCommand(blob: Blob): Promise<boolean> {
+    const url = URL.createObjectURL(blob);
+    try {
+      const div = document.createElement('div');
+      div.contentEditable = 'true';
+      div.style.position = 'fixed';
+      div.style.left = '-9999px';
+      div.style.top = '0';
+      const img = document.createElement('img');
+      img.src = url;
+      // ensure image is loaded before copying
+      if (!img.complete) {
+        await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('img load')); });
+      }
+      div.appendChild(img);
+      document.body.appendChild(div);
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      const ok = document.execCommand('copy');
+      sel?.removeAllRanges();
+      div.remove();
+      return ok;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   copySelectionAsImage(): void {
