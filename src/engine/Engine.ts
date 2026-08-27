@@ -3420,6 +3420,8 @@ export class Engine {
 
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
+      // ponytail: other page → no mirror pill, only PageBar dot
+      if (peer.page != null && peer.page !== myPage) continue;
       const samePage = peer.page == null || peer.page === myPage;
 
       let pos = this.peerLerp.get(peer.id);
