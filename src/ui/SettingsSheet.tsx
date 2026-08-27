@@ -20,6 +20,8 @@ import {
   setColorBind,
   setToolBind,
 } from '../core/keybindings';
+import { readPenSlots } from '../core/penColors';
+import { adaptInkOnce } from '../core/store';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import {
@@ -744,15 +746,17 @@ export function SettingsSheet({
                   <SwapText text={t(locale, 'bindsColors')} />
                 </h3>
                 <ul className="bind-list">
-                  {BIND_COLOR_ORDER.map((color, index) => {
-                    const target: BindTarget = { kind: 'color', color };
-                    const code = colorBinds[color] ?? getColorBind(color);
+                  {BIND_COLOR_ORDER.map((slot, index) => {
+                    const slots = readPenSlots();
+                    const swatch = slots[Number(slot)] ?? slots[index] ?? '#ffffff';
+                    const target: BindTarget = { kind: 'color', color: slot };
+                    const code = colorBinds[slot] ?? getColorBind(slot);
                     const active = isListeningTarget(listening, target);
                     const colorLabel = t(locale, 'bindColor').replace('{n}', String(index + 1));
                     return (
-                      <li key={color} className="bind-row">
+                      <li key={slot} className="bind-row">
                         <span className="bind-label">
-                          <span className="bind-swatch" style={{ background: color }} aria-hidden="true" />
+                          <span className="bind-swatch" style={{ background: swatch }} aria-hidden="true" />
                           <span>{colorLabel}</span>
                         </span>
                         <button
@@ -978,6 +982,21 @@ export function SettingsSheet({
                   </button>
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'adaptInkHint')} />
+                  </p>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    onClick={() => {
+                      const n = adaptInkOnce();
+                      if (n) {
+                        try { window.dispatchEvent(new CustomEvent('review-toast', { detail: { msg: `${n} — готово` } })); } catch {}
+                      }
+                    }}
+                  >
+                    {locale === 'ru' ? 'Конвертировать существующие (ч/б ↔)' : locale === 'zh' ? '转换现有墨迹' : 'Convert existing ink (b/w)'}
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={locale === 'ru' ? 'Одноразово: чёрный на тёмной → белый, белый на светлой → чёрный. Остальные цвета не трогает.' : locale === 'zh' ? '一次性：深底黑变白，浅底白变黑。其他颜色不变。' : 'One-time: black on dark → white, white on light → black. Other colors unchanged.'} />
                   </p>
                   <button
                     type="button"

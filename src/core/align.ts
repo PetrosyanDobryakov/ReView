@@ -174,10 +174,10 @@ export function computeSnap(
       guides.push({
         orientation: 'h',
         pos: snappedY,
-        a0: snappedY,
-        a1: snappedY,
-        b0: snappedY,
-        b1: snappedY,
+        a0: snappedX,
+        a1: snappedX + movingBox.w,
+        b0: snappedX,
+        b1: snappedX + movingBox.w,
       });
     }
   }
