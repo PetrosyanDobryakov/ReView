@@ -6,7 +6,7 @@ import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally 
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
-import { effectiveSyncUrl } from '../net/config';
+import { effectiveSyncUrl, isLoopbackSyncHostname, loopbackSyncHttpBase } from '../net/config';
 import { syncClient } from '../net/client';
 import { netLog } from '../net/log';
 import {
@@ -814,6 +814,52 @@ function bumpCurrentBoard(): void {
 }
 
 /**
+ * Wipe the in-memory Y.Doc on the local sync server after compact.
+ * Prefer loopback so DELETE is authorized even when the UI was opened via a LAN IP.
+ * Never fall back to an unauthenticated DELETE against a LAN/public host.
+ */
+async function deleteServerRoomForCompact(room: string): Promise<void> {
+  const path = `/room/${encodeURIComponent(room)}`;
+  const loopbackUrl = `${loopbackSyncHttpBase()}${path}`;
+  try {
+    const res = await fetch(loopbackUrl, { method: 'DELETE' });
+    if (res.ok) {
+      fileLogFallback('info', 'compact cleared server room', { room, via: 'loopback' });
+      return;
+    }
+    netLog.warn('compact loopback DELETE rejected', () => ({ room, status: res.status }));
+  } catch (e) {
+    netLog.warn('compact loopback DELETE failed', () => ({ room, err: String(e) }));
+  }
+
+  let syncHost = '';
+  let syncUrl = '';
+  try {
+    syncUrl = effectiveSyncUrl();
+    syncHost = new URL(syncUrl).hostname;
+  } catch {
+    return;
+  }
+  if (!isLoopbackSyncHostname(syncHost) || syncHost === '127.0.0.1') {
+    if (!isLoopbackSyncHostname(syncHost)) {
+      netLog.warn('compact skipped non-loopback room DELETE', () => ({ room, host: syncHost }));
+    }
+    return;
+  }
+  try {
+    const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
+    const res = await fetch(`${base}${path}`, { method: 'DELETE' });
+    if (res.ok) {
+      fileLogFallback('info', 'compact cleared server room', { room, via: 'loopback-alias' });
+      return;
+    }
+    netLog.warn('compact alias DELETE rejected', () => ({ room, status: res.status }));
+  } catch (e) {
+    netLog.warn('compact alias DELETE failed', () => ({ room, err: String(e) }));
+  }
+}
+
+/**
  * Forever fix for 355MB ghost boards (gc:false tombstones).
  * Rebuilds a fresh Y.Doc with only live shapes/meta/order/pages,
  * wipes IndexedDB `review-v1-*` and in-memory server room.
@@ -917,11 +963,7 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     }
     // clear server in-memory room (it still holds 372MB Y.Doc)
     try {
-      const syncUrl = effectiveSyncUrl();
-      const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
-      const room = `review-${boardId}`;
-      await fetch(`${base}/room/${encodeURIComponent(room)}`, { method: 'DELETE' });
-      fileLogFallback('info', 'compact cleared server room', { room });
+      await deleteServerRoomForCompact(`review-${boardId}`);
     } catch (e) {
       netLog.warn('compact clear server room failed', () => ({ err: String(e) }));
     }

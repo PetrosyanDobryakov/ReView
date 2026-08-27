@@ -1,7 +1,10 @@
 export {
   defaultSyncUrl,
   effectiveSyncUrl,
+  effectiveSyncPort,
+  isLoopbackSyncHostname,
   isSyncEnabled,
+  loopbackSyncHttpBase,
   boardRoomName,
 } from './config';
 export { SyncClient, syncClient } from './client';

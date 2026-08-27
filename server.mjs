@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { WebSocketServer } from 'ws';
 import { setupWSConnection, docs } from 'y-websocket/bin/utils';
+import { isRoomDeleteAuthorized } from './room-delete-auth.mjs';
 
 const PORT = Number(process.env.REVIEW_SYNC_PORT) || 1234;
 const HOST = process.env.REVIEW_HOST || '0.0.0.0';
@@ -116,6 +117,7 @@ function lanRank(addr) {
 }
 
 const CORS_METHODS = 'GET, POST, DELETE, OPTIONS';
+const CORS_HEADERS = 'Content-Type, Authorization, X-Review-Compact-Token, X-Review-Room-Delete-Token';
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
@@ -123,7 +125,7 @@ function sendJson(res, status, body) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': CORS_METHODS,
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': CORS_HEADERS,
     'Cache-Control': 'no-store',
   });
   res.end(payload);
@@ -167,7 +169,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': CORS_METHODS,
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': CORS_HEADERS,
     });
     res.end();
     return;
@@ -178,9 +180,17 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // ponytail: compaction helper — client cleared IndexedDB but server still holds huge in-memory Y.Doc
+  // Compaction helper — client cleared IndexedDB but server still holds a huge in-memory Y.Doc.
+  // Loopback or REVIEW_COMPACT_TOKEN / REVIEW_ROOM_DELETE_TOKEN only; not a LAN API.
   if (url.startsWith('/room/') && req.method === 'DELETE') {
     const room = decodeURIComponent(url.slice(6).split('?')[0] || '');
+    if (!isRoomDeleteAuthorized(req)) {
+      const remote = req.socket?.remoteAddress || '?';
+      console.log(`[review:net] room DELETE denied from=${remote} room=${room}`);
+      fileLog('warn', 'room DELETE denied', { from: remote, room });
+      sendJson(res, 403, { ok: false });
+      return;
+    }
     const d = docs.get(room);
     if (d) {
       try {
