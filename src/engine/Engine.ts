@@ -954,11 +954,9 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const wx = v.x - s;
-    const wy = v.y + v.h + s;
-    // handle world without rotation — visual is in screen space
-    const hx = wx * z + ox;
-    const hy = wy * z + oy;
+    const w = localToWorld(v, -s, v.h + s);
+    const hx = w.x * z + ox;
+    const hy = w.y * z + oy;
     if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
     return null;
   }
