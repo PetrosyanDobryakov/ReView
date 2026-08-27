@@ -148,6 +148,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [pen, setPen] = useState({ ...settings.pen });
   const [shape, setShape] = useState({ ...settings.shape });
   const [text, setText] = useState({ ...settings.text });
@@ -446,6 +447,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
+    engine.events.onToast = (message) => {
+      setToast(message);
+      window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2000);
+    };
     // ponytail: remember viewport per board+page (localStorage), restore on enter
     const lastCameraKey = { v: '' };
     const persistCamera = () => {
@@ -1040,6 +1045,26 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           ))}
         </div>
       )}
+      {toast ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: '50%',
+            bottom: 24,
+            transform: 'translateX(-50%)',
+            background: 'var(--chrome-panel)',
+            color: 'var(--chrome-text)',
+            border: '1px solid var(--chrome-border)',
+            borderRadius: 10,
+            padding: '10px 16px',
+            boxShadow: 'var(--chrome-shadow)',
+            zIndex: 9999,
+            fontSize: 13,
+          }}
+        >
+          {toast}
+        </div>
+      ) : null}
     </div>
   );
 }
