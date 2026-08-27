@@ -61,7 +61,9 @@ export interface ShapeView {
 }
 
 export const PORTS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
+export const EDGE_PORTS = ['n', 'e', 's', 'w'] as const;
 export type PortId = (typeof PORTS)[number];
+export type EdgePortId = (typeof EDGE_PORTS)[number];
 
 export function portPos(v: ShapeView, port: PortId, offset = 0): { x: number; y: number } {
   let fx = 0.5, fy = 0.5;

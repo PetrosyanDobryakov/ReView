@@ -29,7 +29,8 @@ import { sendCursor, publishTool } from '../net';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
-import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
+import { portPos, portDir, PORTS, EDGE_PORTS, type PortId } from '../core/shapes';
+void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { readPenSlots } from '../core/penColors';
@@ -970,12 +971,12 @@ export class Engine {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
-      for (const port of PORTS) {
-        const p = portPos(v, port, off);
+      for (const port of EDGE_PORTS) {
+        const p = portPos(v, port as PortId, off);
         const hx = p.x * z + ox;
         const hy = p.y * z + oy;
         const d = Math.hypot(hx - sx, hy - sy);
-        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port, dist: d };
+        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port: port as PortId, dist: d };
       }
     }
     return best ? { shapeId: best.shapeId, port: best.port } : null;
@@ -2299,10 +2300,10 @@ export class Engine {
           if (v) {
             let best: PortId | null = null;
             let bestD = Infinity;
-            for (const port of PORTS) {
-              const pp = portPos(v, port, 0);
+            for (const port of EDGE_PORTS) {
+              const pp = portPos(v, port as PortId, 0);
               const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
-              if (d < bestD) { bestD = d; best = port; }
+              if (d < bestD) { bestD = d; best = port as PortId; }
             }
             if (best && bestD < 40 / this.camera.zoom) this.hoverPort = { shapeId: hit, port: best };
             else this.hoverPort = null;
@@ -2371,10 +2372,10 @@ export class Engine {
           if (v) {
             let best: PortId | null = null;
             let bestD = Infinity;
-            for (const port of PORTS) {
-              const pp = portPos(v, port, 0);
+            for (const port of EDGE_PORTS) {
+              const pp = portPos(v, port as PortId, 0);
               const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
-              if (d < bestD) { bestD = d; best = port; }
+              if (d < bestD) { bestD = d; best = port as PortId; }
             }
             if (best) { toId = hit; toPort = best; }
           }
@@ -3498,32 +3499,42 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // group rotation handle — left-bottom, rotation indicator
+          // group rotation handle — left-bottom, beautiful adaptive indicator
           const rx = box.x - ROTATE_HANDLE_OFFSET_PX * s;
           const ry = box.y + box.h + ROTATE_HANDLE_OFFSET_PX * s;
+          const bg = store.viewPaperBg();
+          const rotTheme = themeFor(bg);
+          const rotStroke = rotTheme.text;
+          const rotFill = withAlpha(bg, 0.92);
+          ctx.save();
+          ctx.setLineDash([4 * s, 4 * s]);
+          ctx.strokeStyle = withAlpha(rotStroke, 0.55);
+          ctx.lineWidth = 1.15 * s;
           ctx.beginPath();
           ctx.moveTo(box.x - pad, box.y + box.h + pad);
           ctx.lineTo(rx, ry);
-          ctx.strokeStyle = COLORS.selection;
-          ctx.lineWidth = 1.25 * s;
           ctx.stroke();
-          // rotation indicator — circular arrow
+          ctx.restore();
           ctx.save();
           ctx.translate(rx, ry);
-          ctx.strokeStyle = COLORS.selection;
-          ctx.fillStyle = handleFill;
-          ctx.lineWidth = 1.35 * s;
+          ctx.fillStyle = rotFill;
+          ctx.strokeStyle = rotStroke;
+          ctx.lineWidth = 1.45 * s;
           ctx.beginPath();
-          ctx.arc(0, 0, hr * 1.15, 0, Math.PI * 2);
+          ctx.arc(0, 0, hr * 1.18, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
+          // swirl arrow — like loading indicator
+          ctx.strokeStyle = rotStroke;
+          ctx.lineWidth = 1.55 * s;
+          ctx.lineCap = 'round';
           ctx.beginPath();
-          ctx.arc(0, 0, hr * 0.65, -Math.PI * 0.15, Math.PI * 0.85);
+          ctx.arc(0, 0, hr * 0.68, -Math.PI * 0.9, Math.PI * 0.75);
           ctx.stroke();
           ctx.beginPath();
-          ctx.moveTo(hr * 0.35, -hr * 0.55);
-          ctx.lineTo(hr * 0.72, -hr * 0.15);
-          ctx.lineTo(hr * 0.15, -hr * 0.15);
+          ctx.moveTo(hr * 0.42, -hr * 0.45);
+          ctx.lineTo(hr * 0.68, -hr * 0.12);
+          ctx.lineTo(hr * 0.28, -hr * 0.12);
           ctx.stroke();
           ctx.restore();
         }
@@ -3558,31 +3569,41 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // Rotation handle — left-bottom, rotation indicator
+          // Rotation handle — left-bottom, beautiful adaptive indicator
           const rx = v.x - ROTATE_HANDLE_OFFSET_PX * s;
           const ry = v.y + v.h + ROTATE_HANDLE_OFFSET_PX * s;
+          const bg2 = store.viewPaperBg();
+          const rotTheme2 = themeFor(bg2);
+          const rotStroke2 = rotTheme2.text;
+          const rotFill2 = withAlpha(bg2, 0.92);
+          ctx.save();
+          ctx.setLineDash([4 * s, 4 * s]);
+          ctx.strokeStyle = withAlpha(rotStroke2, 0.55);
+          ctx.lineWidth = 1.15 * s;
           ctx.beginPath();
           ctx.moveTo(v.x - pad, v.y + v.h + pad);
           ctx.lineTo(rx, ry);
-          ctx.strokeStyle = COLORS.selection;
-          ctx.lineWidth = 1.25 * s;
           ctx.stroke();
+          ctx.restore();
           ctx.save();
           ctx.translate(rx, ry);
-          ctx.strokeStyle = COLORS.selection;
-          ctx.fillStyle = handleFill;
-          ctx.lineWidth = 1.35 * s;
+          ctx.fillStyle = rotFill2;
+          ctx.strokeStyle = rotStroke2;
+          ctx.lineWidth = 1.45 * s;
           ctx.beginPath();
-          ctx.arc(0, 0, hr * 1.15, 0, Math.PI * 2);
+          ctx.arc(0, 0, hr * 1.18, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(0, 0, hr * 0.65, -Math.PI * 0.15, Math.PI * 0.85);
+          ctx.arc(0, 0, hr * 0.68, -Math.PI * 0.9, Math.PI * 0.75);
+          ctx.strokeStyle = rotStroke2;
+          ctx.lineWidth = 1.55 * s;
+          ctx.lineCap = 'round';
           ctx.stroke();
           ctx.beginPath();
-          ctx.moveTo(hr * 0.35, -hr * 0.55);
-          ctx.lineTo(hr * 0.72, -hr * 0.15);
-          ctx.lineTo(hr * 0.15, -hr * 0.15);
+          ctx.moveTo(hr * 0.42, -hr * 0.45);
+          ctx.lineTo(hr * 0.68, -hr * 0.12);
+          ctx.lineTo(hr * 0.28, -hr * 0.12);
           ctx.stroke();
           ctx.restore();
         }
@@ -3648,8 +3669,8 @@ export class Engine {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
-      for (const port of PORTS) {
-        const p = portPos(v, port, off);
+      for (const port of EDGE_PORTS) {
+        const p = portPos(v, port as PortId, off);
         const isHover = this.hoverPort?.shapeId === id && this.hoverPort?.port === port;
         const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;
         const hot = isHover || isFrom;
