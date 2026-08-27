@@ -3518,6 +3518,26 @@ h3 .swap-text,
   min-width: 0;
 }
 
+.pages-peer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chrome-accent);
+  box-shadow: 0 0 0 1px var(--chrome-panel);
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+.pages-trigger-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--chrome-accent);
+  box-shadow: 0 0 0 1px var(--chrome-panel, #fff);
+  margin-left: 1px;
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
 .pages-menu-item svg {
   flex-shrink: 0;
   opacity: 0.9;

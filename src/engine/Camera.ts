@@ -17,6 +17,19 @@ export class Camera {
   private ty = 0;
   private tz = 1;
 
+  getView(): { x: number; y: number; zoom: number } {
+    return { x: this.tx, y: this.ty, zoom: this.tz };
+  }
+
+  setView(v: { x: number; y: number; zoom: number }): void {
+    this.tx = v.x;
+    this.ty = v.y;
+    this.tz = Math.min(this.maxZoom, Math.max(this.minZoom, v.zoom));
+    this.x = v.x;
+    this.y = v.y;
+    this.zoom = this.tz;
+  }
+
   update(dt: number): void {
     const k = this.instant ? 1 : 1 - Math.exp(-dt / SMOOTHING);
     this.x += (this.tx - this.x) * k;

@@ -4,6 +4,7 @@ import * as store from '../core/store';
 import { Icon } from './icons';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
+import { onPeers } from '../net';
 
 export function PageBar({ locale }: { locale: LocaleId }) {
   const menuId = useId();
@@ -13,12 +14,23 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
   const [pages, setPages] = useState<string[]>(() => store.listPages());
   const [cur, setCur] = useState<string>(() => store.currentPageId());
+  const [peerPages, setPeerPages] = useState<Set<string>>(() => new Set());
 
   useEffect(
     () =>
       store.onPageChange(() => {
         setPages(store.listPages());
         setCur(store.currentPageId());
+      }),
+    []
+  );
+
+  useEffect(
+    () =>
+      onPeers((peers) => {
+        const s = new Set<string>();
+        for (const p of peers) if (p.page) s.add(p.page);
+        setPeerPages(s);
       }),
     []
   );
@@ -75,6 +87,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   }, [open, close]);
 
   const label = `${idx + 1} / ${pages.length}`;
+  const hasPeerElsewhere = [...peerPages].some((p) => p !== cur);
 
   const menu =
     open && menuStyle
@@ -95,6 +108,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
             <ul className="pages-menu-list" role="listbox" aria-label={t(locale, 'pages')}>
               {pages.map((id, i) => {
                 const active = id === cur;
+                const hasPeer = peerPages.has(id) && id !== cur;
                 return (
                   <li key={id}>
                     <button
@@ -110,6 +124,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
                       <span className="pages-menu-item-label">
                         {t(locale, 'page')} {i + 1}
                       </span>
+                      {hasPeer ? <span className="pages-peer-dot" aria-hidden="true" /> : null}
                       {active ? <Icon name="check" size={14} /> : null}
                     </button>
                   </li>
@@ -161,6 +176,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         <Icon name="more" size={16} />
         <span className="pages-trigger-label">{label}</span>
         <Icon name="chevronDown" size={14} />
+        {hasPeerElsewhere ? <span className="pages-trigger-dot" aria-hidden="true" /> : null}
       </button>
       {menu}
     </div>

@@ -119,6 +119,29 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     setActiveTeam(created.id);
   };
 
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const showCopyToast = useCallback((msg: string) => {
+    setCopyToast(msg);
+    window.setTimeout(() => setCopyToast(null), 2000);
+  }, []);
+  const copyTextFallback = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {}
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (ok) return true;
+    } catch {}
+    return false;
+  };
   const handleCopyLink = async (id: string) => {
     let url = `${window.location.origin}${boardUrl(id)}`;
     try {
@@ -127,11 +150,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     } catch {
       /* keep origin URL */
     }
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      prompt(t(locale, 'copyLink'), url);
-    }
+    const ok = await copyTextFallback(url);
+    if (ok) showCopyToast(t(locale, 'membersInviteCopied'));
+    else showCopyToast(t(locale, 'membersInviteFail'));
   };
 
   const handleJoin = () => {
@@ -535,6 +556,31 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         onGrid={() => {}}
         onClose={() => setSettingsOpen(false)}
       />
+      {copyToast ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: '50%',
+            bottom: 72,
+            transform: 'translateX(-50%)',
+            background: 'var(--chrome-panel)',
+            color: 'var(--chrome-text)',
+            border: '1px solid var(--chrome-border)',
+            borderRadius: 10,
+            padding: '10px 16px',
+            boxShadow: 'var(--chrome-shadow)',
+            zIndex: 9999,
+            fontSize: 13,
+            maxWidth: 'min(420px, 90vw)',
+            whiteSpace: 'normal',
+            textAlign: 'center',
+            wordBreak: 'break-word',
+            lineHeight: 1.4,
+          }}
+        >
+          {copyToast}
+        </div>
+      ) : null}
     </div>
   );
 }

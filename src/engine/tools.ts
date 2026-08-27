@@ -98,6 +98,8 @@ export class SelectTool extends Tool {
   cursor = 'default';
   private mode: 'idle' | 'move' | 'marquee' | 'rotate' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
+  private groupResizing: HandleId | null = null;
+  private groupOrigBox: ShapeBox | null = null;
   private start = { x: 0, y: 0 };
   private moved = 0;
   private originals = new Map<string, ShapeView>();
@@ -124,7 +126,15 @@ export class SelectTool extends Tool {
       engine.setCursor('crosshair');
       return;
     }
-    engine.setCursor(engine.hitTest(p.world.x, p.world.y) ? 'move' : engine.toolCursor());
+    const hit = engine.hitTest(p.world.x, p.world.y);
+    const bounds = engine.selectionBounds();
+    const inside =
+      !!bounds &&
+      p.world.x >= bounds.x &&
+      p.world.x <= bounds.x + bounds.w &&
+      p.world.y >= bounds.y &&
+      p.world.y <= bounds.y + bounds.h;
+    engine.setCursor(hit || inside ? 'move' : engine.toolCursor());
   }
 
   onDown(engine: Engine, p: PointerInfo): void {
@@ -137,6 +147,24 @@ export class SelectTool extends Tool {
     store.beginGesture();
     const rotHit = engine.hitRotateHandle(p.screen.x, p.screen.y);
     if (rotHit) {
+      // easter egg — triple click on rotation handle
+      const hx = rotHit === '__group__' ? (engine.selectionBounds()!.x - 44 / engine.camera.zoom) : (engine.views.get(rotHit)!.x - 44 / engine.camera.zoom);
+      const hy = rotHit === '__group__' ? (engine.selectionBounds()!.y + engine.selectionBounds()!.h + 44 / engine.camera.zoom) : (engine.views.get(rotHit)!.y + engine.views.get(rotHit)!.h + 44 / engine.camera.zoom);
+      (engine as any).handleRotateClick?.(hx, hy);
+      if (rotHit === '__group__') {
+        const box = engine.selectionBounds();
+        if (!box) return;
+        this.mode = 'rotate';
+        this.groupOrigBox = box;
+        for (const id of engine.selection) {
+          const vv = engine.views.get(id);
+          if (vv) this.originals.set(id, { ...vv, points: vv.points ? [...vv.points] : undefined });
+        }
+        const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+        this.rotateOrigDeg = 0;
+        return;
+      }
       const v = engine.views.get(rotHit);
       if (v && !v.locked) {
         this.mode = 'rotate';
@@ -150,25 +178,50 @@ export class SelectTool extends Tool {
     }
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
+      if (h.shapeId === '__group__') {
+        this.groupResizing = h.handle;
+        this.groupOrigBox = engine.selectionBounds();
+        for (const id of engine.selection) {
+          const v = engine.views.get(id);
+          if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
+        }
+        return;
+      }
       this.resizing = h;
       const v = engine.views.get(h.shapeId);
       if (v) this.originals.set(h.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
       return;
     }
     const hit = engine.hitTest(p.world.x, p.world.y);
-    if (hit) {
-      if (p.shift && engine.selection.has(hit)) {
-        engine.setSelection([...engine.selection].filter((id) => id !== hit));
-      } else if (p.shift) {
-        engine.setSelection([...engine.selection, hit]);
-      } else if (!engine.selection.has(hit)) {
-        engine.setSelection([hit]);
+    const bounds = engine.selectionBounds();
+    const insideBounds =
+      !!bounds &&
+      p.world.x >= bounds.x &&
+      p.world.x <= bounds.x + bounds.w &&
+      p.world.y >= bounds.y &&
+      p.world.y <= bounds.y + bounds.h;
+    // ponytail: click anywhere inside selection bbox drags the whole group
+    const hitTarget = hit ?? (insideBounds && engine.selection.size ? [...engine.selection][0] : null);
+    if (hit || insideBounds) {
+      if (hit) {
+        if (p.shift && engine.selection.has(hit)) {
+          engine.setSelection([...engine.selection].filter((id) => id !== hit));
+        } else if (p.shift) {
+          engine.setSelection([...engine.selection, hit]);
+        } else if (!engine.selection.has(hit)) {
+          engine.setSelection([hit]);
+        }
       }
       for (const id of engine.selection) {
         const v = engine.views.get(id);
         if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
       }
-      if (engine.selection.has(hit) && !this.originals.get(hit)?.locked) this.mode = 'move';
+      const canMove = hit ? engine.selection.has(hit) && !this.originals.get(hit)?.locked : engine.selection.size > 0 && [...engine.selection].some((id) => !engine.views.get(id)?.locked);
+      if (canMove) this.mode = 'move';
+      else if (!hitTarget) {
+        this.mode = 'marquee';
+        this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
+      }
     } else {
       this.mode = 'marquee';
       this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
@@ -181,6 +234,43 @@ export class SelectTool extends Tool {
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
     if (this.mode === 'rotate') {
+      // group rotate
+      if (this.groupOrigBox) {
+        const box = this.groupOrigBox;
+        const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+        let deg = ((ang - this.rotateStartAngle) * 180) / Math.PI;
+        deg = snapRotationDeg(deg, Boolean(p.shift) || !readPrefs().rotateSnap);
+        const delta = deg;
+        const patches: Array<[string, Partial<ShapeView>]> = [];
+        for (const [id, o] of this.originals) {
+          if (o.locked) continue;
+          if (o.type === 'pen' || o.type === 'arrow') {
+            const pts = rotatePointsAround(o.points ?? [], c.x, c.y, delta);
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (let i = 0; i < pts.length; i += 2) {
+              minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
+              minY = Math.min(minY, pts[i + 1]); maxY = Math.max(maxY, pts[i + 1]);
+            }
+            const pad = (o.strokeWidth ?? 2) / 2 + 2;
+            patches.push([id, { points: pts, x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, rotation: 0 }]);
+          } else {
+            const cx = o.x + o.w / 2;
+            const cy = o.y + o.h / 2;
+            const dx = cx - c.x;
+            const dy = cy - c.y;
+            const rad = (delta * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            const nx = c.x + dx * cos - dy * sin;
+            const ny = c.y + dx * sin + dy * cos;
+            const curRot = shapeRotation(o);
+            patches.push([id, { x: nx - o.w / 2, y: ny - o.h / 2, rotation: curRot + delta }]);
+          }
+        }
+        if (patches.length) store.patchShapes(patches);
+        return;
+      }
       const [id, o] = [...this.originals.entries()][0] ?? [];
       if (!id || !o) return;
       const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
@@ -293,6 +383,8 @@ export class SelectTool extends Tool {
       if (patches.length) store.patchShapes(patches);
     } else if (this.mode === 'marquee' && this.marquee) {
       this.marquee = normalizeBox(this.start, p.world);
+    } else if (this.groupResizing && this.groupOrigBox) {
+      this.resizeGroup(engine, p);
     } else if (this.resizing) {
       this.resize(engine, p);
     }
@@ -316,8 +408,14 @@ export class SelectTool extends Tool {
     if (this.resizing) {
       engine.updateConnectedArrows(new Set([this.resizing.shapeId]));
     }
+    if (this.groupResizing && this.groupOrigBox) {
+      // update arrows connected to any of the group
+      engine.updateConnectedArrows(new Set([...this.originals.keys()]));
+    }
     this.mode = 'idle';
     this.resizing = null;
+    this.groupResizing = null;
+    this.groupOrigBox = null;
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
@@ -359,6 +457,8 @@ export class SelectTool extends Tool {
     }
     this.mode = 'idle';
     this.resizing = null;
+    this.groupResizing = null;
+    this.groupOrigBox = null;
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
@@ -532,6 +632,62 @@ export class SelectTool extends Tool {
     } else {
       store.patchShape(r.shapeId, { x, y, w, h });
     }
+  }
+
+  private resizeGroup(engine: Engine, p: PointerInfo): void {
+    const handle = this.groupResizing;
+    const origBox = this.groupOrigBox;
+    if (!handle || !origBox) return;
+    let dx = p.world.x - this.start.x;
+    let dy = p.world.y - this.start.y;
+    const MIN = 1 / Math.max(engine.camera.zoom, 0.01);
+    let left = origBox.x;
+    let right = origBox.x + origBox.w;
+    let top = origBox.y;
+    let bottom = origBox.y + origBox.h;
+    if (handle.includes('e')) right = origBox.x + origBox.w + dx;
+    if (handle.includes('w')) left = origBox.x + dx;
+    if (handle.includes('s')) bottom = origBox.y + origBox.h + dy;
+    if (handle.includes('n')) top = origBox.y + dy;
+    let x = Math.min(left, right);
+    let y = Math.min(top, bottom);
+    let w = Math.abs(right - left);
+    let h = Math.abs(bottom - top);
+    if (w < MIN) { w = MIN; x = (left + right) / 2 - w / 2; }
+    if (h < MIN) { h = MIN; y = (top + bottom) / 2 - h / 2; }
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    for (const [id, o] of this.originals) {
+      if (o.locked) continue;
+      // text/sticky: keep size, only spread positions (distance between objects)
+      if (o.type === 'text' || o.type === 'sticky') {
+        const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
+        const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
+        const nx = x + relX * w;
+        const ny = y + relY * h;
+        patches.push([id, { x: nx, y: ny }]);
+        continue;
+      }
+      const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
+      const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
+      const relW = origBox.w !== 0 ? o.w / origBox.w : 0;
+      const relH = origBox.h !== 0 ? o.h / origBox.h : 0;
+      const nx = x + relX * w;
+      const ny = y + relY * h;
+      const nw = Math.max(MIN, relW * w);
+      const nh = Math.max(MIN, relH * h);
+      if (o.points) {
+        const psx = o.w !== 0 ? nw / o.w : 1;
+        const psy = o.h !== 0 ? nh / o.h : 1;
+        const pts: number[] = [];
+        for (let i = 0; i < o.points.length; i += 2) {
+          pts.push(nx + (o.points[i] - o.x) * psx, ny + (o.points[i + 1] - o.y) * psy);
+        }
+        patches.push([id, { x: nx, y: ny, w: nw, h: nh, points: pts }]);
+      } else {
+        patches.push([id, { x: nx, y: ny, w: nw, h: nh }]);
+      }
+    }
+    if (patches.length) store.patchShapes(patches);
   }
 }
 
