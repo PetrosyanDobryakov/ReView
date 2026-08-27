@@ -232,6 +232,7 @@ export interface EngineEvents {
   onEditGraph?: (target: GraphEditTarget | null) => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
+  onToast?: (message: string) => void;
   onCrop?: (active: boolean) => void;
   onContextMenu?: (menu: { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean }) => void;
   onInfo?: (info: { title: string; lines: string[] } | null) => void;
@@ -1392,7 +1393,7 @@ export class Engine {
     return out;
   }
 
-  private async copyAsImage(ids: string[]): Promise<void> {
+  private async copyAsImage(ids: string[]): Promise<boolean> {
     let dataUrl: string | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
@@ -1405,16 +1406,21 @@ export class Engine {
       const canvas = this.selectionCanvas(ids);
       if (canvas) dataUrl = canvas.toDataURL('image/png');
     }
-    if (!dataUrl) return;
+    if (!dataUrl) return false;
     try {
       const blob = await (await fetch(dataUrl)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const CI = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+      if (navigator.clipboard && CI) {
+        await navigator.clipboard.write([new CI({ 'image/png': blob })]);
+        this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
+        return true;
+      }
     } catch {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = 'review.png';
-      a.click();
+      /* clipboard write failed */
     }
+    // ponytail: do not auto-download on copy — user asked for clipboard; show hint
+    this.events.onError?.(t(readLocale(), 'error') + ': clipboard');
+    return false;
   }
 
   copySelectionAsImage(): void {
@@ -1798,10 +1804,6 @@ export class Engine {
               this.pasteSelection();
               return;
             }
-            if (this.clipboard.length) {
-              this.pasteSelection();
-              return;
-            }
             this.insertPlainText(trimmed);
           });
           return;
@@ -1843,14 +1845,13 @@ export class Engine {
   }
 
   private async pasteFromClipboard(): Promise<void> {
-    if (this.clipboard.length) {
-      this.pasteSelection();
-      return;
-    }
+    // ponytail: prioritize system image (PrintScreen) over internal board buffer
     try {
       const items = await Promise.race([
-        navigator.clipboard.read(),
-        new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 150)),
+        (navigator.clipboard as unknown as { read?: () => Promise<ClipboardItem[]> }).read
+          ? (navigator.clipboard as unknown as { read: () => Promise<ClipboardItem[]> }).read()
+          : Promise.resolve(null as ClipboardItem[] | null),
+        new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 220)),
       ]);
       if (items) {
         for (const item of items) {
@@ -1863,8 +1864,21 @@ export class Engine {
         }
       }
     } catch {
-      /* no permission or not a secure context — use internal buffer */
+      /* no permission or not a secure context — fall through to internal */
     }
+    if (this.clipboard.length) {
+      this.pasteSelection();
+      return;
+    }
+    // fallback: try text via clipboard.readText (when paste event is blocked)
+    try {
+      const txt = await navigator.clipboard.readText();
+      const trimmed = txt.replace(/\r\n/g, '\n').trim();
+      if (trimmed) {
+        this.insertPlainText(trimmed);
+        return;
+      }
+    } catch {}
     this.pasteSelection();
   }
 
