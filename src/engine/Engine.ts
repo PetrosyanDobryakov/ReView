@@ -1262,6 +1262,11 @@ export class Engine {
       if (v) this.clipboard.push(structuredClone(v));
     }
     this.pasteN = 0;
+    // also write a marker to system clipboard so a subsequent Ctrl+V via paste event can restore shapes
+    try {
+      const marker = JSON.stringify({ __reviewShapes: this.clipboard });
+      navigator.clipboard?.writeText(marker).catch(() => {});
+    } catch {}
   }
 
   cutSelection(): void {
@@ -1848,6 +1853,16 @@ export class Engine {
               this.pasteSelection();
               return;
             }
+            // if this is our internal shapes marker, paste shapes instead of text
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed && Array.isArray(parsed.__reviewShapes) && parsed.__reviewShapes.length) {
+                // restore internal buffer if it was cleared (new tab)
+                if (!this.clipboard.length) this.clipboard = parsed.__reviewShapes.map((v: ShapeView) => structuredClone(v));
+                this.pasteSelection();
+                return;
+              }
+            } catch {}
             this.insertPlainText(trimmed);
           });
           return;
@@ -1888,7 +1903,7 @@ export class Engine {
     this.setTool('select');
   }
 
-  private async pasteFromClipboard(): Promise<void> {
+  async pasteFromClipboard(): Promise<void> {
     // ponytail: prioritize system image (PrintScreen) over internal board buffer
     try {
       const items = await Promise.race([
@@ -3038,8 +3053,8 @@ export class Engine {
       return;
     }
     if (mod && e.code === 'KeyV') {
-      e.preventDefault();
-      void this.pasteFromClipboard();
+      // ponytail: let native 'paste' handle system images (Discord, screenshot) and shapes marker
+      // internal fallback is in onPaste → pasteSelection()
       return;
     }
     if (mod && e.shiftKey && e.code === 'KeyL') {
