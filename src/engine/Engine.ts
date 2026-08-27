@@ -924,8 +924,23 @@ export class Engine {
     return null;
   }
 
-  /** Screen hit-test for the rotation knob (single selection). Returns shape id. */
+  /** Screen hit-test for the rotation knob (single or group). Returns shape id or __group__. */
   hitRotateHandle(sx: number, sy: number): string | null {
+    if (this.selection.size > 1) {
+      const box = this.selectionBounds();
+      if (!box) return null;
+      const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
+      if (!hasUnlocked) return null;
+      const z = this.camera.zoom;
+      const ox = this.w / 2 - this.camera.x * z;
+      const oy = this.h / 2 - this.camera.y * z;
+      const wx = box.x + box.w / 2;
+      const wy = box.y - ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
+      const hx = wx * z + ox;
+      const hy = wy * z + oy;
+      if (Math.hypot(hx - sx, hy - sy) <= 14) return '__group__';
+      return null;
+    }
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
     const v = this.views.get(id);
@@ -3441,19 +3456,33 @@ export class Engine {
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
-    // ponytail: multi-select → one group bbox, handles scale as group
+    // ponytail: multi-select → thick group bbox + thin per-object for beauty
     if (this.selection.size > 1) {
+      // thin per-object
+      for (const id of this.selection) {
+        const v = this.views.get(id);
+        if (!v) continue;
+        withShapeRotation(ctx, v, () => {
+          const x = v.x - pad * 0.6;
+          const y = v.y - pad * 0.6;
+          const w = v.w + pad * 1.2;
+          const h = v.h + pad * 1.2;
+          ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.35)' : 'rgba(28, 28, 26, 0.25)';
+          ctx.lineWidth = line * 0.7;
+          ctx.strokeRect(x, y, w, h);
+        });
+      }
       const box = this.selectionBounds();
       if (box) {
         const x = box.x - pad;
         const y = box.y - pad;
         const w = box.w + pad * 2;
         const h = box.h + pad * 2;
-        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.65)' : 'rgba(28, 28, 26, 0.5)';
-        ctx.lineWidth = line + 1.25 * s;
+        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.75)' : 'rgba(28, 28, 26, 0.7)';
+        ctx.lineWidth = line + 1.8 * s;
         ctx.strokeRect(x, y, w, h);
         ctx.strokeStyle = COLORS.selection;
-        ctx.lineWidth = line;
+        ctx.lineWidth = line + 0.6 * s;
         ctx.strokeRect(x, y, w, h);
         const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
         if (hasUnlocked) {
@@ -3468,6 +3497,21 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
+          // group rotation handle
+          const rx = box.x + box.w / 2;
+          const ry = box.y - ROTATE_HANDLE_OFFSET_PX * s;
+          ctx.beginPath();
+          ctx.moveTo(box.x + box.w / 2, box.y - pad);
+          ctx.lineTo(rx, ry);
+          ctx.strokeStyle = COLORS.selection;
+          ctx.lineWidth = 1.25 * s;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
+          ctx.fillStyle = handleFill;
+          ctx.fill();
+          ctx.strokeStyle = COLORS.selection;
+          ctx.stroke();
         }
       }
       ctx.restore();
