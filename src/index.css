@@ -3522,18 +3522,20 @@ h3 .swap-text,
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #ff6b6b;
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+  background: var(--chrome-accent);
+  box-shadow: 0 0 0 1px var(--chrome-panel);
   flex-shrink: 0;
+  opacity: 0.95;
 }
 .pages-trigger-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ff6b6b;
-  box-shadow: 0 0 0 1.5px var(--chrome-panel, #fff);
+  background: var(--chrome-accent);
+  box-shadow: 0 0 0 1px var(--chrome-panel, #fff);
   margin-left: 1px;
   flex-shrink: 0;
+  opacity: 0.95;
 }
 
 .pages-menu-item svg {
