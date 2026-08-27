@@ -770,11 +770,6 @@ body {
   zoom: var(--ui-scale);
 }
 
-.members-menu {
-  transform: scale(var(--ui-scale));
-  transform-origin: top left;
-}
-
 .app.settings-open .file-bar,
 .app.settings-open .toolbelt,
 .app.settings-open .style-island {

@@ -98,6 +98,8 @@ export class SelectTool extends Tool {
   cursor = 'default';
   private mode: 'idle' | 'move' | 'marquee' | 'rotate' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
+  private groupResizing: HandleId | null = null;
+  private groupOrigBox: ShapeBox | null = null;
   private start = { x: 0, y: 0 };
   private moved = 0;
   private originals = new Map<string, ShapeView>();
@@ -124,7 +126,15 @@ export class SelectTool extends Tool {
       engine.setCursor('crosshair');
       return;
     }
-    engine.setCursor(engine.hitTest(p.world.x, p.world.y) ? 'move' : engine.toolCursor());
+    const hit = engine.hitTest(p.world.x, p.world.y);
+    const bounds = engine.selectionBounds();
+    const inside =
+      !!bounds &&
+      p.world.x >= bounds.x &&
+      p.world.x <= bounds.x + bounds.w &&
+      p.world.y >= bounds.y &&
+      p.world.y <= bounds.y + bounds.h;
+    engine.setCursor(hit || inside ? 'move' : engine.toolCursor());
   }
 
   onDown(engine: Engine, p: PointerInfo): void {
@@ -150,6 +160,15 @@ export class SelectTool extends Tool {
     }
     const h = engine.hitHandle(p.screen.x, p.screen.y);
     if (h) {
+      if (h.shapeId === '__group__') {
+        this.groupResizing = h.handle;
+        this.groupOrigBox = engine.selectionBounds();
+        for (const id of engine.selection) {
+          const v = engine.views.get(id);
+          if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
+        }
+        return;
+      }
       this.resizing = h;
       const v = engine.views.get(h.shapeId);
       if (v) this.originals.set(h.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
@@ -309,6 +328,8 @@ export class SelectTool extends Tool {
       if (patches.length) store.patchShapes(patches);
     } else if (this.mode === 'marquee' && this.marquee) {
       this.marquee = normalizeBox(this.start, p.world);
+    } else if (this.groupResizing && this.groupOrigBox) {
+      this.resizeGroup(engine, p);
     } else if (this.resizing) {
       this.resize(engine, p);
     }
@@ -332,8 +353,14 @@ export class SelectTool extends Tool {
     if (this.resizing) {
       engine.updateConnectedArrows(new Set([this.resizing.shapeId]));
     }
+    if (this.groupResizing && this.groupOrigBox) {
+      // update arrows connected to any of the group
+      engine.updateConnectedArrows(new Set([...this.originals.keys()]));
+    }
     this.mode = 'idle';
     this.resizing = null;
+    this.groupResizing = null;
+    this.groupOrigBox = null;
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
@@ -375,6 +402,8 @@ export class SelectTool extends Tool {
     }
     this.mode = 'idle';
     this.resizing = null;
+    this.groupResizing = null;
+    this.groupOrigBox = null;
     this.marquee = null;
     this.originals.clear();
     this.stuck.clear();
@@ -548,6 +577,62 @@ export class SelectTool extends Tool {
     } else {
       store.patchShape(r.shapeId, { x, y, w, h });
     }
+  }
+
+  private resizeGroup(engine: Engine, p: PointerInfo): void {
+    const handle = this.groupResizing;
+    const origBox = this.groupOrigBox;
+    if (!handle || !origBox) return;
+    let dx = p.world.x - this.start.x;
+    let dy = p.world.y - this.start.y;
+    const MIN = 1 / Math.max(engine.camera.zoom, 0.01);
+    let left = origBox.x;
+    let right = origBox.x + origBox.w;
+    let top = origBox.y;
+    let bottom = origBox.y + origBox.h;
+    if (handle.includes('e')) right = origBox.x + origBox.w + dx;
+    if (handle.includes('w')) left = origBox.x + dx;
+    if (handle.includes('s')) bottom = origBox.y + origBox.h + dy;
+    if (handle.includes('n')) top = origBox.y + dy;
+    let x = Math.min(left, right);
+    let y = Math.min(top, bottom);
+    let w = Math.abs(right - left);
+    let h = Math.abs(bottom - top);
+    if (w < MIN) { w = MIN; x = (left + right) / 2 - w / 2; }
+    if (h < MIN) { h = MIN; y = (top + bottom) / 2 - h / 2; }
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    for (const [id, o] of this.originals) {
+      if (o.locked) continue;
+      // text/sticky: keep size, only spread positions (distance between objects)
+      if (o.type === 'text' || o.type === 'sticky') {
+        const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
+        const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
+        const nx = x + relX * w;
+        const ny = y + relY * h;
+        patches.push([id, { x: nx, y: ny }]);
+        continue;
+      }
+      const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
+      const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
+      const relW = origBox.w !== 0 ? o.w / origBox.w : 0;
+      const relH = origBox.h !== 0 ? o.h / origBox.h : 0;
+      const nx = x + relX * w;
+      const ny = y + relY * h;
+      const nw = Math.max(MIN, relW * w);
+      const nh = Math.max(MIN, relH * h);
+      if (o.points) {
+        const psx = o.w !== 0 ? nw / o.w : 1;
+        const psy = o.h !== 0 ? nh / o.h : 1;
+        const pts: number[] = [];
+        for (let i = 0; i < o.points.length; i += 2) {
+          pts.push(nx + (o.points[i] - o.x) * psx, ny + (o.points[i + 1] - o.y) * psy);
+        }
+        patches.push([id, { x: nx, y: ny, w: nw, h: nh, points: pts }]);
+      } else {
+        patches.push([id, { x: nx, y: ny, w: nw, h: nh }]);
+      }
+    }
+    if (patches.length) store.patchShapes(patches);
   }
 }
 

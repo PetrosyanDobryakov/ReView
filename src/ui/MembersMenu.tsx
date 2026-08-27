@@ -151,18 +151,15 @@ export function MembersMenu({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const width = 280;
-    const scaledWidth = width * scale;
-    const gap = 8 * scale;
-    const scaledHeight = 400 * scale;
-    const visualLeft = Math.min(Math.max(8 * scale, rect.right - scaledWidth), window.innerWidth - scaledWidth - 8 * scale);
-    const visualBelow = rect.bottom + gap;
-    const visualAbove = rect.top - gap - scaledHeight;
-    const flip = visualBelow + scaledHeight > window.innerHeight - 8 * scale && visualAbove >= 8 * scale;
-    const visualTop = Math.max(8 * scale, flip ? visualAbove : visualBelow);
-    // portal menu uses transform:scale, so layout coords = visual / scale
-    setMenuStyle({ left: visualLeft / scale, top: visualTop / scale });
+    // keep menu on right near settings, not centered — fixed to viewport right
+    const left = window.innerWidth - width - 12;
+    const gap = 8;
+    const estimatedHeight = 400;
+    const below = rect.bottom + gap;
+    const above = rect.top - gap - estimatedHeight;
+    const flip = below + estimatedHeight > window.innerHeight - 8 && above >= 8;
+    setMenuStyle({ left: Math.max(8, left), top: Math.max(8, flip ? above : below) });
   }, []);
 
   useLayoutEffect(() => {
