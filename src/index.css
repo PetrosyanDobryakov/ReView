@@ -766,9 +766,13 @@ body {
 .join-prompt-root,
 .drop-overlay,
 .export-root,
-.members-menu,
 .pages-menu {
   zoom: var(--ui-scale);
+}
+
+.members-menu {
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
 }
 
 .app.settings-open .file-bar,
