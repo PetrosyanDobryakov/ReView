@@ -766,6 +766,7 @@ body {
 .join-prompt-root,
 .drop-overlay,
 .export-root,
+.members-menu,
 .pages-menu {
   zoom: var(--ui-scale);
 }
