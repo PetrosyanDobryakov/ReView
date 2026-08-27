@@ -445,29 +445,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
-    const reload = () => {
-      engine.ensureStoreBound();
-      engine.resetToPage();
-    };
-    const offBoardReady = onBoardReady(reload);
-    if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
-    const curPersist = persistence;
-    const curMeta = meta;
-    const curUndo = undoManager;
     const onSynced = () => setSaved(true);
-    if (!curPersist) {
-      setSaved(false);
-    } else if ((curPersist as unknown as { synced: boolean }).synced) {
-      setSaved(true);
-    } else {
-      curPersist.on('synced', onSynced);
-    }
-    const offSettings = onSettingsChange(() => {
-      setPen({ ...settings.pen });
-      setShape({ ...settings.shape });
-      setText({ ...settings.text });
-      setEraser({ ...settings.eraser });
-    });
     const onMeta = () => {
       // Paper is local once chosen; until then follow synced meta.
       if (readPrefs().paperBg == null) setBg(metaBg());
@@ -482,25 +460,61 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         setBoardTitle(displayBoardTitle(m, synced, m.name));
       }
     };
-    curMeta.observe(onMeta);
-    const offSync = onSyncStatus(setSync);
+    let curPersist = persistence;
+    let curMeta = meta;
+    let curUndo = undoManager;
     const syncUndo = () => {
       setCanUndo(curUndo.undoStack.length > 0);
       setCanRedo(curUndo.redoStack.length > 0);
     };
-    syncUndo();
-    curUndo.on('stack-item-added', syncUndo);
-    curUndo.on('stack-item-popped', syncUndo);
-    curUndo.on('stack-cleared', syncUndo);
+    const unbindChrome = () => {
+      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
+      try { curMeta.unobserve(onMeta); } catch {}
+      try {
+        curUndo.off('stack-item-added', syncUndo);
+        curUndo.off('stack-item-popped', syncUndo);
+        curUndo.off('stack-cleared', syncUndo);
+      } catch {}
+    };
+    const bindChrome = () => {
+      unbindChrome();
+      curMeta = meta;
+      curUndo = undoManager;
+      curPersist = persistence;
+      setEphemeral(!curPersist);
+      curMeta.observe(onMeta);
+      curUndo.on('stack-item-added', syncUndo);
+      curUndo.on('stack-item-popped', syncUndo);
+      curUndo.on('stack-cleared', syncUndo);
+      syncUndo();
+      if (!curPersist) {
+        setSaved(false);
+      } else if ((curPersist as unknown as { synced: boolean }).synced) {
+        setSaved(true);
+      } else {
+        curPersist.on('synced', onSynced);
+      }
+    };
+    const reload = () => {
+      bindChrome();
+      engine.ensureStoreBound();
+      engine.resetToPage();
+    };
+    bindChrome();
+    const offBoardReady = onBoardReady(reload);
+    if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
+    const offSettings = onSettingsChange(() => {
+      setPen({ ...settings.pen });
+      setShape({ ...settings.shape });
+      setText({ ...settings.text });
+      setEraser({ ...settings.eraser });
+    });
+    const offSync = onSyncStatus(setSync);
     return () => {
       offBoardReady();
-      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
+      unbindChrome();
       offSettings();
-      try { curMeta.unobserve(onMeta); } catch {}
       offSync();
-      curUndo.off('stack-item-added', syncUndo);
-      curUndo.off('stack-item-popped', syncUndo);
-      curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
       pauseBoardView();
