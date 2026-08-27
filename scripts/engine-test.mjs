@@ -40,7 +40,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, applyKeybinds, getColorBinds } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -273,6 +273,55 @@ store.patchShape(lockedDel, { locked: true });
 engine.setSelection([lockedDel]);
 engine.deleteSelection();
 assert.equal(store.board.has(lockedDel), true, 'locked shape is not deleted');
+
+engine.setTool('rect');
+const stayId = store.addShape({
+  type: 'rect',
+  x: 50,
+  y: 50,
+  w: 80,
+  h: 60,
+  fill: '#ffffff',
+  stroke: '#7c8cff',
+  strokeWidth: 2,
+});
+const nBeforeRect = store.board.size;
+engine.onPointerDown({ clientX: 590, clientY: 430, button: 0, pointerId: 50, shiftKey: false });
+engine.onPointerMove({ clientX: 640, clientY: 480, button: 0, pointerId: 50, shiftKey: false });
+engine.onPointerUp({ clientX: 640, clientY: 480, button: 0, pointerId: 50, shiftKey: false });
+assert.equal(store.readShape(store.board.get(stayId)).x, 50, 'rect tool does not drag existing shape');
+assert.equal(store.board.size, nBeforeRect + 1, 'rect tool creates a new shape instead of selecting');
+engine.setTool('select');
+
+engine.camera.tx = 50000;
+engine.camera.ty = 50000;
+engine.camera.tz = 1;
+engine.camera.clampCenter({ x: 0, y: 0, w: 200, h: 200 }, 1000, 700);
+assert.ok(engine.camera.tx <= 800, 'tight camera clamp stays near records (x)');
+assert.ok(engine.camera.ty <= 800, 'tight camera clamp stays near records (y)');
+
+assert.equal(displayInk('#1c1c1a', '#1c1c1a'), '#eceae4', 'adapt black ink on dark paper');
+assert.equal(displayInk('#e03131', '#1c1c1a'), '#e03131', 'adapt leaves colored ink on dark paper');
+assert.equal(displayInk('#ffffff', '#f4f4f5'), '#1c1c1a', 'adapt white ink on light paper');
+assert.equal(displayInk('#e03131', '#f4f4f5'), '#e03131', 'adapt leaves colored ink on light paper');
+
+const snap = computeSnap(
+  { x: 10, y: 100, w: 50, h: 20 },
+  [{ x: 100, y: 100, w: 50, h: 20 }],
+  8
+);
+const hGuide = snap.guides.find((g) => g.orientation === 'h');
+assert.ok(hGuide, 'horizontal snap guide exists');
+assert.equal(hGuide.pos, 100, 'h guide pos is the shared y');
+assert.ok(hGuide.a0 < 50, 'h guide a0 is x extent, not y (was drawing a broken top line)');
+
+applyKeybinds({
+  tools: {},
+  colors: { '#ff6b6b': 'Digit3', '0': 'Digit9' },
+});
+const colorBinds = getColorBinds();
+assert.equal(colorBinds['0'], 'Digit1', 'legacy hex color binds reset to slot defaults');
+assert.equal(colorBinds['#ff6b6b'], undefined, 'legacy hex color bind keys are dropped');
 
 console.log('engine-move-test: all checks passed');
 process.exit(0);
