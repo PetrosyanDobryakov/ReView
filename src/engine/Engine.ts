@@ -3456,25 +3456,22 @@ export class Engine {
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
-    // ponytail: multi-select → thick group bbox + thin per-object (Miro-like, board-adaptive)
+    // ponytail: multi-select → thick group bbox + thin per-object (Miro dashed, uniform, zoom-stable)
     if (this.selection.size > 1) {
-      const bg = store.viewPaperBg();
-      const theme = themeFor(bg);
-      const thinColor = orbit ? 'rgba(145, 107, 191, 0.45)' : withAlpha(theme.text, 0.32);
-      // thin per-object — dashed, axis-aligned, not too thin, adaptive
+      const thinColor = orbit ? 'rgba(145, 107, 191, 0.9)' : COLORS.selection;
+      // thin per-object — dashed, axis-aligned, uniform color, thicker and zoom-stable (screen px)
       for (const id of this.selection) {
         const v = this.views.get(id);
         if (!v) continue;
-        // use AABB for rotated shapes so thin frames align with group bbox
         const aabb = v.type === 'pen' || v.type === 'arrow' ? { x: v.x, y: v.y, w: v.w, h: v.h } : rotatedAabb(v);
         const x = aabb.x - pad * 0.7;
         const y = aabb.y - pad * 0.7;
         const w = aabb.w + pad * 1.4;
         const h = aabb.h + pad * 1.4;
         ctx.save();
-        ctx.setLineDash([5 * s, 5 * s]);
+        ctx.setLineDash([6 * s, 6 * s]);
         ctx.strokeStyle = thinColor;
-        ctx.lineWidth = line * 0.95;
+        ctx.lineWidth = 2.2 * s;
         ctx.lineJoin = 'round';
         // @ts-ignore roundRect
         if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4 * s);
@@ -3489,10 +3486,10 @@ export class Engine {
         const w = box.w + pad * 2;
         const h = box.h + pad * 2;
         ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.75)' : 'rgba(28, 28, 26, 0.7)';
-        ctx.lineWidth = line + 1.8 * s;
+        ctx.lineWidth = 3.2 * s;
         ctx.strokeRect(x, y, w, h);
         ctx.strokeStyle = COLORS.selection;
-        ctx.lineWidth = line + 0.6 * s;
+        ctx.lineWidth = 2.4 * s;
         ctx.strokeRect(x, y, w, h);
         const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
         if (hasUnlocked) {
