@@ -1050,7 +1050,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           style={{
             position: 'fixed',
             left: '50%',
-            bottom: 24,
+            bottom: 72,
             transform: 'translateX(-50%)',
             background: 'var(--chrome-panel)',
             color: 'var(--chrome-text)',

@@ -1407,18 +1407,23 @@ export class Engine {
       blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/png'));
       if (!blob) return false;
     }
-    // modern clipboard (secure context + ClipboardItem)
+    // modern clipboard (secure context + ClipboardItem) — use actual blob type
     try {
       const CI = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
       if (navigator.clipboard && CI && (window.isSecureContext ?? true)) {
-        await navigator.clipboard.write([new CI({ 'image/png': blob })]);
+        const mime = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/png';
+        await navigator.clipboard.write([new CI({ [mime]: blob } as Record<string, Blob>)]);
         this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
         return true;
       }
     } catch (e) {
       console.warn('[review] clipboard.write image failed', e);
     }
-    // fallback: hidden contenteditable + execCommand (works on http LAN)
+    // fallback: on http LAN ClipboardItem is blocked — execCommand gives HTML, not PNG → Discord/Preview won't see image
+    if (!(window.isSecureContext ?? true)) {
+      this.events.onError?.('Копирование картинки доступно только по HTTPS — открой доску через localhost или скачай картинку');
+      return false;
+    }
     try {
       const ok = await this.copyBlobViaExecCommand(blob);
       if (ok) {

@@ -561,7 +561,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           style={{
             position: 'fixed',
             left: '50%',
-            bottom: 24,
+            bottom: 72,
             transform: 'translateX(-50%)',
             background: 'var(--chrome-panel)',
             color: 'var(--chrome-text)',
