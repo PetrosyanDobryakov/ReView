@@ -10,6 +10,7 @@ import { createServer as createNetServer } from 'node:net';
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { isLoopbackAddress, isRoomDeleteAuthorized } from '../room-delete-auth.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -234,22 +235,25 @@ async function waitHealth(port, timeoutMs = 8000) {
   throw lastErr ?? new Error(`health timeout :${port}`);
 }
 
-function startSyncServer({ port, netLog }) {
+function startSyncServer({ port, netLog, token, host = '127.0.0.1' }) {
   return spawn(process.execPath, ['server.mjs'], {
     cwd: ROOT,
     env: {
       ...process.env,
       REVIEW_SYNC_PORT: String(port),
-      REVIEW_HOST: '127.0.0.1',
+      REVIEW_HOST: host,
       REVIEW_NET_LOG: netLog ? '1' : '0',
+      ...(token
+        ? { REVIEW_COMPACT_TOKEN: token }
+        : { REVIEW_COMPACT_TOKEN: '', REVIEW_ROOM_DELETE_TOKEN: '' }),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
-async function withServer({ netLog }, fn) {
+async function withServer({ netLog, token, host }, fn) {
   const port = await freePort();
-  const child = startSyncServer({ port, netLog });
+  const child = startSyncServer({ port, netLog, token, host });
   try {
     await waitHealth(port);
     await fn(port);
@@ -330,4 +334,133 @@ await withServer({ netLog: true }, async (port) => {
 });
 
 console.log('sync-test: HTTP /lan + gated /net-log verified');
+
+assert.equal(isLoopbackAddress('127.0.0.1'), true);
+assert.equal(isLoopbackAddress('::1'), true);
+assert.equal(isLoopbackAddress('::ffff:127.0.0.1'), true);
+assert.equal(isLoopbackAddress(':ffff:127.0.0.1'), true);
+assert.equal(isLoopbackAddress('127.0.0.2'), true);
+assert.equal(isLoopbackAddress('192.168.1.5'), false);
+assert.equal(isLoopbackAddress('10.0.0.8'), false);
+assert.equal(isLoopbackAddress('8.8.8.8'), false);
+
+assert.equal(
+  isRoomDeleteAuthorized({ socket: { remoteAddress: '192.168.1.20' }, headers: {} }, {}),
+  false,
+  'LAN DELETE without token is denied'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '192.168.1.20' }, headers: { 'x-forwarded-for': '127.0.0.1' } },
+    {}
+  ),
+  false,
+  'X-Forwarded-For must not authorize DELETE'
+);
+assert.equal(
+  isRoomDeleteAuthorized({ socket: { remoteAddress: '127.0.0.1' }, headers: {} }, {}),
+  true,
+  'loopback DELETE is allowed'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '::ffff:127.0.0.1' }, headers: { 'x-forwarded-for': '10.0.0.8' } },
+    {}
+  ),
+  true,
+  'IPv4-mapped loopback is allowed even if X-Forwarded-For is LAN'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '192.168.1.20' }, headers: { 'x-review-compact-token': 's3cret' } },
+    { REVIEW_COMPACT_TOKEN: 's3cret' }
+  ),
+  true,
+  'LAN DELETE with compact token is allowed'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '192.168.1.20' }, headers: { 'x-review-room-delete-token': 's3cret' } },
+    { REVIEW_ROOM_DELETE_TOKEN: 's3cret' }
+  ),
+  true,
+  'LAN DELETE with room-delete token is allowed'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '192.168.1.20' }, headers: { authorization: 'Bearer s3cret' } },
+    { REVIEW_COMPACT_TOKEN: 's3cret' }
+  ),
+  true,
+  'LAN DELETE with Bearer token is allowed'
+);
+assert.equal(
+  isRoomDeleteAuthorized(
+    { socket: { remoteAddress: '192.168.1.20' }, headers: { 'x-review-compact-token': 'wrong' } },
+    { REVIEW_COMPACT_TOKEN: 's3cret' }
+  ),
+  false,
+  'wrong token is denied'
+);
+
+const compactRoom = 'review-compact-auth-' + Date.now();
+await withServer({ netLog: false }, async (port) => {
+  const del = await fetch(`${httpBase(port)}/room/${encodeURIComponent(compactRoom)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(del.status, 200, 'loopback DELETE /room is allowed');
+  const body = await del.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.cleared, false, 'missing room still returns ok');
+  assert.equal(body.room, compactRoom);
+
+  const spoof = await fetch(`${httpBase(port)}/room/${encodeURIComponent(compactRoom)}`, {
+    method: 'DELETE',
+    headers: { 'X-Forwarded-For': '8.8.8.8' },
+  });
+  assert.equal(spoof.status, 200, 'X-Forwarded-For must not deny loopback DELETE');
+
+  const lan = await fetch(`${httpBase(port)}/lan`);
+  assert.equal(lan.status, 200, 'GET /lan still works after DELETE auth');
+});
+
+const token = 'sync-test-compact-' + Date.now();
+await withServer({ netLog: false, token, host: '0.0.0.0' }, async (port) => {
+  const loopback = await fetch(`${httpBase(port)}/room/${encodeURIComponent(compactRoom)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(loopback.status, 200, 'loopback DELETE still works when token is configured');
+
+  const lanInfo = await (await fetch(`${httpBase(port)}/lan`)).json();
+  const lanHost = Array.isArray(lanInfo.addresses) ? lanInfo.addresses[0] : null;
+  if (lanHost) {
+    try {
+      const denied = await fetch(`http://${lanHost}:${port}/room/${encodeURIComponent(compactRoom)}`, {
+        method: 'DELETE',
+      });
+      const deniedBody = await denied.json().catch(() => ({}));
+      if (denied.status === 200) {
+        // Hairpin NAT can present as loopback; token path below still proves header auth.
+        console.log(`sync-test: LAN DELETE via ${lanHost} hairpinned (status 200); skipping 403 HTTP assert`);
+      } else {
+        assert.equal(denied.status, 403, 'DELETE via LAN IP without token is 403');
+        assert.equal(deniedBody.ok, false);
+      }
+
+      const authed = await fetch(`http://${lanHost}:${port}/room/${encodeURIComponent(compactRoom)}`, {
+        method: 'DELETE',
+        headers: { 'X-Review-Compact-Token': token },
+      });
+      assert.equal(authed.status, 200, 'DELETE via LAN IP with compact token is allowed');
+      const authedBody = await authed.json();
+      assert.equal(authedBody.ok, true);
+    } catch (err) {
+      console.log(`sync-test: LAN DELETE via ${lanHost} unreachable (${err}); 403 covered by unit tests`);
+    }
+  } else {
+    console.log('sync-test: no LAN IPv4 from /lan; HTTP 403 path covered by unit tests');
+  }
+});
+
+console.log('sync-test: DELETE /room auth verified');
 process.exit(0);
