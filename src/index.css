@@ -3518,6 +3518,24 @@ h3 .swap-text,
   min-width: 0;
 }
 
+.pages-peer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+  flex-shrink: 0;
+}
+.pages-trigger-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  box-shadow: 0 0 0 1.5px var(--chrome-panel, #fff);
+  margin-left: 1px;
+  flex-shrink: 0;
+}
+
 .pages-menu-item svg {
   flex-shrink: 0;
   opacity: 0.9;
