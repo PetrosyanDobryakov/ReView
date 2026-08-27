@@ -68,6 +68,7 @@ import { JoinSavePrompt } from './ui/JoinSavePrompt';
 import { navigateThemed } from './ui/navTransition';
 import { isOrbitPaper } from './core/orbit';
 import { applyOrbitToolDefaults, restoreOrbitToolDefaults } from './core/orbitDraw';
+import { loadCamera, saveCamera } from './core/cameraStore';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
@@ -445,6 +446,48 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
+    // ponytail: remember viewport per board+page (localStorage), restore on enter
+    const lastCameraKey = { v: '' };
+    const persistCamera = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      const view = e.camera.getView();
+      const k = `${view.x.toFixed(2)}:${view.y.toFixed(2)}:${view.zoom.toFixed(4)}`;
+      if (k === lastCameraKey.v) return;
+      lastCameraKey.v = k;
+      saveCamera(boardId, currentPageId(), view);
+    };
+    const restoreCamera = (): boolean => {
+      const saved = loadCamera(boardId, currentPageId());
+      if (!saved) return false;
+      engine.camera.setView(saved);
+      engine.setDirty();
+      lastCameraKey.v = `${saved.x.toFixed(2)}:${saved.y.toFixed(2)}:${saved.zoom.toFixed(4)}`;
+      return true;
+    };
+    // restore immediately; defer fitContent fallback to after board sync
+    restoreCamera();
+    const cameraPersistTimer = window.setInterval(persistCamera, 500);
+    const onPageHidePersist = () => persistCamera();
+    window.addEventListener('pagehide', onPageHidePersist);
+    window.addEventListener('beforeunload', onPageHidePersist);
+    let prevPageId = currentPageId();
+    const onCameraPageChange = () => {
+      // save previous page viewport
+      try {
+        const e = engineRef.current;
+        if (e) {
+          const v = e.camera.getView();
+          saveCamera(boardId, prevPageId, v);
+        }
+      } catch {}
+      prevPageId = currentPageId();
+      publishPage(prevPageId);
+      // restore new page viewport (or keep if no saved)
+      if (!restoreCamera()) {
+        // keep current camera — don't auto-fit and jump the user
+      }
+    };
     const onSynced = () => setSaved(true);
     const onMeta = () => {
       // Paper is local once chosen; until then follow synced meta.
@@ -503,10 +546,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       bindChrome();
       engine.ensureStoreBound();
       engine.resetToPage();
+      // after board sync, re-apply saved viewport for this page if any
+      restoreCamera();
     };
     bindChrome();
     const offBoardReady = onBoardReady(reload);
     if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
+    const offCameraPage = onActivePageChange(onCameraPageChange);
     const offSettings = onSettingsChange(() => {
       setPen({ ...settings.pen });
       setShape({ ...settings.shape });
@@ -515,6 +561,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     });
     const offSync = onSyncStatus(setSync);
     return () => {
+      persistCamera();
+      window.clearInterval(cameraPersistTimer);
+      window.removeEventListener('pagehide', onPageHidePersist);
+      window.removeEventListener('beforeunload', onPageHidePersist);
+      offCameraPage();
       offBoardReady();
       unbindChrome();
       offSettings();
