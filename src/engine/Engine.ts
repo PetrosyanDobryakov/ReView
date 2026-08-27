@@ -16,7 +16,7 @@ import {
   arrowBounds,
   measureMixedLine,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, rotationHandleWorld, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
+import { localToWorld, rotatedAabb, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
@@ -924,8 +924,9 @@ export class Engine {
     return null;
   }
 
-  /** Screen hit-test for the rotation knob (single or group). Returns shape id or __group__. */
+  /** Screen hit-test for the rotation knob (single or group) at left-bottom. */
   hitRotateHandle(sx: number, sy: number): string | null {
+    const s = ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
     if (this.selection.size > 1) {
       const box = this.selectionBounds();
       if (!box) return null;
@@ -934,8 +935,8 @@ export class Engine {
       const z = this.camera.zoom;
       const ox = this.w / 2 - this.camera.x * z;
       const oy = this.h / 2 - this.camera.y * z;
-      const wx = box.x + box.w / 2;
-      const wy = box.y - ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
+      const wx = box.x - s;
+      const wy = box.y + box.h + s;
       const hx = wx * z + ox;
       const hy = wy * z + oy;
       if (Math.hypot(hx - sx, hy - sy) <= 14) return '__group__';
@@ -948,10 +949,11 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const world = rotationHandleWorld(v, ROTATE_HANDLE_OFFSET_PX / z);
-    const hx = world.x * z + ox;
-    const hy = world.y * z + oy;
-    // Generous hit so the knob wins over the nearby north connect port.
+    const wx = v.x - s;
+    const wy = v.y + v.h + s;
+    // handle world without rotation — visual is in screen space
+    const hx = wx * z + ox;
+    const hy = wy * z + oy;
     if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
     return null;
   }
@@ -3496,21 +3498,34 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // group rotation handle
-          const rx = box.x + box.w / 2;
-          const ry = box.y - ROTATE_HANDLE_OFFSET_PX * s;
+          // group rotation handle — left-bottom, rotation indicator
+          const rx = box.x - ROTATE_HANDLE_OFFSET_PX * s;
+          const ry = box.y + box.h + ROTATE_HANDLE_OFFSET_PX * s;
           ctx.beginPath();
-          ctx.moveTo(box.x + box.w / 2, box.y - pad);
+          ctx.moveTo(box.x - pad, box.y + box.h + pad);
           ctx.lineTo(rx, ry);
           ctx.strokeStyle = COLORS.selection;
           ctx.lineWidth = 1.25 * s;
           ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
-          ctx.fillStyle = handleFill;
-          ctx.fill();
+          // rotation indicator — circular arrow
+          ctx.save();
+          ctx.translate(rx, ry);
           ctx.strokeStyle = COLORS.selection;
+          ctx.fillStyle = handleFill;
+          ctx.lineWidth = 1.35 * s;
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 1.15, 0, Math.PI * 2);
+          ctx.fill();
           ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 0.65, -Math.PI * 0.15, Math.PI * 0.85);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(hr * 0.35, -hr * 0.55);
+          ctx.lineTo(hr * 0.72, -hr * 0.15);
+          ctx.lineTo(hr * 0.15, -hr * 0.15);
+          ctx.stroke();
+          ctx.restore();
         }
       }
       ctx.restore();
@@ -3543,21 +3558,33 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // Rotation handle above top-center (clear of the north connect port)
-          const rx = v.x + v.w / 2;
-          const ry = v.y - ROTATE_HANDLE_OFFSET_PX * s;
+          // Rotation handle — left-bottom, rotation indicator
+          const rx = v.x - ROTATE_HANDLE_OFFSET_PX * s;
+          const ry = v.y + v.h + ROTATE_HANDLE_OFFSET_PX * s;
           ctx.beginPath();
-          ctx.moveTo(v.x + v.w / 2, v.y - pad);
+          ctx.moveTo(v.x - pad, v.y + v.h + pad);
           ctx.lineTo(rx, ry);
           ctx.strokeStyle = COLORS.selection;
           ctx.lineWidth = 1.25 * s;
           ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
-          ctx.fillStyle = handleFill;
-          ctx.fill();
+          ctx.save();
+          ctx.translate(rx, ry);
           ctx.strokeStyle = COLORS.selection;
+          ctx.fillStyle = handleFill;
+          ctx.lineWidth = 1.35 * s;
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 1.15, 0, Math.PI * 2);
+          ctx.fill();
           ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 0.65, -Math.PI * 0.15, Math.PI * 0.85);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(hr * 0.35, -hr * 0.55);
+          ctx.lineTo(hr * 0.72, -hr * 0.15);
+          ctx.lineTo(hr * 0.15, -hr * 0.15);
+          ctx.stroke();
+          ctx.restore();
         }
       });
     }
@@ -3611,11 +3638,10 @@ export class Engine {
         showFor.push(id);
       }
     } else {
-      // Idle selection: only the ring + resize handles. Ports bloom when the
-      // pointer reaches the outer connect ring (hitPort), so chrome stays calm.
-      if (!this.hoverPort || !this.selection.has(this.hoverPort.shapeId)) return;
       if (this.active !== 'select' && this.override !== 'select') return;
-      showFor = [this.hoverPort.shapeId];
+      if (!this.selection.size) return;
+      // ponytail: show arrow ports always for selected, not only on hover — smaller, different tone than frame handles
+      showFor = [...this.selection];
     }
     const off = 18 * s;
     for (const id of showFor) {
@@ -3628,10 +3654,10 @@ export class Engine {
         const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;
         const hot = isHover || isFrom;
         ctx.save();
-        ctx.fillStyle = hot ? '#ffffff' : COLORS.selection;
-        ctx.strokeStyle = hot ? COLORS.selection : 'rgba(255,255,255,0.92)';
-        ctx.lineWidth = 1.35 * s;
-        const r = connectingActive ? (hot ? 5.5 * s : 4.25 * s) : hot ? 4.75 * s : 3.75 * s;
+        ctx.fillStyle = hot ? '#ffffff' : withAlpha(COLORS.selection, 0.62);
+        ctx.strokeStyle = hot ? COLORS.selection : 'rgba(255,255,255,0.78)';
+        ctx.lineWidth = 1.2 * s;
+        const r = connectingActive ? (hot ? 4.2 * s : 3.1 * s) : hot ? 3.6 * s : 2.65 * s;
         ctx.beginPath();
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();
