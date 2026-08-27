@@ -147,6 +147,20 @@ export class SelectTool extends Tool {
     store.beginGesture();
     const rotHit = engine.hitRotateHandle(p.screen.x, p.screen.y);
     if (rotHit) {
+      if (rotHit === '__group__') {
+        const box = engine.selectionBounds();
+        if (!box) return;
+        this.mode = 'rotate';
+        this.groupOrigBox = box;
+        for (const id of engine.selection) {
+          const vv = engine.views.get(id);
+          if (vv) this.originals.set(id, { ...vv, points: vv.points ? [...vv.points] : undefined });
+        }
+        const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+        this.rotateOrigDeg = 0;
+        return;
+      }
       const v = engine.views.get(rotHit);
       if (v && !v.locked) {
         this.mode = 'rotate';
@@ -216,6 +230,43 @@ export class SelectTool extends Tool {
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
     if (this.mode === 'rotate') {
+      // group rotate
+      if (this.groupOrigBox) {
+        const box = this.groupOrigBox;
+        const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
+        let deg = ((ang - this.rotateStartAngle) * 180) / Math.PI;
+        deg = snapRotationDeg(deg, Boolean(p.shift) || !readPrefs().rotateSnap);
+        const delta = deg;
+        const patches: Array<[string, Partial<ShapeView>]> = [];
+        for (const [id, o] of this.originals) {
+          if (o.locked) continue;
+          if (o.type === 'pen' || o.type === 'arrow') {
+            const pts = rotatePointsAround(o.points ?? [], c.x, c.y, delta);
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (let i = 0; i < pts.length; i += 2) {
+              minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
+              minY = Math.min(minY, pts[i + 1]); maxY = Math.max(maxY, pts[i + 1]);
+            }
+            const pad = (o.strokeWidth ?? 2) / 2 + 2;
+            patches.push([id, { points: pts, x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, rotation: 0 }]);
+          } else {
+            const cx = o.x + o.w / 2;
+            const cy = o.y + o.h / 2;
+            const dx = cx - c.x;
+            const dy = cy - c.y;
+            const rad = (delta * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            const nx = c.x + dx * cos - dy * sin;
+            const ny = c.y + dx * sin + dy * cos;
+            const curRot = shapeRotation(o);
+            patches.push([id, { x: nx - o.w / 2, y: ny - o.h / 2, rotation: curRot + delta }]);
+          }
+        }
+        if (patches.length) store.patchShapes(patches);
+        return;
+      }
       const [id, o] = [...this.originals.entries()][0] ?? [];
       if (!id || !o) return;
       const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
