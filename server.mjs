@@ -115,12 +115,14 @@ function lanRank(addr) {
   return 2;
 }
 
+const CORS_METHODS = 'GET, POST, DELETE, OPTIONS';
+
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': CORS_METHODS,
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store',
   });
@@ -164,7 +166,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': CORS_METHODS,
       'Access-Control-Allow-Headers': 'Content-Type',
     });
     res.end();
@@ -181,6 +183,13 @@ const server = createServer(async (req, res) => {
     const room = decodeURIComponent(url.slice(6).split('?')[0] || '');
     const d = docs.get(room);
     if (d) {
+      try {
+        if (d.conns) {
+          for (const conn of d.conns.keys()) {
+            try { conn.close(1000, 'room cleared'); } catch {}
+          }
+        }
+      } catch {}
       try { d.destroy(); } catch {}
       docs.delete(room);
       emptySince.delete(room);
