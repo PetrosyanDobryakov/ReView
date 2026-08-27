@@ -16,7 +16,7 @@ import {
   arrowBounds,
   measureMixedLine,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, rotationHandleWorld, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
+import { localToWorld, rotatedAabb, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
@@ -29,7 +29,8 @@ import { sendCursor, publishTool } from '../net';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
-import { portPos, portDir, PORTS, type PortId } from '../core/shapes';
+import { portPos, portDir, PORTS, EDGE_PORTS, type PortId } from '../core/shapes';
+void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { readPenSlots } from '../core/penColors';
@@ -231,6 +232,7 @@ export interface EngineEvents {
   onEditGraph?: (target: GraphEditTarget | null) => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
+  onToast?: (message: string) => void;
   onCrop?: (active: boolean) => void;
   onContextMenu?: (menu: { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean }) => void;
   onInfo?: (info: { title: string; lines: string[] } | null) => void;
@@ -435,6 +437,10 @@ export class Engine {
   private snapGuides: AlignGuide[] = [];
   private connecting: { fromId: string; fromPort: PortId; cur: { x: number; y: number } } | null = null;
   private hoverPort: { shapeId: string; port: PortId } | null = null;
+  // easter egg — fireworks from rotation handle triple click
+  private fireworks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }> = [];
+  private easterRotateClicks = 0;
+  private lastEasterTime = 0;
 
   private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
   private observedMeta: Y.Map<unknown> | null = null;
@@ -894,6 +900,20 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
+    // ponytail: multi-select → one group bbox with 8 handles
+    if (this.selection.size > 1) {
+      const box = this.selectionBounds();
+      if (box) {
+        for (const handle of HANDLES) {
+          const [fx, fy] = HANDLE_POS[handle];
+          const hx = (box.x + fx * box.w) * z + ox;
+          const hy = (box.y + fy * box.h) * z + oy;
+          if (Math.hypot(hx - sx, hy - sy) <= 9) {
+            return { shapeId: '__group__', handle };
+          }
+        }
+      }
+    }
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
@@ -910,8 +930,24 @@ export class Engine {
     return null;
   }
 
-  /** Screen hit-test for the rotation knob (single selection). Returns shape id. */
+  /** Screen hit-test for the rotation knob (single or group) at left-bottom. */
   hitRotateHandle(sx: number, sy: number): string | null {
+    const s = ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
+    if (this.selection.size > 1) {
+      const box = this.selectionBounds();
+      if (!box) return null;
+      const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
+      if (!hasUnlocked) return null;
+      const z = this.camera.zoom;
+      const ox = this.w / 2 - this.camera.x * z;
+      const oy = this.h / 2 - this.camera.y * z;
+      const wx = box.x - s;
+      const wy = box.y + box.h + s;
+      const hx = wx * z + ox;
+      const hy = wy * z + oy;
+      if (Math.hypot(hx - sx, hy - sy) <= 14) return '__group__';
+      return null;
+    }
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
     const v = this.views.get(id);
@@ -919,10 +955,9 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const world = rotationHandleWorld(v, ROTATE_HANDLE_OFFSET_PX / z);
-    const hx = world.x * z + ox;
-    const hy = world.y * z + oy;
-    // Generous hit so the knob wins over the nearby north connect port.
+    const w = localToWorld(v, -s, v.h + s);
+    const hx = w.x * z + ox;
+    const hy = w.y * z + oy;
     if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
     return null;
   }
@@ -939,15 +974,99 @@ export class Engine {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
-      for (const port of PORTS) {
-        const p = portPos(v, port, off);
+      for (const port of EDGE_PORTS) {
+        const p = portPos(v, port as PortId, off);
         const hx = p.x * z + ox;
         const hy = p.y * z + oy;
         const d = Math.hypot(hx - sx, hy - sy);
-        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port, dist: d };
+        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port: port as PortId, dist: d };
       }
     }
     return best ? { shapeId: best.shapeId, port: best.port } : null;
+  }
+
+  handleRotateClick(worldX: number, worldY: number): void {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastEasterTime > 700) this.easterRotateClicks = 0;
+    this.lastEasterTime = now;
+    this.easterRotateClicks++;
+    if (this.easterRotateClicks >= 3) {
+      this.easterRotateClicks = 0;
+      this.triggerFireworks(worldX, worldY);
+    }
+  }
+
+  private triggerFireworks(wx: number, wy: number): void {
+    const colors = ['#ff6b6b', '#ffe27a', '#4cd964', '#1c7ed6', '#b197fc', '#ff9fd0', '#ffa94d', '#ffffff'];
+    const count = 28;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const speed = 2.5 + Math.random() * 5;
+      const hue = colors[i % colors.length];
+      this.fireworks.push({
+        x: wx,
+        y: wy,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - Math.random() * 2,
+        life: 1,
+        maxLife: 1,
+        color: hue,
+        size: 2 + Math.random() * 3,
+      });
+    }
+    // second burst
+    for (let i = 0; i < 14; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 3;
+      this.fireworks.push({
+        x: wx,
+        y: wy,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - 1,
+        life: 1,
+        maxLife: 1,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 1.5 + Math.random() * 2,
+      });
+    }
+    this.dirty = true;
+  }
+
+  private updateFireworks(dt: number): void {
+    if (!this.fireworks.length) return;
+    const g = 9.8 * 0.6;
+    for (const p of this.fireworks) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += g * dt;
+      p.vx *= 0.98;
+      p.life -= dt * 1.1;
+    }
+    this.fireworks = this.fireworks.filter((p) => p.life > 0);
+    if (this.fireworks.length) this.dirty = true;
+  }
+
+  private drawFireworks(ctx: CanvasRenderingContext2D): void {
+    if (!this.fireworks.length) return;
+    ctx.save();
+    for (const p of this.fireworks) {
+      const alpha = Math.max(0, p.life);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      // sparkle
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
@@ -1143,6 +1262,11 @@ export class Engine {
       if (v) this.clipboard.push(structuredClone(v));
     }
     this.pasteN = 0;
+    // also write a marker to system clipboard so a subsequent Ctrl+V via paste event can restore shapes
+    try {
+      const marker = JSON.stringify({ __reviewShapes: this.clipboard });
+      navigator.clipboard?.writeText(marker).catch(() => {});
+    } catch {}
   }
 
   cutSelection(): void {
@@ -1274,28 +1398,77 @@ export class Engine {
     return out;
   }
 
-  private async copyAsImage(ids: string[]): Promise<void> {
-    let dataUrl: string | null = null;
+  private async copyAsImage(ids: string[]): Promise<boolean> {
+    let blob: Blob | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      // raw fast path only when nothing is drawn on top of the image
       if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
-        dataUrl = v.src;
+        try { blob = await (await fetch(v.src)).blob(); } catch {}
       }
     }
-    if (!dataUrl) {
+    if (!blob) {
       const canvas = this.selectionCanvas(ids);
-      if (canvas) dataUrl = canvas.toDataURL('image/png');
+      if (!canvas) return false;
+      blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/png'));
+      if (!blob) return false;
     }
-    if (!dataUrl) return;
+    // modern clipboard (secure context + ClipboardItem) — use actual blob type
     try {
-      const blob = await (await fetch(dataUrl)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    } catch {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = 'review.png';
-      a.click();
+      const CI = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+      if (navigator.clipboard && CI && (window.isSecureContext ?? true)) {
+        const mime = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/png';
+        await navigator.clipboard.write([new CI({ [mime]: blob } as Record<string, Blob>)]);
+        this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
+        return true;
+      }
+    } catch (e) {
+      console.warn('[review] clipboard.write image failed', e);
+    }
+    // fallback: on http LAN ClipboardItem is blocked — execCommand gives HTML, not PNG → Discord/Preview won't see image
+    if (!(window.isSecureContext ?? true)) {
+      this.events.onToast?.('Копирование картинки доступно только по HTTPS — открой через localhost или скачай');
+      return false;
+    }
+    try {
+      const ok = await this.copyBlobViaExecCommand(blob);
+      if (ok) {
+        this.events.onToast?.(t(readLocale(), 'syncLanCopied'));
+        return true;
+      }
+    } catch (e) {
+      console.warn('[review] execCommand copy image failed', e);
+    }
+    this.events.onError?.(t(readLocale(), 'error') + ': clipboard');
+    return false;
+  }
+
+  private async copyBlobViaExecCommand(blob: Blob): Promise<boolean> {
+    const url = URL.createObjectURL(blob);
+    try {
+      const div = document.createElement('div');
+      div.contentEditable = 'true';
+      div.style.position = 'fixed';
+      div.style.left = '-9999px';
+      div.style.top = '0';
+      const img = document.createElement('img');
+      img.src = url;
+      // ensure image is loaded before copying
+      if (!img.complete) {
+        await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('img load')); });
+      }
+      div.appendChild(img);
+      document.body.appendChild(div);
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      const ok = document.execCommand('copy');
+      sel?.removeAllRanges();
+      div.remove();
+      return ok;
+    } finally {
+      URL.revokeObjectURL(url);
     }
   }
 
@@ -1680,10 +1853,16 @@ export class Engine {
               this.pasteSelection();
               return;
             }
-            if (this.clipboard.length) {
-              this.pasteSelection();
-              return;
-            }
+            // if this is our internal shapes marker, paste shapes instead of text
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed && Array.isArray(parsed.__reviewShapes) && parsed.__reviewShapes.length) {
+                // restore internal buffer if it was cleared (new tab)
+                if (!this.clipboard.length) this.clipboard = parsed.__reviewShapes.map((v: ShapeView) => structuredClone(v));
+                this.pasteSelection();
+                return;
+              }
+            } catch {}
             this.insertPlainText(trimmed);
           });
           return;
@@ -1724,15 +1903,14 @@ export class Engine {
     this.setTool('select');
   }
 
-  private async pasteFromClipboard(): Promise<void> {
-    if (this.clipboard.length) {
-      this.pasteSelection();
-      return;
-    }
+  async pasteFromClipboard(): Promise<void> {
+    // ponytail: prioritize system image (PrintScreen) over internal board buffer
     try {
       const items = await Promise.race([
-        navigator.clipboard.read(),
-        new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 150)),
+        (navigator.clipboard as unknown as { read?: () => Promise<ClipboardItem[]> }).read
+          ? (navigator.clipboard as unknown as { read: () => Promise<ClipboardItem[]> }).read()
+          : Promise.resolve(null as ClipboardItem[] | null),
+        new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 220)),
       ]);
       if (items) {
         for (const item of items) {
@@ -1745,8 +1923,21 @@ export class Engine {
         }
       }
     } catch {
-      /* no permission or not a secure context — use internal buffer */
+      /* no permission or not a secure context — fall through to internal */
     }
+    if (this.clipboard.length) {
+      this.pasteSelection();
+      return;
+    }
+    // fallback: try text via clipboard.readText (when paste event is blocked)
+    try {
+      const txt = await navigator.clipboard.readText();
+      const trimmed = txt.replace(/\r\n/g, '\n').trim();
+      if (trimmed) {
+        this.insertPlainText(trimmed);
+        return;
+      }
+    } catch {}
     this.pasteSelection();
   }
 
@@ -2268,10 +2459,10 @@ export class Engine {
           if (v) {
             let best: PortId | null = null;
             let bestD = Infinity;
-            for (const port of PORTS) {
-              const pp = portPos(v, port, 0);
+            for (const port of EDGE_PORTS) {
+              const pp = portPos(v, port as PortId, 0);
               const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
-              if (d < bestD) { bestD = d; best = port; }
+              if (d < bestD) { bestD = d; best = port as PortId; }
             }
             if (best && bestD < 40 / this.camera.zoom) this.hoverPort = { shapeId: hit, port: best };
             else this.hoverPort = null;
@@ -2340,10 +2531,10 @@ export class Engine {
           if (v) {
             let best: PortId | null = null;
             let bestD = Infinity;
-            for (const port of PORTS) {
-              const pp = portPos(v, port, 0);
+            for (const port of EDGE_PORTS) {
+              const pp = portPos(v, port as PortId, 0);
               const d = Math.hypot(pp.x - info.world.x, pp.y - info.world.y);
-              if (d < bestD) { bestD = d; best = port; }
+              if (d < bestD) { bestD = d; best = port as PortId; }
             }
             if (best) { toId = hit; toPort = best; }
           }
@@ -2862,8 +3053,8 @@ export class Engine {
       return;
     }
     if (mod && e.code === 'KeyV') {
-      e.preventDefault();
-      void this.pasteFromClipboard();
+      // ponytail: let native 'paste' handle system images (Discord, screenshot) and shapes marker
+      // internal fallback is in onPaste → pasteSelection()
       return;
     }
     if (mod && e.shiftKey && e.code === 'KeyL') {
@@ -2978,6 +3169,7 @@ export class Engine {
       this.lastT = t;
       this.frameDt = dt;
       this.camera.update(dt);
+      this.updateFireworks(dt);
       const moved =
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
@@ -3150,6 +3342,7 @@ export class Engine {
       ctx.strokeRect(this.exportRect.x, this.exportRect.y, this.exportRect.w, this.exportRect.h);
       ctx.restore();
     }
+    this.drawFireworks(ctx);
     ctx.restore();
     if (orbitLive) {
       drawOrbitPaperScreen(ctx, w, h, performance.now(), reduce);
@@ -3298,6 +3491,8 @@ export class Engine {
 
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
+      // ponytail: other page → no mirror pill, only PageBar dot
+      if (peer.page != null && peer.page !== myPage) continue;
       const samePage = peer.page == null || peer.page === myPage;
 
       let pos = this.peerLerp.get(peer.id);
@@ -3427,6 +3622,80 @@ export class Engine {
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
+    // ponytail: multi-select → thick group + thin solid per-object, same color, zoom-stable
+    if (this.selection.size > 1) {
+      // thin per-object — solid, same color as group, zoom-stable
+      for (const id of this.selection) {
+        const v = this.views.get(id);
+        if (!v) continue;
+        const aabb = v.type === 'pen' || v.type === 'arrow' ? { x: v.x, y: v.y, w: v.w, h: v.h } : rotatedAabb(v);
+        const x = aabb.x - pad * 0.7;
+        const y = aabb.y - pad * 0.7;
+        const w = aabb.w + pad * 1.4;
+        const h = aabb.h + pad * 1.4;
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 1.15 * s;
+        ctx.strokeRect(x, y, w, h);
+      }
+      const box = this.selectionBounds();
+      if (box) {
+        const x = box.x - pad;
+        const y = box.y - pad;
+        const w = box.w + pad * 2;
+        const h = box.h + pad * 2;
+        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.75)' : 'rgba(28, 28, 26, 0.7)';
+        ctx.lineWidth = 3.2 * s;
+        ctx.strokeRect(x, y, w, h);
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2.4 * s;
+        ctx.strokeRect(x, y, w, h);
+        const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
+        if (hasUnlocked) {
+          for (const [fx, fy] of Object.values(HANDLE_POS)) {
+            const hx = box.x + fx * box.w;
+            const hy = box.y + fy * box.h;
+            ctx.beginPath();
+            ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+            ctx.fillStyle = handleFill;
+            ctx.fill();
+            ctx.strokeStyle = COLORS.selection;
+            ctx.lineWidth = 1.5 * s;
+            ctx.stroke();
+          }
+          // group rotation handle — left-bottom, beautiful adaptive indicator
+          const rx = box.x - ROTATE_HANDLE_OFFSET_PX * s;
+          const ry = box.y + box.h + ROTATE_HANDLE_OFFSET_PX * s;
+          const bg = store.viewPaperBg();
+          const rotTheme = themeFor(bg);
+          const rotStroke = rotTheme.text;
+          const rotFill = withAlpha(bg, 0.92);
+          ctx.save();
+          ctx.translate(rx, ry);
+          ctx.fillStyle = rotFill;
+          ctx.strokeStyle = rotStroke;
+          ctx.lineWidth = 1.55 * s;
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          // swirl arrow — like loading indicator, bigger
+          ctx.strokeStyle = rotStroke;
+          ctx.lineWidth = 1.75 * s;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(hr * 0.42, -hr * 0.45);
+          ctx.lineTo(hr * 0.68, -hr * 0.12);
+          ctx.lineTo(hr * 0.28, -hr * 0.12);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+      return;
+    }
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v) continue;
@@ -3454,21 +3723,34 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // Rotation handle above top-center (clear of the north connect port)
-          const rx = v.x + v.w / 2;
-          const ry = v.y - ROTATE_HANDLE_OFFSET_PX * s;
+          // Rotation handle — left-bottom, beautiful adaptive indicator
+          const rx = v.x - ROTATE_HANDLE_OFFSET_PX * s;
+          const ry = v.y + v.h + ROTATE_HANDLE_OFFSET_PX * s;
+          const bg2 = store.viewPaperBg();
+          const rotTheme2 = themeFor(bg2);
+          const rotStroke2 = rotTheme2.text;
+          const rotFill2 = withAlpha(bg2, 0.92);
+          ctx.save();
+          ctx.translate(rx, ry);
+          ctx.fillStyle = rotFill2;
+          ctx.strokeStyle = rotStroke2;
+          ctx.lineWidth = 1.55 * s;
           ctx.beginPath();
-          ctx.moveTo(v.x + v.w / 2, v.y - pad);
-          ctx.lineTo(rx, ry);
-          ctx.strokeStyle = COLORS.selection;
-          ctx.lineWidth = 1.25 * s;
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(rx, ry, hr * 1.25, 0, Math.PI * 2);
-          ctx.fillStyle = handleFill;
+          ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = COLORS.selection;
           ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
+          ctx.strokeStyle = rotStroke2;
+          ctx.lineWidth = 1.75 * s;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(hr * 0.42, -hr * 0.45);
+          ctx.lineTo(hr * 0.68, -hr * 0.12);
+          ctx.lineTo(hr * 0.28, -hr * 0.12);
+          ctx.stroke();
+          ctx.restore();
         }
       });
     }
@@ -3522,27 +3804,26 @@ export class Engine {
         showFor.push(id);
       }
     } else {
-      // Idle selection: only the ring + resize handles. Ports bloom when the
-      // pointer reaches the outer connect ring (hitPort), so chrome stays calm.
-      if (!this.hoverPort || !this.selection.has(this.hoverPort.shapeId)) return;
       if (this.active !== 'select' && this.override !== 'select') return;
-      showFor = [this.hoverPort.shapeId];
+      if (!this.selection.size) return;
+      // ponytail: show arrow ports always for selected, not only on hover — smaller, different tone than frame handles
+      showFor = [...this.selection];
     }
     const off = 18 * s;
     for (const id of showFor) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
       if (v.type === 'pen' || v.type === 'arrow') continue;
-      for (const port of PORTS) {
-        const p = portPos(v, port, off);
+      for (const port of EDGE_PORTS) {
+        const p = portPos(v, port as PortId, off);
         const isHover = this.hoverPort?.shapeId === id && this.hoverPort?.port === port;
         const isFrom = this.connecting?.fromId === id && this.connecting?.fromPort === port;
         const hot = isHover || isFrom;
         ctx.save();
-        ctx.fillStyle = hot ? '#ffffff' : COLORS.selection;
-        ctx.strokeStyle = hot ? COLORS.selection : 'rgba(255,255,255,0.92)';
-        ctx.lineWidth = 1.35 * s;
-        const r = connectingActive ? (hot ? 5.5 * s : 4.25 * s) : hot ? 4.75 * s : 3.75 * s;
+        ctx.fillStyle = hot ? '#ffffff' : withAlpha(COLORS.selection, 0.62);
+        ctx.strokeStyle = hot ? COLORS.selection : 'rgba(255,255,255,0.78)';
+        ctx.lineWidth = 1.2 * s;
+        const r = connectingActive ? (hot ? 4.2 * s : 3.1 * s) : hot ? 3.6 * s : 2.65 * s;
         ctx.beginPath();
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();

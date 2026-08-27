@@ -20,6 +20,7 @@ import {
 } from '../core/user';
 import { Icon } from './icons';
 import { t } from './i18n';
+import { onPrefsChange } from '../core/prefs';
 
 function Face({ color, title }: { color: string; title?: string }) {
   return (
@@ -70,13 +71,19 @@ async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
   } catch {
-    try {
-      prompt('', text);
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -150,14 +157,20 @@ export function MembersMenu({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
+    const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const width = 280;
-    const gap = 8;
-    const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
-    const estimatedHeight = 400;
-    const below = rect.bottom + gap;
-    const above = rect.top - gap - estimatedHeight;
-    const flip = below + estimatedHeight > window.innerHeight - 8 && above >= 8;
-    setMenuStyle({ left, top: Math.max(8, flip ? above : below) });
+    const scaledWidth = width * scale;
+    const gap = 8 * scale;
+    const scaledHeight = 400 * scale;
+    // right edge of menu = right edge of trigger (под иконкой)
+    const visualLeft = rect.right - scaledWidth;
+    const visualRightBound = window.innerWidth - scaledWidth - 8 * scale;
+    const clampedVisualLeft = Math.min(Math.max(8 * scale, visualLeft), visualRightBound);
+    const visualBelow = rect.bottom + gap;
+    const visualAbove = rect.top - gap - scaledHeight;
+    const flip = visualBelow + scaledHeight > window.innerHeight - 8 * scale && visualAbove >= 8 * scale;
+    const visualTop = Math.max(8 * scale, flip ? visualAbove : visualBelow);
+    setMenuStyle({ left: clampedVisualLeft / scale, top: visualTop / scale });
   }, []);
 
   useLayoutEffect(() => {
@@ -171,6 +184,11 @@ export function MembersMenu({
       window.removeEventListener('scroll', onReflow, true);
     };
   }, [open, placeMenu, peers.length, lanHosts.length, lanLoading, inviteFlash]);
+
+  useEffect(() => {
+    if (!open) return;
+    return onPrefsChange(() => placeMenu());
+  }, [open, placeMenu]);
 
   useEffect(() => {
     if (!open) return;
