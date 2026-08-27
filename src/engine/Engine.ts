@@ -894,6 +894,20 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
+    // ponytail: multi-select → one group bbox with 8 handles
+    if (this.selection.size > 1) {
+      const box = this.selectionBounds();
+      if (box) {
+        for (const handle of HANDLES) {
+          const [fx, fy] = HANDLE_POS[handle];
+          const hx = (box.x + fx * box.w) * z + ox;
+          const hy = (box.y + fy * box.h) * z + oy;
+          if (Math.hypot(hx - sx, hy - sy) <= 9) {
+            return { shapeId: '__group__', handle };
+          }
+        }
+      }
+    }
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
@@ -3427,6 +3441,38 @@ export class Engine {
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
+    // ponytail: multi-select → one group bbox, handles scale as group
+    if (this.selection.size > 1) {
+      const box = this.selectionBounds();
+      if (box) {
+        const x = box.x - pad;
+        const y = box.y - pad;
+        const w = box.w + pad * 2;
+        const h = box.h + pad * 2;
+        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.65)' : 'rgba(28, 28, 26, 0.5)';
+        ctx.lineWidth = line + 1.25 * s;
+        ctx.strokeRect(x, y, w, h);
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = line;
+        ctx.strokeRect(x, y, w, h);
+        const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
+        if (hasUnlocked) {
+          for (const [fx, fy] of Object.values(HANDLE_POS)) {
+            const hx = box.x + fx * box.w;
+            const hy = box.y + fy * box.h;
+            ctx.beginPath();
+            ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+            ctx.fillStyle = handleFill;
+            ctx.fill();
+            ctx.strokeStyle = COLORS.selection;
+            ctx.lineWidth = 1.5 * s;
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+      return;
+    }
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v) continue;
