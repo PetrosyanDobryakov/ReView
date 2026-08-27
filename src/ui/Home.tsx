@@ -571,6 +571,11 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             boxShadow: 'var(--chrome-shadow)',
             zIndex: 9999,
             fontSize: 13,
+            maxWidth: 'min(420px, 90vw)',
+            whiteSpace: 'normal',
+            textAlign: 'center',
+            wordBreak: 'break-word',
+            lineHeight: 1.4,
           }}
         >
           {copyToast}

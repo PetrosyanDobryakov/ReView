@@ -1421,7 +1421,7 @@ export class Engine {
     }
     // fallback: on http LAN ClipboardItem is blocked — execCommand gives HTML, not PNG → Discord/Preview won't see image
     if (!(window.isSecureContext ?? true)) {
-      this.events.onError?.('Копирование картинки доступно только по HTTPS — открой доску через localhost или скачай картинку');
+      this.events.onToast?.('Копирование картинки доступно только по HTTPS — открой через localhost или скачай');
       return false;
     }
     try {
