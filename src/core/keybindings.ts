@@ -67,19 +67,22 @@ export interface Keybinds {
   colors: ColorBinds;
 }
 
+/** Slot keys "0".."4". Legacy hex keys (e.g. '#ff6b6b') are dropped. */
+function migrateColorBinds(colors: ColorBinds | undefined): ColorBinds {
+  const src = colors ?? {};
+  const hasHex = Object.keys(src).some((k) => k.startsWith('#'));
+  if (hasHex) return { ...DEFAULT_COLOR_BINDS };
+  return { ...DEFAULT_COLOR_BINDS, ...src };
+}
+
 function load(): Keybinds {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Keybinds>;
-      let colors = parsed.colors ?? {};
-      // migrate legacy hex keys (e.g. '#ff6b6b' -> slot) — wipe to slot defaults
-      const hasHex = Object.keys(colors).some((k) => k.startsWith('#'));
-      if (hasHex) colors = { ...DEFAULT_COLOR_BINDS };
-      else colors = { ...DEFAULT_COLOR_BINDS, ...colors };
       return {
         tools: { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) },
-        colors,
+        colors: migrateColorBinds(parsed.colors),
       };
     }
   } catch {}
@@ -155,7 +158,7 @@ export function exportKeybinds(): Keybinds {
 export function applyKeybinds(next: Keybinds): void {
   current = {
     tools: { ...DEFAULT_TOOL_BINDS, ...(next.tools ?? {}) },
-    colors: { ...DEFAULT_COLOR_BINDS, ...(next.colors ?? {}) },
+    colors: migrateColorBinds(next.colors),
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
