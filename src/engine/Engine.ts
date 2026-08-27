@@ -3459,19 +3459,25 @@ export class Engine {
     // ponytail: multi-select → thick group bbox + thin per-object (Miro dashed, uniform, zoom-stable)
     if (this.selection.size > 1) {
       const thinColor = orbit ? 'rgba(145, 107, 191, 0.9)' : COLORS.selection;
-      // thin per-object — dashed, axis-aligned, uniform color, thicker and zoom-stable (screen px)
+      // thin per-object — dashed, uniform, zoom-stable, no seam at corner
       for (const id of this.selection) {
         const v = this.views.get(id);
         if (!v) continue;
         const aabb = v.type === 'pen' || v.type === 'arrow' ? { x: v.x, y: v.y, w: v.w, h: v.h } : rotatedAabb(v);
-        const x = aabb.x - pad * 0.7;
-        const y = aabb.y - pad * 0.7;
-        const w = aabb.w + pad * 1.4;
-        const h = aabb.h + pad * 1.4;
+        const x = aabb.x - pad * 0.9;
+        const y = aabb.y - pad * 0.9;
+        const w = aabb.w + pad * 1.8;
+        const h = aabb.h + pad * 1.8;
+        const perimScreen = 2 * (w + h) * this.camera.zoom;
+        const baseDash = 7;
+        const n = Math.max(4, Math.round(perimScreen / (baseDash * 2)));
+        const evenN = n % 2 === 0 ? n : n + 1;
+        const dashScreen = perimScreen / evenN / 2;
+        const dashWorld = dashScreen * s;
         ctx.save();
-        ctx.setLineDash([6 * s, 6 * s]);
+        ctx.setLineDash([dashWorld, dashWorld]);
         ctx.strokeStyle = thinColor;
-        ctx.lineWidth = 2.2 * s;
+        ctx.lineWidth = 1.9 * s;
         ctx.lineJoin = 'round';
         // @ts-ignore roundRect
         if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4 * s);
