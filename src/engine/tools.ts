@@ -156,19 +156,35 @@ export class SelectTool extends Tool {
       return;
     }
     const hit = engine.hitTest(p.world.x, p.world.y);
-    if (hit) {
-      if (p.shift && engine.selection.has(hit)) {
-        engine.setSelection([...engine.selection].filter((id) => id !== hit));
-      } else if (p.shift) {
-        engine.setSelection([...engine.selection, hit]);
-      } else if (!engine.selection.has(hit)) {
-        engine.setSelection([hit]);
+    const bounds = engine.selectionBounds();
+    const insideBounds =
+      !!bounds &&
+      p.world.x >= bounds.x &&
+      p.world.x <= bounds.x + bounds.w &&
+      p.world.y >= bounds.y &&
+      p.world.y <= bounds.y + bounds.h;
+    // ponytail: click anywhere inside selection bbox drags the whole group
+    const hitTarget = hit ?? (insideBounds && engine.selection.size ? [...engine.selection][0] : null);
+    if (hit || insideBounds) {
+      if (hit) {
+        if (p.shift && engine.selection.has(hit)) {
+          engine.setSelection([...engine.selection].filter((id) => id !== hit));
+        } else if (p.shift) {
+          engine.setSelection([...engine.selection, hit]);
+        } else if (!engine.selection.has(hit)) {
+          engine.setSelection([hit]);
+        }
       }
       for (const id of engine.selection) {
         const v = engine.views.get(id);
         if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
       }
-      if (engine.selection.has(hit) && !this.originals.get(hit)?.locked) this.mode = 'move';
+      const canMove = hit ? engine.selection.has(hit) && !this.originals.get(hit)?.locked : engine.selection.size > 0 && [...engine.selection].some((id) => !engine.views.get(id)?.locked);
+      if (canMove) this.mode = 'move';
+      else if (!hitTarget) {
+        this.mode = 'marquee';
+        this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
+      }
     } else {
       this.mode = 'marquee';
       this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };

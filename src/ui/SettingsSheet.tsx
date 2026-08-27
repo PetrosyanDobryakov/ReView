@@ -215,6 +215,8 @@ export function SettingsSheet({
   const [toolBinds, setToolBinds] = useState(() => getToolBinds());
   const [colorBinds, setColorBinds] = useState(() => getColorBinds());
   const [listening, setListening] = useState<BindTarget | null>(null);
+  const [uiScaleDraft, setUiScaleDraft] = useState<number | null>(null);
+  const [cursorScaleDraft, setCursorScaleDraft] = useState<number | null>(null);
 
   const paperPresets = pickerPaperPresets(prefs.orbitUnlocked);
   const orbitPaperSelected = isOrbitPaper(bg);
@@ -643,10 +645,29 @@ export function SettingsSheet({
                     min={UI_SCALE_MIN}
                     max={UI_SCALE_MAX}
                     step={0.05}
-                    value={prefs.uiScale}
-                    onChange={(e) => patchPrefs({ uiScale: Number(e.target.value) })}
+                    value={uiScaleDraft ?? prefs.uiScale}
+                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
                   />
-                  <span className="sheet-range-value">{Math.round(prefs.uiScale * 100)}%</span>
+                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
                 </label>
                 <label className="sheet-range">
                   <span>{t(locale, 'toolCursorSize')}</span>
@@ -655,10 +676,29 @@ export function SettingsSheet({
                     min={CURSOR_SCALE_MIN}
                     max={CURSOR_SCALE_MAX}
                     step={0.05}
-                    value={prefs.toolCursorScale}
-                    onChange={(e) => patchPrefs({ toolCursorScale: Number(e.target.value) })}
+                    value={cursorScaleDraft ?? prefs.toolCursorScale}
+                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
                   />
-                  <span className="sheet-range-value">{Math.round(prefs.toolCursorScale * 100)}%</span>
+                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
                 </label>
                 <button
                   type="button"
