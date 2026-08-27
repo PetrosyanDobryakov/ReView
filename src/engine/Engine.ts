@@ -3456,21 +3456,31 @@ export class Engine {
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
-    // ponytail: multi-select → thick group bbox + thin per-object for beauty
+    // ponytail: multi-select → thick group bbox + thin per-object (Miro-like, board-adaptive)
     if (this.selection.size > 1) {
-      // thin per-object
+      const bg = store.viewPaperBg();
+      const theme = themeFor(bg);
+      const thinColor = orbit ? 'rgba(145, 107, 191, 0.45)' : withAlpha(theme.text, 0.32);
+      // thin per-object — dashed, axis-aligned, not too thin, adaptive
       for (const id of this.selection) {
         const v = this.views.get(id);
         if (!v) continue;
-        withShapeRotation(ctx, v, () => {
-          const x = v.x - pad * 0.6;
-          const y = v.y - pad * 0.6;
-          const w = v.w + pad * 1.2;
-          const h = v.h + pad * 1.2;
-          ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.35)' : 'rgba(28, 28, 26, 0.25)';
-          ctx.lineWidth = line * 0.7;
-          ctx.strokeRect(x, y, w, h);
-        });
+        // use AABB for rotated shapes so thin frames align with group bbox
+        const aabb = v.type === 'pen' || v.type === 'arrow' ? { x: v.x, y: v.y, w: v.w, h: v.h } : rotatedAabb(v);
+        const x = aabb.x - pad * 0.7;
+        const y = aabb.y - pad * 0.7;
+        const w = aabb.w + pad * 1.4;
+        const h = aabb.h + pad * 1.4;
+        ctx.save();
+        ctx.setLineDash([5 * s, 5 * s]);
+        ctx.strokeStyle = thinColor;
+        ctx.lineWidth = line * 0.95;
+        ctx.lineJoin = 'round';
+        // @ts-ignore roundRect
+        if (ctx.roundRect) ctx.roundRect(x, y, w, h, 4 * s);
+        else ctx.rect(x, y, w, h);
+        ctx.stroke();
+        ctx.restore();
       }
       const box = this.selectionBounds();
       if (box) {
