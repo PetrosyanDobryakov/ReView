@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 
-globalThis.window = { devicePixelRatio: 1, addEventListener() {}, removeEventListener() {} };
+globalThis.window = {
+  devicePixelRatio: 1,
+  addEventListener() {},
+  removeEventListener() {},
+  dispatchEvent() {},
+};
 globalThis.ResizeObserver = class {
   observe() {}
   disconnect() {}
