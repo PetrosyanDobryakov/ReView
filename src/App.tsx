@@ -463,11 +463,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     let curPersist = persistence;
     let curMeta = meta;
     let curUndo = undoManager;
+    let chromeBound = false;
     const syncUndo = () => {
       setCanUndo(curUndo.undoStack.length > 0);
       setCanRedo(curUndo.redoStack.length > 0);
     };
     const unbindChrome = () => {
+      if (!chromeBound) return;
       if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
       try { curMeta.unobserve(onMeta); } catch {}
       try {
@@ -475,6 +477,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         curUndo.off('stack-item-popped', syncUndo);
         curUndo.off('stack-cleared', syncUndo);
       } catch {}
+      chromeBound = false;
     };
     const bindChrome = () => {
       unbindChrome();
@@ -486,6 +489,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       curUndo.on('stack-item-added', syncUndo);
       curUndo.on('stack-item-popped', syncUndo);
       curUndo.on('stack-cleared', syncUndo);
+      chromeBound = true;
       syncUndo();
       if (!curPersist) {
         setSaved(false);
