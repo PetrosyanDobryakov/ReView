@@ -436,6 +436,10 @@ export class Engine {
   private snapGuides: AlignGuide[] = [];
   private connecting: { fromId: string; fromPort: PortId; cur: { x: number; y: number } } | null = null;
   private hoverPort: { shapeId: string; port: PortId } | null = null;
+  // easter egg — fireworks from rotation handle triple click
+  private fireworks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }> = [];
+  private easterRotateClicks = 0;
+  private lastEasterTime = 0;
 
   private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
   private observedMeta: Y.Map<unknown> | null = null;
@@ -980,6 +984,90 @@ export class Engine {
       }
     }
     return best ? { shapeId: best.shapeId, port: best.port } : null;
+  }
+
+  handleRotateClick(worldX: number, worldY: number): void {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastEasterTime > 700) this.easterRotateClicks = 0;
+    this.lastEasterTime = now;
+    this.easterRotateClicks++;
+    if (this.easterRotateClicks >= 3) {
+      this.easterRotateClicks = 0;
+      this.triggerFireworks(worldX, worldY);
+    }
+  }
+
+  private triggerFireworks(wx: number, wy: number): void {
+    const colors = ['#ff6b6b', '#ffe27a', '#4cd964', '#1c7ed6', '#b197fc', '#ff9fd0', '#ffa94d', '#ffffff'];
+    const count = 28;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const speed = 2.5 + Math.random() * 5;
+      const hue = colors[i % colors.length];
+      this.fireworks.push({
+        x: wx,
+        y: wy,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - Math.random() * 2,
+        life: 1,
+        maxLife: 1,
+        color: hue,
+        size: 2 + Math.random() * 3,
+      });
+    }
+    // second burst
+    for (let i = 0; i < 14; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 3;
+      this.fireworks.push({
+        x: wx,
+        y: wy,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - 1,
+        life: 1,
+        maxLife: 1,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 1.5 + Math.random() * 2,
+      });
+    }
+    this.dirty = true;
+  }
+
+  private updateFireworks(dt: number): void {
+    if (!this.fireworks.length) return;
+    const g = 9.8 * 0.6;
+    for (const p of this.fireworks) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += g * dt;
+      p.vx *= 0.98;
+      p.life -= dt * 1.1;
+    }
+    this.fireworks = this.fireworks.filter((p) => p.life > 0);
+    if (this.fireworks.length) this.dirty = true;
+  }
+
+  private drawFireworks(ctx: CanvasRenderingContext2D): void {
+    if (!this.fireworks.length) return;
+    ctx.save();
+    for (const p of this.fireworks) {
+      const alpha = Math.max(0, p.life);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      // sparkle
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   getPortWorldPos(shapeId: string, port: PortId): { x: number; y: number } | null {
@@ -3010,6 +3098,7 @@ export class Engine {
       this.lastT = t;
       this.frameDt = dt;
       this.camera.update(dt);
+      this.updateFireworks(dt);
       const moved =
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
@@ -3182,6 +3271,7 @@ export class Engine {
       ctx.strokeRect(this.exportRect.x, this.exportRect.y, this.exportRect.w, this.exportRect.h);
       ctx.restore();
     }
+    this.drawFireworks(ctx);
     ctx.restore();
     if (orbitLive) {
       drawOrbitPaperScreen(ctx, w, h, performance.now(), reduce);
