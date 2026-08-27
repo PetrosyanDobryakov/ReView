@@ -1,7 +1,7 @@
 import type { ToolId } from '../engine/tools';
 
 export type ToolBinds = Record<ToolId, string>;
-export type ColorBinds = Record<string, string>; // color hex -> code
+export type ColorBinds = Record<string, string>; // slot index "0".."4" -> code (Digit1..5 = color №1..5)
 
 const STORAGE_KEY = 'review-keybinds';
 
@@ -53,14 +53,11 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {
-  '#eceae4': 'Digit1',
-  '#ffe27a': 'Digit2',
-  '#ff6b6b': 'Digit3',
-  '#4cd964': 'Digit4',
-  '#c4a35a': 'Digit5',
-  '#ffa94d': 'Digit6',
-  '#e8e2d6': 'Digit7',
-  '#ff9fd0': 'Digit8',
+  '0': 'Digit1',
+  '1': 'Digit2',
+  '2': 'Digit3',
+  '3': 'Digit4',
+  '4': 'Digit5',
 };
 
 export const BIND_COLOR_ORDER = Object.keys(DEFAULT_COLOR_BINDS);
@@ -70,6 +67,14 @@ export interface Keybinds {
   colors: ColorBinds;
 }
 
+/** Slot keys "0".."4". Legacy hex keys (e.g. '#ff6b6b') are dropped. */
+function migrateColorBinds(colors: ColorBinds | undefined): ColorBinds {
+  const src = colors ?? {};
+  const hasHex = Object.keys(src).some((k) => k.startsWith('#'));
+  if (hasHex) return { ...DEFAULT_COLOR_BINDS };
+  return { ...DEFAULT_COLOR_BINDS, ...src };
+}
+
 function load(): Keybinds {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -77,7 +82,7 @@ function load(): Keybinds {
       const parsed = JSON.parse(raw) as Partial<Keybinds>;
       return {
         tools: { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) },
-        colors: { ...DEFAULT_COLOR_BINDS, ...(parsed.colors ?? {}) },
+        colors: migrateColorBinds(parsed.colors),
       };
     }
   } catch {}
@@ -153,7 +158,7 @@ export function exportKeybinds(): Keybinds {
 export function applyKeybinds(next: Keybinds): void {
   current = {
     tools: { ...DEFAULT_TOOL_BINDS, ...(next.tools ?? {}) },
-    colors: { ...DEFAULT_COLOR_BINDS, ...(next.colors ?? {}) },
+    colors: migrateColorBinds(next.colors),
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));

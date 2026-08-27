@@ -289,6 +289,14 @@
   animation: orbit-glow-spin 7s linear infinite;
 }
 
+/* ponytail: toolbelt at top:12px with inset:-2px+blur10px hits y=0 and gets hard-clipped → top line */
+[data-chrome-theme='orbit'] .style-island::after,
+[data-chrome-theme='orbit'] .toolbelt::after {
+  inset: -1px;
+  filter: blur(6px);
+  opacity: 0.28;
+}
+
 [data-chrome-theme='orbit'] .island::before,
 [data-chrome-theme='orbit'] .toolbelt::before,
 [data-chrome-theme='orbit'] .sheet::before {

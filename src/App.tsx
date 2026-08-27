@@ -8,7 +8,6 @@ import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
-import { AlignBar } from './ui/AlignBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { GraphEditor } from './ui/GraphEditor';
 import { PageBar } from './ui/PageBar';
@@ -446,29 +445,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
-    const reload = () => {
-      engine.ensureStoreBound();
-      engine.resetToPage();
-    };
-    const offBoardReady = onBoardReady(reload);
-    if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
-    const curPersist = persistence;
-    const curMeta = meta;
-    const curUndo = undoManager;
     const onSynced = () => setSaved(true);
-    if (!curPersist) {
-      setSaved(false);
-    } else if ((curPersist as unknown as { synced: boolean }).synced) {
-      setSaved(true);
-    } else {
-      curPersist.on('synced', onSynced);
-    }
-    const offSettings = onSettingsChange(() => {
-      setPen({ ...settings.pen });
-      setShape({ ...settings.shape });
-      setText({ ...settings.text });
-      setEraser({ ...settings.eraser });
-    });
     const onMeta = () => {
       // Paper is local once chosen; until then follow synced meta.
       if (readPrefs().paperBg == null) setBg(metaBg());
@@ -483,25 +460,65 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         setBoardTitle(displayBoardTitle(m, synced, m.name));
       }
     };
-    curMeta.observe(onMeta);
-    const offSync = onSyncStatus(setSync);
+    let curPersist = persistence;
+    let curMeta = meta;
+    let curUndo = undoManager;
+    let chromeBound = false;
     const syncUndo = () => {
       setCanUndo(curUndo.undoStack.length > 0);
       setCanRedo(curUndo.redoStack.length > 0);
     };
-    syncUndo();
-    curUndo.on('stack-item-added', syncUndo);
-    curUndo.on('stack-item-popped', syncUndo);
-    curUndo.on('stack-cleared', syncUndo);
+    const unbindChrome = () => {
+      if (!chromeBound) return;
+      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
+      try { curMeta.unobserve(onMeta); } catch {}
+      try {
+        curUndo.off('stack-item-added', syncUndo);
+        curUndo.off('stack-item-popped', syncUndo);
+        curUndo.off('stack-cleared', syncUndo);
+      } catch {}
+      chromeBound = false;
+    };
+    const bindChrome = () => {
+      unbindChrome();
+      curMeta = meta;
+      curUndo = undoManager;
+      curPersist = persistence;
+      setEphemeral(!curPersist);
+      curMeta.observe(onMeta);
+      curUndo.on('stack-item-added', syncUndo);
+      curUndo.on('stack-item-popped', syncUndo);
+      curUndo.on('stack-cleared', syncUndo);
+      chromeBound = true;
+      syncUndo();
+      if (!curPersist) {
+        setSaved(false);
+      } else if ((curPersist as unknown as { synced: boolean }).synced) {
+        setSaved(true);
+      } else {
+        curPersist.on('synced', onSynced);
+      }
+    };
+    const reload = () => {
+      bindChrome();
+      engine.ensureStoreBound();
+      engine.resetToPage();
+    };
+    bindChrome();
+    const offBoardReady = onBoardReady(reload);
+    if ((persistence as unknown as { synced?: boolean } | null)?.synced) reload();
+    const offSettings = onSettingsChange(() => {
+      setPen({ ...settings.pen });
+      setShape({ ...settings.shape });
+      setText({ ...settings.text });
+      setEraser({ ...settings.eraser });
+    });
+    const offSync = onSyncStatus(setSync);
     return () => {
       offBoardReady();
-      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
+      unbindChrome();
       offSettings();
-      try { curMeta.unobserve(onMeta); } catch {}
       offSync();
-      curUndo.off('stack-item-added', syncUndo);
-      curUndo.off('stack-item-popped', syncUndo);
-      curUndo.off('stack-cleared', syncUndo);
       engine.destroy();
       engineRef.current = null;
       pauseBoardView();
@@ -841,7 +858,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onRemeasureText={(ids) => engineRef.current?.remeasureTextShapes(ids)}
         onSyncEditFormat={(root, fallback) => setEditLiveFormat(readLiveFormat(root, fallback))}
       />
-      <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} />
+      {/* ponytail: removed align panel from top per user — was broken in Orbit and unwanted */}
+      {/* <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} /> */}
 
       <input
         ref={fileRef}
