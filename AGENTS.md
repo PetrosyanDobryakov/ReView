@@ -40,7 +40,7 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 ### Gotchas
 
 - `localhost` and `127.0.0.1` are different origins — IndexedDB will not follow you between them. Pick one and stay there.
-- Sync is optional; local boards work fully offline with IndexedDB persistence.
+- Sync is optional on LAN/self-host; local boards work fully offline with IndexedDB persistence. On static hosts (`pages.dev`, `vercel.app`, …) P2P (y-webrtc) is on by default so peers on the same board URL can see each other without a websocket server.
 - Sync client lives in `src/net/` (WebSocket + Yjs awareness). Friend path is same Wi‑Fi / LAN: Members → copy invite (uses `GET /lan` on the sync server). Settings → System → Connection shows LAN IPs. Tailscale is optional for remote-only — see `docs/DEPLOY.md`.
 - Live sync smoke test: with server up, `npm run test:sync`.
 - **Net debug logs:** **off by default** on client and server. Client: `?netLog=1`, Settings → System → Connection, or `localStorage.setItem('review-net-log','1')`. Server file logging and `GET`/`POST /net-log` run only when `REVIEW_NET_LOG=1`/`true` — otherwise those routes return 404 and `logs/net/` is not created. When enabled: console `[review:net]` + session files under `logs/net/`. Pointers: `logs/net/CURRENT`, `logs/net/latest.log`, and `logs/net/session-<stamp>.log`. `GET /net-log` returns relative paths only (`logs/net/...`). Websocket + `GET /lan` stay available. Empty rooms are GC'd after ~5 minutes (`REVIEW_ROOM_GC_MS`).

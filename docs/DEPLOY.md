@@ -7,7 +7,7 @@ ReView is a static Vite build plus optional sync. It runs on Vercel **and Cloudf
 1. Import the repo on Vercel — it runs `npm run build` and serves `dist/` (see `vercel.json` for SPA rewrites).
 2. Open `https://your-app.vercel.app/` — create boards, draw, refresh to confirm persistence (IndexedDB `review-v1-<boardId>`).
 3. Share a board: on the board header click the download icon (or Home → per-board export) to get a `.review.json` file; send it to a friend who uses **Home → Import** to open it as a new local board.
-4. Optional P2P: both sides open the same board URL (same `<boardId>`), then each enable **Settings → System → Connection → P2P (WebRTC)**. Sync then runs browser-to-browser via `y-webrtc` public signaling (`wss://signaling.yjs.dev`) — no server to deploy. Override with `VITE_P2P_SIGNALING`.
+4. P2P: both sides open the same board URL (same `<boardId>`). On Pages/Vercel, y-webrtc starts on its own via `wss://signaling.yjs.dev`. Override with `VITE_P2P_SIGNALING` or Settings → Signaling. LAN/self-host still needs **Settings → System → Connection → P2P (WebRTC)** turned on.
 
 No backend storage is used on Vercel. The public board is the static SPA; each browser keeps its own copies and shares via files.
 
@@ -17,7 +17,7 @@ Same static build, same P2P/file-share flow. Do not add `public/_redirects` with
 
 1. Create a Pages or Workers project from the same repo. Build with `npm run build`; output is `dist`. Repo-root `wrangler.toml` sets `name = "review"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
 2. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable`.
-3. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS` so sync/P2P detection treats it as static without trying `ws://host:1234`.
+3. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS`, so websocket sync is not attempted at `ws://host:1234`, and P2P is on unless the user turns it off.
 
 
 ## Self-hosted

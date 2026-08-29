@@ -1,4 +1,5 @@
 import { readPrefs } from '../core/prefs';
+import { DEFAULT_P2P_SIGNALING, resolveP2pEnabled } from './p2pPolicy';
 
 const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
 const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
@@ -77,7 +78,12 @@ export function isSyncEnabled(): boolean {
 }
 
 export function isP2pEnabled(): boolean {
-  return readPrefs().p2pEnabled === true;
+  const prefs = readPrefs();
+  return resolveP2pEnabled({
+    staticHost: isStaticHost(),
+    storedEnabled: prefs.p2pEnabled,
+    userSet: prefs.p2pUserSet,
+  });
 }
 
 export function p2pSignalingUrls(): string[] {
@@ -93,7 +99,7 @@ export function p2pSignalingUrls(): string[] {
       .map(s => s.replace(/\/$/, ''));
     if (validated.length) return validated;
   }
-  return ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com', 'wss://y-webrtc-signaling-us.herokuapp.com'];
+  return [...DEFAULT_P2P_SIGNALING];
 }
 
 /** Yjs room name for a board. Legacy fallback when no board is active. */
