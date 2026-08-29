@@ -1,0 +1,16 @@
+name = "review-sync"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[durable_objects]
+bindings = [
+  { name = "BOARD_ROOM", class_name = "BoardRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["BoardRoom"]
+
+[observability]
+enabled = true
