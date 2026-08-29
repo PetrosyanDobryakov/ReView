@@ -1,6 +1,6 @@
 # Deploy
 
-ReView is a static Vite build plus optional sync. It runs on Vercel with no server — boards live in IndexedDB and are shared as files.
+ReView is a static Vite build plus optional sync. It runs on Vercel **and Cloudflare Pages** with no server — boards live in IndexedDB and are shared as files.
 
 ## Vercel (recommended static)
 
@@ -10,6 +10,16 @@ ReView is a static Vite build plus optional sync. It runs on Vercel with no serv
 4. Optional P2P: both sides open the same board URL (same `<boardId>`), then each enable **Settings → System → Connection → P2P (WebRTC)**. Sync then runs browser-to-browser via `y-webrtc` public signaling (`wss://signaling.yjs.dev`) — no server to deploy. Override with `VITE_P2P_SIGNALING`.
 
 No backend storage is used on Vercel. The public board is the static SPA; each browser keeps its own copies and shares via files.
+
+## Cloudflare Pages (Vercel alternative)
+
+Same static build, same P2P/file-share flow — no adaptation needed. Cloudflare Pages is the direct Vercel equivalent.
+
+1. Create a Pages project from the same repo — **Framework preset: Vite**, **Build command: `npm run build`**, **Build output directory: `dist`**.
+2. Vite copies `public/_redirects` and `public/_headers` to `dist/` — `/* -> /index.html 200` gives the SPA rewrite (same as `vercel.json`) and `/assets/*` gets `Cache-Control: immutable`.
+3. Open `https://your-app.pages.dev/` — persistence, file share and P2P work exactly as on Vercel. `pages.dev` is already in `STATIC_HOSTS` so sync/P2P detection treats it as static without trying `ws://host:1234`.
+
+No Worker, no `wrangler.toml` needed for Pages. For Workers Static Assets you can add `wrangler.toml` with `assets.directory = "./dist"` and `not_found_handling = "single-page-application"`, but Pages is the recommended path.
 
 ## Self-hosted
 
