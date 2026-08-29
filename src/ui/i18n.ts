@@ -1055,8 +1055,8 @@ export function pickerPaperPresets(orbitUnlocked: boolean): Array<{ value: strin
     { value: '#1c1c1a', label: 'bgDark' },
     { value: '#2c2a26', label: 'bgGraphite' },
     { value: '#121110', label: 'bgBlack' },
-    { value: ORBIT_PAPER, label: 'bgOrbit' },
     { value: '#fffdf5', label: 'bgCream' },
     { value: '#f4f4f5', label: 'bgLight' },
+    { value: ORBIT_PAPER, label: 'bgOrbit' },
   ];
 }
