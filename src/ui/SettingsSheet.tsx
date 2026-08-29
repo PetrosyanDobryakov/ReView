@@ -32,12 +32,16 @@ import {
   inviteHostname,
   isLocalHostname,
   isNetLogEnabled,
+  isStaticHost,
+  isSyncAvailable,
+  isSyncEnabled,
   lanAppUrl,
   netLog,
   reconnectSync,
   setNetLogEnabled,
   type SyncStatus,
 } from '../net';
+import { p2pSignalingUrls } from '../net/config';
 import {
   CURSOR_SCALE_MAX,
   CURSOR_SCALE_MIN,
@@ -195,6 +199,8 @@ export function SettingsSheet({
   const [userColor, setUserColor] = useState(() => loadUser().color);
   const [syncUrlDraft, setSyncUrlDraft] = useState(() => readPrefs().syncUrl ?? '');
   const [syncUrlError, setSyncUrlError] = useState(false);
+  const [p2pSignalDraft, setP2pSignalDraft] = useState(() => readPrefs().p2pSignaling ?? '');
+  const [p2pSignalError, setP2pSignalError] = useState(false);
   const [lanHosts, setLanHosts] = useState<string[]>([]);
   const [lanLoading, setLanLoading] = useState(false);
   const [lanError, setLanError] = useState(false);
@@ -255,6 +261,8 @@ export function SettingsSheet({
     setUserColor(loadUser().color);
     setSyncUrlDraft(readPrefs().syncUrl ?? '');
     setSyncUrlError(false);
+    setP2pSignalDraft(readPrefs().p2pSignaling ?? '');
+    setP2pSignalError(false);
     setNetLogOn(isNetLogEnabled());
     return onKeybindsChange(syncBinds);
   }, [open]);
@@ -510,8 +518,8 @@ export function SettingsSheet({
                   </li>
                   <li>
                     <span>{t(locale, 'syncUrl')}</span>
-                    <span className="sheet-mono" title={effectiveSyncUrl()}>
-                      {effectiveSyncUrl()}
+                    <span className="sheet-mono" title={isSyncEnabled() ? effectiveSyncUrl() : ''}>
+                      {isSyncEnabled() && effectiveSyncUrl() ? effectiveSyncUrl() : '—'}
                     </span>
                   </li>
                 </ul>
@@ -589,6 +597,89 @@ export function SettingsSheet({
                     {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
                   </button>
                 </div>
+
+                {isStaticHost() && !isSyncAvailable() && !prefs.p2pEnabled && (
+                  <div className="sheet-hint" style={{ border: '1px dashed var(--chrome-border)', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
+                    <strong><SwapText text={t(locale, 'staticMode')} /></strong>
+                    <div style={{ marginTop: 4 }}><SwapText text={t(locale, 'staticModeHint')} /></div>
+                  </div>
+                )}
+
+                <div style={{ height: 12 }} />
+
+                <button
+                  type="button"
+                  role="switch"
+                  className={`sheet-switch${prefs.p2pEnabled ? ' on' : ''}`}
+                  aria-checked={prefs.p2pEnabled}
+                  aria-describedby="p2p-hint p2p-enabled-hint"
+                  disabled={!boardSession}
+                  onClick={() => {
+                    const next = writePrefs({ p2pEnabled: !prefs.p2pEnabled });
+                    setPrefs(next);
+                    reconnectSync();
+                  }}
+                >
+                  <span>{t(locale, 'p2p')}</span>
+                  <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
+                </button>
+                <p id="p2p-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pHint')} /></p>
+                <p id="p2p-enabled-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pEnabledHint')} /></p>
+
+                <label className="nick-row">
+                  <span>{t(locale, 'p2pSignaling')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={p2pSignalDraft}
+                    placeholder={p2pSignalingUrls().join(', ')}
+                    spellCheck={false}
+                    disabled={!boardSession || !prefs.p2pEnabled}
+                    aria-invalid={p2pSignalError}
+                    aria-describedby="p2p-signaling-hint"
+                    onChange={(e) => { setP2pSignalDraft(e.target.value); setP2pSignalError(false); }}
+                  />
+                </label>
+                <p id="p2p-signaling-hint" className="sheet-hint"><SwapText text={p2pSignalError ? t(locale, 'p2pSignalingInvalid') : t(locale, 'p2pSignalingHint')} /></p>
+                <div className="sheet-actions">
+                  <button
+                    type="button"
+                    className="style-btn active"
+                    disabled={!boardSession || !prefs.p2pEnabled}
+                    onClick={() => {
+                      const trimmed = p2pSignalDraft.trim();
+                      if (trimmed) {
+                        if (!/^wss?:\/\//i.test(trimmed)) { setP2pSignalError(true); return; }
+                        const next = writePrefs({ p2pSignaling: trimmed });
+                        setPrefs(next);
+                        setP2pSignalDraft(next.p2pSignaling ?? '');
+                      } else {
+                        const next = writePrefs({ p2pSignaling: null });
+                        setPrefs(next);
+                        setP2pSignalDraft('');
+                      }
+                      setP2pSignalError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlApply')}
+                  </button>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    disabled={!boardSession || !prefs.p2pEnabled}
+                    onClick={() => {
+                      const next = writePrefs({ p2pSignaling: null });
+                      setPrefs(next);
+                      setP2pSignalDraft('');
+                      setP2pSignalError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlReset')}
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   role="switch"

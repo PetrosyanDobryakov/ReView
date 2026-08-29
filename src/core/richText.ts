@@ -13,12 +13,45 @@ export type RichSpan = RichStyle & { text: string };
 
 const BLOCK_TAGS = new Set(['DIV', 'P', 'BR', 'LI']);
 
+// Allowlist for rich-text markup; everything else is unwrapped or dropped.
+// Blocked tags are dropped with their subtree (no text extraction) to avoid
+// executing embedded content like <script>, <svg>, <img onerror=...>.
+const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'MARK', 'SPAN', 'BR', 'DIV', 'P', 'LI', 'UL', 'OL', 'FONT']);
+const BLOCKED_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'IFRAME',
+  'OBJECT',
+  'EMBED',
+  'SVG',
+  'MATH',
+  'IMG',
+  'VIDEO',
+  'AUDIO',
+  'CANVAS',
+  'TEMPLATE',
+  'LINK',
+  'META',
+  'BASE',
+  'FORM',
+  'INPUT',
+  'BUTTON',
+  'SELECT',
+  'TEXTAREA',
+  'TITLE',
+  'NOSCRIPT',
+]);
+
 function normalizeCssColor(raw: string): string | undefined {
   const v = raw.trim();
   if (!v) return undefined;
-  if (v.startsWith('#')) return v;
-  const m = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (!m) return v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+    const r = v[1], g = v[2], b = v[3];
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase();
+  const m = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*[\d.]+)?\s*\)$/i);
+  if (!m) return undefined;
   const hex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
   return `#${hex(Number(m[1]))}${hex(Number(m[2]))}${hex(Number(m[3]))}`;
 }
@@ -37,6 +70,11 @@ export function htmlToSpans(html: string): RichSpan[] {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
     const tag = el.tagName;
+    if (BLOCKED_TAGS.has(tag)) return;
+    if (!ALLOWED_TAGS.has(tag)) {
+      for (const child of Array.from(el.childNodes)) walk(child, style);
+      return;
+    }
     if (tag === 'BR') {
       spans.push({ ...style, text: '\n' });
       return;
@@ -53,9 +91,15 @@ export function htmlToSpans(html: string): RichSpan[] {
     if (tag === 'MARK' || el.style.backgroundColor) next.highlight = true;
     if (tag === 'FONT') {
       const c = el.getAttribute('color');
-      if (c) next.color = normalizeCssColor(c);
+      if (c) {
+        const nc = normalizeCssColor(c);
+        if (nc) next.color = nc;
+      }
     }
-    if (el.style.color) next.color = normalizeCssColor(el.style.color) ?? el.style.color;
+    if (el.style.color) {
+      const nc = normalizeCssColor(el.style.color);
+      if (nc) next.color = nc;
+    }
     if (BLOCK_TAGS.has(tag) && spans.length && !spans[spans.length - 1].text.endsWith('\n')) {
       // block boundary
     }
@@ -97,10 +141,23 @@ export function spansToHtml(spans: RichSpan[]): string {
       if (s.underline) t = `<u>${t}</u>`;
       if (s.strike) t = `<s>${t}</s>`;
       if (s.highlight) t = `<mark>${t}</mark>`;
-      if (s.color) t = `<span style="color:${s.color}">${t}</span>`;
+      const safeColor = s.color ? normalizeCssColor(s.color) : undefined;
+      if (safeColor) t = `<span style="color:${safeColor}">${t}</span>`;
       return t;
     })
     .join('');
+}
+
+/** Sanitize arbitrary HTML to the allowlisted rich-text subset. */
+export function sanitizeRichHtml(html: string): string {
+  if (!html || !html.includes('<')) return html ?? '';
+  try {
+    const spans = htmlToSpans(html);
+    // Empty or plain-only spans produce safe HTML; htmlToSpans already strips disallowed content.
+    return spansToHtml(spans);
+  } catch {
+    return '';
+  }
 }
 
 /** True when any span differs from the object-level style (needs rich path). */
