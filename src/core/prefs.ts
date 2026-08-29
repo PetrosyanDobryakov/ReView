@@ -40,6 +40,11 @@ export interface AppPrefs {
   orbitUnlocked: boolean;
   /** Optional WebRTC p2p sync (for Vercel/static without a websocket server). */
   p2pEnabled: boolean;
+  /**
+   * True once the user toggled P2P in settings. Distinguishes an explicit off
+   * from the old stored default `p2pEnabled: false`.
+   */
+  p2pUserSet: boolean;
   /** Signaling servers for y-webrtc. null = defaults. */
   p2pSignaling: string | null;
 }
@@ -59,6 +64,7 @@ const DEFAULTS: AppPrefs = {
   syncEnabled: true,
   orbitUnlocked: false,
   p2pEnabled: false,
+  p2pUserSet: false,
   p2pSignaling: null,
 };
 
@@ -136,6 +142,7 @@ function parsePrefs(raw: unknown): AppPrefs {
     syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
     orbitUnlocked: typeof parsed.orbitUnlocked === 'boolean' ? parsed.orbitUnlocked : DEFAULTS.orbitUnlocked,
     p2pEnabled: typeof parsed.p2pEnabled === 'boolean' ? parsed.p2pEnabled : DEFAULTS.p2pEnabled,
+    p2pUserSet: parsed.p2pUserSet === true,
     p2pSignaling: Object.prototype.hasOwnProperty.call(parsed, 'p2pSignaling')
       ? normalizeP2pSignaling(parsed.p2pSignaling)
       : DEFAULTS.p2pSignaling,
@@ -188,6 +195,12 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
     orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
     p2pEnabled: patch.p2pEnabled !== undefined ? Boolean(patch.p2pEnabled) : cur.p2pEnabled,
+    p2pUserSet:
+      patch.p2pEnabled !== undefined
+        ? true
+        : patch.p2pUserSet !== undefined
+          ? Boolean(patch.p2pUserSet)
+          : cur.p2pUserSet,
     p2pSignaling:
       patch.p2pSignaling !== undefined
         ? patch.p2pSignaling === null
