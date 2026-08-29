@@ -11,15 +11,14 @@ ReView is a static Vite build plus optional sync. It runs on Vercel **and Cloudf
 
 No backend storage is used on Vercel. The public board is the static SPA; each browser keeps its own copies and shares via files.
 
-## Cloudflare Pages (Vercel alternative)
+## Cloudflare Pages / Workers Static Assets
 
-Same static build, same P2P/file-share flow — no adaptation needed. Cloudflare Pages is the direct Vercel equivalent.
+Same static build, same P2P/file-share flow. Do not add `public/_redirects` with `/* /index.html 200`. Wrangler uploads `dist` as Workers static assets, and `html_handling` strips `.html` / `/index`. That splat rewrite then matches again and Cloudflare rejects the deploy with error 100324 (infinite redirect loop).
 
-1. Create a Pages project from the same repo — **Framework preset: Vite**, **Build command: `npm run build`**, **Build output directory: `dist`**.
-2. Vite copies `public/_redirects` and `public/_headers` to `dist/` — `/* -> /index.html 200` gives the SPA rewrite (same as `vercel.json`) and `/assets/*` gets `Cache-Control: immutable`.
-3. Open `https://your-app.pages.dev/` — persistence, file share and P2P work exactly as on Vercel. `pages.dev` is already in `STATIC_HOSTS` so sync/P2P detection treats it as static without trying `ws://host:1234`.
+1. Create a Pages or Workers project from the same repo. Build with `npm run build`; output is `dist`. Repo-root `wrangler.toml` sets `name = "review"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
+2. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable`.
+3. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS` so sync/P2P detection treats it as static without trying `ws://host:1234`.
 
-No Worker, no `wrangler.toml` needed for Pages. For Workers Static Assets you can add `wrangler.toml` with `assets.directory = "./dist"` and `not_found_handling = "single-page-application"`, but Pages is the recommended path.
 
 ## Self-hosted
 
