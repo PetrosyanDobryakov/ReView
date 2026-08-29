@@ -254,8 +254,8 @@ const server = createServer(async (req, res) => {
       }
       sendJson(res, 200, { ok: true, file: SESSION_REL, written: lines.length });
     } catch (err) {
-      fileLog('warn', 'net-log POST failed', { err: String(err) });
-      sendJson(res, 400, { ok: false, error: String(err) });
+      fileLog('warn', 'net-log POST failed');
+      sendJson(res, 400, { ok: false });
     }
     return;
   }
@@ -269,7 +269,7 @@ const server = createServer(async (req, res) => {
 
 const wss = new WebSocketServer({
   server,
-  maxPayload: 512 * 1024 * 1024,
+  maxPayload: 5 * 1024 * 1024,
   perMessageDeflate: false,
 });
 
