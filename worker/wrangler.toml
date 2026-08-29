@@ -10,7 +10,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["BoardRoom"]
+new_sqlite_classes = ["BoardRoom"]
 
 [observability]
 enabled = true
