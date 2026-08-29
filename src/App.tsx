@@ -50,6 +50,7 @@ import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, saveBoardLocally, isBoardPersistedLocally, boardUrl } from './core/boards';
 import { cloneBoard } from './core/boardClone';
+import { exportBoardFile, importBoardFile } from './core/boardShare';
 import {
   boardRenameMode,
   commitBoardRename,
@@ -280,13 +281,26 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = (file: File, at?: { x: number; y: number }) => {
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.review')) {
+      const locale = readLocale();
+      void importBoardFile(file).then((res) => {
+        if (res.ok) {
+          setToast(t(locale, 'importSuccess'));
+          window.setTimeout(() => setToast((cur) => (cur === t(locale, 'importSuccess') ? null : cur)), 2000);
+          navigateThemed(navigate, boardUrl(res.board.id));
+        } else {
+          setError(t(locale, 'importFailed'));
+        }
+      });
+      return;
+    }
     const e = engineRef.current;
     if (!e) return;
     if (file.type.startsWith('image/')) {
       e.insertImageFile(file, at);
       return;
     }
-    const name = file.name.toLowerCase();
     const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
     const isTxt =
       name.endsWith('.txt') || file.type === 'text/plain' || file.type.startsWith('text/');
@@ -831,6 +845,16 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
             <Icon name="fit" />
           </button>
+          <div className="island-sep" />
+          <button
+            type="button"
+            className="icon-btn"
+            title={t(locale, 'exportBoardHint')}
+            aria-label={t(locale, 'exportBoard')}
+            onClick={() => void exportBoardFile(boardId).then(ok => { if (ok) { setToast(t(readLocale(), 'shareCopied')); setTimeout(() => setToast(null), 1800); } else { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); } }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); })}
+          >
+            <Icon name="download" />
+          </button>
           {ephemeral && (
             <>
               <div className="island-sep" />
@@ -920,7 +944,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,.pdf,application/pdf,.txt,text/plain"
+        accept="image/*,.pdf,application/pdf,.txt,text/plain,.review,.json,application/json"
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];

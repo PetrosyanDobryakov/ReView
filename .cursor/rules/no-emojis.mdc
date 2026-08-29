@@ -1,0 +1,12 @@
+---
+description: Never use emojis in any output
+alwaysApply: true
+---
+
+# No Emojis
+
+Never use emojis in any response, message, comment, commit, or generated content. This applies to all output including chat, code comments, docs, and UI text. Use plain text only.
+
+- Do not include emoji characters, emoticons made of emoji, or unicode emoji.
+- If a template or example contains an emoji, rewrite it without the emoji.
+- Plain ASCII punctuation is allowed.

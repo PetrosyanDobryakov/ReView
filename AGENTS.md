@@ -1,6 +1,14 @@
-# Доска (ReView) — agent notes
+# (ReView) — agent notes
+
+> Global (ported from `~/.cursor/AGENTS.md` → `~/.grok/AGENTS.md`): No extra global drive. Cursor defaults + pstack + project index at `~/.cursor/PROJECTS.md` (mirrored to `~/.claude/PROJECTS.md`). Old handoffs at `~/.cursor/SESSION-MEMORY.md`. Per-project truth is this file + `.cursor/rules`. WSL/UNC: do not move agent to WSL root — use `wsl`/UNC. Git: inspect `git remote -v` first; WSL only for `origin.cursor.com`, native Windows Git for `github.com` and others.
 
 Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and optional Yjs sync.
+
+## Git operations
+
+- Use WSL for Git operations only when the remote URL is hosted on `origin.cursor.com`.
+- For GitHub (`github.com`) and all other remotes, use native Windows Git from this workspace; do not route the operation through WSL.
+- Check `git remote -v` before choosing the Git environment. Do not infer the host from the repository name or apply the Cursor Origin rule to GitHub.
 
 ## Cursor Cloud specific instructions
 
@@ -40,3 +48,7 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 - **Room DELETE:** `DELETE /room/<name>` is loopback-only (`127.0.0.1` / `::1` / IPv4-mapped) or `REVIEW_COMPACT_TOKEN` / `REVIEW_ROOM_DELETE_TOKEN` via `X-Review-Compact-Token` / `X-Review-Room-Delete-Token` / `Authorization: Bearer`. Compaction prefers `http://127.0.0.1:<syncPort>` so a host UI opened via LAN IP can still compact; it does not fall back to an open LAN DELETE. Unauthorized requests get `403 { ok: false }`. Never trust `X-Forwarded-For` for this check.
 - UI defaults to Russian; English and Chinese are available in settings.
 - Production / VM notes: `docs/DEPLOY.md`. Optional `VITE_SYNC_URL`.
+
+## Communication
+
+- Never use emojis in any output — no emoji characters, unicode emoji, or emoji-like emoticons. Use plain text only in all responses, commits, comments, and docs.
