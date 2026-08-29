@@ -35,6 +35,7 @@ import {
   isStaticHost,
   isSyncAvailable,
   isSyncEnabled,
+  isP2pEnabled,
   lanAppUrl,
   netLog,
   reconnectSync,
@@ -196,6 +197,7 @@ export function SettingsSheet({
   const [tab, setTab] = useState<SettingsTab>('customize');
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
+  const p2pOn = isP2pEnabled();
   const [userColor, setUserColor] = useState(() => loadUser().color);
   const [syncUrlDraft, setSyncUrlDraft] = useState(() => readPrefs().syncUrl ?? '');
   const [syncUrlError, setSyncUrlError] = useState(false);
@@ -598,7 +600,7 @@ export function SettingsSheet({
                   </button>
                 </div>
 
-                {isStaticHost() && !isSyncAvailable() && !prefs.p2pEnabled && (
+                {isStaticHost() && !isSyncAvailable() && !p2pOn && (
                   <div className="sheet-hint" style={{ border: '1px dashed var(--chrome-border)', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
                     <strong><SwapText text={t(locale, 'staticMode')} /></strong>
                     <div style={{ marginTop: 4 }}><SwapText text={t(locale, 'staticModeHint')} /></div>
@@ -610,12 +612,12 @@ export function SettingsSheet({
                 <button
                   type="button"
                   role="switch"
-                  className={`sheet-switch${prefs.p2pEnabled ? ' on' : ''}`}
-                  aria-checked={prefs.p2pEnabled}
+                  className={`sheet-switch${p2pOn ? ' on' : ''}`}
+                  aria-checked={p2pOn}
                   aria-describedby="p2p-hint p2p-enabled-hint"
                   disabled={!boardSession}
                   onClick={() => {
-                    const next = writePrefs({ p2pEnabled: !prefs.p2pEnabled });
+                    const next = writePrefs({ p2pEnabled: !p2pOn });
                     setPrefs(next);
                     reconnectSync();
                   }}
@@ -634,7 +636,7 @@ export function SettingsSheet({
                     value={p2pSignalDraft}
                     placeholder={p2pSignalingUrls().join(', ')}
                     spellCheck={false}
-                    disabled={!boardSession || !prefs.p2pEnabled}
+                    disabled={!boardSession || !p2pOn}
                     aria-invalid={p2pSignalError}
                     aria-describedby="p2p-signaling-hint"
                     onChange={(e) => { setP2pSignalDraft(e.target.value); setP2pSignalError(false); }}
@@ -645,7 +647,7 @@ export function SettingsSheet({
                   <button
                     type="button"
                     className="style-btn active"
-                    disabled={!boardSession || !prefs.p2pEnabled}
+                    disabled={!boardSession || !p2pOn}
                     onClick={() => {
                       const trimmed = p2pSignalDraft.trim();
                       if (trimmed) {
@@ -667,7 +669,7 @@ export function SettingsSheet({
                   <button
                     type="button"
                     className="style-btn"
-                    disabled={!boardSession || !prefs.p2pEnabled}
+                    disabled={!boardSession || !p2pOn}
                     onClick={() => {
                       const next = writePrefs({ p2pSignaling: null });
                       setPrefs(next);
