@@ -1,6 +1,17 @@
-# Deploy (self-hosted)
+# Deploy
 
-ReView is a static Vite build plus an optional websocket sync server. No cloud account.
+ReView is a static Vite build plus optional sync. It runs on Vercel with no server — boards live in IndexedDB and are shared as files.
+
+## Vercel (recommended static)
+
+1. Import the repo on Vercel — it runs `npm run build` and serves `dist/` (see `vercel.json` for SPA rewrites).
+2. Open `https://your-app.vercel.app/` — create boards, draw, refresh to confirm persistence (IndexedDB `review-v1-<boardId>`).
+3. Share a board: on the board header click the download icon (or Home → per-board export) to get a `.review.json` file; send it to a friend who uses **Home → Import** to open it as a new local board.
+4. Optional P2P: both sides open the same board URL (same `<boardId>`), then each enable **Settings → System → Connection → P2P (WebRTC)**. Sync then runs browser-to-browser via `y-webrtc` public signaling (`wss://signaling.yjs.dev`) — no server to deploy. Override with `VITE_P2P_SIGNALING`.
+
+No backend storage is used on Vercel. The public board is the static SPA; each browser keeps its own copies and shares via files.
+
+## Self-hosted
 
 ## Friends on the same Wi‑Fi / LAN
 
@@ -71,11 +82,17 @@ server {
 
 If you proxy the websocket under a path, point the client at that URL. In the app: **Settings → System → Connection**, set Sync URL (or build with `VITE_SYNC_URL`). You can also disconnect sync without clearing the board.
 
-## Remote friends (optional virtual LAN)
+## File share (Vercel primary path)
+
+Each board can be saved as a `.review.json` file (Home → export per board, or the download icon on the board header). The file contains a base64 Yjs update plus metadata (name, team, pages). Import on any device via **Home → Import** — it creates a new local board with the same content. Use this when no sync server is deployed.
+
+## Remote friends (optional virtual LAN or P2P)
 
 Same hub — not required for same Wi‑Fi. Use Tailscale / ZeroTier only when friends are not on your LAN: join a mesh, then share the mesh IP the same way as a LAN invite (`http://<mesh-ip>:…`). Guests still should open the app from that IP so sync auto-targets it.
 
-WebRTC / true browser P2P is out of scope.
+### P2P (WebRTC) — works on Vercel/static
+
+Enable **P2P (WebRTC)** in Settings → System → Connection on each device. Both peers open the same `/board/<id>` URL and the `y-webrtc` provider syncs the Yjs doc over WebRTC (public signaling servers). No `server.mjs` needed. Set `VITE_P2P_SIGNALING` or the per-device Signaling server field to use a custom signaling endpoint.
 
 ## Persistence honesty
 

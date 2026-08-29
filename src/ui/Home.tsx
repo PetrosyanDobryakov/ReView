@@ -18,6 +18,7 @@ import {
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
+import { exportBoardFile, importBoardFile, MAX_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
@@ -74,18 +75,26 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const refreshWeights = useCallback(async (list: BoardMeta[]) => {
     const gen = ++weightsGen.current;
-    setWeightsReady(false);
-    const entries = await Promise.all(
-      list.map(async (b) => {
-        const bytes = await estimateBoardBytes(b.id);
-        return [b.id, bytes] as const;
-      })
-    );
-    if (gen !== weightsGen.current) return;
-    const next: Record<string, number> = {};
-    for (const [id, bytes] of entries) next[id] = bytes;
-    setWeights(next);
-    setWeightsReady(true);
+    try {
+      const entries = await Promise.all(
+        list.map(async (b) => {
+          try {
+            const bytes = await estimateBoardBytes(b.id);
+            return [b.id, bytes] as const;
+          } catch {
+            return [b.id, 0] as const;
+          }
+        })
+      );
+      if (gen !== weightsGen.current) return;
+      const next: Record<string, number> = {};
+      for (const [id, bytes] of entries) next[id] = bytes;
+      setWeights(next);
+    } catch {
+      // keep previous weights on unexpected failure
+    } finally {
+      if (gen === weightsGen.current) setWeightsReady(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -101,7 +110,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   }, []);
 
   useEffect(() => {
-    void refreshWeights(boards);
+    void refreshWeights(boards).catch(() => {});
   }, [boards, refreshWeights]);
 
   useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
@@ -188,7 +197,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     const ok = await deleteBoardData(id);
     refresh();
     if (!ok) {
-      window.alert(t(locale, 'error') + ': IndexedDB');
+      window.alert(t(locale, 'deleteBoardFailed'));
     }
   };
 
@@ -206,6 +215,41 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     const next = !saveRemote;
     writePrefs({ saveRemoteBoards: next });
     setSaveRemote(next);
+  };
+
+  const importRef = useRef<HTMLInputElement>(null);
+  const handleExportBoard = async (id: string) => {
+    const ok = await exportBoardFile(id);
+    showCopyToast(ok ? t(locale, 'shareCopied') : t(locale, 'error'));
+  };
+  const handleImportPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (typeof file.size === 'number' && file.size > MAX_FILE_BYTES) {
+      showCopyToast(t(locale, 'importErrorInvalidFile'));
+      return;
+    }
+    const res = await importBoardFile(file);
+    if (res.ok) {
+      refresh();
+      void refreshWeights(listBoards());
+      showCopyToast(t(locale, 'importSuccess'));
+    } else {
+      const key =
+        res.error === 'read_failed'
+          ? 'importErrorReadFailed'
+          : res.error === 'invalid_json'
+            ? 'importErrorInvalidJson'
+            : res.error === 'invalid_file'
+              ? 'importErrorInvalidFile'
+              : res.error === 'invalid_update'
+                ? 'importErrorInvalidUpdate'
+                : res.error === 'file_too_large'
+                  ? 'importErrorInvalidFile'
+                  : 'importFailed';
+      showCopyToast(t(locale, key));
+    }
   };
 
   const localeTag = readLocale();
@@ -374,6 +418,19 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               </button>
             </div>
           </div>
+
+          <div className="sheet-section home-share">
+            <h3>{t(locale, 'shareBoard')}</h3>
+            <p className="sheet-hint">{t(locale, 'shareBoardHint')}</p>
+            <p className="sheet-hint">{t(locale, 'importBoardHint')}</p>
+            <input ref={importRef} type="file" accept=".json,.review,application/json" className="visually-hidden" aria-label={t(locale, 'importBoardAction')} onChange={handleImportPick} />
+            <div className="sheet-actions">
+              <button type="button" className="style-btn active" onClick={() => importRef.current?.click()}>
+                <Icon name="upload" size={14} />
+                {t(locale, 'importBoard')}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="island home-main">
@@ -401,12 +458,26 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                 const weightLabel =
                   bytes === undefined
                     ? t(locale, 'boardWeightLoading')
-                    : formatBoardWeight(bytes, localeTag);
+                    : bytes === 0
+                      ? t(locale, 'boardWeightEmpty')
+                      : formatBoardWeight(bytes, localeTag);
                 const needsSave =
                   (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
                   (Boolean(b.savedLocally) && known && bytes === 0);
                 return (
-                  <div key={b.id} className="island board-row" onClick={() => navigateThemed(navigate, boardUrl(b.id))}>
+                  <div
+                    key={b.id}
+                    className="island board-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigateThemed(navigate, boardUrl(b.id))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigateThemed(navigate, boardUrl(b.id));
+                      }
+                    }}
+                  >
                     <span className="board-col-idx">{idx + 1}</span>
                     <span className="board-col-name">
                       {editingBoard === b.id ? (
@@ -470,6 +541,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                             <Icon name="download" size={20} />
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={t(locale, 'exportBoardHint')}
+                          aria-label={t(locale, 'exportBoard')}
+                          onClick={() => void handleExportBoard(b.id)}
+                        >
+                          <Icon name="download" size={20} />
+                        </button>
                         <button
                           type="button"
                           className="icon-btn"

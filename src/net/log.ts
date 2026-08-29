@@ -28,6 +28,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let clientTag: string | null = null;
 let sessionHintLogged = false;
 let flushInFlight = false;
+let serverNetLogDisabled = false;
 
 function readQueryFlag(): boolean | null {
   if (typeof location === 'undefined') return null;
@@ -109,6 +110,7 @@ export function syncHttpBase(): string {
 }
 
 function enqueue(level: NetLogLevel, msg: string, data?: unknown): void {
+  if (serverNetLogDisabled) return;
   queue.push({
     t: new Date().toISOString(),
     level,
@@ -138,7 +140,10 @@ function scheduleFlush(ms: number): void {
 }
 
 async function flushQueue(): Promise<void> {
-  if (flushInFlight || !queue.length || !isNetLogEnabled()) return;
+  if (flushInFlight || !queue.length || !isNetLogEnabled() || serverNetLogDisabled) {
+    if (serverNetLogDisabled) queue.length = 0;
+    return;
+  }
   if (typeof fetch === 'undefined') return;
   flushInFlight = true;
   const batch = queue.splice(0, queue.length);
@@ -149,6 +154,11 @@ async function flushQueue(): Promise<void> {
       body: JSON.stringify({ lines: batch }),
       keepalive: true,
     });
+    if (res.status === 404) {
+      serverNetLogDisabled = true;
+      queue.length = 0;
+      return;
+    }
     if (!sessionHintLogged && res.ok) {
       sessionHintLogged = true;
       try {
@@ -168,7 +178,14 @@ async function flushQueue(): Promise<void> {
 }
 
 function flushBeacon(): void {
-  if (!queue.length || typeof navigator === 'undefined' || !navigator.sendBeacon) return;
+  if (
+    !queue.length ||
+    typeof navigator === 'undefined' ||
+    !navigator.sendBeacon ||
+    !isNetLogEnabled() ||
+    serverNetLogDisabled
+  )
+    return;
   const batch = queue.splice(0, queue.length);
   try {
     const blob = new Blob([JSON.stringify({ lines: batch })], { type: 'application/json' });

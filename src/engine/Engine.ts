@@ -193,7 +193,7 @@ function paintPeerToolGlyph(
 }
 
 import { settings } from '../core/settings';
-import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
+import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich, sanitizeRichHtml } from '../core/richText';
 
 export interface EditTarget {
   id: string | null;
@@ -2079,10 +2079,11 @@ export class Engine {
       highlight: target.highlight,
       color: color,
     };
-    const spans = richHtml ? htmlToSpans(richHtml) : parseStoredRich(text, undefined, baseStyle);
+    const cleanHtml = richHtml ? sanitizeRichHtml(richHtml) : undefined;
+    const spans = cleanHtml ? htmlToSpans(cleanHtml) : parseStoredRich(text, undefined, baseStyle);
     const plain = spansToPlain(spans).replace(/\n+$/, '');
     const storeRich =
-      richHtml && htmlStoresRichMarkup(richHtml, spans, baseStyle) ? richHtml : undefined;
+      cleanHtml && htmlStoresRichMarkup(cleanHtml, spans, baseStyle) ? cleanHtml : undefined;
     if (id === null) {
       const trimmed = plain.trim();
       if (!trimmed) return;
