@@ -560,7 +560,8 @@ export class SyncClient {
         isSynced,
         room: this.providerRoom,
         boardId: this.boardId,
-        docSize: this.doc ? Y.encodeStateAsUpdate(this.doc).length : 0,
+        // ponytail: don't encode full doc here — freezes on large boards
+        docSize: -1,
       }));
     };
     provider.on('status', onStatus);

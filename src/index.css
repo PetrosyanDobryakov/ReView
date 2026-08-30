@@ -4109,6 +4109,15 @@ h3 .swap-text,
 .board-row-menu-wrap {
   position: relative;
   display: inline-flex;
+  isolation: isolate;
+}
+.board-row-menu-wrap:has(.board-row-menu) {
+  z-index: 3;
+}
+.board-row:has(.board-row-menu) {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
 }
 .board-row-menu {
   position: absolute;
@@ -4123,7 +4132,8 @@ h3 .swap-text,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  z-index: 5;
+  z-index: 20;
+  isolation: isolate;
 }
 .board-row-menu-item {
   display: flex;
