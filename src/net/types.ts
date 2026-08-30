@@ -6,6 +6,8 @@ export type SyncStatus = {
   users: number;
   /** Prefs: syncAllowed. Offline can still be “enabled”. */
   enabled: boolean;
+  /** Last p2p/transport setup error (e.g. chunk load or missing export). */
+  error?: string | null;
 };
 
 /** Ephemeral in-progress stroke shown to peers before CRDT commit. */

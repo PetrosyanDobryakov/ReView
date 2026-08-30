@@ -32,12 +32,17 @@ import {
   inviteHostname,
   isLocalHostname,
   isNetLogEnabled,
+  isStaticHost,
+  isSyncAvailable,
+  isSyncEnabled,
+  isP2pEnabled,
   lanAppUrl,
   netLog,
   reconnectSync,
   setNetLogEnabled,
   type SyncStatus,
 } from '../net';
+import { p2pSignalingUrls } from '../net/config';
 import {
   CURSOR_SCALE_MAX,
   CURSOR_SCALE_MIN,
@@ -64,7 +69,7 @@ type BindTarget =
   | { kind: 'tool'; id: ToolId }
   | { kind: 'color'; color: string };
 
-const TABS: SettingsTab[] = ['customize', 'system', 'binds'];
+const TABS: SettingsTab[] = ['customize', 'binds', 'system'];
 
 const TAB_LABEL: Record<SettingsTab, 'tabSystem' | 'tabBinds' | 'tabCustomize'> = {
   system: 'tabSystem',
@@ -192,9 +197,12 @@ export function SettingsSheet({
   const [tab, setTab] = useState<SettingsTab>('customize');
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
+  const p2pOn = isP2pEnabled();
   const [userColor, setUserColor] = useState(() => loadUser().color);
   const [syncUrlDraft, setSyncUrlDraft] = useState(() => readPrefs().syncUrl ?? '');
   const [syncUrlError, setSyncUrlError] = useState(false);
+  const [p2pSignalDraft, setP2pSignalDraft] = useState(() => readPrefs().p2pSignaling ?? '');
+  const [p2pSignalError, setP2pSignalError] = useState(false);
   const [lanHosts, setLanHosts] = useState<string[]>([]);
   const [lanLoading, setLanLoading] = useState(false);
   const [lanError, setLanError] = useState(false);
@@ -227,7 +235,10 @@ export function SettingsSheet({
   };
 
   const leaveOrbitPaper = () => {
-    if (orbitPaperSelected) onBg(PACKET_PAPER);
+    if (orbitPaperSelected) {
+      onBg(PACKET_PAPER);
+      setPrefs(writePrefs({ orbitUnlocked: false }));
+    }
   };
 
   useEffect(() => {
@@ -255,6 +266,8 @@ export function SettingsSheet({
     setUserColor(loadUser().color);
     setSyncUrlDraft(readPrefs().syncUrl ?? '');
     setSyncUrlError(false);
+    setP2pSignalDraft(readPrefs().p2pSignaling ?? '');
+    setP2pSignalError(false);
     setNetLogOn(isNetLogEnabled());
     return onKeybindsChange(syncBinds);
   }, [open]);
@@ -389,227 +402,6 @@ export function SettingsSheet({
             <div id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" className="sheet-panel">
               <section className="sheet-section">
                 <h3>
-                  <SwapText text={t(locale, 'profile')} />
-                </h3>
-                <label className="nick-row">
-                  <span>{t(locale, 'nickname')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={nick}
-                    maxLength={24}
-                    placeholder={t(locale, 'nicknameHint')}
-                    onChange={(e) => onNick(e.target.value)}
-                  />
-                </label>
-                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
-                  {USER_COLOR_PALETTE.map((c) => (
-                    <button
-                      type="button"
-                      key={c}
-                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
-                      style={{ background: c }}
-                      title={c}
-                      aria-label={c}
-                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
-                      onClick={() => {
-                        const next = saveUserColor(c);
-                        setUserColor(next.color);
-                      }}
-                    />
-                  ))}
-                  <input
-                    type="color"
-                    className="members-swatch-custom"
-                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
-                    title={userColor}
-                    aria-label={t(locale, 'membersColor')}
-                    onChange={(e) => {
-                      const next = saveUserColor(e.target.value);
-                      setUserColor(next.color);
-                    }}
-                  />
-                </div>
-              </section>
-
-              <section className="sheet-section" ref={connectionRef}>
-                <h3>
-                  <SwapText text={t(locale, 'connection')} />
-                </h3>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'syncHint')} />
-                </p>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'syncLanHint')} />
-                </p>
-                <div className="lan-block">
-                  <h4 className="lan-block-title">
-                    <SwapText text={t(locale, 'syncLanSection')} />
-                  </h4>
-                  {lanLoading ? (
-                    <p className="sheet-hint">
-                      <SwapText text={t(locale, 'syncLanLoading')} />
-                    </p>
-                  ) : lanError || lanHosts.length === 0 ? (
-                    <p className="sheet-hint">
-                      <SwapText text={t(locale, 'syncLanEmpty')} />
-                    </p>
-                  ) : (
-                    <ul className="lan-ip-list">
-                      {lanHosts.map((ip) => (
-                        <li key={ip} className="sheet-mono">
-                          {ip}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'syncLanFirewall')} />
-                  </p>
-                  <div className="sheet-actions">
-                    <button
-                      type="button"
-                      className="style-btn active"
-                      disabled={lanLoading || !inviteHostname(lanHosts)}
-                      onClick={async () => {
-                        const host = inviteHostname(lanHosts);
-                        if (!host) return;
-                        const url = lanAppUrl(host);
-                        try {
-                          await navigator.clipboard.writeText(url);
-                          setLanCopied(true);
-                          window.setTimeout(() => setLanCopied(false), 2000);
-                        } catch {
-                          prompt(t(locale, 'syncLanCopyApp'), url);
-                        }
-                      }}
-                    >
-                      {lanCopied ? t(locale, 'syncLanCopied') : t(locale, 'syncLanCopyApp')}
-                    </button>
-                  </div>
-                </div>
-                {!boardSession ? (
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'syncBoardOnly')} />
-                  </p>
-                ) : null}
-                <ul className="sheet-keys">
-                  <li>
-                    <span className={`status-line${sync.online ? ' on' : ''}`}>
-                      {sync.online ? t(locale, 'online') : t(locale, 'offline')}
-                    </span>
-                    <span>{sync.online ? sync.users : '—'}</span>
-                  </li>
-                  <li>
-                    <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
-                    <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
-                  </li>
-                  <li>
-                    <span>{t(locale, 'syncRoom')}</span>
-                    <span className="sheet-mono">{getBoardRoomName(getCurrentBoardId())}</span>
-                  </li>
-                  <li>
-                    <span>{t(locale, 'syncUrl')}</span>
-                    <span className="sheet-mono" title={effectiveSyncUrl()}>
-                      {effectiveSyncUrl()}
-                    </span>
-                  </li>
-                </ul>
-                <label className="nick-row">
-                  <span>{t(locale, 'syncUrl')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={syncUrlDraft}
-                    placeholder={defaultSyncUrl()}
-                    spellCheck={false}
-                    disabled={!boardSession}
-                    aria-invalid={syncUrlError}
-                    onChange={(e) => {
-                      setSyncUrlDraft(e.target.value);
-                      setSyncUrlError(false);
-                    }}
-                  />
-                </label>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, syncUrlError ? 'syncUrlInvalid' : 'syncUrlHint')} />
-                </p>
-                <div className="sheet-actions">
-                  <button
-                    type="button"
-                    className="style-btn active"
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const trimmed = syncUrlDraft.trim();
-                      if (trimmed) {
-                        const parsed = parseSyncUrl(trimmed);
-                        if (!parsed) {
-                          setSyncUrlError(true);
-                          return;
-                        }
-                        const next = writePrefs({ syncUrl: parsed });
-                        setPrefs(next);
-                        setSyncUrlDraft(next.syncUrl ?? '');
-                      } else {
-                        const next = writePrefs({ syncUrl: null });
-                        setPrefs(next);
-                        setSyncUrlDraft('');
-                      }
-                      setSyncUrlError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlApply')}
-                  </button>
-                  <button
-                    type="button"
-                    className="style-btn"
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const next = writePrefs({ syncUrl: null });
-                      setPrefs(next);
-                      setSyncUrlDraft('');
-                      setSyncUrlError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlReset')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`style-btn${prefs.syncEnabled ? '' : ' active'}`}
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const enabled = !prefs.syncEnabled;
-                      const next = writePrefs({ syncEnabled: enabled });
-                      setPrefs(next);
-                      reconnectSync();
-                    }}
-                  >
-                    {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  className={`sheet-switch${netLogOn ? ' on' : ''}`}
-                  aria-checked={netLogOn}
-                  onClick={() => {
-                    const next = !isNetLogEnabled();
-                    setNetLogEnabled(next);
-                    setNetLogOn(next);
-                    if (next) netLog.info('logging enabled via settings');
-                  }}
-                >
-                  <span>{t(locale, 'netLog')}</span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'netLogHint')} />
-                </p>
-              </section>
-
-              <section className="sheet-section">
-                <h3>
                   <SwapText text={t(locale, 'language')} />
                 </h3>
                 <SlideTrack className="locale-row" active={locale}>
@@ -742,6 +534,265 @@ export function SettingsSheet({
                   </li>
                 </ul>
               </section>
+
+              <section className="sheet-section" ref={connectionRef}>
+                <h3>
+                  <SwapText text={t(locale, 'connection')} />
+                </h3>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'syncHint')} />
+                </p>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'syncLanHint')} />
+                </p>
+                <div className="lan-block">
+                  <h4 className="lan-block-title">
+                    <SwapText text={t(locale, 'syncLanSection')} />
+                  </h4>
+                  {lanLoading ? (
+                    <p className="sheet-hint">
+                      <SwapText text={t(locale, 'syncLanLoading')} />
+                    </p>
+                  ) : lanError || lanHosts.length === 0 ? (
+                    <p className="sheet-hint">
+                      <SwapText text={t(locale, 'syncLanEmpty')} />
+                    </p>
+                  ) : (
+                    <ul className="lan-ip-list">
+                      {lanHosts.map((ip) => (
+                        <li key={ip} className="sheet-mono">
+                          {ip}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'syncLanFirewall')} />
+                  </p>
+                  <div className="sheet-actions">
+                    <button
+                      type="button"
+                      className="style-btn active"
+                      disabled={lanLoading || !inviteHostname(lanHosts)}
+                      onClick={async () => {
+                        const host = inviteHostname(lanHosts);
+                        if (!host) return;
+                        const url = lanAppUrl(host);
+                        try {
+                          await navigator.clipboard.writeText(url);
+                          setLanCopied(true);
+                          window.setTimeout(() => setLanCopied(false), 2000);
+                        } catch {
+                          prompt(t(locale, 'syncLanCopyApp'), url);
+                        }
+                      }}
+                    >
+                      {lanCopied ? t(locale, 'syncLanCopied') : t(locale, 'syncLanCopyApp')}
+                    </button>
+                  </div>
+                </div>
+                {!boardSession ? (
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'syncBoardOnly')} />
+                  </p>
+                ) : null}
+                <ul className="sheet-keys">
+                  <li>
+                    <span className={`status-line${sync.online ? ' on' : ''}`}>
+                      {sync.online ? t(locale, 'online') : t(locale, 'offline')}
+                    </span>
+                    <span>{sync.online ? sync.users : '—'}</span>
+                  </li>
+                  <li>
+                    <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
+                    <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
+                  </li>
+                  <li>
+                    <span>{t(locale, 'syncRoom')}</span>
+                    <span className="sheet-mono">{getBoardRoomName(getCurrentBoardId())}</span>
+                  </li>
+                  <li>
+                    <span>{t(locale, 'syncUrl')}</span>
+                    <span className="sheet-mono" title={isSyncEnabled() ? effectiveSyncUrl() : ''}>
+                      {isSyncEnabled() && effectiveSyncUrl() ? effectiveSyncUrl() : '—'}
+                    </span>
+                  </li>
+                </ul>
+                <label className="nick-row">
+                  <span>{t(locale, 'syncUrl')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={syncUrlDraft}
+                    placeholder={defaultSyncUrl()}
+                    spellCheck={false}
+                    disabled={!boardSession}
+                    aria-invalid={syncUrlError}
+                    onChange={(e) => {
+                      setSyncUrlDraft(e.target.value);
+                      setSyncUrlError(false);
+                    }}
+                  />
+                </label>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, syncUrlError ? 'syncUrlInvalid' : 'syncUrlHint')} />
+                </p>
+                <div className="sheet-actions">
+                  <button
+                    type="button"
+                    className="style-btn active"
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const trimmed = syncUrlDraft.trim();
+                      if (trimmed) {
+                        const parsed = parseSyncUrl(trimmed);
+                        if (!parsed) {
+                          setSyncUrlError(true);
+                          return;
+                        }
+                        const next = writePrefs({ syncUrl: parsed });
+                        setPrefs(next);
+                        setSyncUrlDraft(next.syncUrl ?? '');
+                      } else {
+                        const next = writePrefs({ syncUrl: null });
+                        setPrefs(next);
+                        setSyncUrlDraft('');
+                      }
+                      setSyncUrlError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlApply')}
+                  </button>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const next = writePrefs({ syncUrl: null });
+                      setPrefs(next);
+                      setSyncUrlDraft('');
+                      setSyncUrlError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlReset')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`style-btn${prefs.syncEnabled ? '' : ' active'}`}
+                    disabled={!boardSession}
+                    onClick={() => {
+                      const enabled = !prefs.syncEnabled;
+                      const next = writePrefs({ syncEnabled: enabled });
+                      setPrefs(next);
+                      reconnectSync();
+                    }}
+                  >
+                    {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
+                  </button>
+                </div>
+
+                {isStaticHost() && !isSyncAvailable() && !p2pOn && (
+                  <div className="sheet-hint" style={{ border: '1px dashed var(--chrome-border)', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
+                    <strong><SwapText text={t(locale, 'staticMode')} /></strong>
+                    <div style={{ marginTop: 4 }}><SwapText text={t(locale, 'staticModeHint')} /></div>
+                  </div>
+                )}
+
+                <div style={{ height: 12 }} />
+
+                <button
+                  type="button"
+                  role="switch"
+                  className={`sheet-switch${p2pOn ? ' on' : ''}`}
+                  aria-checked={p2pOn}
+                  aria-describedby="p2p-hint p2p-enabled-hint"
+                  disabled={!boardSession}
+                  onClick={() => {
+                    const next = writePrefs({ p2pEnabled: !p2pOn });
+                    setPrefs(next);
+                    reconnectSync();
+                  }}
+                >
+                  <span>{t(locale, 'p2p')}</span>
+                  <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
+                </button>
+                <p id="p2p-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pHint')} /></p>
+                <p id="p2p-enabled-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pEnabledHint')} /></p>
+
+                <label className="nick-row">
+                  <span>{t(locale, 'p2pSignaling')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={p2pSignalDraft}
+                    placeholder={p2pSignalingUrls().join(', ')}
+                    spellCheck={false}
+                    disabled={!boardSession || !p2pOn}
+                    aria-invalid={p2pSignalError}
+                    aria-describedby="p2p-signaling-hint"
+                    onChange={(e) => { setP2pSignalDraft(e.target.value); setP2pSignalError(false); }}
+                  />
+                </label>
+                <p id="p2p-signaling-hint" className="sheet-hint"><SwapText text={p2pSignalError ? t(locale, 'p2pSignalingInvalid') : t(locale, 'p2pSignalingHint')} /></p>
+                <div className="sheet-actions">
+                  <button
+                    type="button"
+                    className="style-btn active"
+                    disabled={!boardSession || !p2pOn}
+                    onClick={() => {
+                      const trimmed = p2pSignalDraft.trim();
+                      if (trimmed) {
+                        if (!/^wss?:\/\//i.test(trimmed)) { setP2pSignalError(true); return; }
+                        const next = writePrefs({ p2pSignaling: trimmed });
+                        setPrefs(next);
+                        setP2pSignalDraft(next.p2pSignaling ?? '');
+                      } else {
+                        const next = writePrefs({ p2pSignaling: null });
+                        setPrefs(next);
+                        setP2pSignalDraft('');
+                      }
+                      setP2pSignalError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlApply')}
+                  </button>
+                  <button
+                    type="button"
+                    className="style-btn"
+                    disabled={!boardSession || !p2pOn}
+                    onClick={() => {
+                      const next = writePrefs({ p2pSignaling: null });
+                      setPrefs(next);
+                      setP2pSignalDraft('');
+                      setP2pSignalError(false);
+                      reconnectSync();
+                    }}
+                  >
+                    {t(locale, 'syncUrlReset')}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  className={`sheet-switch${netLogOn ? ' on' : ''}`}
+                  aria-checked={netLogOn}
+                  onClick={() => {
+                    const next = !isNetLogEnabled();
+                    setNetLogEnabled(next);
+                    setNetLogOn(next);
+                    if (next) netLog.info('logging enabled via settings');
+                  }}
+                >
+                  <span>{t(locale, 'netLog')}</span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'netLogHint')} />
+                </p>
+              </section>
             </div>
           )}
 
@@ -831,6 +882,51 @@ export function SettingsSheet({
             <div id="settings-panel-customize" role="tabpanel" aria-labelledby="settings-tab-customize" className="sheet-panel">
               <section className="sheet-section">
                 <h3>
+                  <SwapText text={t(locale, 'profile')} />
+                </h3>
+                <label className="nick-row">
+                  <span>{t(locale, 'nickname')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={nick}
+                    maxLength={24}
+                    placeholder={t(locale, 'nicknameHint')}
+                    onChange={(e) => onNick(e.target.value)}
+                  />
+                </label>
+                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
+                  {USER_COLOR_PALETTE.map((c) => (
+                    <button
+                      type="button"
+                      key={c}
+                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
+                      style={{ background: c }}
+                      title={c}
+                      aria-label={c}
+                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
+                      onClick={() => {
+                        const next = saveUserColor(c);
+                        setUserColor(next.color);
+                      }}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    className="members-swatch-custom"
+                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
+                    title={userColor}
+                    aria-label={t(locale, 'membersColor')}
+                    onChange={(e) => {
+                      const next = saveUserColor(e.target.value);
+                      setUserColor(next.color);
+                    }}
+                  />
+                </div>
+              </section>
+
+              <section className="sheet-section">
+                <h3>
                   <SwapText text={t(locale, 'ui')} />
                 </h3>
                 <p className="sheet-hint">
@@ -915,6 +1011,8 @@ export function SettingsSheet({
                   ))}
                 </CustomSwatchRollout>
               </section>
+              
+
 
               {!hideBoardSection && (
                 <section className="sheet-section">

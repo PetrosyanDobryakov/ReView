@@ -3,7 +3,7 @@ import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
 import { boardFont, displayInk } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
-import { spansToHtml, plainToSpans } from '../core/richText';
+import { spansToHtml, plainToSpans, sanitizeRichHtml } from '../core/richText';
 import { readLiveFormat, type LiveTextFormat } from '../core/textEditorFormat';
 
 export function TextOverlay({
@@ -45,7 +45,7 @@ export function TextOverlay({
     armedRef.current = false;
     doneRef.current = false;
     if (target.richHtml && target.richHtml.includes('<')) {
-      el.innerHTML = target.richHtml;
+      el.innerHTML = sanitizeRichHtml(target.richHtml);
     } else if (target.bold || target.italic || target.underline || target.strike || target.highlight) {
       el.innerHTML = spansToHtml(
         plainToSpans(target.text, {
@@ -147,7 +147,7 @@ export function TextOverlay({
     doneRef.current = true;
     const el = ref.current;
     const raw = el?.innerText ?? '';
-    const html = el?.innerHTML ?? '';
+    const html = sanitizeRichHtml(el?.innerHTML ?? '');
     if (commit) onDone(raw, html);
     else onCancel();
   };
@@ -217,7 +217,8 @@ export function TextOverlay({
         const html = e.clipboardData.getData('text/html');
         const text = e.clipboardData.getData('text/plain');
         if (html && html.includes('<')) {
-          document.execCommand('insertHTML', false, html);
+          const safe = sanitizeRichHtml(html);
+          document.execCommand('insertHTML', false, safe);
         } else {
           document.execCommand('insertText', false, text);
         }
@@ -231,8 +232,9 @@ export function TextOverlay({
           return;
         }
         const related = e.relatedTarget as HTMLElement | null;
-        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
-          requestAnimationFrame(() => ref.current?.focus());
+        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
+          // toolbar click -> commit instead of refocus (fix flowchart insert lock)
+          finish(true);
           return;
         }
         if (blurTimer.current !== null) window.clearTimeout(blurTimer.current);
@@ -240,8 +242,8 @@ export function TextOverlay({
           blurTimer.current = null;
           const active = document.activeElement;
           if (ref.current && (active === ref.current || ref.current.contains(active))) return;
-          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
-            ref.current?.focus();
+          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
+            finish(true);
             return;
           }
           finish(true);

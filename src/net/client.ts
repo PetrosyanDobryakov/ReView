@@ -216,6 +216,10 @@ export class SyncClient {
     return this.doc !== null && this.boardId !== null;
   }
 
+  getDoc(): Y.Doc | null {
+    return this.doc;
+  }
+
   getBoardId(): string | null {
     return this.boardId;
   }
@@ -248,8 +252,7 @@ export class SyncClient {
       const userId = typeof user.id === 'string' && user.id.trim() ? user.id.trim() : '';
       if (userId && userId === selfId) continue;
       const key = userId || `client:${id}`;
-      // ponytail: dedup by userId — keep freshest entry, drop stale reconnect
-      if (byUser.has(key)) continue;
+      // ponytail: dedup by userId — keep freshest entry, drop stale reconnect (last wins)
       const published = { name: user.name, color: user.color || '#7c8cff' };
       const display = userId ? getPeerDisplay(userId, published) : { ...published, overridden: false };
       const cur = state.cursor as CursorPos | null | undefined;
@@ -557,7 +560,8 @@ export class SyncClient {
         isSynced,
         room: this.providerRoom,
         boardId: this.boardId,
-        docSize: this.doc ? Y.encodeStateAsUpdate(this.doc).length : 0,
+        // ponytail: don't encode full doc here — freezes on large boards
+        docSize: -1,
       }));
     };
     provider.on('status', onStatus);
