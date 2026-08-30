@@ -10,6 +10,52 @@ const messageAwareness = 1;
 
 const EMPTY_GC_MS = 5 * 60 * 1000;
 
+interface RoomEnv {
+  REVIEW_COMPACT_TOKEN?: string;
+  REVIEW_ROOM_DELETE_TOKEN?: string;
+}
+
+function compactTokenFromEnv(env: RoomEnv | unknown): string {
+  const e = (env || {}) as RoomEnv;
+  const a = e.REVIEW_COMPACT_TOKEN;
+  const b = e.REVIEW_ROOM_DELETE_TOKEN;
+  if (typeof a === 'string' && a.length > 0) return a;
+  if (typeof b === 'string' && b.length > 0) return b;
+  return '';
+}
+
+function compactTokenFromHeaders(headers: Headers): string {
+  const named =
+    headers.get('X-Review-Compact-Token') ||
+    headers.get('X-Review-Room-Delete-Token') ||
+    '';
+  if (named.length > 0) return named;
+  const auth = headers.get('Authorization');
+  if (auth) {
+    const m = /^Bearer\s+(\S+)/i.exec(auth.trim());
+    if (m) return m[1];
+  }
+  return '';
+}
+
+function tokensMatch(provided: string, expected: string): boolean {
+  if (!expected || !provided) return false;
+  const enc = new TextEncoder();
+  const a = enc.encode(provided);
+  const b = enc.encode(expected);
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a[i]! ^ b[i]!;
+  return out === 0;
+}
+
+/** Defense in depth inside the DO — same fail-closed rule as the Worker edge. */
+function isRoomDeleteAuthorized(request: Request, env: unknown): boolean {
+  const expected = compactTokenFromEnv(env);
+  if (!expected) return false;
+  return tokensMatch(compactTokenFromHeaders(request.headers), expected);
+}
+
 export class BoardRoom implements DurableObject {
   private doc: Y.Doc;
   private awareness: awarenessProtocol.Awareness;
@@ -18,9 +64,19 @@ export class BoardRoom implements DurableObject {
   constructor(private state: DurableObjectState, private env: unknown) {
     this.doc = new Y.Doc({ gc: false } as any);
     this.awareness = new awarenessProtocol.Awareness(this.doc);
+    this.bindBroadcastHandlers();
 
-    // persist awareness + doc on update? DO keeps in memory while active.
-    // When last client leaves, alarm will GC.
+    // restore from storage if any (optional persistence)
+    this.state.blockConcurrencyWhile(async () => {
+      const stored = await this.state.storage.get<Uint8Array>('doc');
+      if (stored) {
+        try { Y.applyUpdate(this.doc, stored); } catch {}
+      }
+    });
+  }
+
+  /** Attach doc/awareness → websocket broadcast. Must re-run after resetRoom(). */
+  private bindBroadcastHandlers(): void {
     this.doc.on('update', (update: Uint8Array, origin: unknown) => {
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, messageSync);
@@ -43,14 +99,15 @@ export class BoardRoom implements DurableObject {
         try { ws.send(msg); } catch {}
       }
     });
+  }
 
-    // restore from storage if any (optional persistence)
-    this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<Uint8Array>('doc');
-      if (stored) {
-        try { Y.applyUpdate(this.doc, stored); } catch {}
-      }
-    });
+  /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
+  private resetRoom(): void {
+    try { this.doc.destroy(); } catch {}
+    try { this.awareness.destroy(); } catch {}
+    this.doc = new Y.Doc({ gc: false } as any);
+    this.awareness = new awarenessProtocol.Awareness(this.doc);
+    this.bindBroadcastHandlers();
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -58,14 +115,22 @@ export class BoardRoom implements DurableObject {
 
     // handle DELETE /room/<name> for compatibility (clear)
     if (request.method === 'DELETE' && url.pathname.startsWith('/room/')) {
-      this.doc.destroy();
-      this.awareness.destroy();
-      this.doc = new Y.Doc({ gc: false } as any);
-      this.awareness = new awarenessProtocol.Awareness(this.doc);
+      if (!isRoomDeleteAuthorized(request, this.env)) {
+        return new Response(JSON.stringify({ ok: false }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      }
       for (const ws of this.conns) { try { ws.close(1000, 'room cleared'); } catch {} }
       this.conns.clear();
+      this.resetRoom();
       await this.state.storage.deleteAll();
       return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+    }
+
+    // After alarm() GC, recreate an empty doc if needed before accepting clients.
+    if (!this.doc || (this.doc as any).isDestroyed) {
+      this.resetRoom();
     }
 
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -147,10 +212,9 @@ export class BoardRoom implements DurableObject {
 
   async alarm(): Promise<void> {
     if (this.conns.size === 0) {
-      // GC if still empty
+      // GC if still empty, then leave a fresh empty doc so a later fetch is safe
       try { await this.state.storage.deleteAll(); } catch {}
-      this.doc.destroy();
-      this.awareness.destroy();
+      this.resetRoom();
     }
   }
 }
