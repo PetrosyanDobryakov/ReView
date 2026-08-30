@@ -2316,7 +2316,7 @@ export class Engine {
     const rect = this.canvas.getBoundingClientRect();
     this.w = rect.width;
     this.h = rect.height;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = 1;
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
     this.dirty = true;
@@ -3227,7 +3227,7 @@ export class Engine {
     ctx.translate(w / 2, h / 2);
     ctx.scale(z, z);
     ctx.translate(-cx, -cy);
-    if (orbitLive) {
+     if (false && orbitLive && this.frameDt < 0.05) {
       drawOrbitPaperField(ctx, {
         cx,
         cy,

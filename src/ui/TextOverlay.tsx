@@ -232,8 +232,9 @@ export function TextOverlay({
           return;
         }
         const related = e.relatedTarget as HTMLElement | null;
-        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
-          requestAnimationFrame(() => ref.current?.focus());
+        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
+          // toolbar click -> commit instead of refocus (fix flowchart insert lock)
+          finish(true);
           return;
         }
         if (blurTimer.current !== null) window.clearTimeout(blurTimer.current);
@@ -241,8 +242,8 @@ export function TextOverlay({
           blurTimer.current = null;
           const active = document.activeElement;
           if (ref.current && (active === ref.current || ref.current.contains(active))) return;
-          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots')) {
-            ref.current?.focus();
+          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
+            finish(true);
             return;
           }
           finish(true);

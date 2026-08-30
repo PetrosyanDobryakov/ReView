@@ -6,12 +6,21 @@ const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
 const syncPort =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SYNC_PORT) || '1234';
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const STATIC_HOSTS = new Set(['vercel.app', 'netlify.app', 'github.io', 'pages.dev', 'onrender.com', 'workers.dev']);
+
+const FALLBACK_SYNC_URL = 'wss://review-sync.zpro-driftman.workers.dev';
 const BUILTIN_SYNC_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SYNC_URL) ||
-  `${proto}://${host}:${syncPort}`;
-
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const STATIC_HOSTS = new Set(['vercel.app', 'netlify.app', 'github.io', 'pages.dev', 'onrender.com']);
+  (() => {
+    if (typeof location === 'undefined') return `${proto}://${host}:${syncPort}`;
+    const h = location.hostname.toLowerCase();
+    const isLoopback = LOOPBACK_HOSTS.has(h) || h.endsWith('.localhost');
+    const isLan = /^192\.168\./.test(h) || /^10\./.test(h) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(h);
+    if (isLoopback || isLan) return `${proto}://${host}:${syncPort}`;
+    // any public host (workers.dev, pages.dev, etc) -> dedicated sync worker
+    return FALLBACK_SYNC_URL;
+  })();
 
 /** True when running on Vercel/static without a dedicated sync server. */
 export function isStaticHost(): boolean {
@@ -41,7 +50,7 @@ export function effectiveSyncUrl(): string {
 export function isSyncAvailable(): boolean {
   if (!isStaticHost()) return true;
   const viteSync = (typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string,string> }).env?.VITE_SYNC_URL) || '';
-  return Boolean(readPrefs().syncUrl || viteSync);
+  return Boolean(readPrefs().syncUrl || viteSync || BUILTIN_SYNC_URL);
 }
 
 /** True when the sync URL host is this machine's loopback. */
@@ -78,6 +87,11 @@ export function isSyncEnabled(): boolean {
 }
 
 export function isP2pEnabled(): boolean {
+  // Dedicated DO sync on workers.dev/pages.dev -> no P2P needed (was spamming wss://signaling.yjs.dev and causing lag)
+  if (typeof location !== 'undefined') {
+    const h = location.hostname.toLowerCase();
+    if (h.endsWith('.workers.dev') || h.endsWith('.pages.dev')) return false;
+  }
   const prefs = readPrefs();
   return resolveP2pEnabled({
     staticHost: isStaticHost(),

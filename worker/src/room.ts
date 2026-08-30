@@ -183,16 +183,21 @@ export class BoardRoom implements DurableObject {
       }
     });
 
-    // persist doc periodically
-    const onDocUpdate = (update: Uint8Array) => {
-      // storage put is async but we don't await per message — batch
-      this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)).catch(() => {});
-      void update;
+    // persist doc debounced (don't encode full doc on every stroke)
+    let persistTimer: number | null = null;
+    const schedulePersist = () => {
+      if (persistTimer != null) return;
+      persistTimer = setTimeout(() => {
+        persistTimer = null;
+        try { this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)).catch(() => {}); } catch {}
+      }, 1000) as unknown as number;
     };
+    const onDocUpdate = () => schedulePersist();
     this.doc.on('update', onDocUpdate);
 
     const closeHandler = async () => {
       this.conns.delete(server as any);
+      if (persistTimer != null) { clearTimeout(persistTimer as unknown as number); persistTimer = null; }
       // remove awareness for this connection's clientID is handled by awarenessProtocol (client will send remove on close)
       // we also try to remove any awareness that belonged to this ws origin
       // y-protocols doesn't auto-remove on ws close, so we rely on client sending 'removed' on beforeunload.
