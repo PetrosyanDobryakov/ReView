@@ -69,7 +69,7 @@ type BindTarget =
   | { kind: 'tool'; id: ToolId }
   | { kind: 'color'; color: string };
 
-const TABS: SettingsTab[] = ['customize', 'system', 'binds'];
+const TABS: SettingsTab[] = ['customize', 'binds', 'system'];
 
 const TAB_LABEL: Record<SettingsTab, 'tabSystem' | 'tabBinds' | 'tabCustomize'> = {
   system: 'tabSystem',
@@ -235,7 +235,10 @@ export function SettingsSheet({
   };
 
   const leaveOrbitPaper = () => {
-    if (orbitPaperSelected) onBg(PACKET_PAPER);
+    if (orbitPaperSelected) {
+      onBg(PACKET_PAPER);
+      setPrefs(writePrefs({ orbitUnlocked: false }));
+    }
   };
 
   useEffect(() => {
@@ -399,47 +402,137 @@ export function SettingsSheet({
             <div id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" className="sheet-panel">
               <section className="sheet-section">
                 <h3>
-                  <SwapText text={t(locale, 'profile')} />
+                  <SwapText text={t(locale, 'language')} />
                 </h3>
-                <label className="nick-row">
-                  <span>{t(locale, 'nickname')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={nick}
-                    maxLength={24}
-                    placeholder={t(locale, 'nicknameHint')}
-                    onChange={(e) => onNick(e.target.value)}
-                  />
-                </label>
-                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
-                  {USER_COLOR_PALETTE.map((c) => (
+                <SlideTrack className="locale-row" active={locale}>
+                  {LOCALES.map((id) => (
                     <button
                       type="button"
-                      key={c}
-                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
-                      style={{ background: c }}
-                      title={c}
-                      aria-label={c}
-                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
+                      key={id}
+                      className="style-btn"
+                      data-slide-active={locale === id ? 'true' : undefined}
+                      aria-pressed={locale === id}
                       onClick={() => {
-                        const next = saveUserColor(c);
-                        setUserColor(next.color);
+                        if (id === locale) return;
+                        const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
+                        document.documentElement.style.setProperty('--locale-dir', dir);
+                        writeLocale(id);
+                        onLocale(id);
                       }}
-                    />
+                    >
+                      {id.toUpperCase()}
+                    </button>
                   ))}
+                </SlideTrack>
+              </section>
+
+              <section className="sheet-section">
+                <h3>
+                  <SwapText text={t(locale, 'advanced')} />
+                </h3>
+                <label className="sheet-range">
+                  <span>{t(locale, 'uiScale')}</span>
                   <input
-                    type="color"
-                    className="members-swatch-custom"
-                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
-                    title={userColor}
-                    aria-label={t(locale, 'membersColor')}
-                    onChange={(e) => {
-                      const next = saveUserColor(e.target.value);
-                      setUserColor(next.color);
+                    type="range"
+                    min={UI_SCALE_MIN}
+                    max={UI_SCALE_MAX}
+                    step={0.05}
+                    value={uiScaleDraft ?? prefs.uiScale}
+                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
                     }}
                   />
-                </div>
+                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
+                </label>
+                <label className="sheet-range">
+                  <span>{t(locale, 'toolCursorSize')}</span>
+                  <input
+                    type="range"
+                    min={CURSOR_SCALE_MIN}
+                    max={CURSOR_SCALE_MAX}
+                    step={0.05}
+                    value={cursorScaleDraft ?? prefs.toolCursorScale}
+                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                  />
+                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
+                </label>
+                <button
+                  type="button"
+                  className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={prefs.toolHoverAnim}
+                  onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
+                >
+                  <span>{t(locale, 'toolHoverAnim')}</span>
+                  <span className="switch" aria-hidden="true">
+                    <span className="switch-thumb" />
+                  </span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'toolHoverAnimHint')} />
+                </p>
+              </section>
+
+              <section className="sheet-section">
+                <h3>
+                  <SwapText text={t(locale, 'gestures')} />
+                </h3>
+                <ul className="sheet-keys">
+                  <li>
+                    {t(locale, 'wheel')} <span>{t(locale, 'zoom')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'rotateSnap')} <span>{t(locale, 'rotateSnapGesture')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'rotateFree')} <span>{t(locale, 'rotateFreeHint')}</span>
+                  </li>
+                  <li>
+                    {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
+                  </li>
+                  <li>
+                    {modKey()}+D <span>{t(locale, 'ctxDuplicate')}</span>
+                  </li>
+                </ul>
               </section>
 
               <section className="sheet-section" ref={connectionRef}>
@@ -700,141 +793,6 @@ export function SettingsSheet({
                   <SwapText text={t(locale, 'netLogHint')} />
                 </p>
               </section>
-
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'language')} />
-                </h3>
-                <SlideTrack className="locale-row" active={locale}>
-                  {LOCALES.map((id) => (
-                    <button
-                      type="button"
-                      key={id}
-                      className="style-btn"
-                      data-slide-active={locale === id ? 'true' : undefined}
-                      aria-pressed={locale === id}
-                      onClick={() => {
-                        if (id === locale) return;
-                        const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
-                        document.documentElement.style.setProperty('--locale-dir', dir);
-                        writeLocale(id);
-                        onLocale(id);
-                      }}
-                    >
-                      {id.toUpperCase()}
-                    </button>
-                  ))}
-                </SlideTrack>
-              </section>
-
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'advanced')} />
-                </h3>
-                <label className="sheet-range">
-                  <span>{t(locale, 'uiScale')}</span>
-                  <input
-                    type="range"
-                    min={UI_SCALE_MIN}
-                    max={UI_SCALE_MAX}
-                    step={0.05}
-                    value={uiScaleDraft ?? prefs.uiScale}
-                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
-                </label>
-                <label className="sheet-range">
-                  <span>{t(locale, 'toolCursorSize')}</span>
-                  <input
-                    type="range"
-                    min={CURSOR_SCALE_MIN}
-                    max={CURSOR_SCALE_MAX}
-                    step={0.05}
-                    value={cursorScaleDraft ?? prefs.toolCursorScale}
-                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
-                </label>
-                <button
-                  type="button"
-                  className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={prefs.toolHoverAnim}
-                  onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
-                >
-                  <span>{t(locale, 'toolHoverAnim')}</span>
-                  <span className="switch" aria-hidden="true">
-                    <span className="switch-thumb" />
-                  </span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'toolHoverAnimHint')} />
-                </p>
-              </section>
-
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'gestures')} />
-                </h3>
-                <ul className="sheet-keys">
-                  <li>
-                    {t(locale, 'wheel')} <span>{t(locale, 'zoom')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'rotateSnap')} <span>{t(locale, 'rotateSnapGesture')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'rotateFree')} <span>{t(locale, 'rotateFreeHint')}</span>
-                  </li>
-                  <li>
-                    {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
-                  </li>
-                  <li>
-                    {modKey()}+D <span>{t(locale, 'ctxDuplicate')}</span>
-                  </li>
-                </ul>
-              </section>
             </div>
           )}
 
@@ -924,6 +882,51 @@ export function SettingsSheet({
             <div id="settings-panel-customize" role="tabpanel" aria-labelledby="settings-tab-customize" className="sheet-panel">
               <section className="sheet-section">
                 <h3>
+                  <SwapText text={t(locale, 'profile')} />
+                </h3>
+                <label className="nick-row">
+                  <span>{t(locale, 'nickname')}</span>
+                  <input
+                    type="text"
+                    className="nick-input"
+                    value={nick}
+                    maxLength={24}
+                    placeholder={t(locale, 'nicknameHint')}
+                    onChange={(e) => onNick(e.target.value)}
+                  />
+                </label>
+                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
+                  {USER_COLOR_PALETTE.map((c) => (
+                    <button
+                      type="button"
+                      key={c}
+                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
+                      style={{ background: c }}
+                      title={c}
+                      aria-label={c}
+                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
+                      onClick={() => {
+                        const next = saveUserColor(c);
+                        setUserColor(next.color);
+                      }}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    className="members-swatch-custom"
+                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
+                    title={userColor}
+                    aria-label={t(locale, 'membersColor')}
+                    onChange={(e) => {
+                      const next = saveUserColor(e.target.value);
+                      setUserColor(next.color);
+                    }}
+                  />
+                </div>
+              </section>
+
+              <section className="sheet-section">
+                <h3>
                   <SwapText text={t(locale, 'ui')} />
                 </h3>
                 <p className="sheet-hint">
@@ -1008,6 +1011,8 @@ export function SettingsSheet({
                   ))}
                 </CustomSwatchRollout>
               </section>
+              
+
 
               {!hideBoardSection && (
                 <section className="sheet-section">

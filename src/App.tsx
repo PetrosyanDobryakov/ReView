@@ -595,6 +595,21 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
   }, [boardId]);
 
+  const handleTool = (id: ToolId) => {
+    if (editTarget) {
+      try { engineRef.current?.commitText(editTarget.id, textEditorRef.current?.innerText ?? editTarget.text ?? '', editTarget, textEditorRef.current?.innerHTML ?? editTarget.richHtml); } catch {}
+      setEditTarget(null);
+      setEditLiveFormat(null);
+      textEditorRef.current = null;
+      engineRef.current?.cancelTextEdit();
+    }
+    if (editGraph) {
+      engineRef.current?.cancelGraphEditor();
+      setEditGraph(null);
+    }
+    setTool(id);
+  };
+
   useEffect(() => {
     engineRef.current?.setTool(tool);
   }, [tool]);
@@ -965,7 +980,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         selectionCount={selectionCount}
         canCrop={canCrop}
         cropActive={cropActive}
-        onTool={setTool}
+        onTool={handleTool}
         onDelete={() => engine?.deleteSelection()}
         onCopy={() => engine?.copySelection()}
         onPaste={() => engine?.pasteSelection()}
