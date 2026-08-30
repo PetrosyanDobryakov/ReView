@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Destructive DELETE /room/<name> requires a Worker secret:
+#   wrangler secret put REVIEW_COMPACT_TOKEN
+#   (or REVIEW_ROOM_DELETE_TOKEN)
+# Fail closed when unset. Clients send X-Review-Compact-Token /
+# X-Review-Room-Delete-Token / Authorization: Bearer <token>.
+
 [durable_objects]
 bindings = [
   { name = "BOARD_ROOM", class_name = "BoardRoom" }
