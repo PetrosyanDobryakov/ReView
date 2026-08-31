@@ -197,7 +197,12 @@ export class BoardRoom implements DurableObject {
 
     const closeHandler = async () => {
       this.conns.delete(server as any);
-      if (persistTimer != null) { clearTimeout(persistTimer as unknown as number); persistTimer = null; }
+      if (persistTimer != null) {
+        clearTimeout(persistTimer as unknown as number);
+        persistTimer = null;
+        // Flush pending debounce so a disconnect within 1s of the last update is not lost.
+        try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
+      }
       // remove awareness for this connection's clientID is handled by awarenessProtocol (client will send remove on close)
       // we also try to remove any awareness that belonged to this ws origin
       // y-protocols doesn't auto-remove on ws close, so we rely on client sending 'removed' on beforeunload.
