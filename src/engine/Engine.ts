@@ -230,6 +230,8 @@ export interface EngineEvents {
   onStats?: (stats: { zoom: number; shapes: number }) => void;
   onEditText?: (target: EditTarget | null) => void;
   onEditGraph?: (target: GraphEditTarget | null) => void;
+  /** Ask the host to commit the currently open text editor (editor is being replaced). */
+  onRequestCommitText?: () => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
   onToast?: (message: string) => void;
@@ -1975,6 +1977,10 @@ export class Engine {
   openTextEditor(id: string): void {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
+    // ponytail: replacing the open editor (e.g. dblclick another sticky while
+    // typing) must commit the current text first — otherwise the new target
+    // overwrites the overlay content and typed text is lost without a commit.
+    if (this.editing && this.editId !== id) this.events.onRequestCommitText?.();
     const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
     let color: string;
     if (v.type === 'sticky') {
@@ -2010,6 +2016,8 @@ export class Engine {
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
     // ponytail: never mutate stored color — editor shows displayInk via TextOverlay
     const editorColor = color;
+    // ponytail: same replace-guard as openTextEditor — commit current text first.
+    if (this.editing) this.events.onRequestCommitText?.();
     const fmt = settings.text;
     this.editing = true;
     this.editId = null;
@@ -2125,6 +2133,9 @@ export class Engine {
       const patch: Partial<ShapeView> = {
         text: plain,
         richHtml: storeRich ?? '',
+        // ponytail: persist the size the overlay edited with — shapes created
+        // before fontSize existed (or imported) would otherwise drift from it.
+        ...(target.fontSize !== undefined ? { fontSize: target.fontSize } : {}),
         textColor: color,
         bold: target.bold,
         italic: target.italic,

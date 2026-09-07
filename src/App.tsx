@@ -146,6 +146,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [editLiveFormat, setEditLiveFormat] = useState<LiveTextFormat | null>(null);
   const textEditorRef = useRef<HTMLDivElement | null>(null);
+  const editTargetRef = useRef<EditTarget | null>(null);
+  useEffect(() => {
+    editTargetRef.current = editTarget;
+  }, [editTarget]);
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -458,6 +462,20 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     engine.events.onEditText = (target) => {
       setEditLiveFormat(null);
       setEditTarget(target);
+    };
+    // ponytail: engine is replacing the open editor (dblclick another shape
+    // while typing) — commit current text synchronously before it is lost.
+    engine.events.onRequestCommitText = () => {
+      const cur = editTargetRef.current;
+      const el = textEditorRef.current;
+      if (!cur) return;
+      try {
+        engineRef.current?.commitText(cur.id, el?.innerText ?? cur.text ?? '', cur, el?.innerHTML ?? cur.richHtml);
+      } catch {}
+      setEditTarget(null);
+      setEditLiveFormat(null);
+      textEditorRef.current = null;
+      engineRef.current?.cancelTextEdit();
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
     engine.events.onError = (message) => setError(message);
