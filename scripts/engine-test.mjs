@@ -328,5 +328,37 @@ const colorBinds = getColorBinds();
 assert.equal(colorBinds['0'], 'Digit1', 'legacy hex color binds reset to slot defaults');
 assert.equal(colorBinds['#ff6b6b'], undefined, 'legacy hex color bind keys are dropped');
 
+// multi-select resizes via the group bbox only — invisible per-member
+// handles must not hijack drags (camera: world = screen - (500, 350)).
+const gShape = (x, y) =>
+  store.addShape({ type: 'rect', x, y, w: 100, h: 100, fill: '#ffffff', stroke: '#7c8cff', strokeWidth: 2 });
+const gA = gShape(5000, 5000);
+const gB = gShape(5300, 5000);
+const gC = gShape(5600, 5000);
+engine.setSelection([gA, gB, gC]);
+// B 'se' corner world (5400,5100) → screen (5900,5450); nearest group handle 50px away
+assert.equal(engine.hitHandle(5900, 5450), null, 'no per-member handle in multi-select');
+// group 'se' corner world (5700,5100) → screen (6200,5450)
+assert.deepEqual(
+  engine.hitHandle(6200, 5450),
+  { shapeId: '__group__', handle: 'se' },
+  'group handle still works'
+);
+// drag from the member handle moves the group instead of resizing one member
+engine.onPointerDown({ clientX: 5900, clientY: 5450, button: 0, pointerId: 9, shiftKey: false });
+engine.onPointerMove({ clientX: 5920, clientY: 5470, button: 0, pointerId: 9, shiftKey: false });
+engine.onPointerUp({ clientX: 5920, clientY: 5470, button: 0, pointerId: 9, shiftKey: false });
+const gv = store.readShape(store.board.get(gB));
+assert.equal(gv.w, 100, 'member width untouched by group drag');
+assert.equal(gv.h, 100, 'member height untouched by group drag');
+// single select keeps per-member handles (recompute: the drag above moved B)
+engine.setSelection([gB]);
+const gb = engine.views.get(gB);
+assert.deepEqual(
+  engine.hitHandle(gb.x + gb.w + 500, gb.y + gb.h + 350),
+  { shapeId: gB, handle: 'se' },
+  'single-select handle works'
+);
+
 console.log('engine-move-test: all checks passed');
 process.exit(0);
