@@ -38,6 +38,15 @@ export interface AppPrefs {
    * off by default so Packet stays the everyday look.
    */
   orbitUnlocked: boolean;
+  /** Optional WebRTC p2p sync (for Vercel/static without a websocket server). */
+  p2pEnabled: boolean;
+  /**
+   * True once the user toggled P2P in settings. Distinguishes an explicit off
+   * from the old stored default `p2pEnabled: false`.
+   */
+  p2pUserSet: boolean;
+  /** Signaling servers for y-webrtc. null = defaults. */
+  p2pSignaling: string | null;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -54,6 +63,9 @@ const DEFAULTS: AppPrefs = {
   syncUrl: null,
   syncEnabled: true,
   orbitUnlocked: false,
+  p2pEnabled: false,
+  p2pUserSet: false,
+  p2pSignaling: null,
 };
 
 function normalizeSyncUrl(raw: unknown): string | null {
@@ -67,6 +79,15 @@ function normalizeSyncUrl(raw: unknown): string | null {
 
 export function parseSyncUrl(raw: string): string | null {
   return normalizeSyncUrl(raw);
+}
+
+function normalizeP2pSignaling(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (!/^wss?:\/\//i.test(s)) return null;
+  return s.replace(/\/$/, '');
 }
 
 const CURSOR_SCALE_MIN = 0.7;
@@ -120,6 +141,11 @@ function parsePrefs(raw: unknown): AppPrefs {
       : DEFAULTS.syncUrl,
     syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
     orbitUnlocked: typeof parsed.orbitUnlocked === 'boolean' ? parsed.orbitUnlocked : DEFAULTS.orbitUnlocked,
+    p2pEnabled: typeof parsed.p2pEnabled === 'boolean' ? parsed.p2pEnabled : DEFAULTS.p2pEnabled,
+    p2pUserSet: parsed.p2pUserSet === true,
+    p2pSignaling: Object.prototype.hasOwnProperty.call(parsed, 'p2pSignaling')
+      ? normalizeP2pSignaling(parsed.p2pSignaling)
+      : DEFAULTS.p2pSignaling,
   };
 }
 
@@ -158,10 +184,35 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
       patch.syncUrl !== undefined
         ? patch.syncUrl === null
           ? null
-          : normalizeSyncUrl(patch.syncUrl) ?? cur.syncUrl
+          : (() => {
+              const normalized = normalizeSyncUrl(patch.syncUrl);
+              if (normalized === null && typeof patch.syncUrl === 'string' && patch.syncUrl.trim() !== '') {
+                throw new Error('Invalid syncUrl: must start with ws:// or wss://');
+              }
+              return normalized;
+            })()
         : cur.syncUrl,
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
     orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
+    p2pEnabled: patch.p2pEnabled !== undefined ? Boolean(patch.p2pEnabled) : cur.p2pEnabled,
+    p2pUserSet:
+      patch.p2pEnabled !== undefined
+        ? true
+        : patch.p2pUserSet !== undefined
+          ? Boolean(patch.p2pUserSet)
+          : cur.p2pUserSet,
+    p2pSignaling:
+      patch.p2pSignaling !== undefined
+        ? patch.p2pSignaling === null
+          ? null
+          : (() => {
+              const normalized = normalizeP2pSignaling(patch.p2pSignaling);
+              if (normalized === null && typeof patch.p2pSignaling === 'string' && patch.p2pSignaling.trim() !== '') {
+                throw new Error('Invalid p2pSignaling URL: must start with ws:// or wss://');
+              }
+              return normalized;
+            })()
+        : cur.p2pSignaling,
   };
   cached = next;
   try {

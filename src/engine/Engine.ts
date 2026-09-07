@@ -193,7 +193,7 @@ function paintPeerToolGlyph(
 }
 
 import { settings } from '../core/settings';
-import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich } from '../core/richText';
+import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich, sanitizeRichHtml } from '../core/richText';
 
 export interface EditTarget {
   id: string | null;
@@ -2079,10 +2079,11 @@ export class Engine {
       highlight: target.highlight,
       color: color,
     };
-    const spans = richHtml ? htmlToSpans(richHtml) : parseStoredRich(text, undefined, baseStyle);
+    const cleanHtml = richHtml ? sanitizeRichHtml(richHtml) : undefined;
+    const spans = cleanHtml ? htmlToSpans(cleanHtml) : parseStoredRich(text, undefined, baseStyle);
     const plain = spansToPlain(spans).replace(/\n+$/, '');
     const storeRich =
-      richHtml && htmlStoresRichMarkup(richHtml, spans, baseStyle) ? richHtml : undefined;
+      cleanHtml && htmlStoresRichMarkup(cleanHtml, spans, baseStyle) ? cleanHtml : undefined;
     if (id === null) {
       const trimmed = plain.trim();
       if (!trimmed) return;
@@ -2315,7 +2316,7 @@ export class Engine {
     const rect = this.canvas.getBoundingClientRect();
     this.w = rect.width;
     this.h = rect.height;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = 1;
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
     this.dirty = true;
@@ -3226,7 +3227,7 @@ export class Engine {
     ctx.translate(w / 2, h / 2);
     ctx.scale(z, z);
     ctx.translate(-cx, -cy);
-    if (orbitLive) {
+     if (false && orbitLive && this.frameDt < 0.05) {
       drawOrbitPaperField(ctx, {
         cx,
         cy,
