@@ -913,6 +913,10 @@ export class Engine {
           }
         }
       }
+      // ponytail: per-member handles are not drawn for multi-select — letting
+      // them hijack drags single-resizes one member (e.g. a frame inside the
+      // group) while the user is moving the group.
+      return null;
     }
     for (const id of this.selection) {
       const v = this.views.get(id);
