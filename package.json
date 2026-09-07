@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.12.1",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with optional Yjs sync on your machine or LAN",
   "type": "module",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1 — unreleased
+
+### Board titles
+- Switching boards no longer leaks the previous board's synced title onto the newly opened board (title effects ran before `initBoard`; reconcile/mirror now apply only to the current board).
+- "Save as my board" copies no longer inherit the source title/owner — the copy keeps its "(copy)" name.
+
 ## 0.12.0 — unreleased
 
 ### Security
