@@ -314,6 +314,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         </div>
       </header>
 
+      <div className="home-notice" role="note">
+        <Icon name="warn" size={16} />
+        <span className="home-notice-text">{t(locale, 'storageNotice')}</span>
+        {/* ponytail: desktop download placeholder — no URL yet, wire to the installer link later */}
+        <span className="home-notice-cta" role="link" aria-disabled="true" title={t(locale, 'desktopCta')}>
+          {t(locale, 'desktopCta')}
+        </span>
+      </div>
+
       <div className="home-body">
         <div className="island home-side">
           <div className="home-side-head">
