@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { createBoard, getBoard, type BoardMeta } from './boards';
 import { readLocale } from './locale';
-import { getCurrentBoardId, doc } from './store';
+import { getCurrentBoardId, META_OWNER_ID, META_TITLE, doc } from './store';
 import { t } from '../ui/i18n';
 
 function dbName(boardId: string): string {
@@ -34,6 +34,16 @@ async function writeBoardUpdate(boardId: string, update: Uint8Array): Promise<vo
   try {
     await persist.whenSynced;
     Y.applyUpdate(doc, update);
+    // ponytail: a copy is a new board — never inherit the source's synced
+    // owner/title, or opening the copy would mirror the old name over the
+    // "(copy)" suffix. Reconcile re-seeds both from the copy's own metadata.
+    try {
+      const copyMeta = doc.getMap('meta');
+      if (copyMeta.has(META_TITLE)) copyMeta.delete(META_TITLE);
+      if (copyMeta.has(META_OWNER_ID)) copyMeta.delete(META_OWNER_ID);
+    } catch {
+      /* keep content even if the meta strip fails */
+    }
     // Give IndexedDB a beat to flush.
     await new Promise((r) => setTimeout(r, 80));
   } finally {
