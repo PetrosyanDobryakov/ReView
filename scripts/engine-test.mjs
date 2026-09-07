@@ -360,5 +360,40 @@ assert.deepEqual(
   'single-select handle works'
 );
 
+// replacing the open text editor requests a commit first (dblclick another sticky)
+const stShape = (x) =>
+  store.addShape({ type: 'sticky', x, y: 7000, w: 180, h: 120, fill: '#ffe57a', stroke: '#e0b93c', strokeWidth: 2, textColor: '#3a2f00' });
+const stA = stShape(7000);
+const stB = stShape(7300);
+let lastEditTarget = null;
+let commitRequests = 0;
+const prevOnEditText = engine.events.onEditText;
+engine.events.onEditText = (t) => {
+  lastEditTarget = t;
+};
+engine.events.onRequestCommitText = () => {
+  commitRequests += 1;
+  // host (App) commits whatever is in the editor DOM
+  engine.commitText(lastEditTarget.id, 'Сохранённый', lastEditTarget, undefined);
+};
+engine.openTextEditor(stA);
+assert.equal(engine.editing, true, 'editor open on A');
+engine.openTextEditor(stB);
+assert.equal(commitRequests, 1, 'replacing editor requests a commit');
+assert.equal(store.readShape(store.board.get(stA)).text, 'Сохранённый', 'A text survives editor switch');
+assert.equal(engine.editId, stB, 'B becomes the edited shape');
+engine.events.onEditText = prevOnEditText;
+engine.events.onRequestCommitText = undefined;
+engine.cancelTextEdit();
+// commit persists the edited size onto shapes that predate fontSize
+const stC = stShape(7600);
+engine.commitText(
+  stC,
+  'Крупно',
+  { id: stC, x: 7600, y: 7000, w: 180, h: 120, text: '', fontSize: 30, color: '#3a2f00', type: 'sticky', centered: false },
+  undefined
+);
+assert.equal(store.readShape(store.board.get(stC)).fontSize, 30, 'commit stores overlay fontSize');
+
 console.log('engine-move-test: all checks passed');
 process.exit(0);
