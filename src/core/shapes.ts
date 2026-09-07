@@ -1086,7 +1086,9 @@ export function drawShape(
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, 8);
       ctx.fill();
-      ctx.stroke();
+      // ponytail: classic yellow sticky is borderless (like a real sticky note);
+      // stroke only when the user picked a custom border color.
+      if (v.stroke.trim().toLowerCase() !== COLORS.stickyStroke.toLowerCase()) ctx.stroke();
       if (v.text && !hideText) {
         ctx.save();
         ctx.beginPath();
