@@ -8,7 +8,7 @@
 
 import { getBoard, renameBoard, type BoardMeta } from './boards';
 import { loadUser } from './user';
-import { metaOwnerId, metaTitle, seedBoardMeta, setSyncedBoardTitle } from './store';
+import { getCurrentBoardId, metaOwnerId, metaTitle, seedBoardMeta, setSyncedBoardTitle } from './store';
 
 export type BoardRenameMode = 'sync' | 'local' | false;
 
@@ -62,6 +62,10 @@ export function canRenameBoardOnHome(meta: BoardMeta | undefined): boolean {
 
 /** Apply synced title from Yjs to local metadata (session clients). */
 export function mirrorSyncedTitle(boardId: string, syncedTitle: string): void {
+  // ponytail: the shared Yjs doc may still belong to the previous board
+  // (the title effect in App runs before initBoard on board switch).
+  // Never stamp another board's synced title onto this board's metadata.
+  if (getCurrentBoardId() !== boardId) return;
   const meta = getBoard(boardId);
   if (!meta || usesLocalBoardName(meta)) return;
   const next = normalizeBoardTitle(syncedTitle);
@@ -73,6 +77,14 @@ export function mirrorSyncedTitle(boardId: string, syncedTitle: string): void {
 export function reconcileBoardTitleOnOpen(boardId: string, fallback = 'ReView'): string {
   const local = getBoard(boardId);
   if (!local) return fallback;
+
+  // ponytail: same stale-doc guard as mirrorSyncedTitle — show the local
+  // name until this board's doc is current (initBoard runs later in App's
+  // effect order). The board-ready event re-runs reconcile after initBoard,
+  // so this degrades to the correct title instead of corrupting metadata.
+  if (getCurrentBoardId() !== boardId) {
+    return normalizeBoardTitle(local.name, fallback);
+  }
 
   seedBoardMeta(local);
 
