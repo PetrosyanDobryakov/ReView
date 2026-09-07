@@ -3717,6 +3717,46 @@ h3 .swap-text,
   align-self: start;
   width: 100%;
 }
+.home-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 1180px;
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(224, 142, 60, 0.45);
+  background: rgba(224, 142, 60, 0.12);
+  color: var(--chrome-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.home-notice svg {
+  flex: none;
+  color: #e08e3c;
+}
+.home-notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.home-notice-cta {
+  flex: none;
+  color: #57a8e8;
+  font-weight: 600;
+  text-shadow:
+    0 0 8px rgba(87, 168, 232, 0.8),
+    0 0 20px rgba(87, 168, 232, 0.45);
+  animation: home-notice-glow 2.4s ease-in-out infinite;
+  cursor: pointer;
+  white-space: nowrap;
+}
+@keyframes home-notice-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-notice-cta { animation: none; }
+}
 .home-side-head, .home-main-head {
   display: flex;
   justify-content: space-between;
