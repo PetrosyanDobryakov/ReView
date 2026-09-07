@@ -3823,20 +3823,11 @@ h3 .swap-text,
 }
 .board-row {
   display: grid;
-  /* Shared fixed tracks so header labels sit on the same columns as cells.
-     Actions stay icon-only (~4×28); Keep on device lives under STORAGE. */
-  grid-template-columns:
-    28px
-    minmax(0, 1fr)
-    minmax(72px, 96px)
-    minmax(108px, 140px)
-    minmax(48px, 56px)
-    minmax(0, 128px)
-    160px;
+  grid-template-columns: 36px minmax(0, 1fr) 150px 128px;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 0;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 14px 14px;
+  border-radius: 12px;
   cursor: pointer;
   transition: transform var(--chrome-dur-fast) var(--chrome-ease), background-color var(--chrome-dur-fast) var(--chrome-ease);
 }
@@ -3853,7 +3844,7 @@ h3 .swap-text,
   border: 1px solid transparent !important;
   box-shadow: none !important;
   cursor: default;
-  padding: 2px 12px 6px;
+  padding: 2px 14px 6px;
   font-size: 11px;
   color: var(--chrome-text-dim);
   font-weight: 600;
@@ -3874,7 +3865,7 @@ h3 .swap-text,
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 .board-name-text {
@@ -3885,34 +3876,48 @@ h3 .swap-text,
   font-weight: 600;
   line-height: 1.25;
 }
-.board-id-label {
+.board-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
   font-size: 11px;
-  display: block;
+  line-height: 1.3;
   color: var(--chrome-text-dim);
-  line-height: 1.2;
-  padding-left: 0;
 }
-.board-col-team,
-.board-col-date,
-.board-col-weight {
-  font-size: 12px;
+.board-meta-line .board-id-label,
+.board-meta-weight,
+.board-meta-date {
+  font-size: 11px;
   color: var(--chrome-text-dim);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
-.board-col-team,
-.board-col-date {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.board-col-weight {
-  justify-self: end;
+.board-meta-weight {
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-left: 0;
+}
+.board-meta-sep {
+  color: var(--chrome-text-dim);
+  opacity: 0.55;
+  user-select: none;
+}
+.board-meta-badge-inline {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+.board-meta-badge-inline .board-meta-badge-wrap {
+  display: inline-flex;
+}
+.board-id-label {
+  font-size: 11px;
+  display: inline;
+  color: var(--chrome-text-dim);
+  line-height: 1.2;
 }
 .board-col-status {
   display: flex;
@@ -4083,15 +4088,9 @@ h3 .swap-text,
   text-align: center;
 }
 .board-row-head .board-col-name,
-.board-row-head .board-col-status,
-.board-row-head .board-col-team,
-.board-row-head .board-col-date {
+.board-row-head .board-col-status {
   justify-self: stretch;
   text-align: start;
-}
-.board-row-head .board-col-weight {
-  justify-self: stretch;
-  text-align: right;
 }
 .board-row-head .board-col-actions {
   display: block;
@@ -4107,39 +4106,82 @@ h3 .swap-text,
   font-size: 12px;
   white-space: nowrap;
 }
-/* Collapse by list width, not viewport — sidebar eats horizontal space.
-   Max list ≈852px (home-body 1180 − side 280 − gaps/padding), so keep the
-   full 7-col layout available near the top of that range. */
+.board-row-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
+}
+.board-row-menu-wrap:has(.board-row-menu) {
+  z-index: 3;
+}
+.board-row:has(.board-row-menu) {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+.board-row-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 172px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--chrome-border);
+  background: var(--chrome-panel);
+  box-shadow: var(--chrome-shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.24));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  isolation: isolate;
+}
+.board-row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--chrome-text);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.board-row-menu-item:hover {
+  background: var(--chrome-panel-2);
+  border-color: var(--chrome-border-soft);
+}
+.board-row-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.board-row-menu-item.danger {
+  color: var(--chrome-danger, #d84a4a);
+}
+/* Collapse by list width, not viewport — sidebar eats horizontal space. */
 @container home-list (max-width: 720px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) minmax(108px, 140px) minmax(48px, 56px) 160px;
-  }
-  .board-col-team,
-  .board-col-date {
-    display: none;
+    grid-template-columns: 36px minmax(0, 1fr) 130px 96px;
   }
 }
 @container home-list (max-width: 520px) {
   .board-row {
-    /* Fifth tool (keep-on-device icon) appears when STORAGE is hidden. */
-    grid-template-columns: 28px minmax(0, 1fr) minmax(48px, 56px) 198px;
+    grid-template-columns: 36px minmax(0, 1fr) 96px;
   }
-  .board-col-team,
-  .board-col-date,
   .board-col-status {
     display: none;
   }
-  /* Status column (and its text CTA) gone — keep save as an icon in tools. */
-  .board-row-cta-icon {
+  .board-meta-badge-inline {
     display: inline-flex;
   }
 }
 @container home-list (max-width: 400px) {
   .board-row {
-    grid-template-columns: 28px minmax(0, 1fr) minmax(160px, 198px);
-  }
-  .board-col-weight {
-    display: none;
+    grid-template-columns: 36px minmax(0, 1fr) 96px;
   }
   .board-row-head {
     display: none;

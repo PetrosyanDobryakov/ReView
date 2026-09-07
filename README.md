@@ -2,7 +2,7 @@
 
 [English](README.md) · [Русский](README.ru.md) · [中文](README.zh.md)
 
-Local-first infinite board. Draw, drop stickies, type, paste images. It keeps working with the network unplugged. Optional realtime sync is a websocket on your machine (or LAN), not a cloud account.
+Local-first infinite board. Draw, drop stickies, type, paste images. It keeps working with the network unplugged. Optional realtime sync is a websocket on your machine (or LAN), or peer-to-peer WebRTC in the browser. Works as a static site on Vercel with local save and file sharing.
 
 The product is named ReView. The on-screen name can be renamed by clicking it in the header.
 
@@ -18,7 +18,9 @@ Home is `/`. Each board lives at `/board/:id` with its own IndexedDB (`review-v1
 - Undo / redo, z-order, lock, lasso, marquee
 - Teams and multiple boards on the home page, with local size shown
 - Per-board IndexedDB persistence (`review-v1-<id>`)
-- Optional Yjs rooms `review-<id>` on `ws://<host>:1234`
+- Optional Yjs rooms `review-<id>` on `ws://<host>:1234` or P2P WebRTC
+- Save and share boards as `.review` files (local import/export) — primary sharing on Vercel
+- Works on Vercel as a static SPA (no server required)
 - UI in Russian (default), English, Chinese
 - Chrome skins and board paper are separate settings
 
@@ -44,7 +46,12 @@ npm test
 npm run build
 ```
 
-Production / VM hosting: see [docs/DEPLOY.md](docs/DEPLOY.md). Optional env: `VITE_SYNC_URL` (websocket URL).
+## Deploy
+
+- **Vercel / Cloudflare Pages (static, no server):** push to Vercel or Pages — it builds `dist/` and serves as SPA. Boards stay in the browser (IndexedDB). P2P (WebRTC) starts on these hosts automatically via `wss://signaling.yjs.dev` (room `review-<boardId>`). Use **Export** / **Import** for file share. LAN/self-host still treats P2P as opt-in.
+- **Self-hosted with sync:** `npm run server` or `node server.mjs`. Set `VITE_SYNC_URL` to point browsers at your `wss://` server.
+
+Production / VM hosting: see [docs/DEPLOY.md](docs/DEPLOY.md). Optional env: `VITE_SYNC_URL`, `VITE_P2P_SIGNALING`.
 
 ![Settings](docs/screenshots/settings.png)
 

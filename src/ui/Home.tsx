@@ -18,6 +18,7 @@ import {
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
+import { exportBoardFile, importBoardFile, MAX_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
@@ -50,6 +51,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [teamName, setTeamName] = useState('');
   const [editingBoard, setEditingBoard] = useState<string | null>(null);
   const [boardName, setBoardName] = useState('');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [joinLink, setJoinLink] = useState('');
   const [saveRemote, setSaveRemote] = useState(() => readPrefs().saveRemoteBoards);
   const [weights, setWeights] = useState<Record<string, number>>({});
@@ -74,18 +76,26 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const refreshWeights = useCallback(async (list: BoardMeta[]) => {
     const gen = ++weightsGen.current;
-    setWeightsReady(false);
-    const entries = await Promise.all(
-      list.map(async (b) => {
-        const bytes = await estimateBoardBytes(b.id);
-        return [b.id, bytes] as const;
-      })
-    );
-    if (gen !== weightsGen.current) return;
-    const next: Record<string, number> = {};
-    for (const [id, bytes] of entries) next[id] = bytes;
-    setWeights(next);
-    setWeightsReady(true);
+    try {
+      const entries = await Promise.all(
+        list.map(async (b) => {
+          try {
+            const bytes = await estimateBoardBytes(b.id);
+            return [b.id, bytes] as const;
+          } catch {
+            return [b.id, 0] as const;
+          }
+        })
+      );
+      if (gen !== weightsGen.current) return;
+      const next: Record<string, number> = {};
+      for (const [id, bytes] of entries) next[id] = bytes;
+      setWeights(next);
+    } catch {
+      // keep previous weights on unexpected failure
+    } finally {
+      if (gen === weightsGen.current) setWeightsReady(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -101,7 +111,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   }, []);
 
   useEffect(() => {
-    void refreshWeights(boards);
+    void refreshWeights(boards).catch(() => {});
   }, [boards, refreshWeights]);
 
   useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
@@ -188,7 +198,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     const ok = await deleteBoardData(id);
     refresh();
     if (!ok) {
-      window.alert(t(locale, 'error') + ': IndexedDB');
+      window.alert(t(locale, 'deleteBoardFailed'));
     }
   };
 
@@ -208,7 +218,61 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     setSaveRemote(next);
   };
 
+  const importRef = useRef<HTMLInputElement>(null);
+  const handleExportBoard = async (id: string) => {
+    const ok = await exportBoardFile(id);
+    showCopyToast(ok ? t(locale, 'shareCopied') : t(locale, 'error'));
+  };
+  const handleImportPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (typeof file.size === 'number' && file.size > MAX_FILE_BYTES) {
+      showCopyToast(t(locale, 'importErrorInvalidFile'));
+      return;
+    }
+    const res = await importBoardFile(file);
+    if (res.ok) {
+      refresh();
+      void refreshWeights(listBoards());
+      showCopyToast(t(locale, 'importSuccess'));
+    } else {
+      const key =
+        res.error === 'read_failed'
+          ? 'importErrorReadFailed'
+          : res.error === 'invalid_json'
+            ? 'importErrorInvalidJson'
+            : res.error === 'invalid_file'
+              ? 'importErrorInvalidFile'
+              : res.error === 'invalid_update'
+                ? 'importErrorInvalidUpdate'
+                : res.error === 'file_too_large'
+                  ? 'importErrorInvalidFile'
+                  : 'importFailed';
+      showCopyToast(t(locale, key));
+    }
+  };
+
   const localeTag = readLocale();
+
+  // Close overflow menu on outside click / Escape.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (target && target.closest('.board-row-menu-wrap')) return;
+      setOpenMenuId(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openMenuId]);
 
   return (
     <div className="home-root">
@@ -374,6 +438,19 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               </button>
             </div>
           </div>
+
+          <div className="sheet-section home-share">
+            <h3>{t(locale, 'shareBoard')}</h3>
+            <p className="sheet-hint">{t(locale, 'shareBoardHint')}</p>
+            <p className="sheet-hint">{t(locale, 'importBoardHint')}</p>
+            <input ref={importRef} type="file" accept=".json,.review,application/json" className="visually-hidden" aria-label={t(locale, 'importBoardAction')} onChange={handleImportPick} />
+            <div className="sheet-actions">
+              <button type="button" className="style-btn active" onClick={() => importRef.current?.click()}>
+                <Icon name="upload" size={14} />
+                {t(locale, 'importBoard')}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="island home-main">
@@ -388,25 +465,39 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             <div className="board-row board-row-head">
               <span className="board-col-idx">#</span>
               <span className="board-col-name">{t(locale, 'boardNameCol')}</span>
-              <span className="board-col-team">{t(locale, 'boardTeamCol')}</span>
               <span className="board-col-status">{t(locale, 'boardStorageCol')}</span>
-              <span className="board-col-weight">{t(locale, 'boardWeightCol')}</span>
-              <span className="board-col-date">{t(locale, 'boardDateCol')}</span>
               <span className="board-col-actions">{t(locale, 'boardActionsCol')}</span>
             </div>
             {filtered.length ? (
               filtered.map((b, idx) => {
                 const known = weightsReady && Object.prototype.hasOwnProperty.call(weights, b.id);
                 const bytes = known ? weights[b.id]! : undefined;
-                const weightLabel =
+                const weightLabelFull =
                   bytes === undefined
                     ? t(locale, 'boardWeightLoading')
-                    : formatBoardWeight(bytes, localeTag);
+                    : bytes === 0
+                      ? t(locale, 'boardWeightEmpty')
+                      : formatBoardWeight(bytes, localeTag);
+                const weightLabelShort = bytes === 0 ? '—' : weightLabelFull;
+                const weightTitle = bytes === 0 && known ? t(locale, 'boardWeightEmpty') : bytes && bytes > 0 ? weightLabelFull : undefined;
                 const needsSave =
                   (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
                   (Boolean(b.savedLocally) && known && bytes === 0);
+                const dateLabel = new Date(b.updatedAt).toLocaleString(localeTag);
                 return (
-                  <div key={b.id} className="island board-row" onClick={() => navigateThemed(navigate, boardUrl(b.id))}>
+                  <div
+                    key={b.id}
+                    className="island board-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigateThemed(navigate, boardUrl(b.id))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigateThemed(navigate, boardUrl(b.id));
+                      }
+                    }}
+                  >
                     <span className="board-col-idx">{idx + 1}</span>
                     <span className="board-col-name">
                       {editingBoard === b.id ? (
@@ -434,9 +525,22 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                       ) : (
                         <b className="board-name-text">{b.name}</b>
                       )}
-                      <span className="panel-label board-id-label">{b.id}</span>
+                      <span className="board-meta-line">
+                        <span className="board-id-label">{b.id}</span>
+                        <span className="board-meta-sep" aria-hidden="true">·</span>
+                        <span className="board-meta-weight" title={weightTitle}>
+                          {weightLabelShort}
+                        </span>
+                        <span className="board-meta-sep" aria-hidden="true">·</span>
+                        <span className="board-meta-date">{dateLabel}</span>
+                        <span className="board-meta-badge-inline">
+                          <span className="board-meta-sep" aria-hidden="true">·</span>
+                          <span className="board-meta-badge-wrap">
+                            <BoardStorageBadge meta={b} locale={locale} />
+                          </span>
+                        </span>
+                      </span>
                     </span>
-                    <span className="board-col-team panel-label">{teams.find((tm) => tm.id === b.teamId)?.name ?? b.teamId}</span>
                     <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
                       <BoardStorageBadge meta={b} locale={locale} />
                       {needsSave && (
@@ -450,26 +554,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         </button>
                       )}
                     </span>
-                    <span
-                      className="board-col-weight panel-label"
-                      title={bytes && bytes > 0 ? weightLabel : known ? t(locale, 'boardWeightEmpty') : undefined}
-                    >
-                      {weightLabel}
-                    </span>
-                    <span className="board-col-date panel-label">{new Date(b.updatedAt).toLocaleString(localeTag)}</span>
                     <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
                       <span className="board-row-tools">
-                        {needsSave && (
-                          <button
-                            type="button"
-                            className="icon-btn board-row-cta-icon"
-                            title={t(locale, 'keepOnDeviceHint')}
-                            aria-label={t(locale, 'keepOnDevice')}
-                            onClick={() => handleSaveBoard(b.id)}
-                          >
-                            <Icon name="download" size={20} />
-                          </button>
-                        )}
                         <button
                           type="button"
                           className="icon-btn"
@@ -488,29 +574,64 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         >
                           <Icon name="copy" size={20} />
                         </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t(locale, 'rename')}
-                          aria-label={t(locale, 'rename')}
-                          disabled={!canRenameBoardOnHome(b)}
-                          onClick={() => {
-                            if (!canRenameBoardOnHome(b)) return;
-                            setEditingBoard(b.id);
-                            setBoardName(b.name);
-                          }}
-                        >
-                          <Icon name="pen" size={20} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t(locale, 'ctxDelete')}
-                          aria-label={t(locale, 'ctxDelete')}
-                          onClick={() => void handleDeleteBoard(b.id)}
-                        >
-                          <Icon name="trash" size={20} />
-                        </button>
+                        <span className="board-row-menu-wrap">
+                          <button
+                            type="button"
+                            className="icon-btn board-row-menu-trigger"
+                            aria-label={t(locale, 'more')}
+                            aria-expanded={openMenuId === b.id}
+                            aria-haspopup="menu"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === b.id ? null : b.id);
+                            }}
+                          >
+                            <Icon name="dots" size={20} />
+                          </button>
+                          {openMenuId === b.id && (
+                            <div className="board-row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="board-row-menu-item"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void handleExportBoard(b.id);
+                                }}
+                              >
+                                <Icon name="download" size={14} />
+                                {t(locale, 'exportBoard')}
+                              </button>
+                              <button
+                                type="button"
+                                className="board-row-menu-item"
+                                role="menuitem"
+                                disabled={!canRenameBoardOnHome(b)}
+                                onClick={() => {
+                                  if (!canRenameBoardOnHome(b)) return;
+                                  setOpenMenuId(null);
+                                  setEditingBoard(b.id);
+                                  setBoardName(b.name);
+                                }}
+                              >
+                                <Icon name="pen" size={14} />
+                                {t(locale, 'rename')}
+                              </button>
+                              <button
+                                type="button"
+                                className="board-row-menu-item danger"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void handleDeleteBoard(b.id);
+                                }}
+                              >
+                                <Icon name="trash" size={14} />
+                                {t(locale, 'ctxDelete')}
+                              </button>
+                            </div>
+                          )}
+                        </span>
                       </span>
                     </span>
                   </div>

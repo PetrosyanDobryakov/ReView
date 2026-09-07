@@ -5,10 +5,12 @@ import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { attachSync, detachSync, ensureP2pAttached, publishBoardView, publishDraft, publishErasePreview } from '../net';
 import { effectiveSyncUrl, isLoopbackSyncHostname, loopbackSyncHttpBase } from '../net/config';
 import { syncClient } from '../net/client';
+import { p2pClient } from '../net/p2p';
 import { netLog } from '../net/log';
+import { sanitizeRichHtml } from './richText';
 import {
   POINTS_SPACE_LOCAL,
   POINTS_SPACE_META,
@@ -113,7 +115,7 @@ let compactInFlight = false;
 async function maybeAutoCompact(): Promise<void> {
   if (!currentBoardId || !persistence || compactInFlight) return;
   try {
-    if (syncClient.collectPeers().length > 0) {
+    if (syncClient.collectPeers().length > 0 || p2pClient.collectPeers().length > 0) {
       netLog.info('autoCompact skipped (peers present)', () => ({ boardId: currentBoardId }));
       return;
     }
@@ -213,12 +215,14 @@ async function migrateLegacyBoard(targetPersistence: IndexeddbPersistence): Prom
 /** Enable IndexedDB for the current board (after explicit Save). */
 export function enableBoardPersistence(): void {
   if (!currentBoardId || persistence) return;
+  if (!shouldPersist(currentBoardId)) return;
   attachPersistence(currentBoardId);
 }
 
 /** Attach IndexedDB when this board is open and not yet persisted (home save, etc.). */
 export function persistBoardIfOpen(boardId: string): boolean {
   if (currentBoardId !== boardId || persistence) return false;
+  if (!shouldPersist(boardId)) return false;
   attachPersistence(boardId);
   return true;
 }
@@ -229,6 +233,7 @@ export function initBoard(boardId: string): void {
       attachPersistence(boardId);
       if (persistence) void migrateLegacyBoard(persistence);
     }
+    try { ensureP2pAttached(doc, boardId); } catch {}
     return;
   }
   try { undoManager.clear(); } catch {}
@@ -273,6 +278,8 @@ export function initBoard(boardId: string): void {
   emitPageList();
   emitActivePage();
   attachSync(doc, boardId);
+  // If p2p was enabled after initial load, ensure it attaches too
+  try { ensureP2pAttached(doc, boardId); } catch {}
   // Ephemeral boards never get an IDB 'synced' — still notify the engine immediately.
   if (!persistence) {
     migratePointsSpace();
@@ -284,7 +291,23 @@ export function initBoard(boardId: string): void {
 export function leaveBoard(): void {
   flushWriteGate();
   flushBoardUpdated();
+  try { undoManager.clear(); } catch {}
+  try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
+  try { persistence?.destroy(); } catch {}
+  persistence = null;
+  pagesObserved = false;
+  try { doc.destroy(); } catch {}
+  doc = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
+  board = doc.getMap<Y.Map<unknown>>('shapes');
+  meta = doc.getMap('meta');
+  order = doc.getArray<string>('order');
+  pages = doc.getArray<string>('pages');
+  doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
+  undoManager = new Y.UndoManager([board, order, pages], {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: 200,
+  });
   currentBoardId = null;
 }
 
@@ -636,7 +659,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     rotation: typeof m.get('rotation') === 'number' ? (m.get('rotation') as number) : undefined,
     cornerRadius: typeof m.get('cornerRadius') === 'number' ? (m.get('cornerRadius') as number) : undefined,
     arrowHead: typeof m.get('arrowHead') === 'number' ? (m.get('arrowHead') as number) : undefined,
-    richHtml: typeof m.get('richHtml') === 'string' ? (m.get('richHtml') as string) : undefined,
+    richHtml: typeof m.get('richHtml') === 'string' ? sanitizeRichHtml(m.get('richHtml') as string) || undefined : undefined,
     fromId: m.get('fromId') as string | undefined,
     fromPort: m.get('fromPort') as string | undefined,
     toId: m.get('toId') as string | undefined,
@@ -669,7 +692,10 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     if (v.strike) m.set('strike', true);
     if (v.textAlign && v.textAlign !== 'left') m.set('textAlign', v.textAlign);
     if (v.highlight) m.set('highlight', true);
-    if (v.richHtml) m.set('richHtml', v.richHtml);
+    if (v.richHtml) {
+      const safe = sanitizeRichHtml(v.richHtml);
+      if (safe && safe.includes('<')) m.set('richHtml', safe);
+    }
   }
   if (v.points) {
     const arr = new Y.Array<number>();
@@ -752,6 +778,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       m.delete('rotation');
     } else if (key === 'richHtml' && value === '') {
       m.delete('richHtml');
+    } else if (key === 'richHtml' && typeof value === 'string') {
+      const safe = sanitizeRichHtml(value as string);
+      if (!safe || !safe.includes('<')) m.delete('richHtml');
+      else m.set(key, safe);
     } else {
       m.set(key, value);
     }
@@ -875,7 +905,7 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     } catch {
       return { before: 0, after: 0, didCompact: false };
     }
-    if (syncClient.collectPeers().length > 0) {
+    if (syncClient.collectPeers().length > 0 || p2pClient.collectPeers().length > 0) {
       netLog.info('compact skipped (peers present)', () => ({ boardId, before }));
       return { before, after: before, didCompact: false };
     }
@@ -897,6 +927,9 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
           const sub = new Y.Map<unknown>();
           for (const [sk, sv] of (v as Y.Map<unknown>).entries()) sub.set(sk, sv);
           nm.set(k, sub);
+        } else if (k === 'richHtml' && typeof v === 'string') {
+          const safe = sanitizeRichHtml(v);
+          if (safe && safe.includes('<')) nm.set(k, safe);
         } else {
           nm.set(k, v as unknown);
         }
