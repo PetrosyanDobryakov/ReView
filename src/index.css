@@ -3722,7 +3722,7 @@ h3 .swap-text,
   align-items: center;
   gap: 10px;
   max-width: 1180px;
-  margin: 12px auto 0;
+  margin: 12px auto 16px;
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid rgba(224, 142, 60, 0.45);
