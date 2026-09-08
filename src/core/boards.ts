@@ -300,3 +300,56 @@ export function ensureBoardWithId(
   writeBoards(boards);
   return b;
 }
+
+const RECENT_KEY = 'review-recent-boards';
+const RECENT_MAX = 12;
+
+interface RecentEntry {
+  id: string;
+  at: number;
+}
+
+function parseRecent(raw: unknown): RecentEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecentEntry[] = [];
+  for (const e of raw) {
+    if (!e || typeof e !== 'object') continue;
+    const r = e as Record<string, unknown>;
+    if (typeof r.id !== 'string' || !r.id) continue;
+    out.push({ id: r.id, at: typeof r.at === 'number' ? r.at : 0 });
+  }
+  return out;
+}
+
+/** Boards created on this device or explicitly kept (remote session-only boards are guests). */
+export function isOwnBoard(meta: BoardMeta | undefined): boolean {
+  if (!meta) return false;
+  return meta.status !== 'remote' || meta.savedLocally === true;
+}
+
+/** Remember a board visit (own or guest) for the Recent section. */
+export function recordBoardVisit(id: string): void {
+  if (!id) return;
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const list = parseRecent(raw ? JSON.parse(raw) : []);
+    const next = [{ id, at: Date.now() }, ...list.filter((e) => e.id !== id)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+/** Recently visited boards (own + guest), newest first. Drops deleted boards. */
+export function listRecentBoards(): BoardMeta[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const out: BoardMeta[] = [];
+    for (const e of parseRecent(JSON.parse(raw))) {
+      const m = getBoard(e.id);
+      if (m) out.push(m);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
