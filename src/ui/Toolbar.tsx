@@ -1,13 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ToolId } from '../engine/tools';
-import { onPrefsChange, readPrefs } from '../core/prefs';
+import { onPrefsChange, readPrefs, writePrefs } from '../core/prefs';
 import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
 import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
 
-const NAV: ToolId[] = ['select', 'lasso', 'pan'];
-const CREATE: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text', 'graph'];
+const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
+const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
+/** Tools that live on the strip and can be reordered by drag (popovers excluded). */
+const MOVABLE = new Set<ToolId>([...NAV_DEFAULTS, ...CREATE_DEFAULTS]);
 const SCHEME: ToolId[] = [
   'diamond',
   'triangle',
@@ -19,10 +21,31 @@ const SCHEME: ToolId[] = [
   'display',
   'frame',
 ];
-const DEFAULT_SCHEME: ToolId = 'diamond';
+/** Overflow shelf for specialty tools (graph today, tables later). */
+const MORE: ToolId[] = ['graph'];
 
-function isSchemeTool(id: ToolId): boolean {
-  return SCHEME.includes(id);
+type StripGroup = 'nav' | 'create';
+
+function readOrders(): { nav: ToolId[]; create: ToolId[] } {
+  const saved = readPrefs().toolbarOrder;
+  const clean = (v: unknown): ToolId[] =>
+    Array.isArray(v) ? v.filter((x): x is ToolId => typeof x === 'string' && MOVABLE.has(x as ToolId)) : [];
+  const nav = clean(saved?.nav);
+  const create = clean(saved?.create).filter((id) => !nav.includes(id));
+  const seen = new Set<ToolId>([...nav, ...create]);
+  for (const id of NAV_DEFAULTS) {
+    if (!seen.has(id)) {
+      nav.push(id);
+      seen.add(id);
+    }
+  }
+  for (const id of CREATE_DEFAULTS) {
+    if (!seen.has(id)) {
+      create.push(id);
+      seen.add(id);
+    }
+  }
+  return { nav, create };
 }
 
 export interface ToolbarProps {
@@ -47,30 +70,207 @@ function ToolButtons({
   ids,
   tool,
   locale,
+  group,
   onTool,
+  onMove,
 }: {
   ids: ToolId[];
   tool: ToolId;
   locale: LocaleId;
+  group: StripGroup;
   onTool: (id: ToolId) => void;
+  onMove: (id: ToolId, to: StripGroup, before: ToolId | null, after: boolean) => void;
 }) {
+  const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
+  const [dragId, setDragId] = useState<ToolId | null>(null);
+  const suppressClick = useRef(false);
+
+  const beginDrag = (e: React.DragEvent, id: ToolId) => {
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    suppressClick.current = true;
+    setDragId(id);
+  };
+  const endDrag = () => {
+    setDragId(null);
+    setDrop(null);
+    window.setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
+  };
+
   return (
     <SlideTrack className="tool-group" active={ids.includes(tool) ? tool : null}>
       {ids.map((id) => (
         <button
           type="button"
           key={id}
-          className="tool-btn"
+          className={`tool-btn${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
           data-slide-active={tool === id ? 'true' : undefined}
           title={t(locale, id)}
           aria-label={t(locale, id)}
           aria-pressed={tool === id}
-          onClick={() => onTool(id)}
+          draggable
+          onDragStart={(e) => beginDrag(e, id)}
+          onDragEnd={endDrag}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const r = e.currentTarget.getBoundingClientRect();
+            const after = e.clientX > r.left + r.width / 2;
+            setDrop((cur) => (cur && cur.id === id && cur.after === after ? cur : { id, after }));
+          }}
+          onDragLeave={() => {
+            setDrop((cur) => (cur && cur.id === id ? null : cur));
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const drag = e.dataTransfer.getData('text/plain');
+            setDrop(null);
+            if (drag) onMove(drag as ToolId, group, id, drop?.id === id ? drop.after : false);
+          }}
+          onClick={() => {
+            if (suppressClick.current) return;
+            onTool(id);
+          }}
         >
           <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
         </button>
       ))}
     </SlideTrack>
+  );
+}
+
+/** Tool shelf with a popover (block-scheme, more). Remembers the last used tool. */
+function PopoverToolGroup({
+  ids,
+  defaultId,
+  tool,
+  locale,
+  titleKey,
+  chevronIcon,
+  onTool,
+}: {
+  ids: ToolId[];
+  defaultId: ToolId;
+  tool: ToolId;
+  locale: LocaleId;
+  titleKey: MessageKey;
+  chevronIcon: IconName;
+  onTool: (id: ToolId) => void;
+}) {
+  const menuId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [lastTool, setLastTool] = useState<ToolId>(defaultId);
+
+  useEffect(() => {
+    if (ids.includes(tool)) setLastTool(tool);
+  }, [tool, ids]);
+
+  const prevTool = useRef(tool);
+  useEffect(() => {
+    if (ids.includes(prevTool.current) && !ids.includes(tool)) setOpen(false);
+    prevTool.current = tool;
+  }, [tool, ids]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      chevronRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const active = menuRef.current?.querySelector<HTMLButtonElement>(
+      '[data-scheme-active="true"], [role="menuitem"]'
+    );
+    active?.focus();
+  }, [open]);
+
+  const isActive = ids.includes(tool);
+  const icon = (isActive ? tool : lastTool) as IconName;
+
+  const pick = (id: ToolId) => {
+    setLastTool(id);
+    onTool(id);
+    setOpen(false);
+    chevronRef.current?.focus();
+  };
+
+  return (
+    <div className="tool-group scheme-group" ref={rootRef}>
+      <button
+        type="button"
+        className={`tool-btn${isActive ? ' active' : ''}`}
+        title={t(locale, lastTool)}
+        aria-label={t(locale, lastTool)}
+        aria-pressed={isActive}
+        onClick={() => {
+          onTool(lastTool);
+          setOpen(false);
+        }}
+      >
+        <Icon name={icon} size={TOOLBELT_ICON_SIZE} />
+      </button>
+      <button
+        ref={chevronRef}
+        type="button"
+        className={`tool-btn scheme-chevron${open ? ' active' : ''}`}
+        title={t(locale, titleKey)}
+        aria-label={t(locale, titleKey)}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name={chevronIcon} size={14} />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          id={menuId}
+          className="island block-scheme-popover"
+          role="menu"
+          aria-label={t(locale, titleKey)}
+        >
+          <div className="block-scheme-popover-title">{t(locale, titleKey)}</div>
+          {ids.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="menuitemradio"
+              className={`tool-btn${tool === id ? ' active' : ''}`}
+              data-scheme-active={tool === id ? 'true' : undefined}
+              title={t(locale, id)}
+              aria-label={t(locale, id)}
+              aria-checked={tool === id}
+              onClick={() => pick(id)}
+            >
+              <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -100,66 +300,27 @@ export function Toolbar({
   onCancelCrop,
   onExport,
 }: ToolbarProps) {
-  const menuId = useId();
-  const schemeRootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const chevronRef = useRef<HTMLButtonElement>(null);
-  const [schemeOpen, setSchemeOpen] = useState(false);
-  const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>(DEFAULT_SCHEME);
   const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
+  const [orders, setOrders] = useState(readOrders);
 
   useEffect(() => onPrefsChange((p) => setToolHoverAnim(p.toolHoverAnim)), []);
+  useEffect(() => onPrefsChange(() => setOrders(readOrders())), []);
 
-  useEffect(() => {
-    if (isSchemeTool(tool)) setLastSchemeTool(tool);
-  }, [tool]);
-
-  const prevTool = useRef(tool);
-  useEffect(() => {
-    if (isSchemeTool(prevTool.current) && !isSchemeTool(tool)) setSchemeOpen(false);
-    prevTool.current = tool;
-  }, [tool]);
-
-  useEffect(() => {
-    if (!schemeOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (schemeRootRef.current?.contains(target)) return;
-      setSchemeOpen(false);
+  const moveTool = (id: ToolId, to: StripGroup, before: ToolId | null, after: boolean) => {
+    if (!MOVABLE.has(id)) return;
+    const next = {
+      nav: orders.nav.filter((x) => x !== id),
+      create: orders.create.filter((x) => x !== id),
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setSchemeOpen(false);
-      chevronRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [schemeOpen]);
-
-  useEffect(() => {
-    if (!schemeOpen) return;
-    const active = menuRef.current?.querySelector<HTMLButtonElement>(
-      '[data-scheme-active="true"], [role="menuitem"]'
-    );
-    active?.focus();
-  }, [schemeOpen]);
-
-  const isSchemeActive = isSchemeTool(tool);
-  const schemeIcon = (isSchemeActive ? tool : lastSchemeTool) as IconName;
-  const hasSelection = selectionCount > 0;
-
-  const pickScheme = (id: ToolId) => {
-    setLastSchemeTool(id);
-    onTool(id);
-    setSchemeOpen(false);
-    chevronRef.current?.focus();
+    const list = next[to];
+    const at = before ? list.indexOf(before) : -1;
+    if (at < 0) list.push(id);
+    else list.splice(after ? at + 1 : at, 0, id);
+    writePrefs({ toolbarOrder: next });
+    setOrders(next);
   };
+
+  const hasSelection = selectionCount > 0;
 
   return (
     <div
@@ -169,99 +330,49 @@ export function Toolbar({
       data-tool-anim={toolHoverAnim ? 'on' : undefined}
     >
       <div className="toolbelt-scroll">
-        <ToolButtons ids={NAV} tool={tool} locale={locale} onTool={onTool} />
+        <ToolButtons ids={orders.nav} tool={tool} locale={locale} group="nav" onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
-        <ToolButtons ids={CREATE} tool={tool} locale={locale} onTool={onTool} />
+        <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
-        <div className="tool-group scheme-group" ref={schemeRootRef}>
-          <button
-            type="button"
-            className={`tool-btn${isSchemeActive ? ' active' : ''}`}
-            title={t(locale, lastSchemeTool)}
-            aria-label={t(locale, lastSchemeTool)}
-            aria-pressed={isSchemeActive}
-            onClick={() => {
-              onTool(lastSchemeTool);
-              setSchemeOpen(false);
-            }}
-          >
-            <Icon name={schemeIcon} size={TOOLBELT_ICON_SIZE} />
-          </button>
-          <button
-            ref={chevronRef}
-            type="button"
-            className={`tool-btn scheme-chevron${schemeOpen ? ' active' : ''}`}
-            title={t(locale, 'blockScheme')}
-            aria-label={t(locale, 'blockScheme')}
-            aria-haspopup="menu"
-            aria-controls={menuId}
-            aria-expanded={schemeOpen}
-            onClick={() => setSchemeOpen((v) => !v)}
-          >
-            <Icon name="chevronDown" size={14} />
-          </button>
-          {schemeOpen && (
-            <div
-              ref={menuRef}
-              id={menuId}
-              className="island block-scheme-popover"
-              role="menu"
-              aria-label={t(locale, 'blockScheme')}
-            >
-              <div className="block-scheme-popover-title">{t(locale, 'blockScheme')}</div>
-              {SCHEME.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="menuitemradio"
-                  className={`tool-btn${tool === id ? ' active' : ''}`}
-                  data-scheme-active={tool === id ? 'true' : undefined}
-                  title={t(locale, id)}
-                  aria-label={t(locale, id)}
-                  aria-checked={tool === id}
-                  onClick={() => pickScheme(id)}
-                >
-                  <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <PopoverToolGroup
+          ids={SCHEME}
+          defaultId="diamond"
+          tool={tool}
+          locale={locale}
+          titleKey="blockScheme"
+          chevronIcon="chevronDown"
+          onTool={onTool}
+        />
+        <div className="toolbelt-sep" />
+        <PopoverToolGroup
+          ids={MORE}
+          defaultId="graph"
+          tool={tool}
+          locale={locale}
+          titleKey="more"
+          chevronIcon="more"
+          onTool={onTool}
+        />
         <div className="toolbelt-sep" />
         <div className="tool-group">
-          <button
-            type="button"
-            className="tool-btn"
-            title={actionLabel(locale, 'delete', 'deleteDisabled', hasSelection)}
-            aria-label={actionLabel(locale, 'delete', 'deleteDisabled', hasSelection)}
-            disabled={!hasSelection}
-            onClick={onDelete}
-          >
-            <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            title={actionLabel(locale, 'copy', 'copyDisabled', hasSelection)}
-            aria-label={actionLabel(locale, 'copy', 'copyDisabled', hasSelection)}
-            disabled={!hasSelection}
-            onClick={onCopy}
-          >
-            <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
-          </button>
+          {hasSelection && (
+            <button type="button" className="tool-btn" title={t(locale, 'delete')} aria-label={t(locale, 'delete')} onClick={onDelete}>
+              <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
+            </button>
+          )}
+          {hasSelection && (
+            <button type="button" className="tool-btn" title={t(locale, 'copy')} aria-label={t(locale, 'copy')} onClick={onCopy}>
+              <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
+            </button>
+          )}
           <button type="button" className="tool-btn" title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
             <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
           </button>
-          <button
-            type="button"
-            className="tool-btn"
-            title={actionLabel(locale, 'duplicate', 'duplicateDisabled', hasSelection)}
-            aria-label={actionLabel(locale, 'duplicate', 'duplicateDisabled', hasSelection)}
-            disabled={!hasSelection}
-            onClick={onDuplicate}
-          >
-            <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
-          </button>
+          {hasSelection && (
+            <button type="button" className="tool-btn" title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} onClick={onDuplicate}>
+              <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
+            </button>
+          )}
         </div>
         <div className="toolbelt-sep" />
         <div className="tool-group">
