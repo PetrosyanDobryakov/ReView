@@ -3776,6 +3776,12 @@ h3 .swap-text,
   gap: 6px;
   width: 100%;
 }
+.home-side > .home-teams {
+  margin-bottom: 12px;
+}
+.home-side > .home-teams:last-child {
+  margin-bottom: 0;
+}
 .home-team-btn {
   display: flex;
   align-items: center;

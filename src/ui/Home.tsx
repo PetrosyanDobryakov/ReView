@@ -334,10 +334,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       <div className="home-body">
         <div className="island home-side">
           <div className="home-side-head">
-            <span className="panel-label">{t(locale, 'teams')}</span>
-            <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>
-              <Icon name="plus" size={16} />
-            </button>
+            <span className="panel-label">{t(locale, 'recent')}</span>
           </div>
           <div className="home-teams">
             <div
@@ -354,6 +351,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             >
               <span className="home-team-name">{t(locale, 'recent')}</span>
             </div>
+          </div>
+          <div className="home-side-head">
+            <span className="panel-label">{t(locale, 'teams')}:</span>
+            <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>
+              <Icon name="plus" size={16} />
+            </button>
+          </div>
+          <div className="home-teams">
             {teams.map((team) => (
               <div
                 key={team.id}
