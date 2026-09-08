@@ -14,6 +14,8 @@ import {
   ensureBoardWithId,
   saveBoardLocally,
   isBoardPersistedLocally,
+  listRecentBoards,
+  isOwnBoard,
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
@@ -46,6 +48,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [nick, setNick] = useState(() => loadUser().name);
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
   const [boards, setBoards] = useState<BoardMeta[]>(() => listBoards());
+  const [recent, setRecent] = useState<BoardMeta[]>(() => listRecentBoards());
   const [activeTeam, setActiveTeam] = useState<string>('default');
   const [editingTeam, setEditingTeam] = useState<string | null>(null);
   const [teamName, setTeamName] = useState('');
@@ -72,6 +75,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const refresh = useCallback(() => {
     setTeams(listTeams());
     setBoards(listBoards());
+    setRecent(listRecentBoards());
   }, []);
 
   const refreshWeights = useCallback(async (list: BoardMeta[]) => {
@@ -116,7 +120,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
 
-  const filtered = boards.filter((b) => b.teamId === activeTeam).sort((a, b) => b.updatedAt - a.updatedAt);
+  const filtered = boards.filter((b) => b.teamId === activeTeam && isOwnBoard(b)).sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleCreateBoard = () => {
     const b = createBoard(t(locale, 'newBoard'), activeTeam);
@@ -325,6 +329,36 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
       <div className="home-body">
         <div className="island home-side">
+          <div className="home-side-head">
+            <span className="panel-label">{t(locale, 'recent')}</span>
+          </div>
+          <div className="home-recent">
+            {recent.length ? (
+              recent.map((b) => (
+                <div
+                  key={b.id}
+                  className="home-recent-btn"
+                  role="button"
+                  tabIndex={0}
+                  title={b.name}
+                  onClick={() => navigateThemed(navigate, boardUrl(b.id))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigateThemed(navigate, boardUrl(b.id));
+                    }
+                  }}
+                >
+                  <span className="home-recent-name">{b.name}</span>
+                  <span className="home-meta-badge-wrap">
+                    <BoardStorageBadge meta={b} locale={locale} />
+                  </span>
+                </div>
+              ))
+            ) : (
+              <span className="home-recent-empty">{t(locale, 'recentEmpty')}</span>
+            )}
+          </div>
           <div className="home-side-head">
             <span className="panel-label">{t(locale, 'teams')}</span>
             <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>

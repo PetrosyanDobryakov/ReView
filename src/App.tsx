@@ -48,7 +48,7 @@ import {
 } from './net';
 import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
-import { getBoard, saveBoardLocally, isBoardPersistedLocally, boardUrl } from './core/boards';
+import { getBoard, saveBoardLocally, isBoardPersistedLocally, boardUrl, recordBoardVisit } from './core/boards';
 import { cloneBoard } from './core/boardClone';
 import { exportBoardFile, importBoardFile } from './core/boardShare';
 import {
@@ -193,6 +193,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     setEphemeral(!isBoardPersistedLocally(m));
     syncWasOnline.current = false;
     setHostOffline(false);
+    recordBoardVisit(boardId);
   }, [boardId]);
 
   useEffect(() => {
