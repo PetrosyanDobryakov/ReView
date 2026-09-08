@@ -1,5 +1,7 @@
 /** App-level preferences (not per-board). */
 
+import type { ToolId } from '../engine/tools';
+
 export interface AppPrefs {
   /** When false (default), remote/"other users'" boards are not written to IndexedDB. */
   saveRemoteBoards: boolean;
@@ -47,6 +49,8 @@ export interface AppPrefs {
   p2pUserSet: boolean;
   /** Signaling servers for y-webrtc. null = defaults. */
   p2pSignaling: string | null;
+  /** Custom toolbelt order per strip group. null = defaults. */
+  toolbarOrder: { nav: ToolId[]; create: ToolId[] } | null;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -66,6 +70,7 @@ const DEFAULTS: AppPrefs = {
   p2pEnabled: false,
   p2pUserSet: false,
   p2pSignaling: null,
+  toolbarOrder: null,
 };
 
 function normalizeSyncUrl(raw: unknown): string | null {
@@ -94,6 +99,24 @@ const CURSOR_SCALE_MIN = 0.7;
 const CURSOR_SCALE_MAX = 1.8;
 const UI_SCALE_MIN = 0.75;
 const UI_SCALE_MAX = 1.5;
+
+/** Keep only string ids, drop empties/dupes (validated against tool groups by the caller). */
+function normalizeToolbarOrder(raw: unknown): { nav: ToolId[]; create: ToolId[] } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const rec = raw as Record<string, unknown>;
+  const clean = (v: unknown): ToolId[] => {
+    if (!Array.isArray(v)) return [];
+    const out: ToolId[] = [];
+    for (const x of v) {
+      if (typeof x === 'string' && x && !out.includes(x as ToolId)) out.push(x as ToolId);
+    }
+    return out;
+  };
+  const nav = clean(rec.nav);
+  const create = clean(rec.create);
+  if (!nav.length && !create.length) return null;
+  return { nav, create };
+}
 
 type Listener = (prefs: AppPrefs) => void;
 const listeners = new Set<Listener>();
@@ -146,6 +169,9 @@ function parsePrefs(raw: unknown): AppPrefs {
     p2pSignaling: Object.prototype.hasOwnProperty.call(parsed, 'p2pSignaling')
       ? normalizeP2pSignaling(parsed.p2pSignaling)
       : DEFAULTS.p2pSignaling,
+    toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
+      ? normalizeToolbarOrder(parsed.toolbarOrder)
+      : DEFAULTS.toolbarOrder,
   };
 }
 
@@ -213,6 +239,8 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
               return normalized;
             })()
         : cur.p2pSignaling,
+    toolbarOrder:
+      patch.toolbarOrder !== undefined ? normalizeToolbarOrder(patch.toolbarOrder) : cur.toolbarOrder,
   };
   cached = next;
   try {
@@ -229,6 +257,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     'paperBg',
     'recognizeShapes',
     'rotateSnap',
+    'toolbarOrder',
   ];
   if (userFields.some((k) => patch[k] !== undefined)) {
     try {

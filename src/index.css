@@ -940,6 +940,23 @@ button.brand {
   height: 22px;
 }
 
+/* Toolbar customize by drag — grabbable strip buttons, accent insertion caret. */
+.toolbelt .tool-group .tool-btn[draggable='true'] {
+  cursor: grab;
+}
+.toolbelt .tool-group .tool-btn[draggable='true']:active {
+  cursor: grabbing;
+}
+.tool-btn.dragging {
+  opacity: 0.35;
+}
+.tool-btn.drop-before {
+  box-shadow: -2px 0 0 0 var(--chrome-accent-strong);
+}
+.tool-btn.drop-after {
+  box-shadow: 2px 0 0 0 var(--chrome-accent-strong);
+}
+
 /* Toolbelt hover motion — unique per glyph; gated by data-tool-anim. No lift. */
 .toolbelt[data-tool-anim='on'] .tool-btn svg {
   transform-origin: 50% 50%;
