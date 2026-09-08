@@ -120,10 +120,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
 
-  const filtered = boards.filter((b) => b.teamId === activeTeam && isOwnBoard(b)).sort((a, b) => b.updatedAt - a.updatedAt);
+  // ponytail: 'recent' is a pseudo-team — same board list, own + guest boards in visit order.
+  const filtered =
+    activeTeam === 'recent'
+      ? recent
+      : boards.filter((b) => b.teamId === activeTeam && isOwnBoard(b)).sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleCreateBoard = () => {
-    const b = createBoard(t(locale, 'newBoard'), activeTeam);
+    const b = createBoard(t(locale, 'newBoard'), activeTeam === 'recent' ? 'default' : activeTeam);
     navigateThemed(navigate, boardUrl(b.id));
   };
 
@@ -330,42 +334,26 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       <div className="home-body">
         <div className="island home-side">
           <div className="home-side-head">
-            <span className="panel-label">{t(locale, 'recent')}</span>
-          </div>
-          <div className="home-recent">
-            {recent.length ? (
-              recent.map((b) => (
-                <div
-                  key={b.id}
-                  className="home-recent-btn"
-                  role="button"
-                  tabIndex={0}
-                  title={b.name}
-                  onClick={() => navigateThemed(navigate, boardUrl(b.id))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      navigateThemed(navigate, boardUrl(b.id));
-                    }
-                  }}
-                >
-                  <span className="home-recent-name">{b.name}</span>
-                  <span className="home-meta-badge-wrap">
-                    <BoardStorageBadge meta={b} locale={locale} />
-                  </span>
-                </div>
-              ))
-            ) : (
-              <span className="home-recent-empty">{t(locale, 'recentEmpty')}</span>
-            )}
-          </div>
-          <div className="home-side-head">
             <span className="panel-label">{t(locale, 'teams')}</span>
             <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>
               <Icon name="plus" size={16} />
             </button>
           </div>
           <div className="home-teams">
+            <div
+              className={`home-team-btn${activeTeam === 'recent' ? ' on' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveTeam('recent')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setActiveTeam('recent');
+                }
+              }}
+            >
+              <span className="home-team-name">{t(locale, 'recent')}</span>
+            </div>
             {teams.map((team) => (
               <div
                 key={team.id}
@@ -498,7 +486,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
         <div className="island home-main">
           <div className="home-main-head">
-            <h2>{teams.find((tm) => tm.id === activeTeam)?.name ?? ''}</h2>
+            <h2>{activeTeam === 'recent' ? t(locale, 'recent') : (teams.find((tm) => tm.id === activeTeam)?.name ?? '')}</h2>
             <button type="button" className="style-btn active" onClick={handleCreateBoard}>
               <Icon name="plus" size={14} />
               {t(locale, 'newBoard')}
@@ -681,7 +669,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                 );
               })
             ) : (
-              <div className="sheet-hint home-empty">{t(locale, 'noBoards')}</div>
+              <div className="sheet-hint home-empty">{t(locale, activeTeam === 'recent' ? 'recentEmpty' : 'noBoards')}</div>
             )}
           </div>
         </div>
