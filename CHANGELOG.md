@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.4 — unreleased
+
+### Toolbar
+- More shelf: "Block-scheme" row spans full popover width like "Graph" (root cause was `align-items:center` inherited from `.island` shrink-wrapping the `.more-sub` wrapper).
+
 ## 0.12.3 — unreleased
 
 ### Toolbar
