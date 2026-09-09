@@ -1376,7 +1376,7 @@ button.brand {
 
 .block-scheme-popover {
   position: absolute;
-  bottom: calc(var(--tool-btn-size) + 8px);
+  bottom: calc(var(--tool-btn-size) + 14px);
   left: 50%;
   transform: translateX(-50%);
   padding: 8px;
@@ -1399,36 +1399,49 @@ button.brand {
   padding: 0 0 4px;
 }
 
-/* Nested shelf inside the More popover (block-schemes fly out to the side). */
-.more-sub {
-  grid-column: 1 / -1;
-  position: relative;
+/* More shelf: labeled list popover, schemes fly out to the right. */
+.block-scheme-popover.more-pop {
+  display: flex;
+  flex-direction: column;
+  min-width: 212px;
+  gap: 4px;
 }
-.more-sub-row {
+.tool-btn.more-row {
   width: 100%;
-  border-radius: 8px;
-  padding: 0 8px;
-  gap: 8px;
+  height: 40px;
+  border-radius: 10px;
+  padding: 0 10px;
+  gap: 10px;
   justify-content: flex-start;
 }
-.more-sub-row:hover {
+.tool-btn.more-row:hover {
   background: var(--chrome-panel-2);
 }
-.more-sub-label {
+.tool-btn.more-row > svg:first-child {
+  flex: none;
+}
+.more-row-label {
   flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
   font-size: 13px;
-  white-space: nowrap;
 }
-.more-sub-row > svg:last-child {
+.more-row > svg:last-child {
+  flex: none;
   width: 14px;
   height: 14px;
   opacity: 0.7;
 }
+.more-sub {
+  position: relative;
+}
 .block-scheme-submenu {
   position: absolute;
-  left: calc(100% + 8px);
-  top: -8px;
+  left: calc(100% + 10px);
+  bottom: 0;
   padding: 8px;
   gap: 6px;
   display: grid;
