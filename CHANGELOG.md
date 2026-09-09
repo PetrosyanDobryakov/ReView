@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.3 — unreleased
+
+### Toolbar
+- More-shelf rows use an explicit grid layout so labels always align left.
+
 ## 0.12.2 — unreleased
 
 ### Toolbar
