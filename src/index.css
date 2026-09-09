@@ -1395,6 +1395,43 @@ button.brand {
   padding: 0 0 4px;
 }
 
+/* Nested shelf inside the More popover (block-schemes fly out to the side). */
+.more-sub {
+  grid-column: 1 / -1;
+  position: relative;
+}
+.more-sub-row {
+  width: 100%;
+  border-radius: 8px;
+  padding: 0 8px;
+  gap: 8px;
+  justify-content: flex-start;
+}
+.more-sub-row:hover {
+  background: var(--chrome-panel-2);
+}
+.more-sub-label {
+  flex: 1 1 auto;
+  text-align: left;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.more-sub-row > svg:last-child {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+.block-scheme-submenu {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: -8px;
+  padding: 8px;
+  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, var(--tool-btn-size));
+  z-index: 31;
+}
+
 .tool-media-slot {
   width: var(--tool-btn-size);
   height: var(--tool-btn-size);

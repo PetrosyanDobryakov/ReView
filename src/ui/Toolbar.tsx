@@ -141,40 +141,36 @@ function ToolButtons({
   );
 }
 
-/** Tool shelf with a popover (block-scheme, more). Remembers the last used tool. */
-function PopoverToolGroup({
-  ids,
-  defaultId,
+/** Overflow shelf: graph + nested block-scheme submenu. Single pretty button, no strip duplicates. */
+function MoreMenu({
   tool,
   locale,
-  titleKey,
-  chevronIcon,
   onTool,
 }: {
-  ids: ToolId[];
-  defaultId: ToolId;
   tool: ToolId;
   locale: LocaleId;
-  titleKey: MessageKey;
-  chevronIcon: IconName;
   onTool: (id: ToolId) => void;
 }) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const chevronRef = useRef<HTMLButtonElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [lastTool, setLastTool] = useState<ToolId>(defaultId);
+  const [sub, setSub] = useState(false);
+  const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
 
   useEffect(() => {
-    if (ids.includes(tool)) setLastTool(tool);
-  }, [tool, ids]);
+    if (SCHEME.includes(tool)) setLastSchemeTool(tool);
+  }, [tool]);
 
   const prevTool = useRef(tool);
   useEffect(() => {
-    if (ids.includes(prevTool.current) && !ids.includes(tool)) setOpen(false);
+    if (prevTool.current !== tool) {
+      setOpen(false);
+      setSub(false);
+    }
     prevTool.current = tool;
-  }, [tool, ids]);
+  }, [tool]);
 
   useEffect(() => {
     if (!open) return;
@@ -182,13 +178,15 @@ function PopoverToolGroup({
       const target = e.target as Node;
       if (rootRef.current?.contains(target)) return;
       setOpen(false);
+      setSub(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);
-      chevronRef.current?.focus();
+      setSub(false);
+      btnRef.current?.focus();
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown, true);
@@ -204,45 +202,36 @@ function PopoverToolGroup({
       '[data-scheme-active="true"], [role="menuitem"]'
     );
     active?.focus();
-  }, [open]);
+  }, [open ]);
 
-  const isActive = ids.includes(tool);
-  const icon = (isActive ? tool : lastTool) as IconName;
+  const isActive = MORE.includes(tool) || SCHEME.includes(tool);
 
   const pick = (id: ToolId) => {
-    setLastTool(id);
+    if (SCHEME.includes(id)) setLastSchemeTool(id);
     onTool(id);
     setOpen(false);
-    chevronRef.current?.focus();
+    setSub(false);
+    btnRef.current?.focus();
   };
 
   return (
     <div className="tool-group scheme-group" ref={rootRef}>
       <button
+        ref={btnRef}
         type="button"
         className={`tool-btn${isActive ? ' active' : ''}`}
-        title={t(locale, lastTool)}
-        aria-label={t(locale, lastTool)}
+        title={t(locale, 'more')}
+        aria-label={t(locale, 'more')}
         aria-pressed={isActive}
-        onClick={() => {
-          onTool(lastTool);
-          setOpen(false);
-        }}
-      >
-        <Icon name={icon} size={TOOLBELT_ICON_SIZE} />
-      </button>
-      <button
-        ref={chevronRef}
-        type="button"
-        className={`tool-btn scheme-chevron${open ? ' active' : ''}`}
-        title={t(locale, titleKey)}
-        aria-label={t(locale, titleKey)}
         aria-haspopup="menu"
         aria-controls={menuId}
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          setSub(false);
+        }}
       >
-        <Icon name={chevronIcon} size={14} />
+        <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
       </button>
       {open && (
         <div
@@ -250,10 +239,10 @@ function PopoverToolGroup({
           id={menuId}
           className="island block-scheme-popover"
           role="menu"
-          aria-label={t(locale, titleKey)}
+          aria-label={t(locale, 'more')}
         >
-          <div className="block-scheme-popover-title">{t(locale, titleKey)}</div>
-          {ids.map((id) => (
+          <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
+          {MORE.map((id) => (
             <button
               key={id}
               type="button"
@@ -268,6 +257,44 @@ function PopoverToolGroup({
               <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
             </button>
           ))}
+          <div
+            className="more-sub"
+            onMouseEnter={() => setSub(true)}
+            onMouseLeave={() => setSub(false)}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="tool-btn more-sub-row"
+              aria-haspopup="menu"
+              aria-expanded={sub}
+              title={t(locale, 'blockScheme')}
+              onClick={() => setSub((v) => !v)}
+            >
+              <Icon name={lastSchemeTool as IconName} size={TOOLBELT_ICON_SIZE} />
+              <span className="more-sub-label">{t(locale, 'blockScheme')}</span>
+              <Icon name="chevronRight" size={14} />
+            </button>
+            {sub && (
+              <div className="island block-scheme-submenu" role="menu" aria-label={t(locale, 'blockScheme')}>
+                {SCHEME.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="menuitemradio"
+                    className={`tool-btn${tool === id ? ' active' : ''}`}
+                    data-scheme-active={tool === id ? 'true' : undefined}
+                    title={t(locale, id)}
+                    aria-label={t(locale, id)}
+                    aria-checked={tool === id}
+                    onClick={() => pick(id)}
+                  >
+                    <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -334,25 +361,7 @@ export function Toolbar({
         <div className="toolbelt-sep" />
         <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
-        <PopoverToolGroup
-          ids={SCHEME}
-          defaultId="diamond"
-          tool={tool}
-          locale={locale}
-          titleKey="blockScheme"
-          chevronIcon="chevronDown"
-          onTool={onTool}
-        />
-        <div className="toolbelt-sep" />
-        <PopoverToolGroup
-          ids={MORE}
-          defaultId="graph"
-          tool={tool}
-          locale={locale}
-          titleKey="more"
-          chevronIcon="more"
-          onTool={onTool}
-        />
+        <MoreMenu tool={tool} locale={locale} onTool={onTool} />
         <div className="toolbelt-sep" />
         <div className="tool-group">
           {hasSelection && (
