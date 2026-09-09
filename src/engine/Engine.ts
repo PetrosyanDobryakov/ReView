@@ -3388,6 +3388,9 @@ export class Engine {
     for (const peer of this.remotePeers) {
       // Hide cursors of people on another sub-page (missing page → show everywhere).
       if (peer.page != null && peer.page !== myPage) continue;
+      // Away (alt-tab, home, minimized): connection alive but not on the board — hide the frozen cursor.
+      // Missing flag (old clients) means viewing, so this stays backward compatible.
+      if (peer.viewing === false) continue;
 
       if (peer.draft && peer.draft.points.length >= 4) {
         const d = peer.draft;

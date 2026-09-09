@@ -394,7 +394,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       publishBoardView(!document.hidden);
     });
     const onVisibility = () => {
-      // Alt-tab / minimize: freeze cursor at last pose, do not clear awareness.
+      // Alt-tab / minimize: keep last cursor in awareness (no wipe), remotes hide it via viewing=false.
       publishBoardView(!document.hidden);
     };
     document.addEventListener('visibilitychange', onVisibility);
