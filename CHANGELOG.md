@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.2 — unreleased
+
+### Toolbar
+- Graph moved into the new "More" shelf (sparkles button); block-schemes live in a nested fly-out submenu. No more strip duplicates.
+- More popover is a labeled list with a side submenu, detached from the strip.
+- Delete / copy / duplicate appear only when something is selected.
+- Strip order (navigate + create groups) is draggable and persisted.
+
+### Home
+- "Recent" pseudo-team tab above Teams: own + guest boards in visit order, same board list UI.
+- Storage notice banner + desktop app teaser placeholder.
+
+### Stickies
+- Typed text no longer lost when switching editors (dblclick another sticky commits first).
+- Commit persists the edited fontSize; classic yellow sticky is borderless (custom borders still drawn).
+
+### Engine
+- Multi-select resizes via the group bbox only — invisible per-member handles no longer hijack drags.
+
 ## 0.12.1 — unreleased
 
 ### Board titles
