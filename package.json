@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.12.4",
+  "version": "0.12.5",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with optional Yjs sync (LAN websocket or P2P WebRTC) and file share; static/Vercel-ready",
   "type": "module",

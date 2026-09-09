@@ -12,6 +12,10 @@ globalThis.ResizeObserver = class {
 };
 globalThis.requestAnimationFrame = () => 0;
 globalThis.cancelAnimationFrame = () => {};
+globalThis.Path2D = class {
+  constructor() {}
+  addPath() {}
+};
 const fakeReq = {
   onupgradeneeded: null,
   onsuccess: null,
@@ -394,6 +398,47 @@ engine.commitText(
   undefined
 );
 assert.equal(store.readShape(store.board.get(stC)).fontSize, 30, 'commit stores overlay fontSize');
+
+// away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor
+const peerBase = (id, userId, name, x, viewing) => ({
+  id,
+  userId,
+  name,
+  color: '#ff0000',
+  publishedName: name,
+  publishedColor: '#ff0000',
+  overridden: false,
+  x,
+  y: 150,
+  tool: 'select',
+  page: null,
+  viewing,
+  draft: null,
+  erasePreview: null,
+});
+engine.setPeers([
+  peerBase(101, 'u-view', 'Viewer', 200, true),
+  peerBase(102, 'u-away', 'Away', 300, false),
+  peerBase(103, 'u-legacy', 'Legacy', 400, undefined),
+]);
+const paintedLabels = [];
+const recCtx = new Proxy(
+  {},
+  {
+    get: (_t, p) => {
+      if (p === 'fillText') return (text) => { paintedLabels.push(String(text)); };
+      if (p === 'measureText') return () => ({ width: 10 });
+      return () => undefined;
+    },
+    set: () => true,
+  }
+);
+engine.drawPeers(recCtx);
+assert.deepEqual(
+  paintedLabels.sort(),
+  ['Legacy', 'Viewer'],
+  'only viewing peers paint cursors (away hidden, legacy shown)'
+);
 
 console.log('engine-move-test: all checks passed');
 process.exit(0);

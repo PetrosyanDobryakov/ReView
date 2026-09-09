@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.5 — unreleased
+
+### Sync / presence
+- Away peers (alt-tab, home, minimized) no longer leave a frozen cursor: `Engine` skips `viewing=false` peers when painting cursors. They stay in the members roster while the tab is open.
+- Regression test: `engine-test` asserts only viewing peers paint (`Viewer`+legacy shown, `Away` hidden).
+
 ## 0.12.4 — unreleased
 
 ### Toolbar
