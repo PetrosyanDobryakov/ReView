@@ -199,7 +199,7 @@ function MoreMenu({
   useEffect(() => {
     if (!open) return;
     const active = menuRef.current?.querySelector<HTMLButtonElement>(
-      '[data-scheme-active="true"], [role="menuitem"]'
+      '[data-scheme-active="true"], [role="menuitemradio"], [role="menuitem"]'
     );
     active?.focus();
   }, [open ]);
