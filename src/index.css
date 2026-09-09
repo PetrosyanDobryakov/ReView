@@ -1413,6 +1413,7 @@ button.brand {
   padding: 0 10px;
   gap: 10px;
   justify-content: flex-start;
+  text-align: left;
 }
 .tool-btn.more-row:hover {
   background: var(--chrome-panel-2);
@@ -1429,7 +1430,7 @@ button.brand {
   text-align: left;
   font-size: 13px;
 }
-.more-row > svg:last-child {
+.more-sub .more-row > svg:last-child {
   flex: none;
   width: 14px;
   height: 14px;
