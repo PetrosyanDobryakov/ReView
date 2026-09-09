@@ -199,7 +199,7 @@ function MoreMenu({
   useEffect(() => {
     if (!open) return;
     const active = menuRef.current?.querySelector<HTMLButtonElement>(
-      '[data-scheme-active="true"], [role="menuitemradio"], [role="menuitem"]'
+      '[data-scheme-active="true"], button'
     );
     active?.focus();
   }, [open ]);
@@ -237,7 +237,7 @@ function MoreMenu({
         <div
           ref={menuRef}
           id={menuId}
-          className="island block-scheme-popover"
+          className="island block-scheme-popover more-pop"
           role="menu"
           aria-label={t(locale, 'more')}
         >
@@ -246,15 +246,14 @@ function MoreMenu({
             <button
               key={id}
               type="button"
-              role="menuitemradio"
-              className={`tool-btn${tool === id ? ' active' : ''}`}
-              data-scheme-active={tool === id ? 'true' : undefined}
+              role="menuitem"
+              className={`tool-btn more-row${tool === id ? ' active' : ''}`}
               title={t(locale, id)}
               aria-label={t(locale, id)}
-              aria-checked={tool === id}
               onClick={() => pick(id)}
             >
               <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+              <span className="more-row-label">{t(locale, id)}</span>
             </button>
           ))}
           <div
@@ -265,14 +264,14 @@ function MoreMenu({
             <button
               type="button"
               role="menuitem"
-              className="tool-btn more-sub-row"
+              className="tool-btn more-row"
               aria-haspopup="menu"
               aria-expanded={sub}
               title={t(locale, 'blockScheme')}
               onClick={() => setSub((v) => !v)}
             >
               <Icon name={lastSchemeTool as IconName} size={TOOLBELT_ICON_SIZE} />
-              <span className="more-sub-label">{t(locale, 'blockScheme')}</span>
+              <span className="more-row-label">{t(locale, 'blockScheme')}</span>
               <Icon name="chevronRight" size={14} />
             </button>
             {sub && (
@@ -283,7 +282,6 @@ function MoreMenu({
                     type="button"
                     role="menuitemradio"
                     className={`tool-btn${tool === id ? ' active' : ''}`}
-                    data-scheme-active={tool === id ? 'true' : undefined}
                     title={t(locale, id)}
                     aria-label={t(locale, id)}
                     aria-checked={tool === id}
