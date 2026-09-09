@@ -64,6 +64,7 @@ export const ICON_PATHS = {
   chevronRight: 'M9 6l6 6-6 6',
   dots: 'M12 5a1.4 1.4 0 1 0 0.01 0M12 12a1.4 1.4 0 1 0 0.01 0M12 19a1.4 1.4 0 1 0 0.01 0',
   warn: 'M12 3l10 17H2zM12 10v5M12 18.2v.3',
+  sparkles: 'M11 4l1.9 5.8L18.7 11.7l-5.8 1.9L11 19.4l-1.9-5.8L3.3 11.7l5.8-1.9zM18.5 3l.8 2.3 2.3.8-2.3.8-.8 2.3-.8-2.3-2.3-.8 2.3-.8z',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
