@@ -2,6 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -46,7 +47,8 @@ export type ToolId =
   | 'cylinder'
   | 'terminator'
   | 'subroutine'
-  | 'display';
+  | 'display'
+  | 'table';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
@@ -928,7 +930,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -1148,6 +1150,82 @@ export class GraphTool extends BoxTool {
     ctx.lineTo(drawBox.x + drawBox.w - 12 * s, drawBox.y + drawBox.h - 16 * s);
     ctx.moveTo(drawBox.x + 16 * s, drawBox.y + drawBox.h - 16 * s);
     ctx.lineTo(drawBox.x + 16 * s, drawBox.y + 12 * s);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class TableTool extends BoxTool {
+  readonly id = 'table';
+  readonly shapeType = 'table';
+  readonly defaultW = TABLE_DEFAULT_COLS * TABLE_CELL_W;
+  readonly defaultH = TABLE_DEFAULT_ROWS * TABLE_CELL_H;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    if (!this.start || !this.cur) return;
+    this.shift = p.shift;
+    let box: ShapeBox;
+    if (this.movedScreen < 3) {
+      box = {
+        x: p.world.x - this.defaultW / 2,
+        y: p.world.y - this.defaultH / 2,
+        w: this.defaultW,
+        h: this.defaultH,
+      };
+    } else if (this.shift) {
+      box = squareFromAnchor(this.start, this.cur);
+    } else {
+      box = normalizeBox(this.start, this.cur);
+    }
+    const cols = Math.min(8, Math.max(1, Math.round(box.w / TABLE_CELL_W)));
+    const rows = Math.min(12, Math.max(1, Math.round(box.h / TABLE_CELL_H)));
+    const id = store.addShape({
+      type: 'table',
+      ...box,
+      fill: shapeFillValue(),
+      stroke: settings.shape.stroke,
+      strokeWidth: settings.shape.strokeWidth,
+      cols,
+      rows,
+      cells: normalizeTableCells(cols, rows),
+      header: true,
+    });
+    this.start = null;
+    this.cur = null;
+    this.shift = false;
+    engine.openTableCellEditor(id, 0, 0);
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const drawBox = this.previewBox();
+    if (!drawBox) return;
+    const s = 1 / engine.camera.zoom;
+    const cols = Math.min(8, Math.max(1, Math.round(drawBox.w / TABLE_CELL_W)));
+    const rows = Math.min(12, Math.max(1, Math.round(drawBox.h / TABLE_CELL_H)));
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = shapeFillValue();
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([5 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.rect(drawBox.x, drawBox.y, drawBox.w, drawBox.h);
+    ctx.stroke();
+    // live grid hint
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    for (let c = 1; c < cols; c++) {
+      const x = drawBox.x + (c * drawBox.w) / cols;
+      ctx.moveTo(x, drawBox.y);
+      ctx.lineTo(x, drawBox.y + drawBox.h);
+    }
+    for (let r = 1; r < rows; r++) {
+      const y = drawBox.y + (r * drawBox.h) / rows;
+      ctx.moveTo(drawBox.x, y);
+      ctx.lineTo(drawBox.x + drawBox.w, y);
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -1699,6 +1777,7 @@ export class Tools {
   readonly text = new TextTool();
   readonly arrow = new ArrowTool();
   readonly eraser = new EraserTool();
+  readonly table = new TableTool();
 
   get(id: ToolId): Tool {
     return this[id];

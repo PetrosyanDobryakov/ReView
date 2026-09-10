@@ -7,6 +7,7 @@ export const ICON_PATHS = {
   sticky: 'M5 4h10l5 5v11H5zM15 4v5h5M8 13h8M8 17h5',
   text: 'M5 6h14M12 6v13',
   graph: 'M4 19V5M4 19h16M7 14c2-4 3-1 5-5s3 2 5-3',
+  table: 'M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16',
   arrow: 'M5 12h14M13 6l6 6-6 6',
   eraser: 'M3 16.5l5.5 5.5 13-13-5.5-5.5zM10 22h11',
   lasso: 'M12 5c4.2 0 7.5 2.8 7.5 6.2S16.2 17.4 12 17.4 4.5 14.6 4.5 11.2 7.8 5 12 5z',

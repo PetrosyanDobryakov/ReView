@@ -399,6 +399,67 @@ engine.commitText(
 );
 assert.equal(store.readShape(store.board.get(stC)).fontSize, 30, 'commit stores overlay fontSize');
 
+// tables: grid model round-trips through the doc, cell commit + row/col ops work
+const tKey = store.addShape({
+  type: 'table',
+  x: 10,
+  y: 20,
+  w: 420,
+  h: 224,
+  fill: '#ffffff',
+  stroke: '#6b6b66',
+  strokeWidth: 2,
+  cols: 3,
+  rows: 4,
+  cells: ['A1', 'B1'],
+  header: true,
+});
+let tv = store.readShape(store.board.get(tKey));
+assert.equal(tv.cols, 3, 'table cols persist');
+assert.equal(tv.rows, 4, 'table rows persist');
+assert.equal(tv.cells.length, 12, 'cells normalized to cols*rows');
+assert.deepEqual(tv.cells.slice(0, 3), ['A1', 'B1', ''], 'cells keep values, pad empty');
+assert.equal(tv.fontSize, 14, 'table font default is 14');
+
+let cellTarget = null;
+const prevOnEditTable = engine.events.onEditText;
+engine.events.onEditText = (t) => {
+  cellTarget = t;
+};
+engine.openTableCellEditor(tKey, 1, 2);
+assert.deepEqual(cellTarget?.tableCell, { row: 1, col: 2 }, 'cell editor targets the cell');
+assert.equal(cellTarget?.text, '', 'empty cell text');
+assert.equal(cellTarget?.w, 140, 'cell rect width = w/cols');
+assert.equal(cellTarget?.h, 56, 'cell rect height = h/rows');
+engine.commitTableCell(tKey, 1, 2, 'hello');
+tv = store.readShape(store.board.get(tKey));
+assert.equal(tv.cells[5], 'hello', 'cell commit writes cells[]');
+engine.tableInsertRow(tKey);
+tv = store.readShape(store.board.get(tKey));
+assert.equal(tv.rows, 5, 'row inserted');
+assert.equal(tv.cells.length, 15, 'cells grow with rows');
+assert.equal(tv.cells[5], 'hello', 'existing rows shift intact');
+engine.tableInsertCol(tKey);
+tv = store.readShape(store.board.get(tKey));
+assert.equal(tv.cols, 4, 'column inserted');
+assert.equal(tv.cells.length, 20, 'cells grow with cols');
+engine.tableRemoveCol(tKey);
+engine.tableRemoveRow(tKey);
+tv = store.readShape(store.board.get(tKey));
+assert.equal(tv.cols, 3, 'column removed');
+assert.equal(tv.rows, 4, 'row removed');
+assert.equal(tv.cells[5], 'hello', 'cell survives structural ops');
+engine.tableToggleHeader(tKey);
+assert.equal(store.readShape(store.board.get(tKey)).header, false, 'header toggles off');
+engine.tableToggleHeader(tKey);
+assert.notEqual(store.readShape(store.board.get(tKey)).header, false, 'header toggles on');
+engine.advanceTableCell(tKey, 0, 2, 'right');
+assert.deepEqual(cellTarget?.tableCell, { row: 1, col: 0 }, 'tab wraps to next row');
+engine.advanceTableCell(tKey, 3, 0, 'down');
+assert.deepEqual(cellTarget?.tableCell, { row: 0, col: 0 }, 'enter wraps to first row');
+engine.events.onEditText = prevOnEditTable;
+engine.cancelTextEdit();
+
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor
 const peerBase = (id, userId, name, x, viewing) => ({
   id,

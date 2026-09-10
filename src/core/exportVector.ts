@@ -1,5 +1,5 @@
 import type { ShapeView } from './shapes';
-import { arrowBounds } from './shapes';
+import { arrowBounds, tableGrid } from './shapes';
 import { shapeRotation, rotatedAabb } from './transform';
 import { spansToPlain, parseStoredRich } from './richText';
 
@@ -107,6 +107,40 @@ export function shapesToSvg(
       parts.push(
         `<text x="${x + 8}" y="${y + (v.fontSize ?? 18)}" font-size="${v.fontSize ?? 18}" fill="${esc(v.textColor ?? '#eceae4')}"${opacity}${xf}>${esc(plain)}</text>`
       );
+    } else if (v.type === 'table') {
+      const g = tableGrid(v);
+      const colW = v.w / g.cols;
+      const rowH = v.h / g.rows;
+      const size = v.fontSize ?? 14;
+      const ink = esc(v.textColor ?? '#1c1c1a');
+      const gridSw = Math.min(v.strokeWidth, 1.5);
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" fill="${v.fill === 'transparent' || v.fill === 'none' ? 'none' : esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`
+      );
+      const lines: string[] = [];
+      for (let c = 1; c < g.cols; c++) {
+        const lx = x + c * colW;
+        lines.push(`M${lx} ${y}L${lx} ${y + v.h}`);
+      }
+      for (let r = 1; r < g.rows; r++) {
+        const ly = y + r * rowH;
+        lines.push(`M${x} ${ly}L${x + v.w} ${ly}`);
+      }
+      if (lines.length) {
+        parts.push(
+          `<path d="${lines.join(' ')}" fill="none" stroke="${esc(v.stroke)}" stroke-width="${gridSw}"${opacity}${xf}/>`
+        );
+      }
+      for (let r = 0; r < g.rows; r++) {
+        for (let c = 0; c < g.cols; c++) {
+          const text = g.cells[r * g.cols + c];
+          if (!text) continue;
+          const weight = (g.header && r === 0) || v.bold ? ' font-weight="bold"' : '';
+          parts.push(
+            `<text x="${x + c * colW + 10}" y="${y + r * rowH + 8 + size}" font-size="${size}" fill="${ink}"${weight}${opacity}${xf}>${esc(text.split('\n')[0] ?? '')}</text>`
+          );
+        }
+      }
     } else {
       parts.push(
         `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${v.cornerRadius === undefined ? 6 : Math.max(0, v.cornerRadius)}" fill="${v.fill === 'transparent' || v.fill === 'none' ? 'none' : esc(v.fill)}" stroke="${esc(v.stroke)}" stroke-width="${v.strokeWidth}"${opacity}${xf}/>`

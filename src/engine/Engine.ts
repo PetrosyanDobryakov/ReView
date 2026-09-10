@@ -2,14 +2,19 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, BOARD_TYPEFACE, boardFont, containedIn, withAlpha } from '../core/shapes';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TABLE_FONT, TEXT_FONT, BOARD_TYPEFACE, boardFont, containedIn, withAlpha } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
   getImage,
+  hasFill,
   onImageLoad,
   pointInShape,
   displayInk,
+  readableTextOn,
+  tableCellAt,
+  tableCellRect,
+  tableGrid,
   themeFor,
   intersects,
   normalizeBox,
@@ -78,6 +83,7 @@ const PEER_TOOL_ICON: Record<string, IconName> = {
   terminator: 'terminator',
   subroutine: 'subroutine',
   display: 'display',
+  table: 'table',
 };
 
 function peerToolIcon(tool: string | null | undefined): IconName {
@@ -214,6 +220,8 @@ export interface EditTarget {
   strike: boolean;
   textAlign: 'left' | 'center' | 'right';
   highlight: boolean;
+  /** Table cell being edited (overlay covers one cell, commit writes cells[]). */
+  tableCell?: { row: number; col: number };
 }
 
 export interface GraphEditTarget {
@@ -319,6 +327,8 @@ export class Engine {
   >();
   private peersAnimating = false;
   private frameDt = 1 / 60;
+  /** Last edited cell per table (row/col ops + active-cell outline target it). */
+  private tableActive = new Map<string, { r: number; c: number }>();
 
   setPeers(peers: PeerCursor[]): void {
     const prevById = new Map(this.remotePeers.map((p) => [p.id, p]));
@@ -1558,6 +1568,7 @@ export class Engine {
         arrow: 'infoArrow',
         image: 'infoImage',
         graph: 'infoGraph',
+        table: 'infoTable',
         diamond: 'infoDiamond',
         frame: 'infoFrame',
         triangle: 'infoTriangle',
@@ -1574,6 +1585,10 @@ export class Engine {
       `${t(locale, 'infoPos')}: ${Math.round(v.x)}, ${Math.round(v.y)}`,
     ];
     if (v.points) lines.push(`${t(locale, 'infoPoints')}: ${v.points.length / 2}`);
+    if (v.type === 'table') {
+      const g = tableGrid(v);
+      lines.push(`${g.cols} × ${g.rows}`);
+    }
     if (v.type === 'image') {
       const img = getImage(v.src ?? '');
       if (img && img.complete && img.naturalWidth) {
@@ -1977,6 +1992,12 @@ export class Engine {
   openTextEditor(id: string): void {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
+    // Tables edit one cell at a time — route to the cell editor.
+    if (v.type === 'table') {
+      const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
+      this.openTableCellEditor(id, a.r, a.c);
+      return;
+    }
     // ponytail: replacing the open editor (e.g. dblclick another sticky while
     // typing) must commit the current text first — otherwise the new target
     // overwrites the overlay content and typed text is lost without a commit.
@@ -2011,6 +2032,170 @@ export class Engine {
       textAlign: v.textAlign ?? (centered ? 'center' : 'left'),
       highlight: !!v.highlight,
     });
+  }
+
+  /** Open the text overlay over a single table cell (plain text). */
+  openTableCellEditor(id: string, row: number, col: number): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    if (this.editing && this.editId !== id) this.events.onRequestCommitText?.();
+    const grid = tableGrid(v);
+    const r = Math.min(grid.rows - 1, Math.max(0, row));
+    const c = Math.min(grid.cols - 1, Math.max(0, col));
+    this.tableActive.set(id, { r, c });
+    const rect = tableCellRect(v, r, c);
+    const size = v.fontSize ?? TABLE_FONT;
+    // ponytail: the overlay sits on the cell fill, not the board — contrast against it
+    const paper = store.viewPaperBg();
+    const base = v.textColor ?? themeFor(paper).text;
+    const color = hasFill(v.fill) ? readableTextOn(base, v.fill) : base;
+    this.editing = true;
+    this.editId = id;
+    this.events.onEditText?.({
+      id,
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
+      text: grid.cells[r * grid.cols + c] ?? '',
+      fontSize: size,
+      color,
+      type: 'table',
+      centered: false,
+      bold: false,
+      italic: false,
+      underline: false,
+      strike: false,
+      textAlign: 'left',
+      highlight: false,
+      tableCell: { row: r, col: c },
+    });
+  }
+
+  /** Spreadsheet nav: Enter commits and moves down, Tab commits and moves right. */
+  advanceTableCell(id: string, row: number, col: number, dir: 'down' | 'right'): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table') return;
+    const grid = tableGrid(v);
+    let r = row;
+    let c = col;
+    if (dir === 'down') r = (r + 1) % grid.rows;
+    else {
+      c += 1;
+      if (c >= grid.cols) {
+        c = 0;
+        r = (r + 1) % grid.rows;
+      }
+    }
+    this.openTableCellEditor(id, r, c);
+  }
+
+  /** Write overlay text into one cell (plain text, no rich markup). */
+  commitTableCell(id: string, row: number, col: number, text: string): void {
+    this.editing = false;
+    this.editId = null;
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table') return;
+    const grid = tableGrid(v);
+    const r = Math.min(grid.rows - 1, Math.max(0, row));
+    const c = Math.min(grid.cols - 1, Math.max(0, col));
+    const cells = [...grid.cells];
+    cells[r * grid.cols + c] = text.replace(/\n+$/, '');
+    store.patchShape(id, { cols: grid.cols, rows: grid.rows, cells });
+    this.dirty = true;
+  }
+
+  /** Active cell for row/col ops (clamped to the live grid). */
+  tableActiveCell(id: string): { r: number; c: number } {
+    const v = this.views.get(id);
+    const grid = v && v.type === 'table' ? tableGrid(v) : { rows: 1, cols: 1 };
+    const a = this.tableActive.get(id) ?? { r: grid.rows - 1, c: grid.cols - 1 };
+    return {
+      r: Math.min(grid.rows - 1, Math.max(0, a.r)),
+      c: Math.min(grid.cols - 1, Math.max(0, a.c)),
+    };
+  }
+
+  tableInsertRow(id: string, at?: number): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    const grid = tableGrid(v);
+    if (grid.rows >= 64) return;
+    const row = at ?? Math.min(grid.rows, this.tableActiveCell(id).r + 1);
+    const cells = [...grid.cells];
+    for (let i = 0; i < grid.cols; i++) cells.splice(row * grid.cols + i, 0, '');
+    this.tableActive.set(id, { r: row, c: this.tableActiveCell(id).c });
+    store.patchShape(id, { rows: grid.rows + 1, cells });
+    this.dirty = true;
+  }
+
+  tableInsertCol(id: string, at?: number): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    const grid = tableGrid(v);
+    if (grid.cols >= 24) return;
+    const col = at ?? Math.min(grid.cols, this.tableActiveCell(id).c + 1);
+    const cells: string[] = [];
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) cells.push(grid.cells[r * grid.cols + c] ?? '');
+      cells.splice(r * (grid.cols + 1) + col, 0, '');
+    }
+    this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: col });
+    store.patchShape(id, { cols: grid.cols + 1, cells });
+    this.dirty = true;
+  }
+
+  tableRemoveRow(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    const grid = tableGrid(v);
+    if (grid.rows <= 1) return;
+    const at = this.tableActiveCell(id).r;
+    const cells = grid.cells.filter((_, i) => Math.floor(i / grid.cols) !== at);
+    this.tableActive.set(id, { r: Math.min(at, grid.rows - 2), c: this.tableActiveCell(id).c });
+    store.patchShape(id, { rows: grid.rows - 1, cells });
+    this.dirty = true;
+  }
+
+  tableRemoveCol(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    const grid = tableGrid(v);
+    if (grid.cols <= 1) return;
+    const at = this.tableActiveCell(id).c;
+    const cells = grid.cells.filter((_, i) => i % grid.cols !== at);
+    this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: Math.min(at, grid.cols - 2) });
+    store.patchShape(id, { cols: grid.cols - 1, cells });
+    this.dirty = true;
+  }
+
+  tableToggleHeader(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return;
+    store.patchShape(id, { header: tableGrid(v).header ? false : true });
+    this.dirty = true;
+  }
+
+  /** Screen-space [+] pills for the single selected table (append row / column). */
+  private tablePlusPills(v: ShapeView): Array<{ kind: 'row' | 'col'; x: number; y: number; r: number }> {
+    const s = 1 / this.camera.zoom;
+    return [
+      { kind: 'col', x: v.x + v.w + 16 * s, y: v.y + v.h / 2, r: 10 * s },
+      { kind: 'row', x: v.x + v.w / 2, y: v.y + v.h + 16 * s, r: 10 * s },
+    ];
+  }
+
+  private hitTablePlus(wx: number, wy: number): { id: string; kind: 'row' | 'col' } | null {
+    if (this.editing || this.active !== 'select' || this.override) return null;
+    if (this.selection.size !== 1) return null;
+    const id = [...this.selection][0];
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return null;
+    const slop = 4 / this.camera.zoom;
+    for (const p of this.tablePlusPills(v)) {
+      if (Math.hypot(wx - p.x, wy - p.y) <= p.r + slop) return { id, kind: p.kind };
+    }
+    return null;
   }
 
   openTextEditorAt(x: number, y: number, fontSize: number, color: string): void {
@@ -2396,6 +2581,16 @@ export class Engine {
     if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
+      if (e.button === 0) {
+        const plus = this.hitTablePlus(info.world.x, info.world.y);
+        if (plus) {
+          const gv = this.views.get(plus.id);
+          if (plus.kind === 'row') this.tableInsertRow(plus.id, gv && gv.type === 'table' ? tableGrid(gv).rows : undefined);
+          else this.tableInsertCol(plus.id, gv && gv.type === 'table' ? tableGrid(gv).cols : undefined);
+          this.dirty = true;
+          return;
+        }
+      }
       if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) return;
       // Rotate knob wins over connect ports (north port sits near the stem).
       const onRotate = this.hitRotateHandle(info.screen.x, info.screen.y);
@@ -2653,6 +2848,14 @@ export class Engine {
     }
     if (type === 'graph') {
       this.openGraphEditor(id);
+      return;
+    }
+    if (type === 'table' && id) {
+      const tv = this.views.get(id);
+      if (tv) {
+        const cell = tableCellAt(tv, p.world.x, p.world.y);
+        this.openTableCellEditor(id, cell.row, cell.col);
+      }
       return;
     }
     const TEXT_TYPES = new Set([
@@ -3161,7 +3364,7 @@ export class Engine {
             const v = this.views.get(id);
             if (!v || v.locked) continue;
             if (v.type === 'pen') patches.push([id, { stroke: color }]);
-            else if (['rect','ellipse','diamond','frame','triangle','parallelogram','hexagon','cylinder','terminator','subroutine','display'].includes(v.type)) patches.push([id, { fill: color, stroke: color }]);
+            else if (['rect','ellipse','diamond','frame','triangle','parallelogram','hexagon','cylinder','terminator','subroutine','display','table'].includes(v.type)) patches.push([id, { fill: color, stroke: color }]);
             else if (v.type === 'sticky') patches.push([id, { fill: color }]);
             else if (v.type === 'text' || v.type === 'arrow') patches.push([id, { stroke: color, textColor: color }]);
           }
@@ -3285,6 +3488,9 @@ export class Engine {
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it
       const hideText = this.editing && this.editId === v.id;
+      // tables hide only the edited cell so the rest stays visible while typing
+      const active = hideText && v.type === 'table' ? this.tableActive.get(v.id) : undefined;
+      const hideCell = active ? { row: active.r, col: active.c } : undefined;
       const partial = this.partialErase.get(v.id) ?? peerPartial.get(v.id);
       const wholeErase = this.erasing.has(v.id) || peerWhole.has(v.id);
       if (partial && partial.size && !wholeErase) {
@@ -3312,7 +3518,7 @@ export class Engine {
       if (wholeErase) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, paperBg, hideText);
+        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
         ctx.restore();
         ctx.save();
         ctx.strokeStyle = '#c96a62';
@@ -3323,7 +3529,7 @@ export class Engine {
         ctx.fillRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, paperBg, hideText);
+        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
       }
     };
     const ord = store.order;
@@ -3770,6 +3976,35 @@ export class Engine {
           ctx.lineTo(hr * 0.28, -hr * 0.12);
           ctx.stroke();
           ctx.restore();
+          // ponytail: tables get FigJam-style [+] pills (append row / column) + active-cell frame
+          if (v.type === 'table') {
+            for (const p of this.tablePlusPills(v)) {
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+              ctx.fillStyle = handleFill;
+              ctx.fill();
+              ctx.strokeStyle = COLORS.selection;
+              ctx.lineWidth = 1.5 * s;
+              ctx.stroke();
+              const g = p.r * 0.45;
+              ctx.strokeStyle = COLORS.selection;
+              ctx.lineWidth = 2 * s;
+              ctx.lineCap = 'round';
+              ctx.beginPath();
+              ctx.moveTo(p.x - g, p.y);
+              ctx.lineTo(p.x + g, p.y);
+              ctx.moveTo(p.x, p.y - g);
+              ctx.lineTo(p.x, p.y + g);
+              ctx.stroke();
+            }
+            const a = this.tableActive.get(id);
+            if (a) {
+              const cr = tableCellRect(v, a.r, a.c);
+              ctx.strokeStyle = COLORS.selection;
+              ctx.lineWidth = 2 * s;
+              ctx.strokeRect(cr.x + 1, cr.y + 1, cr.w - 2, cr.h - 2);
+            }
+          }
         }
       });
     }

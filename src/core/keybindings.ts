@@ -27,6 +27,7 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'display',
   'frame',
   'graph',
+  'table',
 ];
 
 const DEFAULT_TOOL_BINDS: ToolBinds = {
@@ -50,6 +51,7 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   terminator: 'KeyU',
   subroutine: 'KeyI',
   display: 'KeyK',
+  table: '',
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {

@@ -13,7 +13,7 @@ assert.deepEqual(readOrders(null), {
   create: [...CREATE_DEFAULTS],
   more: [...MORE_DEFAULTS],
 });
-assert.deepEqual(readOrders({ nav: ['select'], create: ['pen'] }).more, ['graph'], 'legacy prefs gain the shelf');
+assert.deepEqual(readOrders({ nav: ['select'], create: ['pen'] }).more, [...MORE_DEFAULTS], 'legacy prefs gain the shelf');
 
 // unknown ids dropped, scheme ids never become rows, first group wins dupes
 const messy = readOrders({
@@ -23,7 +23,7 @@ const messy = readOrders({
 });
 assert.deepEqual(messy.nav, ['select', 'pen', 'lasso', 'pan'], 'nav cleaned + backfilled');
 assert.deepEqual(messy.create, ['eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled');
-assert.deepEqual(messy.more, ['graph'], 'shelf keeps only parkable, no dupes');
+assert.deepEqual(messy.more, [...MORE_DEFAULTS], 'shelf keeps only parkable, no dupes');
 
 // park eraser on the shelf, pull graph out to the strip
 let o = readOrders(null);

@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TEXT_FONT, relativeLuminance, themeFor } from '../core/shapes';
+import { COLORS, SHAPE_FONT, STICKY_FONT, TABLE_FONT, TEXT_FONT, relativeLuminance, tableGrid, themeFor } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
@@ -633,7 +633,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     stroke: (m.get('stroke') as string) ?? COLORS.stroke,
     strokeWidth: (m.get('strokeWidth') as number) ?? 2,
     text: m.get('text') as string | undefined,
-    fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : ['rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'].includes(type) ? SHAPE_FONT : TEXT_FONT),
+    fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : ['rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'].includes(type) ? SHAPE_FONT : type === 'table' ? TABLE_FONT : TEXT_FONT),
     textColor: m.get('textColor') as string | undefined,
     bold: m.get('bold') === true,
     italic: m.get('italic') === true,
@@ -664,6 +664,14 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     fromPort: m.get('fromPort') as string | undefined,
     toId: m.get('toId') as string | undefined,
     toPort: m.get('toPort') as string | undefined,
+    cols: typeof m.get('cols') === 'number' ? (m.get('cols') as number) : undefined,
+    rows: typeof m.get('rows') === 'number' ? (m.get('rows') as number) : undefined,
+    cells: (() => {
+      const c = m.get('cells');
+      if (c instanceof Y.Array) return (c.toArray() as unknown[]).filter((x): x is string => typeof x === 'string');
+      return Array.isArray(c) ? c.filter((x): x is string => typeof x === 'string') : undefined;
+    })(),
+    header: m.get('header') === false ? false : undefined,
   };
 }
 
@@ -678,12 +686,12 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   m.set('fill', v.fill);
   m.set('stroke', v.stroke);
   m.set('strokeWidth', v.strokeWidth);
-  const textTypes = new Set(['sticky', 'text', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
+  const textTypes = new Set(['sticky', 'text', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
   if (textTypes.has(v.type)) {
     m.set('text', v.text ?? '');
     m.set(
       'fontSize',
-      v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT)
+      v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : v.type === 'table' ? TABLE_FONT : TEXT_FONT)
     );
     if (v.textColor) m.set('textColor', v.textColor);
     if (v.bold) m.set('bold', true);
@@ -726,6 +734,15 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('cropH', v.cropH ?? 1);
   }
   if (v.type === 'graph') m.set('expr', v.expr ?? 'sin(x)');
+  if (v.type === 'table') {
+    const grid = tableGrid(v);
+    m.set('cols', grid.cols);
+    m.set('rows', grid.rows);
+    const arr = new Y.Array<string>();
+    arr.insert(0, grid.cells);
+    m.set('cells', arr);
+    if (v.header === false) m.set('header', false);
+  }
   if (v.fromId) m.set('fromId', v.fromId);
   if (v.fromPort) m.set('fromPort', v.fromPort);
   if (v.toId) m.set('toId', v.toId);
@@ -774,6 +791,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const arr = new Y.Array<string>();
       arr.insert(0, value as string[]);
       m.set('pages', arr);
+    } else if (key === 'cells' && Array.isArray(value)) {
+      const arr = new Y.Array<string>();
+      arr.insert(0, (value as unknown[]).filter((x): x is string => typeof x === 'string'));
+      m.set('cells', arr);
     } else if (key === 'rotation' && value === 0) {
       m.delete('rotation');
     } else if (key === 'richHtml' && value === '') {

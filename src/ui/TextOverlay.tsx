@@ -13,6 +13,7 @@ export function TextOverlay({
   onDone,
   onCancel,
   onFormatChange,
+  onCellAdvance,
 }: {
   target: EditTarget;
   engine: Engine;
@@ -20,6 +21,8 @@ export function TextOverlay({
   onDone: (text: string, html: string) => void;
   onCancel: () => void;
   onFormatChange?: (format: LiveTextFormat) => void;
+  /** Table cells only: Enter/Tab commits and moves to the next cell. */
+  onCellAdvance?: (dir: 'down' | 'right') => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
@@ -191,6 +194,15 @@ export function TextOverlay({
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
           finish(true);
+        } else if (target.tableCell && e.key === 'Enter') {
+          // spreadsheet nav: commit and move down (Ctrl+Enter still finishes)
+          e.preventDefault();
+          finish(true);
+          onCellAdvance?.('down');
+        } else if (target.tableCell && e.key === 'Tab') {
+          e.preventDefault();
+          finish(true);
+          onCellAdvance?.('right');
         } else if (e.key === 'Escape') {
           e.preventDefault();
           finish(false);
