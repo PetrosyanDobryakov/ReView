@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.6 — unreleased
+
+### Toolbar
+- Customizable toolbar: any strip tool can be parked in the "More" shelf and dragged back out; shelf rows reorder by drag. Order persists in prefs (`toolbarOrder.more`).
+- Drag onto the closed shelf button spring-opens the popover; dropping on a group appends.
+- Block-scheme shapes stay in the nested fly-out submenu (not individually movable).
+- New pure-logic module `core/toolbarOrder.ts` + `toolbar-order-test` in the suite.
+
 ## 0.12.5 — unreleased
 
 ### Sync / presence

@@ -956,6 +956,17 @@ button.brand {
 .tool-btn.drop-after {
   box-shadow: 2px 0 0 0 var(--chrome-accent-strong);
 }
+/* Shelf rows stack vertically — insertion caret goes top/bottom. */
+.tool-btn.more-row.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--chrome-accent-strong);
+}
+.tool-btn.more-row.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--chrome-accent-strong);
+}
+/* DnD append zone around strip groups (layout-neutral). */
+.tool-drop-group {
+  display: contents;
+}
 
 /* Toolbelt hover motion — unique per glyph; gated by data-tool-anim. No lift. */
 .toolbelt[data-tool-anim='on'] .tool-btn svg {
