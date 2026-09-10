@@ -49,8 +49,8 @@ export interface AppPrefs {
   p2pUserSet: boolean;
   /** Signaling servers for y-webrtc. null = defaults. */
   p2pSignaling: string | null;
-  /** Custom toolbelt order per strip group. null = defaults. */
-  toolbarOrder: { nav: ToolId[]; create: ToolId[] } | null;
+  /** Custom toolbelt order per strip group + More shelf. null = defaults. */
+  toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -101,7 +101,7 @@ const UI_SCALE_MIN = 0.75;
 const UI_SCALE_MAX = 1.5;
 
 /** Keep only string ids, drop empties/dupes (validated against tool groups by the caller). */
-function normalizeToolbarOrder(raw: unknown): { nav: ToolId[]; create: ToolId[] } | null {
+function normalizeToolbarOrder(raw: unknown): { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null {
   if (!raw || typeof raw !== 'object') return null;
   const rec = raw as Record<string, unknown>;
   const clean = (v: unknown): ToolId[] => {
@@ -114,8 +114,9 @@ function normalizeToolbarOrder(raw: unknown): { nav: ToolId[]; create: ToolId[] 
   };
   const nav = clean(rec.nav);
   const create = clean(rec.create);
-  if (!nav.length && !create.length) return null;
-  return { nav, create };
+  const more = clean(rec.more);
+  if (!nav.length && !create.length && !more.length) return null;
+  return more.length ? { nav, create, more } : { nav, create };
 }
 
 type Listener = (prefs: AppPrefs) => void;

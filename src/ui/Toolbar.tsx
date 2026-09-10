@@ -1,51 +1,32 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ToolId } from '../engine/tools';
 import { onPrefsChange, readPrefs, writePrefs } from '../core/prefs';
+import {
+  SCHEME,
+  isParkable,
+  moveToolInOrders,
+  readOrders as readToolbarOrders,
+  type StripGroup,
+  type ToolbarOrders,
+} from '../core/toolbarOrder';
 import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
 import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
 
-const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
-const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
-/** Tools that live on the strip and can be reordered by drag (popovers excluded). */
-const MOVABLE = new Set<ToolId>([...NAV_DEFAULTS, ...CREATE_DEFAULTS]);
-const SCHEME: ToolId[] = [
-  'diamond',
-  'triangle',
-  'parallelogram',
-  'hexagon',
-  'cylinder',
-  'terminator',
-  'subroutine',
-  'display',
-  'frame',
-];
-/** Overflow shelf for specialty tools (graph today, tables later). */
-const MORE: ToolId[] = ['graph'];
+function readOrders(): ToolbarOrders {
+  return readToolbarOrders(readPrefs().toolbarOrder);
+}
 
-type StripGroup = 'nav' | 'create';
-
-function readOrders(): { nav: ToolId[]; create: ToolId[] } {
-  const saved = readPrefs().toolbarOrder;
-  const clean = (v: unknown): ToolId[] =>
-    Array.isArray(v) ? v.filter((x): x is ToolId => typeof x === 'string' && MOVABLE.has(x as ToolId)) : [];
-  const nav = clean(saved?.nav);
-  const create = clean(saved?.create).filter((id) => !nav.includes(id));
-  const seen = new Set<ToolId>([...nav, ...create]);
-  for (const id of NAV_DEFAULTS) {
-    if (!seen.has(id)) {
-      nav.push(id);
-      seen.add(id);
-    }
+/** Tool id from a DnD payload, or null for foreign drags (files, …). */
+function dropToolId(e: React.DragEvent): ToolId | null {
+  let v = '';
+  try {
+    v = e.dataTransfer.getData('text/plain');
+  } catch {
+    return null;
   }
-  for (const id of CREATE_DEFAULTS) {
-    if (!seen.has(id)) {
-      create.push(id);
-      seen.add(id);
-    }
-  }
-  return { nav, create };
+  return v && isParkable(v) ? (v as ToolId) : null;
 }
 
 export interface ToolbarProps {
@@ -100,6 +81,20 @@ function ToolButtons({
   };
 
   return (
+    <div
+      className="tool-drop-group"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={(e) => {
+        if (e.defaultPrevented) return;
+        const drag = dropToolId(e);
+        if (!drag) return;
+        e.preventDefault();
+        onMove(drag, group, null, false);
+      }}
+    >
     <SlideTrack className="tool-group" active={ids.includes(tool) ? tool : null}>
       {ids.map((id) => (
         <button
@@ -125,9 +120,9 @@ function ToolButtons({
           }}
           onDrop={(e) => {
             e.preventDefault();
-            const drag = e.dataTransfer.getData('text/plain');
+            const drag = dropToolId(e);
             setDrop(null);
-            if (drag) onMove(drag as ToolId, group, id, drop?.id === id ? drop.after : false);
+            if (drag) onMove(drag, group, id, drop?.id === id ? drop.after : false);
           }}
           onClick={() => {
             if (suppressClick.current) return;
@@ -138,18 +133,23 @@ function ToolButtons({
         </button>
       ))}
     </SlideTrack>
+    </div>
   );
 }
 
-/** Overflow shelf: graph + nested block-scheme submenu. Single pretty button, no strip duplicates. */
+/** Overflow shelf: parked tool rows + nested block-scheme submenu. Rows are draggable both ways. */
 function MoreMenu({
   tool,
   locale,
+  ids,
   onTool,
+  onMove,
 }: {
   tool: ToolId;
   locale: LocaleId;
+  ids: ToolId[];
   onTool: (id: ToolId) => void;
+  onMove: (id: ToolId, to: StripGroup, before: ToolId | null, after: boolean) => void;
 }) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -158,6 +158,9 @@ function MoreMenu({
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState(false);
   const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
+  const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
+  const [dragId, setDragId] = useState<ToolId | null>(null);
+  const suppressClick = useRef(false);
 
   useEffect(() => {
     if (SCHEME.includes(tool)) setLastSchemeTool(tool);
@@ -204,7 +207,7 @@ function MoreMenu({
     active?.focus();
   }, [open ]);
 
-  const isActive = MORE.includes(tool) || SCHEME.includes(tool);
+  const isActive = ids.includes(tool) || SCHEME.includes(tool);
 
   const pick = (id: ToolId) => {
     if (SCHEME.includes(id)) setLastSchemeTool(id);
@@ -212,6 +215,20 @@ function MoreMenu({
     setOpen(false);
     setSub(false);
     btnRef.current?.focus();
+  };
+
+  const beginDrag = (e: React.DragEvent, id: ToolId) => {
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    suppressClick.current = true;
+    setDragId(id);
+  };
+  const endDrag = () => {
+    setDragId(null);
+    setDrop(null);
+    window.setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
   };
 
   return (
@@ -230,6 +247,23 @@ function MoreMenu({
           setOpen((v) => !v);
           setSub(false);
         }}
+        onDragOver={(e) => {
+          // Spring-load: hovering the shelf button mid-drag opens the popover.
+          if (!open) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setOpen(true);
+            setSub(false);
+          }
+        }}
+        onDrop={(e) => {
+          if (e.defaultPrevented) return;
+          const drag = dropToolId(e);
+          if (!drag) return;
+          e.preventDefault();
+          onMove(drag, 'more', null, false);
+          setOpen(true);
+        }}
       >
         <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
       </button>
@@ -240,17 +274,51 @@ function MoreMenu({
           className="island block-scheme-popover more-pop"
           role="menu"
           aria-label={t(locale, 'more')}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(e) => {
+            if (e.defaultPrevented) return;
+            const drag = dropToolId(e);
+            if (!drag) return;
+            e.preventDefault();
+            onMove(drag, 'more', null, false);
+          }}
         >
           <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
-          {MORE.map((id) => (
+          {ids.map((id) => (
             <button
               key={id}
               type="button"
               role="menuitem"
-              className={`tool-btn more-row${tool === id ? ' active' : ''}`}
+              draggable
+              className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
               title={t(locale, id)}
               aria-label={t(locale, id)}
-              onClick={() => pick(id)}
+              onDragStart={(e) => beginDrag(e, id)}
+              onDragEnd={endDrag}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const r = e.currentTarget.getBoundingClientRect();
+                const after = e.clientY > r.top + r.height / 2;
+                setDrop((cur) => (cur && cur.id === id && cur.after === after ? cur : { id, after }));
+              }}
+              onDragLeave={() => {
+                setDrop((cur) => (cur && cur.id === id ? null : cur));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const drag = dropToolId(e);
+                const at = drop?.id === id ? drop.after : false;
+                setDrop(null);
+                if (drag) onMove(drag, 'more', id, at);
+              }}
+              onClick={() => {
+                if (suppressClick.current) return;
+                pick(id);
+              }}
             >
               <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
               <span className="more-row-label">{t(locale, id)}</span>
@@ -332,20 +400,14 @@ export function Toolbar({
   useEffect(() => onPrefsChange(() => setOrders(readOrders())), []);
 
   const moveTool = (id: ToolId, to: StripGroup, before: ToolId | null, after: boolean) => {
-    if (!MOVABLE.has(id)) return;
-    const next = {
-      nav: orders.nav.filter((x) => x !== id),
-      create: orders.create.filter((x) => x !== id),
-    };
-    const list = next[to];
-    const at = before ? list.indexOf(before) : -1;
-    if (at < 0) list.push(id);
-    else list.splice(after ? at + 1 : at, 0, id);
+    const next = moveToolInOrders(orders, id, to, before, after);
+    if (next === orders) return;
     writePrefs({ toolbarOrder: next });
     setOrders(next);
   };
 
   const hasSelection = selectionCount > 0;
+  const hasStrip = orders.nav.length > 0 || orders.create.length > 0;
 
   return (
     <div
@@ -355,11 +417,15 @@ export function Toolbar({
       data-tool-anim={toolHoverAnim ? 'on' : undefined}
     >
       <div className="toolbelt-scroll">
-        <ToolButtons ids={orders.nav} tool={tool} locale={locale} group="nav" onTool={onTool} onMove={moveTool} />
-        <div className="toolbelt-sep" />
-        <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
-        <div className="toolbelt-sep" />
-        <MoreMenu tool={tool} locale={locale} onTool={onTool} />
+        {orders.nav.length > 0 && (
+          <ToolButtons ids={orders.nav} tool={tool} locale={locale} group="nav" onTool={onTool} onMove={moveTool} />
+        )}
+        {orders.nav.length > 0 && orders.create.length > 0 && <div className="toolbelt-sep" />}
+        {orders.create.length > 0 && (
+          <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
+        )}
+        {hasStrip && <div className="toolbelt-sep" />}
+        <MoreMenu tool={tool} locale={locale} ids={orders.more} onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
         <div className="tool-group">
           {hasSelection && (

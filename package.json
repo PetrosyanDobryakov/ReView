@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.12.5",
+  "version": "0.12.6",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with optional Yjs sync (LAN websocket or P2P WebRTC) and file share; static/Vercel-ready",
   "type": "module",
@@ -13,7 +13,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "bundle:engine": "node scripts/bundle-engine.mjs",
-    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/lock-test.mjs && node scripts/board-size-test.mjs && node scripts/board-title-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs && node scripts/bundle-core.mjs && node scripts/transform-test.mjs && node scripts/points-space-test.mjs && node scripts/sync-test.mjs && node --experimental-strip-types scripts/p2p-config-test.mjs",
+    "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/lock-test.mjs && node scripts/board-size-test.mjs && node scripts/board-title-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs && node scripts/bundle-core.mjs && node scripts/transform-test.mjs && node scripts/points-space-test.mjs && node scripts/sync-test.mjs && node --experimental-strip-types scripts/p2p-config-test.mjs && node --experimental-strip-types scripts/toolbar-order-test.mjs",
     "test:sync": "node scripts/sync-test.mjs"
   },
   "dependencies": {
