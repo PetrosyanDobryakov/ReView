@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0 — unreleased
+
+### Tables
+- New `table` tool (More shelf, parkable): drag to size (cols/rows derived from the box), click for a 3×4 default.
+- Uniform grid with header row (bold + tint, toggleable), hairline grid, cell text wrap/clip, 14px default.
+- Cell editing via the text overlay: double-click / Enter, spreadsheet nav (Enter = down, Tab = right), plain-text cells synced over Yjs.
+- FigJam-style `[+]` pills on the selected table append row/column; context menu inserts/deletes at the active cell + toggles the header.
+- Style island covers tables (fill, stroke, text, size); color keys paint fill+stroke; SVG export draws grid + cells; info dialog shows grid dims.
+- Fixes: labels now contrast against the shape fill (was invisible light-on-white), canvas hides only the edited table cell while typing.
+
 ## 0.12.6 — unreleased
 
 ### Toolbar

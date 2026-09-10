@@ -10,7 +10,7 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
 
 export type TextAlign = 'left' | 'center' | 'right';
 
@@ -58,6 +58,13 @@ export interface ShapeView {
   fromPort?: string;
   toId?: string;
   toPort?: string;
+  /** Table grid: column / row counts. */
+  cols?: number;
+  rows?: number;
+  /** Table cells, row-major plain text. */
+  cells?: string[];
+  /** Table first row styled as a header (default true). */
+  header?: boolean;
 }
 
 export const PORTS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
@@ -185,6 +192,14 @@ export const PEN_STROKE = 3;
 export const STICKY_FONT = 16;
 export const TEXT_FONT = 18;
 export const SHAPE_FONT = 16;
+/** Table cell text size. */
+export const TABLE_FONT = 14;
+/** Default table grid for click-created tables. */
+export const TABLE_DEFAULT_COLS = 3;
+export const TABLE_DEFAULT_ROWS = 4;
+/** Approximate cell size used to derive cols/rows from a drag box. */
+export const TABLE_CELL_W = 140;
+export const TABLE_CELL_H = 56;
 /** Legacy default for rects drawn before the sharp/rounded option existed. */
 export const DEFAULT_RECT_RADIUS = 6;
 
@@ -196,6 +211,51 @@ export function rectCornerRadius(v: Pick<ShapeView, 'cornerRadius' | 'w' | 'h'>)
   const raw = v.cornerRadius === undefined ? DEFAULT_RECT_RADIUS : Math.max(0, v.cornerRadius);
   if (raw <= 0) return 0;
   return Math.min(raw, Math.abs(v.w) / 2, Math.abs(v.h) / 2);
+}
+
+/** Normalized table grid (uniform cells derived from the outer box). */
+export interface TableGrid {
+  cols: number;
+  rows: number;
+  cells: string[];
+  header: boolean;
+}
+
+export function normalizeTableCells(cols: number, rows: number, cells?: unknown): string[] {
+  const src = Array.isArray(cells) ? cells : [];
+  const out: string[] = new Array(cols * rows).fill('');
+  for (let i = 0; i < out.length && i < src.length; i++) {
+    out[i] = typeof src[i] === 'string' ? src[i] : '';
+  }
+  return out;
+}
+
+export function tableGrid(v: Pick<ShapeView, 'cols' | 'rows' | 'cells' | 'header'>): TableGrid {
+  const cols = Math.min(24, Math.max(1, Math.floor(v.cols ?? TABLE_DEFAULT_COLS) || TABLE_DEFAULT_COLS));
+  const rows = Math.min(64, Math.max(1, Math.floor(v.rows ?? TABLE_DEFAULT_ROWS) || TABLE_DEFAULT_ROWS));
+  return { cols, rows, cells: normalizeTableCells(cols, rows, v.cells), header: v.header !== false };
+}
+
+export function tableCellRect(
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header'>,
+  row: number,
+  col: number
+): ShapeBox {
+  const { cols, rows } = tableGrid(v);
+  const r = Math.min(rows - 1, Math.max(0, row));
+  const c = Math.min(cols - 1, Math.max(0, col));
+  return { x: v.x + (c * v.w) / cols, y: v.y + (r * v.h) / rows, w: v.w / cols, h: v.h / rows };
+}
+
+export function tableCellAt(
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header'>,
+  px: number,
+  py: number
+): { row: number; col: number } {
+  const { cols, rows } = tableGrid(v);
+  const col = v.w > 0 ? Math.floor(((px - v.x) / v.w) * cols) : 0;
+  const row = v.h > 0 ? Math.floor(((py - v.y) / v.h) * rows) : 0;
+  return { row: Math.min(rows - 1, Math.max(0, row)), col: Math.min(cols - 1, Math.max(0, col)) };
 }
 
 export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
@@ -856,11 +916,13 @@ export function drawShape(
   v: ShapeView,
   textColor: string = COLORS.text,
   boardBg: string = COLORS.background,
-  hideText = false
+  hideText = false,
+  /** Table only: hide just this cell's text (the overlay covers it while editing). */
+  hideCell?: { row: number; col: number }
 ): void {
   if (shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
     withShapeRotation(ctx, v, () =>
-      drawShape(ctx, { ...v, rotation: 0 }, textColor, boardBg, hideText)
+      drawShape(ctx, { ...v, rotation: 0 }, textColor, boardBg, hideText, hideCell)
     );
     return;
   }
@@ -1059,6 +1121,10 @@ export function drawShape(
       ctx.fill();
       ctx.stroke();
       if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
+      break;
+    }
+    case 'table': {
+      drawTable(ctx, v, textColor, boardBg, hideText, hideCell);
       break;
     }
     case 'sticky': {
@@ -1663,8 +1729,96 @@ function drawShapeRichText(
 
 function labelInk(v: ShapeView, textColor: string, boardBg?: string): string {
   const raw = v.textColor ?? textColor;
-  // ponytail: shape labels are inside fills (except sticky), adapt only when viewer wants it
-  return boardBg && v.type !== 'sticky' ? displayInk(raw, boardBg) : raw;
+  if (!boardBg || v.type === 'sticky') return raw;
+  // ponytail: labels sit inside the fill — contrast against it when opaque
+  // (light theme text on a white table/rect would otherwise be invisible).
+  if (hasFill(v.fill) && readPrefs().adaptInkToPaper) return readableTextOn(raw, v.fill);
+  return displayInk(raw, boardBg);
+}
+
+function drawTable(
+  ctx: CanvasRenderingContext2D,
+  v: ShapeView,
+  textColor: string,
+  boardBg?: string,
+  hideText = false,
+  hideCell?: { row: number; col: number }
+): void {
+  const { cols, rows, cells, header } = tableGrid(v);
+  const colW = v.w / cols;
+  const rowH = v.h / rows;
+  const size = v.fontSize ?? TABLE_FONT;
+  const ink = labelInk(v, textColor, boardBg);
+  const align = v.textAlign ?? 'left';
+  const padX = 10;
+  const padTop = 8;
+  const lineHeight = size * 1.3;
+  const maxLines = Math.max(1, Math.floor((rowH - padTop * 1.5) / lineHeight));
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(v.x, v.y, v.w, v.h);
+  if (hasFill(v.fill)) {
+    ctx.fillStyle = v.fill;
+    ctx.fill();
+  }
+  ctx.clip();
+  // header tint follows the border color so custom strokes stay coherent
+  if (header) {
+    ctx.save();
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = v.stroke;
+    ctx.fillRect(v.x, v.y, v.w, rowH);
+    ctx.restore();
+  }
+  // hairline grid
+  ctx.strokeStyle = v.stroke;
+  ctx.lineWidth = Math.min(v.strokeWidth, 1.5);
+  ctx.beginPath();
+  for (let c = 1; c < cols; c++) {
+    const x = v.x + c * colW;
+    ctx.moveTo(x, v.y);
+    ctx.lineTo(x, v.y + v.h);
+  }
+  for (let r = 1; r < rows; r++) {
+    const y = v.y + r * rowH;
+    ctx.moveTo(v.x, y);
+    ctx.lineTo(v.x + v.w, y);
+  }
+  ctx.stroke();
+  if (!hideText || hideCell) {
+    ctx.fillStyle = ink;
+    ctx.textBaseline = 'top';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        // the cell under the open editor is covered by the overlay — hide just it
+        if (hideCell && hideCell.row === r && hideCell.col === c) continue;
+        const text = cells[r * cols + c];
+        if (!text) continue;
+        const isHeader = header && r === 0;
+        ctx.font = boardFont(size, { bold: isHeader || v.bold, italic: v.italic });
+        const lines = wrapText(ctx, text, Math.max(20, colW - padX * 2)).slice(0, maxLines);
+        const bx = v.x + c * colW + padX;
+        const maxW = Math.max(20, colW - padX * 2);
+        lines.forEach((line, i) => {
+          const lw = ctx.measureText(line).width;
+          const lx = lineAnchorX(bx, maxW, lw, align);
+          const ly = v.y + r * rowH + padTop + i * lineHeight;
+          ctx.fillText(line, lx, ly);
+          drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
+        });
+      }
+    }
+  }
+  ctx.restore();
+  // outer border on top, full user width
+  ctx.save();
+  ctx.strokeStyle = v.stroke;
+  ctx.lineWidth = v.strokeWidth;
+  ctx.beginPath();
+  ctx.rect(v.x, v.y, v.w, v.h);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: string, boardBg?: string): void {

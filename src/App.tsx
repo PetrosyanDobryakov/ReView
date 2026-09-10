@@ -471,7 +471,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       const el = textEditorRef.current;
       if (!cur) return;
       try {
-        engineRef.current?.commitText(cur.id, el?.innerText ?? cur.text ?? '', cur, el?.innerHTML ?? cur.richHtml);
+        if (cur.tableCell && cur.id) {
+          engineRef.current?.commitTableCell(cur.id, cur.tableCell.row, cur.tableCell.col, el?.innerText ?? cur.text ?? '');
+        } else {
+          engineRef.current?.commitText(cur.id, el?.innerText ?? cur.text ?? '', cur, el?.innerHTML ?? cur.richHtml);
+        }
       } catch {}
       setEditTarget(null);
       setEditLiveFormat(null);
@@ -708,6 +712,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       if (menuView.type === 'pen') {
         menuItems.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
+      if (menuView.type === 'table') {
+        menuItems.push(
+          { label: t(locale, 'ctxTableAddRow'), run: () => e?.tableInsertRow(shapeId) },
+          { label: t(locale, 'ctxTableAddCol'), run: () => e?.tableInsertCol(shapeId) },
+          { label: t(locale, 'ctxTableDelRow'), danger: true, run: () => e?.tableRemoveRow(shapeId) },
+          { label: t(locale, 'ctxTableDelCol'), danger: true, run: () => e?.tableRemoveCol(shapeId) },
+          { label: t(locale, 'ctxTableHeader'), run: () => e?.tableToggleHeader(shapeId) }
+        );
+      }
       menuItems.push(
         { label: t(locale, 'ctxFront'), run: () => e?.bringFront() },
         { label: t(locale, 'ctxBack'), run: () => e?.sendBack() },
@@ -772,10 +785,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             }}
             onFormatChange={setEditLiveFormat}
             onDone={(value, html) => {
-              engine.commitText(editTarget.id, value, editTarget, html);
+              if (editTarget.tableCell && editTarget.id) {
+                engine.commitTableCell(editTarget.id, editTarget.tableCell.row, editTarget.tableCell.col, value);
+              } else {
+                engine.commitText(editTarget.id, value, editTarget, html);
+              }
               setEditTarget(null);
               setEditLiveFormat(null);
               textEditorRef.current = null;
+            }}
+            onCellAdvance={(dir) => {
+              const t = editTarget;
+              if (!t.tableCell || !t.id) return;
+              engineRef.current?.advanceTableCell(t.id, t.tableCell.row, t.tableCell.col, dir);
             }}
             onCancel={() => {
               engine.cancelTextEdit();

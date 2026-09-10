@@ -7,7 +7,7 @@ export type StripGroup = 'nav' | 'create' | 'more';
 export const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
 export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
 /** Default More-shelf rows (specialty tools). */
-export const MORE_DEFAULTS: ToolId[] = ['graph'];
+export const MORE_DEFAULTS: ToolId[] = ['graph', 'table'];
 export const SCHEME: ToolId[] = [
   'diamond',
   'triangle',
