@@ -4,4 +4,4 @@ export { settings } from '../src/core/settings';
 export { displayInk } from '../src/core/shapes';
 export { computeSnap } from '../src/core/align';
 export { applyKeybinds, getColorBinds } from '../src/core/keybindings';
-export { tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds } from '../src/core/shapes';
+export { tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries } from '../src/core/shapes';

@@ -49,7 +49,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, applyKeybinds, getColorBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, applyKeybinds, getColorBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -460,7 +460,9 @@ assert.deepEqual(cellTarget?.tableCell, { row: 0, col: 0 }, 'down wraps to first
 engine.events.onEditText = prevOnEditTable;
 engine.cancelTextEdit();
 
-// table column/row fractions: persist, split on insert, merge on delete
+// table column/row fractions: persist, grow on insert, shrink on delete
+const approxFracs = (a, b) =>
+  a.length === b.length && a.every((x, i) => Math.abs(x - b[i]) < 1e-9);
 const fKey = store.addShape({
   type: 'table', x: 0, y: 0, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
   cols: 2, rows: 2, cells: ['', '', '', ''], colW: [0.6, 0.4], rowH: [0.25, 0.75],
@@ -470,20 +472,22 @@ assert.deepEqual(fv.colW, [0.6, 0.4], 'col fractions persist');
 assert.deepEqual(fv.rowH, [0.25, 0.75], 'row fractions persist');
 engine.tableInsertCol(fKey, 1);
 fv = store.readShape(store.board.get(fKey));
-assert.deepEqual(fv.colW, [0.6, 0.2, 0.2], 'inserted column splits the donor');
+assert.ok(approxFracs(fv.colW, [240 / 560, 160 / 560, 160 / 560]), 'inserted column grows the table');
+assert.equal(fv.w, 560, 'table widens by the donor column');
 engine.tableRemoveCol(fKey, 1);
 fv = store.readShape(store.board.get(fKey));
-assert.deepEqual(fv.colW, [0.6, 0.4], 'removed column merges back');
+assert.ok(approxFracs(fv.colW, [0.6, 0.4]), 'removed column shrinks back');
+assert.equal(fv.w, 400, 'table width restored');
 engine.tableInsertRow(fKey, 0);
 fv = store.readShape(store.board.get(fKey));
-assert.deepEqual(fv.rowH, [0.125, 0.125, 0.75], 'inserted row splits the donor');
+assert.ok(approxFracs(fv.rowH, [50 / 250, 50 / 250, 150 / 250]), 'inserted row grows the table');
+assert.equal(fv.h, 250, 'table height grows by the donor row');
 engine.tableRemoveRow(fKey, 0);
 fv = store.readShape(store.board.get(fKey));
-assert.deepEqual(fv.rowH, [0.25, 0.75], 'removed row merges back');
+assert.ok(approxFracs(fv.rowH, [0.25, 0.75]), 'removed row shrinks back');
+assert.equal(fv.h, 200, 'table height restored');
 
 // divider math: neighbor compensates, min fraction holds
-const approxFracs = (a, b) =>
-  a.length === b.length && a.every((x, i) => Math.abs(x - b[i]) < 1e-9);
 assert.ok(approxFracs(shiftTableDivider([0.5, 0.5], 1, 0.1, 0.05), [0.6, 0.4]), 'divider shifts');
 assert.ok(approxFracs(shiftTableDivider([0.5, 0.5], 1, 10, 0.1), [0.9, 0.1]), 'divider clamps at min');
 assert.ok(approxFracs(shiftTableDivider([0.5, 0.5], 1, -10, 0.1), [0.1, 0.9]), 'divider clamps other way');
@@ -491,6 +495,13 @@ assert.deepEqual(shiftTableDivider([0.5, 0.5], 0, 0.1, 0.05), [0.5, 0.5], 'edge 
 assert.deepEqual(normalizeTableSizes(2, [2, 1]), [2 / 3, 1 / 3], 'sizes normalize to sum 1');
 assert.deepEqual(normalizeTableSizes(2, [0.5]), [0.5, 0.5], 'bad sizes fall back to uniform');
 assert.deepEqual(tableGrid({ cols: 2, rows: 1 }).colW, [0.5, 0.5], 'missing sizes default uniform');
+
+// tray rule: center on the table + not bigger => rides, even hanging off the edge
+const tray = { x: 0, y: 0, w: 300, h: 200 };
+assert.equal(tableCarries(tray, { x: 10, y: 10, w: 40, h: 30 }), true, 'contained rides');
+assert.equal(tableCarries(tray, { x: 250, y: 150, w: 100, h: 100 }), true, 'edge-hanger rides (center inside)');
+assert.equal(tableCarries(tray, { x: 500, y: 500, w: 40, h: 30 }), false, 'outsider stays');
+assert.equal(tableCarries(tray, { x: 100, y: 50, w: 400, h: 300 }), false, 'bigger-than-table stays');
 
 // riders: objects on a table move with it (nested tables cascade)
 const hostKey = store.addShape({
@@ -543,6 +554,25 @@ assert.ok(
   'divider drag resizes columns'
 );
 assert.equal(dv.x, 3000, 'divider drag does not move the table');
+engine.setSelection([]);
+
+// mouse-drag carries riders exactly (sticky + rect on a table)
+const mKey = store.addShape({
+  type: 'table', x: 30000, y: 30000, w: 300, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+const stRiderKey = store.addShape({ type: 'sticky', x: 30050, y: 30050, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
+const rcRiderKey = store.addShape({ type: 'rect', x: 30200, y: 30100, w: 50, h: 30, fill: '#ffffff', stroke: '#000000', strokeWidth: 2 });
+const mselect = engine.tools.get('select');
+const mpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: false });
+mselect.onDown(engine, mpinfo(30150, 30150));
+mselect.onMove(engine, mpinfo(30180, 30190));
+mselect.onUp(engine, mpinfo(30180, 30190));
+assert.equal(store.readShape(store.board.get(mKey)).x, 30030, 'dragged table moves');
+assert.equal(store.readShape(store.board.get(mKey)).y, 30040, 'dragged table moves y');
+assert.equal(store.readShape(store.board.get(stRiderKey)).x, 30080, 'sticky rider follows drag exactly');
+assert.equal(store.readShape(store.board.get(stRiderKey)).y, 30090, 'sticky rider follows drag exactly y');
+assert.equal(store.readShape(store.board.get(rcRiderKey)).x, 30230, 'rect rider follows drag exactly');
 engine.setSelection([]);
 
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor

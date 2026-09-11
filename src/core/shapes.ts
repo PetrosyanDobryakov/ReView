@@ -1,7 +1,7 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
-import { shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
+import { shapeRotation, worldToLocal, withShapeRotation, localToWorld, rotatedAabb } from './transform';
 import { drawRichBlock, parseStoredRich } from './richText';
 import { isOrbitPaper } from './orbit';
 import {
@@ -328,7 +328,7 @@ export function tableCellAt(
  * tableIds = already-moving tables; returns rider ids (excluding the input tables).
  */
 export function tableRiderIds(
-  shapes: Array<Pick<ShapeView, 'id' | 'x' | 'y' | 'w' | 'h' | 'type' | 'locked'>>,
+  shapes: Array<Pick<ShapeView, 'id' | 'x' | 'y' | 'w' | 'h' | 'type' | 'locked'> & { rotation?: number }>,
   tableIds: Set<string> | string[]
 ): string[] {
   const byId = new Map(shapes.map((s) => [s.id, s]));
@@ -342,7 +342,7 @@ export function tableRiderIds(
       for (const rid of riding) {
         const t = byId.get(rid);
         if (!t || t.type !== 'table') continue;
-        if (containedIn(s, t)) {
+        if (tableCarries(rotatedAabb(t as ShapeView), s)) {
           riding.add(s.id);
           added = true;
           break;
@@ -353,6 +353,28 @@ export function tableRiderIds(
   }
   for (const id of tableIds) riding.delete(id);
   return [...riding];
+}
+
+/**
+ * Tray rule: a shape rides the table when its center is on it and it is not
+ * bigger than the table. Forgiving for casually placed objects hanging slightly
+ * off the edge; huge backgrounds underneath are left alone.
+ */
+export function tableCarries(
+  t: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'>,
+  s: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'>
+): boolean {
+  const tol = 2;
+  const cx = s.x + s.w / 2;
+  const cy = s.y + s.h / 2;
+  return (
+    cx >= t.x - tol &&
+    cy >= t.y - tol &&
+    cx <= t.x + t.w + tol &&
+    cy <= t.y + t.h + tol &&
+    s.w <= t.w + tol * 2 &&
+    s.h <= t.h + tol * 2
+  );
 }
 
 export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
