@@ -672,6 +672,16 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
       return Array.isArray(c) ? c.filter((x): x is string => typeof x === 'string') : undefined;
     })(),
     header: m.get('header') === false ? false : undefined,
+    colW: (() => {
+      const c = m.get('colW');
+      const arr = c instanceof Y.Array ? (c.toArray() as unknown[]) : Array.isArray(c) ? c : undefined;
+      return arr?.filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+    })(),
+    rowH: (() => {
+      const c = m.get('rowH');
+      const arr = c instanceof Y.Array ? (c.toArray() as unknown[]) : Array.isArray(c) ? c : undefined;
+      return arr?.filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+    })(),
   };
 }
 
@@ -742,6 +752,16 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     arr.insert(0, grid.cells);
     m.set('cells', arr);
     if (v.header === false) m.set('header', false);
+    if (v.colW) {
+      const cw = new Y.Array<number>();
+      cw.insert(0, grid.colW);
+      m.set('colW', cw);
+    }
+    if (v.rowH) {
+      const rh = new Y.Array<number>();
+      rh.insert(0, grid.rowH);
+      m.set('rowH', rh);
+    }
   }
   if (v.fromId) m.set('fromId', v.fromId);
   if (v.fromPort) m.set('fromPort', v.fromPort);
@@ -795,6 +815,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const arr = new Y.Array<string>();
       arr.insert(0, (value as unknown[]).filter((x): x is string => typeof x === 'string'));
       m.set('cells', arr);
+    } else if ((key === 'colW' || key === 'rowH') && Array.isArray(value)) {
+      const arr = new Y.Array<number>();
+      arr.insert(0, (value as unknown[]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x)));
+      m.set(key, arr);
     } else if (key === 'rotation' && value === 0) {
       m.delete('rotation');
     } else if (key === 'richHtml' && value === '') {

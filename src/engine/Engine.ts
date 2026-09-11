@@ -15,13 +15,14 @@ import {
   tableCellAt,
   tableCellRect,
   tableGrid,
+  tableRiderIds,
   themeFor,
   intersects,
   normalizeBox,
   arrowBounds,
   measureMixedLine,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, withShapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
+import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { t } from '../ui/i18n';
@@ -1131,6 +1132,16 @@ export class Engine {
       moved.add(id);
       patches.push([id, { x: v.x + dx, y: v.y + dy }]);
     }
+    // tables carry objects placed on them (keyboard nudge included)
+    const tableIds = [...moved].filter((id) => this.views.get(id)?.type === 'table');
+    if (tableIds.length) {
+      for (const rid of tableRiderIds([...this.views.values()], tableIds)) {
+        const rv = this.views.get(rid);
+        if (!rv || rv.locked || moved.has(rid)) continue;
+        moved.add(rid);
+        patches.push([rid, { x: rv.x + dx, y: rv.y + dy }]);
+      }
+    }
     // update connected arrows
     for (const [aid, av] of this.views) {
       if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
@@ -2038,7 +2049,13 @@ export class Engine {
   openTableCellEditor(id: string, row: number, col: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
+    // ponytail: same-table cell switch must commit the current cell first —
+    // the editId guard below only fires across shapes, so check the cell too.
     if (this.editing && this.editId !== id) this.events.onRequestCommitText?.();
+    else if (this.editing && this.editId === id) {
+      const cur = this.tableActive.get(id);
+      if (!cur || cur.r !== row || cur.c !== col) this.events.onRequestCommitText?.();
+    }
     const grid = tableGrid(v);
     const r = Math.min(grid.rows - 1, Math.max(0, row));
     const c = Math.min(grid.cols - 1, Math.max(0, col));
@@ -2121,11 +2138,16 @@ export class Engine {
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.rows >= 64) return;
-    const row = at ?? Math.min(grid.rows, this.tableActiveCell(id).r + 1);
+    const row = Math.min(grid.rows, Math.max(0, at ?? Math.min(grid.rows, this.tableActiveCell(id).r + 1)));
     const cells = [...grid.cells];
     for (let i = 0; i < grid.cols; i++) cells.splice(row * grid.cols + i, 0, '');
+    // new row splits the donor's height half/half
+    const donor = Math.min(row, grid.rows - 1);
+    const halves = [...grid.rowH];
+    halves[donor] = halves[donor] / 2;
+    halves.splice(row, 0, halves[donor]);
     this.tableActive.set(id, { r: row, c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows + 1, cells });
+    store.patchShape(id, { rows: grid.rows + 1, cells, rowH: halves });
     this.dirty = true;
   }
 
@@ -2134,38 +2156,46 @@ export class Engine {
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.cols >= 24) return;
-    const col = at ?? Math.min(grid.cols, this.tableActiveCell(id).c + 1);
+    const col = Math.min(grid.cols, Math.max(0, at ?? Math.min(grid.cols, this.tableActiveCell(id).c + 1)));
     const cells: string[] = [];
     for (let r = 0; r < grid.rows; r++) {
       for (let c = 0; c < grid.cols; c++) cells.push(grid.cells[r * grid.cols + c] ?? '');
       cells.splice(r * (grid.cols + 1) + col, 0, '');
     }
+    const donor = Math.min(col, grid.cols - 1);
+    const halves = [...grid.colW];
+    halves[donor] = halves[donor] / 2;
+    halves.splice(col, 0, halves[donor]);
     this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: col });
-    store.patchShape(id, { cols: grid.cols + 1, cells });
+    store.patchShape(id, { cols: grid.cols + 1, cells, colW: halves });
     this.dirty = true;
   }
 
-  tableRemoveRow(id: string): void {
+  tableRemoveRow(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.rows <= 1) return;
-    const at = this.tableActiveCell(id).r;
-    const cells = grid.cells.filter((_, i) => Math.floor(i / grid.cols) !== at);
-    this.tableActive.set(id, { r: Math.min(at, grid.rows - 2), c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows - 1, cells });
+    const row = Math.min(grid.rows - 1, Math.max(0, at ?? this.tableActiveCell(id).r));
+    const cells = grid.cells.filter((_, i) => Math.floor(i / grid.cols) !== row);
+    const fracs = grid.rowH.filter((_, i) => i !== row);
+    fracs[Math.min(row, fracs.length - 1)] += grid.rowH[row];
+    this.tableActive.set(id, { r: Math.min(row, grid.rows - 2), c: this.tableActiveCell(id).c });
+    store.patchShape(id, { rows: grid.rows - 1, cells, rowH: fracs });
     this.dirty = true;
   }
 
-  tableRemoveCol(id: string): void {
+  tableRemoveCol(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.cols <= 1) return;
-    const at = this.tableActiveCell(id).c;
-    const cells = grid.cells.filter((_, i) => i % grid.cols !== at);
-    this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: Math.min(at, grid.cols - 2) });
-    store.patchShape(id, { cols: grid.cols - 1, cells });
+    const col = Math.min(grid.cols - 1, Math.max(0, at ?? this.tableActiveCell(id).c));
+    const cells = grid.cells.filter((_, i) => i % grid.cols !== col);
+    const fracs = grid.colW.filter((_, i) => i !== col);
+    fracs[Math.min(col, fracs.length - 1)] += grid.colW[col];
+    this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: Math.min(col, grid.cols - 2) });
+    store.patchShape(id, { cols: grid.cols - 1, cells, colW: fracs });
     this.dirty = true;
   }
 
@@ -2176,16 +2206,22 @@ export class Engine {
     this.dirty = true;
   }
 
-  /** Screen-space [+] pills for the single selected table (append row / column). */
-  private tablePlusPills(v: ShapeView): Array<{ kind: 'row' | 'col'; x: number; y: number; r: number }> {
+  /** [+]/[−] pills around the single selected table (push/pop row / column at the end). */
+  private tablePlusPills(
+    v: ShapeView
+  ): Array<{ kind: 'row' | 'col' | 'delRow' | 'delCol'; x: number; y: number; r: number }> {
     const s = 1 / this.camera.zoom;
+    const cx = v.x + v.w / 2;
+    const cy = v.y + v.h / 2;
     return [
-      { kind: 'col', x: v.x + v.w + 16 * s, y: v.y + v.h / 2, r: 10 * s },
-      { kind: 'row', x: v.x + v.w / 2, y: v.y + v.h + 16 * s, r: 10 * s },
+      { kind: 'col', x: v.x + v.w + 16 * s, y: cy - 14 * s, r: 10 * s },
+      { kind: 'delCol', x: v.x + v.w + 16 * s, y: cy + 14 * s, r: 10 * s },
+      { kind: 'row', x: cx - 14 * s, y: v.y + v.h + 16 * s, r: 10 * s },
+      { kind: 'delRow', x: cx + 14 * s, y: v.y + v.h + 16 * s, r: 10 * s },
     ];
   }
 
-  private hitTablePlus(wx: number, wy: number): { id: string; kind: 'row' | 'col' } | null {
+  private hitTablePlus(wx: number, wy: number): { id: string; kind: 'row' | 'col' | 'delRow' | 'delCol' } | null {
     if (this.editing || this.active !== 'select' || this.override) return null;
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
@@ -2194,6 +2230,32 @@ export class Engine {
     const slop = 4 / this.camera.zoom;
     for (const p of this.tablePlusPills(v)) {
       if (Math.hypot(wx - p.x, wy - p.y) <= p.r + slop) return { id, kind: p.kind };
+    }
+    return null;
+  }
+
+  /** Interior grid divider under the pointer (single selected table): { divider index }. */
+  hitTableDivider(
+    wx: number,
+    wy: number
+  ): { shapeId: string; kind: 'col' | 'row'; index: number } | null {
+    if (this.editing || this.selection.size !== 1) return null;
+    const id = [...this.selection][0];
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return null;
+    const g = tableGrid(v);
+    const p = shapeRotation(v) ? worldToLocal(v, wx, wy) : { x: wx, y: wy };
+    const slop = 6 / this.camera.zoom;
+    if (p.y < v.y - slop || p.y > v.y + v.h + slop || p.x < v.x - slop || p.x > v.x + v.w + slop) return null;
+    let acc = 0;
+    for (let i = 1; i < g.cols; i++) {
+      acc += g.colW[i - 1];
+      if (Math.abs(p.x - (v.x + acc * v.w)) <= slop) return { shapeId: id, kind: 'col', index: i };
+    }
+    acc = 0;
+    for (let i = 1; i < g.rows; i++) {
+      acc += g.rowH[i - 1];
+      if (Math.abs(p.y - (v.y + acc * v.h)) <= slop) return { shapeId: id, kind: 'row', index: i };
     }
     return null;
   }
@@ -2585,8 +2647,11 @@ export class Engine {
         const plus = this.hitTablePlus(info.world.x, info.world.y);
         if (plus) {
           const gv = this.views.get(plus.id);
-          if (plus.kind === 'row') this.tableInsertRow(plus.id, gv && gv.type === 'table' ? tableGrid(gv).rows : undefined);
-          else this.tableInsertCol(plus.id, gv && gv.type === 'table' ? tableGrid(gv).cols : undefined);
+          const grid = gv && gv.type === 'table' ? tableGrid(gv) : null;
+          if (plus.kind === 'row') this.tableInsertRow(plus.id, grid ? grid.rows : undefined);
+          else if (plus.kind === 'col') this.tableInsertCol(plus.id, grid ? grid.cols : undefined);
+          else if (plus.kind === 'delRow') this.tableRemoveRow(plus.id, grid ? grid.rows - 1 : undefined);
+          else this.tableRemoveCol(plus.id, grid ? grid.cols - 1 : undefined);
           this.dirty = true;
           return;
         }
@@ -3976,7 +4041,7 @@ export class Engine {
           ctx.lineTo(hr * 0.28, -hr * 0.12);
           ctx.stroke();
           ctx.restore();
-          // ponytail: tables get FigJam-style [+] pills (append row / column) + active-cell frame
+          // ponytail: tables get FigJam-style [+]/[−] pills (push/pop row / column) + active-cell frame
           if (v.type === 'table') {
             for (const p of this.tablePlusPills(v)) {
               ctx.beginPath();
@@ -3993,8 +4058,10 @@ export class Engine {
               ctx.beginPath();
               ctx.moveTo(p.x - g, p.y);
               ctx.lineTo(p.x + g, p.y);
-              ctx.moveTo(p.x, p.y - g);
-              ctx.lineTo(p.x, p.y + g);
+              if (p.kind === 'row' || p.kind === 'col') {
+                ctx.moveTo(p.x, p.y - g);
+                ctx.lineTo(p.x, p.y + g);
+              }
               ctx.stroke();
             }
             const a = this.tableActive.get(id);
