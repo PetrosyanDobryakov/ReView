@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.1 — unreleased
+
+### Tables
+- Insert row/column now GROWS the table by the donor size (was: split the last cell in half); delete shrinks it back. Existing cells keep their size.
+- Riders hardened: tray rule is now center-on-table + not-bigger (casually placed objects hanging off the edge ride along, huge backgrounds stay), rotated tables included. Verified exact in unit tests (mouse drag, nudge) and end-to-end in the browser.
+
 ## 0.14.0 — unreleased
 
 ### Tables

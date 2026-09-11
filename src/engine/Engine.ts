@@ -2133,69 +2133,80 @@ export class Engine {
     };
   }
 
+  /** Insert a row: the table grows by one donor-height row (no cell shrinking). */
   tableInsertRow(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.rows >= 64) return;
     const row = Math.min(grid.rows, Math.max(0, at ?? Math.min(grid.rows, this.tableActiveCell(id).r + 1)));
+    const donor = Math.min(row, grid.rows - 1);
+    const donorH = grid.rowH[donor] * v.h;
     const cells = [...grid.cells];
     for (let i = 0; i < grid.cols; i++) cells.splice(row * grid.cols + i, 0, '');
-    // new row splits the donor's height half/half
-    const donor = Math.min(row, grid.rows - 1);
-    const halves = [...grid.rowH];
-    halves[donor] = halves[donor] / 2;
-    halves.splice(row, 0, halves[donor]);
+    const abs = grid.rowH.map((f) => f * v.h);
+    abs.splice(row, 0, donorH);
+    const total = v.h + donorH;
     this.tableActive.set(id, { r: row, c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows + 1, cells, rowH: halves });
+    store.patchShape(id, { rows: grid.rows + 1, cells, rowH: abs.map((a) => a / total), h: total });
     this.dirty = true;
   }
 
+  /** Insert a column: the table grows by one donor-width column. */
   tableInsertCol(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.cols >= 24) return;
     const col = Math.min(grid.cols, Math.max(0, at ?? Math.min(grid.cols, this.tableActiveCell(id).c + 1)));
+    const donor = Math.min(col, grid.cols - 1);
+    const donorW = grid.colW[donor] * v.w;
     const cells: string[] = [];
     for (let r = 0; r < grid.rows; r++) {
       for (let c = 0; c < grid.cols; c++) cells.push(grid.cells[r * grid.cols + c] ?? '');
       cells.splice(r * (grid.cols + 1) + col, 0, '');
     }
-    const donor = Math.min(col, grid.cols - 1);
-    const halves = [...grid.colW];
-    halves[donor] = halves[donor] / 2;
-    halves.splice(col, 0, halves[donor]);
+    const abs = grid.colW.map((f) => f * v.w);
+    abs.splice(col, 0, donorW);
+    const total = v.w + donorW;
     this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: col });
-    store.patchShape(id, { cols: grid.cols + 1, cells, colW: halves });
+    store.patchShape(id, { cols: grid.cols + 1, cells, colW: abs.map((a) => a / total), w: total });
     this.dirty = true;
   }
 
+  /** Delete a row: the table shrinks by the removed height. */
   tableRemoveRow(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.rows <= 1) return;
     const row = Math.min(grid.rows - 1, Math.max(0, at ?? this.tableActiveCell(id).r));
+    const removedH = grid.rowH[row] * v.h;
     const cells = grid.cells.filter((_, i) => Math.floor(i / grid.cols) !== row);
-    const fracs = grid.rowH.filter((_, i) => i !== row);
-    fracs[Math.min(row, fracs.length - 1)] += grid.rowH[row];
+    const total = Math.max(1, v.h - removedH);
+    const fracs = grid.rowH
+      .filter((_, i) => i !== row)
+      .map((f) => (f * v.h) / total);
     this.tableActive.set(id, { r: Math.min(row, grid.rows - 2), c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows - 1, cells, rowH: fracs });
+    store.patchShape(id, { rows: grid.rows - 1, cells, rowH: fracs, h: total });
     this.dirty = true;
   }
 
+  /** Delete a column: the table shrinks by the removed width. */
   tableRemoveCol(id: string, at?: number): void {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return;
     const grid = tableGrid(v);
     if (grid.cols <= 1) return;
     const col = Math.min(grid.cols - 1, Math.max(0, at ?? this.tableActiveCell(id).c));
+    const removedW = grid.colW[col] * v.w;
     const cells = grid.cells.filter((_, i) => i % grid.cols !== col);
-    const fracs = grid.colW.filter((_, i) => i !== col);
-    fracs[Math.min(col, fracs.length - 1)] += grid.colW[col];
+    const total = Math.max(1, v.w - removedW);
+    const fracs = grid.colW
+      .filter((_, i) => i !== col)
+      .map((f) => (f * v.w) / total);
     this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: Math.min(col, grid.cols - 2) });
-    store.patchShape(id, { cols: grid.cols - 1, cells, colW: fracs });
+    store.patchShape(id, { cols: grid.cols - 1, cells, colW: fracs, w: total });
     this.dirty = true;
   }
 

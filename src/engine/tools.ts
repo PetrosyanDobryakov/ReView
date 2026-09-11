@@ -2,7 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableGrid } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableCarries, tableGrid } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -413,10 +413,11 @@ export class SelectTool extends Tool {
         const carriers: ShapeView[] = [...this.originals.values(), ...this.stuck.values()];
         for (const o of carriers) {
           if (o.type !== 'table') continue;
+          const obox = rotatedAabb(o);
           for (const [sid, sv] of engine.views) {
             if (movedIds.has(sid) || this.originals.has(sid) || this.stuck.has(sid)) continue;
             if (sv.locked) continue;
-            if (!containedIn(sv, o)) continue;
+            if (!tableCarries(obox, sv)) continue;
             const base = { ...sv, points: sv.points ? [...sv.points] : undefined };
             this.stuck.set(sid, base);
             patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
