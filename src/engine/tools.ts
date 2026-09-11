@@ -2,7 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
 import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableGrid } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -11,7 +11,7 @@ import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, reanchorRotatedResize, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg } from '../core/transform';
+import { degToRad, reanchorRotatedResize, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg, worldToLocal } from '../core/transform';
 import { publishDraft, publishErasePreview } from '../net';
 
 /** Square a drag box around the original anchor (handles upward / leftward Shift draws). */
@@ -98,7 +98,7 @@ function rotatedHandleCursor(handle: HandleId, rotDeg: number): string {
 export class SelectTool extends Tool {
   readonly id = 'select';
   cursor = 'default';
-  private mode: 'idle' | 'move' | 'marquee' | 'rotate' = 'idle';
+  private mode: 'idle' | 'move' | 'marquee' | 'rotate' | 'tablediv' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
   private groupResizing: HandleId | null = null;
   private groupOrigBox: ShapeBox | null = null;
@@ -110,6 +110,16 @@ export class SelectTool extends Tool {
   private marquee: ShapeBox | null = null;
   private rotateStartAngle = 0;
   private rotateOrigDeg = 0;
+  /** Dragging an interior table grid divider (resizes columns/rows by fractions). */
+  private tableDiv: {
+    shapeId: string;
+    kind: 'col' | 'row';
+    index: number;
+    fracs: number[];
+    span: number;
+    startX: number;
+    startY: number;
+  } | null = null;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
@@ -121,6 +131,11 @@ export class SelectTool extends Tool {
     if (h) {
       const v = engine.views.get(h.shapeId);
       engine.setCursor(rotatedHandleCursor(h.handle, shapeRotation(v ?? {})));
+      return;
+    }
+    const div = engine.hitTableDivider(p.world.x, p.world.y);
+    if (div) {
+      engine.setCursor(div.kind === 'col' ? 'ew-resize' : 'ns-resize');
       return;
     }
     const port = engine.hitPort(p.screen.x, p.screen.y);
@@ -194,6 +209,28 @@ export class SelectTool extends Tool {
       if (v) this.originals.set(h.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
       return;
     }
+    // interior table dividers win over move/marquee (single selected table only)
+    if (engine.selection.size === 1) {
+      const div = engine.hitTableDivider(p.world.x, p.world.y);
+      if (div) {
+        const v = engine.views.get(div.shapeId);
+        if (v && v.type === 'table' && !v.locked) {
+          const grid = tableGrid(v);
+          const local = shapeRotation(v) ? worldToLocal(v, p.world.x, p.world.y) : { x: p.world.x, y: p.world.y };
+          this.tableDiv = {
+            shapeId: div.shapeId,
+            kind: div.kind,
+            index: div.index,
+            fracs: div.kind === 'col' ? [...grid.colW] : [...grid.rowH],
+            span: div.kind === 'col' ? v.w : v.h,
+            startX: local.x,
+            startY: local.y,
+          };
+          this.mode = 'tablediv';
+          return;
+        }
+      }
+    }
     const hit = engine.hitTest(p.world.x, p.world.y);
     const bounds = engine.selectionBounds();
     const insideBounds =
@@ -235,6 +272,18 @@ export class SelectTool extends Tool {
       this.moved,
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
+    if (this.mode === 'tablediv' && this.tableDiv) {
+      const t = this.tableDiv;
+      const v = engine.views.get(t.shapeId);
+      if (!v || v.type !== 'table') return;
+      const local = shapeRotation(v) ? worldToLocal(v, p.world.x, p.world.y) : { x: p.world.x, y: p.world.y };
+      const at = t.kind === 'col' ? local.x : local.y;
+      const from = t.kind === 'col' ? t.startX : t.startY;
+      const minF = Math.min(0.2, 28 / Math.max(1, t.span));
+      const next = shiftTableDivider(t.fracs, t.index, (at - from) / Math.max(1, t.span), minF);
+      store.patchShape(t.shapeId, t.kind === 'col' ? { colW: next } : { rowH: next });
+      return;
+    }
     if (this.mode === 'rotate') {
       // group rotate
       if (this.groupOrigBox) {
@@ -358,6 +407,25 @@ export class SelectTool extends Tool {
           movedIds.add(sid);
         }
       }
+      // tables carry objects placed on them (fixpoint: nested tables cascade)
+      for (let pass = 0; pass < 4; pass++) {
+        let added = false;
+        const carriers: ShapeView[] = [...this.originals.values(), ...this.stuck.values()];
+        for (const o of carriers) {
+          if (o.type !== 'table') continue;
+          for (const [sid, sv] of engine.views) {
+            if (movedIds.has(sid) || this.originals.has(sid) || this.stuck.has(sid)) continue;
+            if (sv.locked) continue;
+            if (!containedIn(sv, o)) continue;
+            const base = { ...sv, points: sv.points ? [...sv.points] : undefined };
+            this.stuck.set(sid, base);
+            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
+            movedIds.add(sid);
+            added = true;
+          }
+        }
+        if (!added) break;
+      }
       for (const [aid, av] of engine.views) {
         if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
         if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
@@ -419,6 +487,7 @@ export class SelectTool extends Tool {
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.marquee = null;
+    this.tableDiv = null;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
@@ -426,6 +495,10 @@ export class SelectTool extends Tool {
   }
 
   cancel(engine: Engine): void {
+    if (this.tableDiv) {
+      const t = this.tableDiv;
+      store.patchShape(t.shapeId, t.kind === 'col' ? { colW: [...t.fracs] } : { rowH: [...t.fracs] });
+    }
     if (this.originals.size) {
       const patches: Array<[string, Partial<ShapeView>]> = [];
       for (const [id, o] of this.originals) {
@@ -462,6 +535,7 @@ export class SelectTool extends Tool {
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.marquee = null;
+    this.tableDiv = null;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();

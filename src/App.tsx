@@ -555,12 +555,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     const unbindChrome = () => {
       if (!chromeBound) return;
-      if (curPersist) try { curPersist.off('synced', onSynced); } catch {}
-      try { curMeta.unobserve(onMeta); } catch {}
+      const metaSnap = curMeta;
+      const undoSnap = curUndo;
+      const persistSnap = curPersist;
+      if (persistSnap) try { persistSnap.off('synced', onSynced); } catch {}
+      try { metaSnap.unobserve(onMeta); } catch {}
       try {
-        curUndo.off('stack-item-added', syncUndo);
-        curUndo.off('stack-item-popped', syncUndo);
-        curUndo.off('stack-cleared', syncUndo);
+        undoSnap.off('stack-item-added', syncUndo);
+        undoSnap.off('stack-item-popped', syncUndo);
+        undoSnap.off('stack-cleared', syncUndo);
       } catch {}
       chromeBound = false;
     };

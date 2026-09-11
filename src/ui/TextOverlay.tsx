@@ -195,10 +195,10 @@ export function TextOverlay({
           e.preventDefault();
           finish(true);
         } else if (target.tableCell && e.key === 'Enter') {
-          // spreadsheet nav: commit and move down (Ctrl+Enter still finishes)
+          // ponytail: Enter commits and EXITS cell editing so the table can be
+          // dragged right away; Tab keeps fast multi-cell entry (moves right).
           e.preventDefault();
           finish(true);
-          onCellAdvance?.('down');
         } else if (target.tableCell && e.key === 'Tab') {
           e.preventDefault();
           finish(true);

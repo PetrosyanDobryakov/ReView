@@ -109,8 +109,16 @@ export function shapesToSvg(
       );
     } else if (v.type === 'table') {
       const g = tableGrid(v);
-      const colW = v.w / g.cols;
-      const rowH = v.h / g.rows;
+      const cumX = (i: number) => {
+        let s = 0;
+        for (let k = 0; k < i && k < g.colW.length; k++) s += g.colW[k];
+        return s;
+      };
+      const cumY = (i: number) => {
+        let s = 0;
+        for (let k = 0; k < i && k < g.rowH.length; k++) s += g.rowH[k];
+        return s;
+      };
       const size = v.fontSize ?? 14;
       const ink = esc(v.textColor ?? '#1c1c1a');
       const gridSw = Math.min(v.strokeWidth, 1.5);
@@ -119,11 +127,11 @@ export function shapesToSvg(
       );
       const lines: string[] = [];
       for (let c = 1; c < g.cols; c++) {
-        const lx = x + c * colW;
+        const lx = x + cumX(c) * v.w;
         lines.push(`M${lx} ${y}L${lx} ${y + v.h}`);
       }
       for (let r = 1; r < g.rows; r++) {
-        const ly = y + r * rowH;
+        const ly = y + cumY(r) * v.h;
         lines.push(`M${x} ${ly}L${x + v.w} ${ly}`);
       }
       if (lines.length) {
@@ -137,7 +145,7 @@ export function shapesToSvg(
           if (!text) continue;
           const weight = (g.header && r === 0) || v.bold ? ' font-weight="bold"' : '';
           parts.push(
-            `<text x="${x + c * colW + 10}" y="${y + r * rowH + 8 + size}" font-size="${size}" fill="${ink}"${weight}${opacity}${xf}>${esc(text.split('\n')[0] ?? '')}</text>`
+            `<text x="${x + cumX(c) * v.w + 10}" y="${y + cumY(r) * v.h + 8 + size}" font-size="${size}" fill="${ink}"${weight}${opacity}${xf}>${esc(text.split('\n')[0] ?? '')}</text>`
           );
         }
       }

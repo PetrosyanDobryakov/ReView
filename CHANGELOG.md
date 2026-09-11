@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 — unreleased
+
+### Tables
+- `[−]` pills next to `[+]`: pop the last row / column (insert/delete at the active cell stays in the context menu).
+- Resizable cells: drag interior grid lines (fractions persist, outer resize keeps proportions, insert splits / delete merges, Esc reverts mid-drag).
+- Header tint removed (first row still reads through bold; toggle it off in the menu for a fully uniform grid).
+- Cell editing no longer traps dragging: Enter commits and EXITS (Tab keeps fast entry to the next cell); double-clicking another cell of the same table commits the current one first (was silently lost).
+- Objects placed on a table ride along when it moves (mouse drag and arrow nudge, nested tables cascade); riders stay individually movable.
+
 ## 0.13.0 — unreleased
 
 ### Tables

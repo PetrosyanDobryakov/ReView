@@ -65,6 +65,9 @@ export interface ShapeView {
   cells?: string[];
   /** Table first row styled as a header (default true). */
   header?: boolean;
+  /** Table column widths / row heights as fractions summing to 1 (omit = uniform). */
+  colW?: number[];
+  rowH?: number[];
 }
 
 export const PORTS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
@@ -213,12 +216,15 @@ export function rectCornerRadius(v: Pick<ShapeView, 'cornerRadius' | 'w' | 'h'>)
   return Math.min(raw, Math.abs(v.w) / 2, Math.abs(v.h) / 2);
 }
 
-/** Normalized table grid (uniform cells derived from the outer box). */
+/** Normalized table grid (cells sized by column/row fractions of the outer box). */
 export interface TableGrid {
   cols: number;
   rows: number;
   cells: string[];
   header: boolean;
+  /** Column widths / row heights as fractions summing to 1. */
+  colW: number[];
+  rowH: number[];
 }
 
 export function normalizeTableCells(cols: number, rows: number, cells?: unknown): string[] {
@@ -230,32 +236,123 @@ export function normalizeTableCells(cols: number, rows: number, cells?: unknown)
   return out;
 }
 
-export function tableGrid(v: Pick<ShapeView, 'cols' | 'rows' | 'cells' | 'header'>): TableGrid {
+/** Fractions summing to 1, or uniform when the stored sizes are invalid. */
+export function normalizeTableSizes(n: number, arr?: unknown): number[] {
+  if (Array.isArray(arr) && arr.length === n) {
+    const nums = arr.map((x) => (typeof x === 'number' && Number.isFinite(x) ? x : NaN));
+    if (nums.every((x) => x > 0)) {
+      const sum = nums.reduce((a, b) => a + b, 0);
+      if (sum > 0) return nums.map((x) => x / sum);
+    }
+  }
+  return new Array(n).fill(1 / n);
+}
+
+/** Move the divider after column/row i-1 by delta (fractions); the neighbor compensates. */
+export function shiftTableDivider(fracs: number[], i: number, delta: number, minF: number): number[] {
+  if (i < 1 || i >= fracs.length) return fracs;
+  const total = fracs[i - 1] + fracs[i];
+  const lo = Math.min(minF, Math.max(0, total - minF));
+  const a = Math.min(total - lo, Math.max(lo, fracs[i - 1] + delta));
+  const out = [...fracs];
+  out[i - 1] = a;
+  out[i] = total - a;
+  return out;
+}
+
+export function tableGrid(
+  v: Pick<ShapeView, 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'>
+): TableGrid {
   const cols = Math.min(24, Math.max(1, Math.floor(v.cols ?? TABLE_DEFAULT_COLS) || TABLE_DEFAULT_COLS));
   const rows = Math.min(64, Math.max(1, Math.floor(v.rows ?? TABLE_DEFAULT_ROWS) || TABLE_DEFAULT_ROWS));
-  return { cols, rows, cells: normalizeTableCells(cols, rows, v.cells), header: v.header !== false };
+  return {
+    cols,
+    rows,
+    cells: normalizeTableCells(cols, rows, v.cells),
+    header: v.header !== false,
+    colW: normalizeTableSizes(cols, v.colW),
+    rowH: normalizeTableSizes(rows, v.rowH),
+  };
+}
+
+/** Cumulative fraction offset of column/row i. */
+function tableCum(fracs: number[], i: number): number {
+  let s = 0;
+  for (let k = 0; k < i && k < fracs.length; k++) s += fracs[k];
+  return s;
 }
 
 export function tableCellRect(
-  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header'>,
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'>,
   row: number,
   col: number
 ): ShapeBox {
-  const { cols, rows } = tableGrid(v);
-  const r = Math.min(rows - 1, Math.max(0, row));
-  const c = Math.min(cols - 1, Math.max(0, col));
-  return { x: v.x + (c * v.w) / cols, y: v.y + (r * v.h) / rows, w: v.w / cols, h: v.h / rows };
+  const g = tableGrid(v);
+  const r = Math.min(g.rows - 1, Math.max(0, row));
+  const c = Math.min(g.cols - 1, Math.max(0, col));
+  return {
+    x: v.x + tableCum(g.colW, c) * v.w,
+    y: v.y + tableCum(g.rowH, r) * v.h,
+    w: g.colW[c] * v.w,
+    h: g.rowH[r] * v.h,
+  };
 }
 
 export function tableCellAt(
-  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header'>,
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'>,
   px: number,
   py: number
 ): { row: number; col: number } {
-  const { cols, rows } = tableGrid(v);
-  const col = v.w > 0 ? Math.floor(((px - v.x) / v.w) * cols) : 0;
-  const row = v.h > 0 ? Math.floor(((py - v.y) / v.h) * rows) : 0;
-  return { row: Math.min(rows - 1, Math.max(0, row)), col: Math.min(cols - 1, Math.max(0, col)) };
+  const g = tableGrid(v);
+  const fx = v.w > 0 ? (px - v.x) / v.w : 0;
+  const fy = v.h > 0 ? (py - v.y) / v.h : 0;
+  let col = g.cols - 1;
+  for (let c = 0; c < g.cols; c++) {
+    if (fx < tableCum(g.colW, c + 1)) {
+      col = c;
+      break;
+    }
+  }
+  let row = g.rows - 1;
+  for (let r = 0; r < g.rows; r++) {
+    if (fy < tableCum(g.rowH, r + 1)) {
+      row = r;
+      break;
+    }
+  }
+  return { row, col };
+}
+
+/**
+ * Shapes riding on tables (fully contained, transitively): they move with the table.
+ * tableIds = already-moving tables; returns rider ids (excluding the input tables).
+ */
+export function tableRiderIds(
+  shapes: Array<Pick<ShapeView, 'id' | 'x' | 'y' | 'w' | 'h' | 'type' | 'locked'>>,
+  tableIds: Set<string> | string[]
+): string[] {
+  const byId = new Map(shapes.map((s) => [s.id, s]));
+  const tables = [...tableIds].map((id) => byId.get(id)).filter((t) => t && t.type === 'table');
+  if (!tables.length) return [];
+  const riding = new Set<string>([...tableIds]);
+  for (let pass = 0; pass < 4; pass++) {
+    let added = false;
+    for (const s of shapes) {
+      if (riding.has(s.id) || s.locked) continue;
+      for (const rid of riding) {
+        const t = byId.get(rid);
+        if (!t || t.type !== 'table') continue;
+        if (containedIn(s, t)) {
+          riding.add(s.id);
+          added = true;
+          break;
+        }
+      }
+    }
+    if (!added) break;
+  }
+  for (const id of tableIds) riding.delete(id);
+  return [...riding];
 }
 
 export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
@@ -1744,16 +1841,15 @@ function drawTable(
   hideText = false,
   hideCell?: { row: number; col: number }
 ): void {
-  const { cols, rows, cells, header } = tableGrid(v);
-  const colW = v.w / cols;
-  const rowH = v.h / rows;
+  const { cols, rows, cells, header, colW: colF, rowH: rowF } = tableGrid(v);
+  const cumX = (i: number) => tableCum(colF, i);
+  const cumY = (i: number) => tableCum(rowF, i);
   const size = v.fontSize ?? TABLE_FONT;
   const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'left';
   const padX = 10;
   const padTop = 8;
   const lineHeight = size * 1.3;
-  const maxLines = Math.max(1, Math.floor((rowH - padTop * 1.5) / lineHeight));
 
   ctx.save();
   ctx.beginPath();
@@ -1763,25 +1859,17 @@ function drawTable(
     ctx.fill();
   }
   ctx.clip();
-  // header tint follows the border color so custom strokes stay coherent
-  if (header) {
-    ctx.save();
-    ctx.globalAlpha = 0.14;
-    ctx.fillStyle = v.stroke;
-    ctx.fillRect(v.x, v.y, v.w, rowH);
-    ctx.restore();
-  }
-  // hairline grid
+  // hairline grid (no header tint — header reads through bold text only)
   ctx.strokeStyle = v.stroke;
   ctx.lineWidth = Math.min(v.strokeWidth, 1.5);
   ctx.beginPath();
   for (let c = 1; c < cols; c++) {
-    const x = v.x + c * colW;
+    const x = v.x + cumX(c) * v.w;
     ctx.moveTo(x, v.y);
     ctx.lineTo(x, v.y + v.h);
   }
   for (let r = 1; r < rows; r++) {
-    const y = v.y + r * rowH;
+    const y = v.y + cumY(r) * v.h;
     ctx.moveTo(v.x, y);
     ctx.lineTo(v.x + v.w, y);
   }
@@ -1790,6 +1878,8 @@ function drawTable(
     ctx.fillStyle = ink;
     ctx.textBaseline = 'top';
     for (let r = 0; r < rows; r++) {
+      const cellH = rowF[r] * v.h;
+      const maxLines = Math.max(1, Math.floor((cellH - padTop * 1.5) / lineHeight));
       for (let c = 0; c < cols; c++) {
         // the cell under the open editor is covered by the overlay — hide just it
         if (hideCell && hideCell.row === r && hideCell.col === c) continue;
@@ -1797,13 +1887,14 @@ function drawTable(
         if (!text) continue;
         const isHeader = header && r === 0;
         ctx.font = boardFont(size, { bold: isHeader || v.bold, italic: v.italic });
-        const lines = wrapText(ctx, text, Math.max(20, colW - padX * 2)).slice(0, maxLines);
-        const bx = v.x + c * colW + padX;
-        const maxW = Math.max(20, colW - padX * 2);
+        const cellW = colF[c] * v.w;
+        const lines = wrapText(ctx, text, Math.max(20, cellW - padX * 2)).slice(0, maxLines);
+        const bx = v.x + cumX(c) * v.w + padX;
+        const maxW = Math.max(20, cellW - padX * 2);
         lines.forEach((line, i) => {
           const lw = ctx.measureText(line).width;
           const lx = lineAnchorX(bx, maxW, lw, align);
-          const ly = v.y + r * rowH + padTop + i * lineHeight;
+          const ly = v.y + cumY(r) * v.h + padTop + i * lineHeight;
           ctx.fillText(line, lx, ly);
           drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
         });
