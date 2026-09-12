@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
-import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries } from '../core/shapes';
+import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableCarries, tableGrid } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -1755,8 +1755,8 @@ export class EraserTool extends Tool {
       if (!store.isOnActivePage(id)) continue;
       const v = engine.views.get(id);
       if (!v || v.locked) continue;
-      // ponytail: tables and photos are never erasable (either eraser mode)
-      if (v.type === 'table' || v.type === 'image') continue;
+      // ponytail: containers (photos, docs, tables, graphs, frames, flowchart nodes) are never erasable
+      if (NON_ERASABLE_TYPES.has(v.type)) continue;
       if (partial && v.type === 'pen' && v.points) {
         let idx = this.partialHits.get(id);
         if (!idx) {
