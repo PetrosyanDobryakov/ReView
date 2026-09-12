@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.9 — unreleased
+
+### Toolbar
+- Block-scheme fly-out no longer collapses while reaching for it (it sat 10px off the row, tripping mouseleave in the gap — now overlaps by 2px).
+
 ## 0.14.8 — unreleased
 
 ### Toolbar

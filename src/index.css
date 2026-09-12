@@ -1459,7 +1459,9 @@ button.brand {
 }
 .block-scheme-submenu {
   position: absolute;
-  left: calc(100% + 10px);
+  /* ponytail: overlap the row by 2px — any gap here fires .more-sub mouseleave
+     while reaching for the submenu and it collapses under the cursor */
+  left: calc(100% - 2px);
   bottom: 0;
   padding: 8px;
   gap: 6px;
