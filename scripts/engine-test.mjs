@@ -699,6 +699,23 @@ assert.equal(store.board.has(eStrokeKey), false, 'last vertex cleaned up by the 
 settings.eraser.size = prevSize;
 settings.eraser.mode = prevEraserMode;
 
+// setTool drops selection for drawing tools, keeps it for navigate tools
+const selKey = store.addShape({ type: 'rect', x: 60000, y: 60000, w: 50, h: 40, fill: '#ffffff', stroke: '#000000', strokeWidth: 2 });
+engine.setSelection([selKey]);
+assert.equal(engine.selection.size, 1, 'setup selected');
+engine.setTool('pen');
+assert.equal(engine.selection.size, 0, 'drawing tool clears selection');
+engine.setSelection([selKey]);
+engine.setTool('select');
+assert.equal(engine.selection.size, 1, 'select keeps selection');
+engine.setTool('pan');
+assert.equal(engine.selection.size, 1, 'pan keeps selection');
+engine.setSelection([selKey]);
+engine.setTool('eraser');
+assert.equal(engine.selection.size, 0, 'eraser clears selection');
+engine.setTool('select');
+engine.setSelection([]);
+
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor
 const peerBase = (id, userId, name, x, viewing) => ({
   id,

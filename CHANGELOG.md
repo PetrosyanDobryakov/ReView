@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.8 — unreleased
+
+### Toolbar
+- Fixed toolbar dying after shelf drag-and-drop: a cross-group drop unmounts the source button, losing its dragend and sticking the click guard — the guard is now shared, released on every drop, and backed by a window-level dragend.
+- Switching to a drawing tool now clears the selection (select/pan/lasso keep it): no more stale style island with a hidden frame, and the new tool's own panel always appears.
+
 ## 0.14.7 — unreleased
 
 ### Board files

@@ -815,6 +815,12 @@ export class Engine {
   setTool(id: ToolId): void {
     this.active = id;
     this.override = null;
+    // ponytail: drawing tools drop the selection — the frame hides off-select
+    // anyway, and a stale selection would keep showing its style island with
+    // no frame while the new tool's own panel stays hidden
+    if (id !== 'select' && id !== 'pan' && id !== 'lasso' && this.selection.size) {
+      this.setSelection([]);
+    }
     this.setCursor(this.toolCursor());
     publishTool(id);
     this.events.onTool?.(id);
