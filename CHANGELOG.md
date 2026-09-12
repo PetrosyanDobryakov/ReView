@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.3 — unreleased
+
+### Eraser
+- Tables and photos are never erasable (both eraser modes, including peers' previews).
+- Dots erase: single-tap pen dots are hittable in whole mode, and pen hit-testing is now brush-radius aware (was: stroke-width precision, so dots needed pixel-perfect aim).
+
 ## 0.14.2 — unreleased
 
 ### Tables

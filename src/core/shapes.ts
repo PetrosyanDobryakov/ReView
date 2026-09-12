@@ -746,24 +746,30 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   }
 }
 
-function pointNearPolyline(pts: number[], px: number, py: number, tol: number): boolean {
-  if (pts.length < 2) return false;
-  const t2 = tol * tol;
+/** Min distance from a point to an open polyline (single vertex = point distance). */
+export function polylineDistance(pts: number[], px: number, py: number): number {
+  if (pts.length < 2) return Infinity;
+  if (pts.length < 4) {
+    return Math.hypot(px - pts[0], py - pts[1]);
+  }
+  let best = Infinity;
   for (let i = 0; i < pts.length - 2; i += 2) {
     const ax = pts[i];
     const ay = pts[i + 1];
-    const bx = pts[i + 2];
-    const by = pts[i + 3];
-    const abx = bx - ax;
-    const aby = by - ay;
+    const abx = pts[i + 2] - ax;
+    const aby = pts[i + 3] - ay;
     const len2 = abx * abx + aby * aby;
-    let t = len2 ? ((px - ax) * abx + (py - ay) * aby) / len2 : 0;
-    t = Math.max(0, Math.min(1, t));
+    const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / len2)) : 0;
     const dx = px - (ax + abx * t);
     const dy = py - (ay + aby * t);
-    if (dx * dx + dy * dy <= t2) return true;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < best) best = d;
   }
-  return false;
+  return best;
+}
+
+function pointNearPolyline(pts: number[], px: number, py: number, tol: number): boolean {
+  return polylineDistance(pts, px, py) <= tol;
 }
 
 /** True only when stylus pressure actually changes — mice report a flat ~0.5. */
