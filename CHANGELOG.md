@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.2 — unreleased
+
+### Tables
+- Fixed riders freezing mid-drag: carried objects are now re-patched on every move frame (was: only the first ~zero-delta move applied, so nothing visibly followed).
+- Rider rule is now marks-vs-sheets: pen, arrow, sticky and text ride by center alone; rect, ellipse, image, frame, doc, graph and nested tables must also fit — huge backgrounds underneath stay put.
+- Regression tests use incremental drag moves (a single jump masked the freeze).
+
 ## 0.14.1 — unreleased
 
 ### Tables

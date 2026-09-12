@@ -502,6 +502,9 @@ assert.equal(tableCarries(tray, { x: 10, y: 10, w: 40, h: 30 }), true, 'containe
 assert.equal(tableCarries(tray, { x: 250, y: 150, w: 100, h: 100 }), true, 'edge-hanger rides (center inside)');
 assert.equal(tableCarries(tray, { x: 500, y: 500, w: 40, h: 30 }), false, 'outsider stays');
 assert.equal(tableCarries(tray, { x: 100, y: 50, w: 400, h: 300 }), false, 'bigger-than-table stays');
+assert.equal(tableCarries(tray, { x: 100, y: 50, w: 400, h: 300, type: 'pen' }), true, 'big pen mark still rides');
+assert.equal(tableCarries(tray, { x: 100, y: 50, w: 400, h: 300, type: 'sticky' }), true, 'big note still rides');
+assert.equal(tableCarries(tray, { x: 100, y: 50, w: 400, h: 300, type: 'rect' }), false, 'big sheet stays');
 
 // riders: objects on a table move with it (nested tables cascade)
 const hostKey = store.addShape({
@@ -564,8 +567,13 @@ const mKey = store.addShape({
 const stRiderKey = store.addShape({ type: 'sticky', x: 30050, y: 30050, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
 const rcRiderKey = store.addShape({ type: 'rect', x: 30200, y: 30100, w: 50, h: 30, fill: '#ffffff', stroke: '#000000', strokeWidth: 2 });
 const mselect = engine.tools.get('select');
-const mpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: false });
+// alt = no snapping (snap is orthogonal, riders need exact deltas)
+const mpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
 mselect.onDown(engine, mpinfo(30150, 30150));
+// ponytail: incremental moves like a real drag (a single jump would mask
+// riders that only patch on the first move and freeze after)
+mselect.onMove(engine, mpinfo(30160, 30160));
+mselect.onMove(engine, mpinfo(30170, 30175));
 mselect.onMove(engine, mpinfo(30180, 30190));
 mselect.onUp(engine, mpinfo(30180, 30190));
 assert.equal(store.readShape(store.board.get(mKey)).x, 30030, 'dragged table moves');
@@ -573,6 +581,30 @@ assert.equal(store.readShape(store.board.get(mKey)).y, 30040, 'dragged table mov
 assert.equal(store.readShape(store.board.get(stRiderKey)).x, 30080, 'sticky rider follows drag exactly');
 assert.equal(store.readShape(store.board.get(stRiderKey)).y, 30090, 'sticky rider follows drag exactly y');
 assert.equal(store.readShape(store.board.get(rcRiderKey)).x, 30230, 'rect rider follows drag exactly');
+engine.setSelection([]);
+
+// drawn objects ride too (pen stroke + free arrow fully on the table)
+// table is now at (30030,30040); press a free cell, drag +20/+20
+const dPenKey = store.addShape({
+  type: 'pen', x: 30060, y: 30080, w: 60, h: 40, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [30065, 30085, 30090, 30100, 30115, 30095],
+});
+const dArrKey = store.addShape({
+  type: 'arrow', x: 30150, y: 30120, w: 80, h: 20, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [30150, 30130, 30230, 30130],
+});
+const dselect = engine.tools.get('select');
+const dpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
+dselect.onDown(engine, dpinfo(30180, 30100));
+dselect.onMove(engine, dpinfo(30190, 30110));
+dselect.onMove(engine, dpinfo(30200, 30120));
+dselect.onUp(engine, dpinfo(30200, 30120));
+assert.equal(store.readShape(store.board.get(mKey)).x, 30050, 'table moves under pen riders');
+const penView = store.readShape(store.board.get(dPenKey));
+assert.equal(penView.x, 30080, 'pen rider follows');
+assert.equal(penView.points[0], 30085, 'pen world points shift with the ride');
+const arrView = store.readShape(store.board.get(dArrKey));
+assert.equal(arrView.x, 30170, 'free arrow rider follows');
 engine.setSelection([]);
 
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor

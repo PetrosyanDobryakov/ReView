@@ -356,25 +356,21 @@ export function tableRiderIds(
 }
 
 /**
- * Tray rule: a shape rides the table when its center is on it and it is not
- * bigger than the table. Forgiving for casually placed objects hanging slightly
- * off the edge; huge backgrounds underneath are left alone.
+ * Tray rule: a shape rides the table when its center is on it.
+ * Freehand marks and notes (pen, arrow, sticky, text) always belong where
+ * drawn — no size check. Sheet-like shapes (rect, ellipse, image, frame, doc,
+ * graph, nested tables) must also fit, so huge backgrounds underneath stay put.
  */
 export function tableCarries(
   t: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'>,
-  s: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'>
+  s: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'type'>
 ): boolean {
   const tol = 2;
   const cx = s.x + s.w / 2;
   const cy = s.y + s.h / 2;
-  return (
-    cx >= t.x - tol &&
-    cy >= t.y - tol &&
-    cx <= t.x + t.w + tol &&
-    cy <= t.y + t.h + tol &&
-    s.w <= t.w + tol * 2 &&
-    s.h <= t.h + tol * 2
-  );
+  if (cx < t.x - tol || cy < t.y - tol || cx > t.x + t.w + tol || cy > t.y + t.h + tol) return false;
+  if (s.type === 'pen' || s.type === 'arrow' || s.type === 'sticky' || s.type === 'text') return true;
+  return s.w <= t.w + tol * 2 && s.h <= t.h + tol * 2;
 }
 
 export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
