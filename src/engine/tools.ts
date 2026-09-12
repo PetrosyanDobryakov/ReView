@@ -319,7 +319,7 @@ export class SelectTool extends Tool {
             patches.push([id, { x: nx - o.w / 2, y: ny - o.h / 2, rotation: curRot + delta }]);
           }
         }
-        if (patches.length) store.patchShapes(patches);
+      if (patches.length) store.patchShapes(patches);
         return;
       }
       const [id, o] = [...this.originals.entries()][0] ?? [];
@@ -407,7 +407,9 @@ export class SelectTool extends Tool {
           movedIds.add(sid);
         }
       }
-      // tables carry objects placed on them (fixpoint: nested tables cascade)
+      // tables carry objects placed on them (fixpoint: nested tables cascade).
+      // ponytail: like image/frame riders — snapshot once, re-patch EVERY move
+      // from the snapshot (skipping stuck here would freeze riders after move#1).
       for (let pass = 0; pass < 4; pass++) {
         let added = false;
         const carriers: ShapeView[] = [...this.originals.values(), ...this.stuck.values()];
@@ -415,14 +417,17 @@ export class SelectTool extends Tool {
           if (o.type !== 'table') continue;
           const obox = rotatedAabb(o);
           for (const [sid, sv] of engine.views) {
-            if (movedIds.has(sid) || this.originals.has(sid) || this.stuck.has(sid)) continue;
+            if (movedIds.has(sid) || this.originals.has(sid)) continue;
             if (sv.locked) continue;
-            if (!tableCarries(obox, sv)) continue;
-            const base = { ...sv, points: sv.points ? [...sv.points] : undefined };
-            this.stuck.set(sid, base);
+            let base = this.stuck.get(sid);
+            if (!base) {
+              if (!tableCarries(obox, sv)) continue;
+              base = { ...sv, points: sv.points ? [...sv.points] : undefined };
+              this.stuck.set(sid, base);
+              added = true;
+            }
             patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
             movedIds.add(sid);
-            added = true;
           }
         }
         if (!added) break;
@@ -451,7 +456,9 @@ export class SelectTool extends Tool {
         const maxY = Math.max(a.y, b.y) + pad;
         patches.push([aid, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
       }
-      if (patches.length) store.patchShapes(patches);
+      if (patches.length) {
+        store.patchShapes(patches);
+      }
     } else if (this.mode === 'marquee' && this.marquee) {
       this.marquee = normalizeBox(this.start, p.world);
     } else if (this.groupResizing && this.groupOrigBox) {
