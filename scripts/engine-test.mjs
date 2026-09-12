@@ -663,6 +663,38 @@ assert.equal(store.board.has(eTableKey), true, 'table survives the eraser');
 eraser.onDown(engine, epinfo(40460, 40045));
 eraser.onUp(engine, epinfo(40460, 40045));
 assert.equal(store.board.has(eImgKey), true, 'photo survives the eraser');
+// containers + flowchart nodes survive (whole mode): doc, graph, frame, all 8 scheme shapes
+const eContainerKeys = [];
+eContainerKeys.push([store.addShape({
+  type: 'doc', x: 40600, y: 40000, w: 120, h: 160, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  pages: ['data:image/jpeg;base64,x'],
+}), 40660, 40080, 'doc']);
+eContainerKeys.push([store.addShape({
+  type: 'graph', x: 40740, y: 40000, w: 120, h: 90, fill: '#ffffff', stroke: '#000000', strokeWidth: 2, expr: 'sin(x)',
+}), 40800, 40045, 'graph']);
+eContainerKeys.push([store.addShape({
+  type: 'frame', x: 40880, y: 40000, w: 120, h: 90, fill: 'transparent', stroke: '#000000', strokeWidth: 2,
+}), 40940, 40045, 'frame']);
+const eSchemeTypes = ['diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'];
+eSchemeTypes.forEach((type, i) => {
+  eContainerKeys.push([store.addShape({
+    type, x: 40000 + i * 140, y: 40600, w: 120, h: 90, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  }), 40060 + i * 140, 40645, type]);
+});
+for (const [k, cx, cy, label] of eContainerKeys) {
+  eraser.onDown(engine, epinfo(cx, cy));
+  eraser.onUp(engine, epinfo(cx, cy));
+  assert.equal(store.board.has(k), true, `${label} survives the eraser`);
+}
+// ink on top of a container still erases while the container lives
+const eInkKey = store.addShape({
+  type: 'pen', x: 40056, y: 40641, w: 8, h: 8, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [40060, 40645],
+});
+eraser.onDown(engine, epinfo(40060, 40645));
+eraser.onUp(engine, epinfo(40060, 40645));
+assert.equal(store.board.has(eInkKey), false, 'ink on top of a scheme node erases');
+assert.equal(store.board.has(eContainerKeys[3][0]), true, 'scheme node under erased ink survives');
 // same protection in partial mode (+ dots still die there)
 const prevEraserMode = settings.eraser.mode;
 settings.eraser.mode = 'partial';
@@ -679,6 +711,11 @@ assert.equal(store.board.has(eTableKey), true, 'table survives the eraser in par
 eraser.onDown(engine, epinfo(40460, 40045));
 eraser.onUp(engine, epinfo(40460, 40045));
 assert.equal(store.board.has(eImgKey), true, 'photo survives the eraser in partial mode');
+for (const [k, cx, cy, label] of eContainerKeys) {
+  eraser.onDown(engine, epinfo(cx, cy));
+  eraser.onUp(engine, epinfo(cx, cy));
+  assert.equal(store.board.has(k), true, `${label} survives the eraser in partial mode`);
+}
 settings.eraser.mode = prevEraserMode;
 
 // tiny brush (6px) opens a precise gap in partial mode

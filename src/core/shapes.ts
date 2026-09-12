@@ -12,6 +12,23 @@ import {
 
 export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
 
+/** Container-like shapes the eraser never touches (either mode) — ink on top of them still erases. */
+export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
+  'image',
+  'doc',
+  'table',
+  'graph',
+  'frame',
+  'diamond',
+  'triangle',
+  'parallelogram',
+  'hexagon',
+  'cylinder',
+  'terminator',
+  'subroutine',
+  'display',
+]);
+
 export type TextAlign = 'left' | 'center' | 'right';
 
 export interface ShapeView {

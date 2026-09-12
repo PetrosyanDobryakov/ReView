@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.10 — unreleased
+
+### Eraser
+- Only ink erases now: photos, PDF docs, tables, graphs, frames, and all 8 flowchart nodes are immune in both eraser modes, while pen strokes drawn on top of them still wipe off.
+
 ## 0.14.9 — unreleased
 
 ### Toolbar
