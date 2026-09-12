@@ -89,7 +89,8 @@ export function ExportDialog({
         setFileSize(result.blob.size);
         setDims({ w: result.width, h: result.height });
         setExportError(null);
-      } catch {
+      } catch (err) {
+        console.error('[review] export failed:', err);
         if (!cancelled) {
           setPreviewUrl(null);
           setFileSize(null);

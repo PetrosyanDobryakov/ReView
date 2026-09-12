@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.6 — unreleased
+
+### Export
+- One bad shape no longer kills the whole export (per-shape isolation in PNG/JPEG and SVG paths, culprit logged to console).
+- Export failures now log the real error to the console instead of failing silently.
+
 ## 0.14.5 — unreleased
 
 ### Eraser
