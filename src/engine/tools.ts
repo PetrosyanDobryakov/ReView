@@ -373,9 +373,9 @@ export class SelectTool extends Tool {
       }
       // also move connected arrows
       const movedIds = new Set(patches.map(([id]) => id));
-      // annotations (text/sticky/pen) sitting on a moved image stick to it
+      // annotations (text/sticky/pen) sitting on a moved image or PDF stick to it
       for (const [, o] of this.originals) {
-        if (o.type !== 'image') continue;
+        if (o.type !== 'image' && o.type !== 'doc') continue;
         for (const [sid, sv] of engine.views) {
           if (movedIds.has(sid) || this.originals.has(sid)) continue;
           if (sv.locked) continue;
