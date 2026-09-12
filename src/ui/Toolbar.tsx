@@ -47,6 +47,33 @@ export interface ToolbarProps {
   onExport: () => void;
 }
 
+/** Shared drag-click guard: a drop anywhere must release it — the source button
+ * can unmount mid-drop (strip <-> shelf move re-renders it away), in which case
+ * its own dragend never fires and a per-component flag would stick forever. */
+let suppressToolbarClick = false;
+let windowDragEndHooked = false;
+function armToolbarClickSuppress(): void {
+  suppressToolbarClick = true;
+  if (!windowDragEndHooked && typeof window !== 'undefined') {
+    windowDragEndHooked = true;
+    // native dragend always reaches window, even when the source node is gone
+    window.addEventListener('dragend', () => {
+      window.setTimeout(() => {
+        suppressToolbarClick = false;
+      }, 0);
+    });
+  }
+}
+function clearToolbarClickSuppressSoon(): void {
+  window.setTimeout(() => {
+    suppressToolbarClick = false;
+  }, 0);
+}
+/** A successful drop never produces a click — release immediately. */
+function clearToolbarClickSuppressNow(): void {
+  suppressToolbarClick = false;
+}
+
 function ToolButtons({
   ids,
   tool,
@@ -64,20 +91,17 @@ function ToolButtons({
 }) {
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
-  const suppressClick = useRef(false);
 
   const beginDrag = (e: React.DragEvent, id: ToolId) => {
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.effectAllowed = 'move';
-    suppressClick.current = true;
+    armToolbarClickSuppress();
     setDragId(id);
   };
   const endDrag = () => {
     setDragId(null);
     setDrop(null);
-    window.setTimeout(() => {
-      suppressClick.current = false;
-    }, 0);
+    clearToolbarClickSuppressSoon();
   };
 
   return (
@@ -93,6 +117,7 @@ function ToolButtons({
         if (!drag) return;
         e.preventDefault();
         onMove(drag, group, null, false);
+        clearToolbarClickSuppressNow();
       }}
     >
     <SlideTrack className="tool-group" active={ids.includes(tool) ? tool : null}>
@@ -123,9 +148,10 @@ function ToolButtons({
             const drag = dropToolId(e);
             setDrop(null);
             if (drag) onMove(drag, group, id, drop?.id === id ? drop.after : false);
+            clearToolbarClickSuppressNow();
           }}
           onClick={() => {
-            if (suppressClick.current) return;
+            if (suppressToolbarClick) return;
             onTool(id);
           }}
         >
@@ -160,7 +186,6 @@ function MoreMenu({
   const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
-  const suppressClick = useRef(false);
 
   useEffect(() => {
     if (SCHEME.includes(tool)) setLastSchemeTool(tool);
@@ -220,15 +245,13 @@ function MoreMenu({
   const beginDrag = (e: React.DragEvent, id: ToolId) => {
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.effectAllowed = 'move';
-    suppressClick.current = true;
+    armToolbarClickSuppress();
     setDragId(id);
   };
   const endDrag = () => {
     setDragId(null);
     setDrop(null);
-    window.setTimeout(() => {
-      suppressClick.current = false;
-    }, 0);
+    clearToolbarClickSuppressSoon();
   };
 
   return (
@@ -263,6 +286,7 @@ function MoreMenu({
           e.preventDefault();
           onMove(drag, 'more', null, false);
           setOpen(true);
+          clearToolbarClickSuppressNow();
         }}
       >
         <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
@@ -284,6 +308,7 @@ function MoreMenu({
             if (!drag) return;
             e.preventDefault();
             onMove(drag, 'more', null, false);
+            clearToolbarClickSuppressNow();
           }}
         >
           <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
@@ -314,9 +339,10 @@ function MoreMenu({
                 const at = drop?.id === id ? drop.after : false;
                 setDrop(null);
                 if (drag) onMove(drag, 'more', id, at);
+                clearToolbarClickSuppressNow();
               }}
               onClick={() => {
-                if (suppressClick.current) return;
+                if (suppressToolbarClick) return;
                 pick(id);
               }}
             >
