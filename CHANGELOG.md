@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.4 — unreleased
+
+### Tables
+- Creating a table no longer opens the first cell for typing — it drops back to the select tool with nothing selected, so you stay free to move around the board.
+
 ## 0.14.3 — unreleased
 
 ### Eraser

@@ -1261,7 +1261,7 @@ export class TableTool extends BoxTool {
     }
     const cols = Math.min(8, Math.max(1, Math.round(box.w / TABLE_CELL_W)));
     const rows = Math.min(12, Math.max(1, Math.round(box.h / TABLE_CELL_H)));
-    const id = store.addShape({
+    store.addShape({
       type: 'table',
       ...box,
       fill: shapeFillValue(),
@@ -1275,7 +1275,8 @@ export class TableTool extends BoxTool {
     this.start = null;
     this.cur = null;
     this.shift = false;
-    engine.openTableCellEditor(id, 0, 0);
+    // ponytail: no auto-edit — drop back to select, unselected, so the board stays navigable
+    engine.setTool('select');
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {

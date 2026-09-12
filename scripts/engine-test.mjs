@@ -583,6 +583,18 @@ assert.equal(store.readShape(store.board.get(stRiderKey)).y, 30090, 'sticky ride
 assert.equal(store.readShape(store.board.get(rcRiderKey)).x, 30230, 'rect rider follows drag exactly');
 engine.setSelection([]);
 
+// creating a table drops back to select: no auto-edit, no selection
+const tableTool = engine.tools.get('table');
+const tpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
+const shapeCountBefore = [...store.board.keys()].length;
+tableTool.onDown(engine, tpinfo(60000, 60000));
+tableTool.onUp(engine, tpinfo(60000, 60000));
+assert.equal([...store.board.keys()].length, shapeCountBefore + 1, 'table created on click');
+assert.equal(engine.active, 'select', 'back to select after creating a table');
+assert.equal(engine.editing, false, 'no cell editor auto-opens');
+assert.equal(engine.selection.size, 0, 'new table is not selected');
+engine.setSelection([]);
+
 // drawn objects ride too (pen stroke + free arrow fully on the table)
 // table is now at (30030,30040); press a free cell, drag +20/+20
 const dPenKey = store.addShape({
