@@ -57,6 +57,7 @@ export function shapesToSvg(
     parts.push(`<rect width="100%" height="100%" fill="${esc(opts.background)}"/>`);
   }
   for (const v of views) {
+    try {
     const rot = shapeRotation(v);
     const cx = v.x + v.w / 2 + ox;
     const cy = v.y + v.h / 2 + oy;
@@ -158,6 +159,10 @@ export function shapesToSvg(
           `<text x="${x + v.w / 2}" y="${y + v.h / 2}" text-anchor="middle" dominant-baseline="middle" font-size="${v.fontSize ?? 14}" fill="${esc(v.textColor ?? '#1c1c1a')}"${xf}>${esc(v.text.split('\n')[0] ?? '')}</text>`
         );
       }
+    }
+    } catch (err) {
+      // ponytail: one bad shape must not kill the whole export
+      console.warn('[review] svg export skipped shape', v.id, v.type, err);
     }
   }
   parts.push('</svg>');

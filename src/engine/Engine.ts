@@ -666,7 +666,12 @@ export class Engine {
         if (!v) continue;
         const vb = this.spatialBox(v);
         if (!intersects(vb, exportBox)) continue;
-        drawShape(ctx, v, theme.text, paper);
+        try {
+          drawShape(ctx, v, theme.text, paper);
+        } catch (err) {
+          // ponytail: one bad shape must not kill the whole export
+          console.warn('[review] export skipped shape', id, v.type, err);
+        }
       }
       return canvas;
     } catch {
