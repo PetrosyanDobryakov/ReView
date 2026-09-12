@@ -1611,13 +1611,6 @@ button.brand {
   padding-left: 4px;
 }
 
-.eraser-dot {
-  display: inline-block;
-  border-radius: 50%;
-  background: currentColor;
-  vertical-align: middle;
-}
-
 .size-slider {
   width: 72px;
   accent-color: var(--chrome-accent);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.5 — unreleased
+
+### Eraser
+- Size is now a slider in points (2–96, like the pen brush) instead of three fixed slots — small precise erasing for 1–3pt handwriting is possible.
+
 ## 0.14.4 — unreleased
 
 ### Tables
