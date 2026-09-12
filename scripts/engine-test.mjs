@@ -583,6 +583,34 @@ assert.equal(store.readShape(store.board.get(stRiderKey)).y, 30090, 'sticky ride
 assert.equal(store.readShape(store.board.get(rcRiderKey)).x, 30230, 'rect rider follows drag exactly');
 engine.setSelection([]);
 
+// annotations ride a dragged PDF like they ride a photo (pen + sticky fully on the page)
+const docKey = store.addShape({
+  type: 'doc', x: 50000, y: 50000, w: 240, h: 320, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  pages: ['data:image/jpeg;base64,x'],
+});
+const docPenKey = store.addShape({
+  type: 'pen', x: 50060, y: 50080, w: 60, h: 40, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [50065, 50085, 50090, 50100, 50115, 50095],
+});
+const docNoteKey = store.addShape({ type: 'sticky', x: 50100, y: 50150, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
+const docOutsiderKey = store.addShape({
+  type: 'pen', x: 51000, y: 51000, w: 60, h: 40, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [51005, 51005, 51030, 51020],
+});
+const docSelect = engine.tools.get('select');
+const docPinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
+docSelect.onDown(engine, docPinfo(50010, 50010));
+docSelect.onMove(engine, docPinfo(50020, 50020));
+docSelect.onMove(engine, docPinfo(50030, 50035));
+docSelect.onUp(engine, docPinfo(50030, 50035));
+assert.equal(store.readShape(store.board.get(docKey)).x, 50020, 'dragged PDF moves');
+assert.equal(store.readShape(store.board.get(docKey)).y, 50025, 'dragged PDF moves y');
+assert.equal(store.readShape(store.board.get(docPenKey)).x, 50080, 'pen annotation follows the PDF');
+assert.equal(store.readShape(store.board.get(docPenKey)).y, 50105, 'pen annotation follows the PDF y');
+assert.equal(store.readShape(store.board.get(docNoteKey)).x, 50120, 'sticky note follows the PDF');
+assert.equal(store.readShape(store.board.get(docOutsiderKey)).x, 51000, 'ink off the page stays');
+engine.setSelection([]);
+
 // creating a table drops back to select: no auto-edit, no selection
 const tableTool = engine.tools.get('table');
 const tpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });

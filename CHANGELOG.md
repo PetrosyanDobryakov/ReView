@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.11 — unreleased
+
+### PDF
+- Ink sticks to PDFs now: pen, sticky, and text drawn on a PDF page move with it when dragged, same as photos. Ink off the page stays put.
+
 ## 0.14.10 — unreleased
 
 ### Eraser
