@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.7 — unreleased
+
+### Board files
+- Fixed .review export failing with a bare error on photo boards: file/update/base64 limits raised 8 → 32 MB (import accepts them back, so friend handoff keeps working).
+- Oversized boards now report honestly ("too large") instead of a generic error.
+
 ## 0.14.6 — unreleased
 
 ### Export

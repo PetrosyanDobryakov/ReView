@@ -228,8 +228,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const importRef = useRef<HTMLInputElement>(null);
   const handleExportBoard = async (id: string) => {
-    const ok = await exportBoardFile(id);
-    showCopyToast(ok ? t(locale, 'shareCopied') : t(locale, 'error'));
+    const res = await exportBoardFile(id);
+    showCopyToast(res === 'ok' ? t(locale, 'shareCopied') : res === 'too_large' ? t(locale, 'exportTooLarge') : t(locale, 'error'));
   };
   const handleImportPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

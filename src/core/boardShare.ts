@@ -16,10 +16,10 @@ const FILE_EXT = '.review';
 const MIME_JSON = 'application/json';
 
 // File-import limits (defense in depth: file.text() / JSON.parse / base64 decode / Y.applyUpdate all bounded)
-// Mirror Engine.ts 8MB image guard — unbounded file.text()/JSON/fromBase64/Y.applyUpdate led to quota/memory exhaustion
-export const MAX_FILE_BYTES = 8 * 1024 * 1024;
-export const MAX_UPDATE_BYTES = 8 * 1024 * 1024;
-export const MAX_BASE64_CHARS = 11 * 1024 * 1024; // ceil(8MB*4/3) ≈ 10.7MB
+// 32MB covers realistic photo boards; transient base64 (~43MB string) is fine on desktop.
+export const MAX_FILE_BYTES = 32 * 1024 * 1024;
+export const MAX_UPDATE_BYTES = 32 * 1024 * 1024;
+export const MAX_BASE64_CHARS = 45 * 1024 * 1024; // ceil(32MB*4/3) ≈ 42.7MB
 
 export type BoardFile = {
   v: number;
@@ -218,18 +218,19 @@ function safeFileName(name: string): string {
 }
 
 /** Build the share payload for a board (no side effects). */
-export async function buildBoardFile(boardId: string): Promise<BoardFile | null> {
+export type BoardFileError = 'missing' | 'load_failed' | 'too_large';
+export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile } | { error: BoardFileError }> {
   const meta = getBoard(boardId);
-  if (!meta) return null;
+  if (!meta) return { error: 'missing' };
   const update = await loadUpdateForBoard(boardId);
   if (!update) {
     try { console.warn('[boardShare] buildBoardFile: no update for board', boardId); } catch {}
-    return null;
+    return { error: 'load_failed' };
   }
-  if (update.length > MAX_UPDATE_BYTES) return null;
+  if (update.length > MAX_UPDATE_BYTES) return { error: 'too_large' };
   // pre-check predicted base64/JSON size before 4/3x blowup + JSON.stringify + Blob triple allocation
   const predictedB64Len = Math.ceil(update.length / 3) * 4;
-  if (predictedB64Len > MAX_BASE64_CHARS) return null;
+  if (predictedB64Len > MAX_BASE64_CHARS) return { error: 'too_large' };
   let pages: string[] = ['main'];
   try {
     if (getCurrentBoardId() === boardId) {
@@ -258,33 +259,36 @@ export async function buildBoardFile(boardId: string): Promise<BoardFile | null>
   try {
     b64 = toBase64(update);
   } catch {
-    return null;
+    return { error: 'too_large' };
   }
-  if (b64.length > MAX_BASE64_CHARS) return null;
+  if (b64.length > MAX_BASE64_CHARS) return { error: 'too_large' };
   // estimated JSON size = base64 + envelope (~512 bytes); bound JSON.stringify + Blob allocation
-  if (b64.length + 1024 > MAX_FILE_BYTES) return null;
+  if (b64.length + 1024 > MAX_FILE_BYTES) return { error: 'too_large' };
   return {
-    v: FILE_VERSION,
-    kind: 'review-board',
-    boardId: meta.id,
-    name: meta.name,
-    teamId: meta.teamId,
-    createdAt: meta.createdAt,
-    exportedAt: Date.now(),
-    appVersion,
-    pages,
-    update: b64,
+    file: {
+      v: FILE_VERSION,
+      kind: 'review-board',
+      boardId: meta.id,
+      name: meta.name,
+      teamId: meta.teamId,
+      createdAt: meta.createdAt,
+      exportedAt: Date.now(),
+      appVersion,
+      pages,
+      update: b64,
+    },
   };
 }
 
 /** Trigger a download for a board's .review file. */
-export async function exportBoardFile(boardId: string): Promise<boolean> {
-  const file = await buildBoardFile(boardId);
-  if (!file) return false;
+export async function exportBoardFile(boardId: string): Promise<'ok' | 'too_large' | 'failed'> {
+  const built = await buildBoardFile(boardId);
+  if (!('file' in built)) return built.error === 'too_large' ? 'too_large' : 'failed';
+  const file = built.file;
   // guard JSON.stringify + Blob triple allocation with max-bytes cap
-  if (file.update.length > MAX_BASE64_CHARS) return false;
+  if (file.update.length > MAX_BASE64_CHARS) return 'too_large';
   const json = JSON.stringify(file);
-  if (json.length > MAX_FILE_BYTES) return false;
+  if (json.length > MAX_FILE_BYTES) return 'too_large';
   const blob = new Blob([json], { type: MIME_JSON });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -296,13 +300,14 @@ export async function exportBoardFile(boardId: string): Promise<boolean> {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return true;
+  return 'ok';
 }
 
 /** Share via Web Share API when available, otherwise fall back to download. */
 export async function shareBoard(boardId: string): Promise<'shared' | 'downloaded' | 'failed'> {
-  const file = await buildBoardFile(boardId);
-  if (!file) return 'failed';
+  const built = await buildBoardFile(boardId);
+  if (!('file' in built)) return 'failed';
+  const file = built.file;
   if (file.update.length > MAX_BASE64_CHARS) return 'failed';
   const meta = getBoard(boardId);
   const filename = `${safeFileName(meta?.name ?? boardId)}${FILE_EXT}`;
