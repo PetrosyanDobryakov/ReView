@@ -607,6 +607,68 @@ const arrView = store.readShape(store.board.get(dArrKey));
 assert.equal(arrView.x, 30170, 'free arrow rider follows');
 engine.setSelection([]);
 
+// eraser: tables + photos survive, single-tap dots die (whole mode)
+const eTableKey = store.addShape({
+  type: 'table', x: 40000, y: 40000, w: 300, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+const eImgKey = store.addShape({
+  type: 'image', x: 40400, y: 40000, w: 120, h: 90, fill: 'transparent', stroke: 'transparent', strokeWidth: 0,
+  src: 'data:image/png;base64,x',
+});
+const eDotKey = store.addShape({
+  type: 'pen', x: 40200, y: 40200, w: 8, h: 8, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [40204, 40204],
+});
+const eraser = engine.tools.get('eraser');
+const epinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
+const prevEraserSize = settings.eraser.size;
+settings.eraser.size = 32;
+eraser.onDown(engine, epinfo(40204, 40204));
+eraser.onUp(engine, epinfo(40204, 40204));
+assert.equal(store.board.has(eDotKey), false, 'single-tap dot erased in whole mode');
+// brush radius counts, not stroke-width precision: 20px away still erases…
+const eDot3Key = store.addShape({
+  type: 'pen', x: 40300, y: 40300, w: 8, h: 8, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [40304, 40304],
+});
+eraser.onDown(engine, epinfo(40324, 40304));
+eraser.onUp(engine, epinfo(40324, 40304));
+assert.equal(store.board.has(eDot3Key), false, 'dot erased by nearby brush pass');
+// …but far passes spare it
+const eDot4Key = store.addShape({
+  type: 'pen', x: 40400, y: 40400, w: 8, h: 8, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [40404, 40404],
+});
+eraser.onDown(engine, epinfo(40500, 40404));
+eraser.onUp(engine, epinfo(40500, 40404));
+assert.equal(store.board.has(eDot4Key), true, 'dot survives a far brush pass');
+store.removeShapes([eDot4Key]);
+settings.eraser.size = prevEraserSize;
+eraser.onDown(engine, epinfo(40100, 40100));
+eraser.onUp(engine, epinfo(40100, 40100));
+assert.equal(store.board.has(eTableKey), true, 'table survives the eraser');
+eraser.onDown(engine, epinfo(40460, 40045));
+eraser.onUp(engine, epinfo(40460, 40045));
+assert.equal(store.board.has(eImgKey), true, 'photo survives the eraser');
+// same protection in partial mode (+ dots still die there)
+const prevEraserMode = settings.eraser.mode;
+settings.eraser.mode = 'partial';
+const eDot2Key = store.addShape({
+  type: 'pen', x: 40250, y: 40250, w: 8, h: 8, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [40254, 40254],
+});
+eraser.onDown(engine, epinfo(40254, 40254));
+eraser.onUp(engine, epinfo(40254, 40254));
+assert.equal(store.board.has(eDot2Key), false, 'dot erased in partial mode');
+eraser.onDown(engine, epinfo(40100, 40100));
+eraser.onUp(engine, epinfo(40100, 40100));
+assert.equal(store.board.has(eTableKey), true, 'table survives the eraser in partial mode');
+eraser.onDown(engine, epinfo(40460, 40045));
+eraser.onUp(engine, epinfo(40460, 40045));
+assert.equal(store.board.has(eImgKey), true, 'photo survives the eraser in partial mode');
+settings.eraser.mode = prevEraserMode;
+
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor
 const peerBase = (id, userId, name, x, viewing) => ({
   id,

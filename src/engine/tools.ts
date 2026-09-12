@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
-import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, pressureVaries } from '../core/shapes';
+import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableCarries, tableGrid } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -1627,6 +1627,11 @@ export class TextTool extends Tool {
 
 function circleHitsShape(cx: number, cy: number, r: number, v: ShapeView): boolean {
   if (pointInShape(v, cx, cy)) return true;
+  // ponytail: open strokes hit by brush radius, not by stroke-width precision —
+  // otherwise a dot needs pixel-perfect aim despite the big eraser circle
+  if (v.type === 'pen' && v.points) {
+    return polylineDistance(v.points, cx, cy) <= v.strokeWidth / 2 + 3 + r;
+  }
   // Avoid AABB false positives on non-rect shapes (triangle / diamond / hexagon corners).
   const precise = new Set([
     'ellipse',
@@ -1749,6 +1754,8 @@ export class EraserTool extends Tool {
       if (!store.isOnActivePage(id)) continue;
       const v = engine.views.get(id);
       if (!v || v.locked) continue;
+      // ponytail: tables and photos are never erasable (either eraser mode)
+      if (v.type === 'table' || v.type === 'image') continue;
       if (partial && v.type === 'pen' && v.points) {
         let idx = this.partialHits.get(id);
         if (!idx) {
