@@ -910,7 +910,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             className="icon-btn"
             title={t(locale, 'exportBoardHint')}
             aria-label={t(locale, 'exportBoard')}
-            onClick={() => void exportBoardFile(boardId).then(ok => { if (ok) { setToast(t(readLocale(), 'shareCopied')); setTimeout(() => setToast(null), 1800); } else { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); } }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); })}
+            onClick={() => void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); setToast(msg); setTimeout(() => setToast(null), 1800); }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); })}
           >
             <Icon name="download" />
           </button>
