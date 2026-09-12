@@ -681,6 +681,24 @@ eraser.onUp(engine, epinfo(40460, 40045));
 assert.equal(store.board.has(eImgKey), true, 'photo survives the eraser in partial mode');
 settings.eraser.mode = prevEraserMode;
 
+// tiny brush (6px) opens a precise gap in partial mode
+const prevSize = settings.eraser.size;
+settings.eraser.size = 6;
+settings.eraser.mode = 'partial';
+const eStrokeKey = store.addShape({
+  type: 'pen', x: 51000, y: 51000, w: 120, h: 4, fill: 'transparent', stroke: '#111111', strokeWidth: 3,
+  points: [51000, 51000, 51060, 51000, 51120, 51000],
+});
+eraser.onDown(engine, epinfo(51030, 51000));
+eraser.onUp(engine, epinfo(51030, 51000));
+const cut = store.readShape(store.board.get(eStrokeKey));
+assert.deepEqual(cut.points, [51120, 51000], '6px brush removes only the touched segment');
+eraser.onDown(engine, epinfo(51120, 51000));
+eraser.onUp(engine, epinfo(51120, 51000));
+assert.equal(store.board.has(eStrokeKey), false, 'last vertex cleaned up by the tiny brush');
+settings.eraser.size = prevSize;
+settings.eraser.mode = prevEraserMode;
+
 // away peers (viewing=false: alt-tab, home, minimized) must not paint a frozen cursor
 const peerBase = (id, userId, name, x, viewing) => ({
   id,

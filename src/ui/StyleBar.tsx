@@ -28,9 +28,7 @@ import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
 import { hasFill } from '../core/shapes';
 
-const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
-const ERASER_SIZES = [16, 32, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table'];
+const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table'];
 const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
 const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
@@ -456,18 +454,19 @@ export function StyleBar({
           >
             {t(locale, 'eraserPartial')}
           </button>
-          {ERASER_SIZES.map((s) => (
-            <button
-              type="button"
-              key={s}
-              className={`style-btn${eraser.size === s ? ' active' : ''}`}
-              title={`${s}`}
-              aria-pressed={eraser.size === s}
-              onClick={() => updateEraserSettings({ size: s })}
-            >
-              <span className="eraser-dot" style={{ width: s / 2.5, height: s / 2.5 }} />
-            </button>
-          ))}
+          <input
+            className="size-slider"
+            type="range"
+            min={2}
+            max={96}
+            value={Math.min(96, Math.max(2, eraser.size))}
+            title={t(locale, 'brushSize')}
+            aria-label={t(locale, 'brushSize')}
+            onChange={(e) => {
+              updateEraserSettings({ size: Number(e.target.value) });
+            }}
+          />
+          <span className="size-value">{eraser.size}</span>
         </>
       )}
       {view.showPenStyle && (
