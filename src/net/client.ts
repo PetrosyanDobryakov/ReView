@@ -33,7 +33,7 @@ const ERASE_MAX_PARTIAL_VERTS = 64;
 /** Quantize world coords to cut awareness churn from sub-pixel jitter. */
 const CURSOR_QUANT = 0.5;
 /** Self-heal rare desync without hammering the hub. */
-const RESYNC_INTERVAL_MS = 45_000;
+const RESYNC_INTERVAL_MS = 60_000;
 
 function quantizeCursor(pos: CursorPos): CursorPos {
   return {
@@ -85,6 +85,20 @@ export class SyncClient {
   private offProviderStatus: (() => void) | null = null;
   private offAwareness: (() => void) | null = null;
   private offPeerDisplay: (() => void) | null = null;
+
+  constructor() {
+    // ponytail: hidden tabs drop the socket so idle rooms can hibernate/GC —
+    // a whole night of open-but-minimized boards bills ~zero. Reconnect on return.
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          if (this.provider) this.disconnect();
+        } else if (document.visibilityState === 'visible') {
+          if (!this.provider && this.doc && this.boardId && isSyncEnabled()) this.connect();
+        }
+      });
+    }
+  }
 
   /** Bind a Y.Doc to a board room and connect if sync is enabled. */
   attach(doc: Y.Doc, boardId: string): void {
