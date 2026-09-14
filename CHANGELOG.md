@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.18 — unreleased
+
+### Sync worker
+- Throttled room persist (first write immediate, then ≤1/s): full-doc encode+put on every message stalled the room under drag floods.
+
 ## 0.14.17 — unreleased
 
 ### Rollback

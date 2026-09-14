@@ -66,6 +66,8 @@ export class BoardRoom implements DurableObject {
   private awareness: awarenessProtocol.Awareness | null = null;
   /** Set by the doc 'update' handler; flushed to storage before sleeping. */
   private dirty = false;
+  /** Last message-time persist (throttle — full-doc encode+put per message stalls floods). */
+  private lastPersist = 0;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     this.state.blockConcurrencyWhile(async () => {
@@ -120,6 +122,20 @@ export class BoardRoom implements DurableObject {
     if (!this.dirty || !this.doc) return;
     this.dirty = false;
     try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
+  }
+
+  /**
+   * Message-time persist, throttled: full-doc encode+put per message is O(doc)
+   * and stalls the single-threaded DO under drag floods on photo boards.
+   * First dirty message after idle always persists (hibernation-eviction safe);
+   * stragglers heal from clients via state vectors on reconnect.
+   */
+  private async maybePersist(): Promise<void> {
+    if (!this.dirty) return;
+    const now = Date.now();
+    if (now - this.lastPersist < 1000) return;
+    this.lastPersist = now;
+    await this.flush();
   }
 
   /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
@@ -211,7 +227,7 @@ export class BoardRoom implements DurableObject {
     } catch (e) {
       console.error('[BoardRoom] message error', e);
     }
-    await this.flush();
+    await this.maybePersist();
   }
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
