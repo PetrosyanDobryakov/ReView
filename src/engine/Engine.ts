@@ -288,6 +288,12 @@ export class Engine {
   editId: string | null = null;
   remotePeers: PeerCursor[] = [];
   /**
+   * Bitmap shapes currently dragged locally — painted as cheap placeholders
+   * instead of rescaling multi-MP bitmaps every frame (no per-frame rescale).
+   * Managed by SelectTool; always a subset of the active gesture.
+   */
+  readonly mediaProxy = new Set<string>();
+  /**
    * Critically-damped peer cursor state (display pose + velocity + samples).
    * Purely local — awareness rate unchanged.
    */
@@ -3523,6 +3529,15 @@ export class Engine {
     }
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
+      // dragged bitmaps paint as placeholders — full image returns on drop
+      if ((v.type === 'image' || v.type === 'doc') && this.mediaProxy.has(v.id)) {
+        ctx.fillStyle = v.type === 'doc' ? '#ffffff' : '#2e2e2b';
+        ctx.fillRect(v.x, v.y, v.w, v.h);
+        ctx.strokeStyle = '#454540';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(v.x, v.y, v.w, v.h);
+        return;
+      }
       // hide canvas text of the shape being edited — the overlay renders it
       const hideText = this.editing && this.editId === v.id;
       // tables hide only the edited cell so the rest stays visible while typing
