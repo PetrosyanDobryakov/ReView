@@ -4177,6 +4177,19 @@ h3 .swap-text,
   position: relative;
   z-index: 1;
 }
+.ui-restore-close {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--chrome-border);
+  opacity: 0.7;
+}
+.ui-restore-pill:not(:disabled):hover .ui-restore-close {
+  opacity: 1;
+}
 .join-prompt-root {
   position: fixed;
   inset: 0;
