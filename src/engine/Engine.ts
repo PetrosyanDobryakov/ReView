@@ -221,6 +221,8 @@ export interface EngineEvents {
   onEditGraph?: (target: GraphEditTarget | null) => void;
   /** Ask the host to commit the currently open text editor (editor is being replaced). */
   onRequestCommitText?: () => void;
+  /** Ask the host to toggle the UI chrome (KeyH) — session-only, never persisted. */
+  onToggleUi?: () => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
   onToast?: (message: string) => void;
@@ -232,7 +234,6 @@ export interface EngineEvents {
 
 const TOOL_KEYS_FALLBACK: Record<string, ToolId> = {
   KeyV: 'select',
-  KeyH: 'pan',
   KeyP: 'pen',
   KeyR: 'rect',
   KeyO: 'ellipse',
@@ -3374,6 +3375,11 @@ export class Engine {
       return;
     }
     if (!mod && !e.altKey) {
+      // ponytail: KeyH hides the UI chrome (never a tool bind — see keybindings)
+      if (e.code === 'KeyH') {
+        this.events.onToggleUi?.();
+        return;
+      }
       const toolBinds = getToolBinds();
       for (const [tool, bind] of Object.entries(toolBinds) as Array<[ToolId, string]>) {
         if (bind && bind === e.code) {

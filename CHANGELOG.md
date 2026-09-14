@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.20 — unreleased
+
+### UI
+- H hides the interface again (session-only, resets on board switch / reload). No pill, no cooldown, no buttons — just a passive hint; H brings everything back. Pan is unbound from H (H is reserved for UI-hide).
+
 ## 0.14.19 — unreleased
 
 ### Perf
