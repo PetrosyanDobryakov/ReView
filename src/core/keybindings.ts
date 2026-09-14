@@ -33,7 +33,7 @@ export const BIND_TOOL_ORDER: ToolId[] = [
 const DEFAULT_TOOL_BINDS: ToolBinds = {
   select: 'KeyV',
   lasso: 'KeyQ',
-  pan: '',
+  pan: 'KeyH',
   pen: 'KeyP',
   rect: 'KeyR',
   ellipse: 'KeyO',
@@ -82,11 +82,8 @@ function load(): Keybinds {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Keybinds>;
-      const tools = { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) };
-      // ponytail: KeyH is UI-hide now, not pan — drop the stale default-follow
-      if (tools.pan === 'KeyH') tools.pan = '';
       return {
-        tools,
+        tools: { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) },
         colors: migrateColorBinds(parsed.colors),
       };
     }
@@ -121,8 +118,6 @@ export function getToolBind(tool: ToolId): string {
 }
 
 export function setToolBind(tool: ToolId, code: string): void {
-  // ponytail: KeyH is reserved for UI-hide (engine intercepts it before binds)
-  if (code === 'KeyH') return;
   // remove duplicate
   for (const [k, v] of Object.entries(current.tools) as Array<[ToolId, string]>) {
     if (v === code && k !== tool) current.tools[k] = '';
@@ -139,8 +134,6 @@ export function getColorBind(color: string): string {
 }
 
 export function setColorBind(color: string, code: string): void {
-  // ponytail: KeyH is reserved for UI-hide (engine intercepts it before binds)
-  if (code === 'KeyH') return;
   for (const [col, c] of Object.entries(current.colors)) {
     if (c === code && col !== color) delete current.colors[col];
   }

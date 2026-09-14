@@ -184,19 +184,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
   const [joinPrompt, setJoinPrompt] = useState(false);
   const [hostOffline, setHostOffline] = useState(false);
-  const [rejoining, setRejoining] = useState(false);
-  // ponytail: UI-hide is session-only — H toggles, board switch/reload restores
-  const [uiHidden, setUiHidden] = useState(false);
-  // Restore pill: 5s cooldown with a fill (teaches H), then click dismisses it.
-  const [pillReady, setPillReady] = useState(false);
-  const [pillGone, setPillGone] = useState(false);
-  useEffect(() => {
-    if (!uiHidden) return;
-    setPillReady(false);
-    setPillGone(false);
-    const id = window.setTimeout(() => setPillReady(true), 5000);
-    return () => window.clearTimeout(id);
-  }, [uiHidden]);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -206,8 +193,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     setEphemeral(!isBoardPersistedLocally(m));
     syncWasOnline.current = false;
     setHostOffline(false);
-    setRejoining(false);
-    setUiHidden(false);
     recordBoardVisit(boardId);
   }, [boardId]);
 
@@ -238,21 +223,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     if (sync.online) {
       syncWasOnline.current = true;
       setHostOffline(false);
-      setRejoining(false);
-      return;
-    }
-    if (!ephemeral) {
-      setRejoining(false);
-      return;
-    }
-    if (syncWasOnline.current) {
-      // brief drop after a live session = rejoin, not a dead host
-      setRejoining(true);
-      const id = window.setTimeout(() => {
-        setRejoining(false);
-        setHostOffline(true);
-      }, 4000);
-      return () => window.clearTimeout(id);
+    } else if (syncWasOnline.current && ephemeral) {
+      setHostOffline(true);
     }
   }, [sync.online, ephemeral]);
 
@@ -516,7 +488,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setToast(message);
       window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2000);
     };
-    engine.events.onToggleUi = () => setUiHidden((v) => !v);
     // ponytail: remember viewport per board+page (localStorage), restore on enter
     const lastCameraKey = { v: '' };
     const persistCamera = () => {
@@ -805,7 +776,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }
 
   return (
-    <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
+    <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
@@ -969,11 +940,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               <span>{t(locale, 'hostOfflineBanner')}</span>
               <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
             </button>
-          )}
-          {rejoining && ephemeral && !hostOffline && (
-            <div className="syncing-banner" role="status" aria-label={t(locale, 'syncingNow')}>
-              <span>{t(locale, 'syncingNow')}</span>
-            </div>
           )}
           {errorShown && errorView && (
             <button
@@ -1146,24 +1112,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           onSaveAsMyBoard={handleSaveAsMyBoard}
           onLater={dismissJoinPrompt}
         />
-      )}
-      {uiHidden && !pillGone && (
-        <button
-          type="button"
-          className="ui-restore-pill"
-          title={t(locale, 'pillHideHint')}
-          aria-label={`${t(locale, 'showUi')}. ${t(locale, 'pillHideHint')}`}
-          disabled={!pillReady}
-          onClick={() => {
-            if (pillReady) setPillGone(true);
-          }}
-        >
-          <span className="ui-restore-fill" aria-hidden="true" />
-          <span className="ui-restore-label">{t(locale, 'showUi')}</span>
-          <span className="ui-restore-close" aria-hidden="true">
-            <Icon name="close" size={13} />
-          </span>
-        </button>
       )}
       {infoShown && infoView && (
         <div className={`info-modal${info ? '' : ' is-leaving'}`}>
