@@ -8,7 +8,7 @@ const messageSync = 0;
 const messageAwareness = 1;
 // const messageAuth = 2;
 
-const EMPTY_GC_MS = 5 * 60 * 1000;
+const EMPTY_GC_MS = 90 * 1000;
 
 interface RoomEnv {
   REVIEW_COMPACT_TOKEN?: string;
@@ -56,57 +56,79 @@ function isRoomDeleteAuthorized(request: Request, env: unknown): boolean {
   return tokensMatch(compactTokenFromHeaders(request.headers), expected);
 }
 
+/**
+ * Yjs room with hibernatable WebSockets: the DO sleeps between messages, so
+ * idle-but-connected tabs bill ~zero duration. No per-connection state lives
+ * in memory — sockets come from state.getWebSockets(), the doc from storage.
+ */
 export class BoardRoom implements DurableObject {
-  private doc: Y.Doc;
-  private awareness: awarenessProtocol.Awareness;
-  private conns = new Set<WebSocket>();
+  private doc: Y.Doc | null = null;
+  private awareness: awarenessProtocol.Awareness | null = null;
+  /** Set by the doc 'update' handler; flushed to storage before sleeping. */
+  private dirty = false;
 
   constructor(private state: DurableObjectState, private env: unknown) {
-    this.doc = new Y.Doc({ gc: false } as any);
-    this.awareness = new awarenessProtocol.Awareness(this.doc);
-    this.bindBroadcastHandlers();
-
-    // restore from storage if any (optional persistence)
     this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<Uint8Array>('doc');
-      if (stored) {
-        try { Y.applyUpdate(this.doc, stored); } catch {}
-      }
+      await this.loadOrCreate();
     });
+  }
+
+  /** Restore the doc from storage (fresh empty pair when nothing stored). */
+  private async loadOrCreate(): Promise<void> {
+    const doc = new Y.Doc({ gc: false } as any);
+    try {
+      const stored = await this.state.storage.get<Uint8Array>('doc');
+      if (stored) Y.applyUpdate(doc, stored);
+    } catch {}
+    this.doc = doc;
+    this.awareness = new awarenessProtocol.Awareness(doc);
+    this.dirty = false;
+    this.bindBroadcastHandlers();
   }
 
   /** Attach doc/awareness → websocket broadcast. Must re-run after resetRoom(). */
   private bindBroadcastHandlers(): void {
-    this.doc.on('update', (update: Uint8Array, origin: unknown) => {
+    const doc = this.doc!;
+    const awareness = this.awareness!;
+    doc.on('update', (update: Uint8Array, origin: unknown) => {
+      this.dirty = true;
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, messageSync);
       syncProtocol.writeUpdate(encoder, update);
-      const msg = encoding.toUint8Array(encoder);
-      for (const ws of this.conns) {
-        if (ws === origin) continue;
-        try { ws.send(msg); } catch {}
-      }
+      this.broadcast(encoding.toUint8Array(encoder), origin);
     });
 
-    this.awareness.on('update', ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+    awareness.on('update', ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
       const changed = added.concat(updated).concat(removed);
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, messageAwareness);
-      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed));
-      const msg = encoding.toUint8Array(encoder);
-      for (const ws of this.conns) {
-        if (ws === origin) continue;
-        try { ws.send(msg); } catch {}
-      }
+      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(awareness, changed));
+      this.broadcast(encoding.toUint8Array(encoder), origin);
     });
+  }
+
+  private broadcast(msg: Uint8Array, origin: unknown): void {
+    for (const ws of this.state.getWebSockets()) {
+      if (ws === origin) continue;
+      try { ws.send(msg); } catch {}
+    }
+  }
+
+  /** Persist every applied mutation synchronously — a hibernating DO may be
+   * evicted at any time, so in-memory debounce would lose data. */
+  private async flush(): Promise<void> {
+    if (!this.dirty || !this.doc) return;
+    this.dirty = false;
+    try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
   }
 
   /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
   private resetRoom(): void {
-    try { this.doc.destroy(); } catch {}
-    try { this.awareness.destroy(); } catch {}
+    try { this.doc?.destroy(); } catch {}
+    try { (this.awareness as any)?.destroy(); } catch {}
     this.doc = new Y.Doc({ gc: false } as any);
     this.awareness = new awarenessProtocol.Awareness(this.doc);
+    this.dirty = false;
     this.bindBroadcastHandlers();
   }
 
@@ -121,110 +143,101 @@ export class BoardRoom implements DurableObject {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
         });
       }
-      for (const ws of this.conns) { try { ws.close(1000, 'room cleared'); } catch {} }
-      this.conns.clear();
+      for (const ws of this.state.getWebSockets()) { try { ws.close(1000, 'room cleared'); } catch {} }
       this.resetRoom();
       await this.state.storage.deleteAll();
       return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-    }
-
-    // After alarm() GC, recreate an empty doc if needed before accepting clients.
-    if (!this.doc || (this.doc as any).isDestroyed) {
-      this.resetRoom();
     }
 
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected websocket', { status: 426 });
     }
 
+    // After alarm() GC the in-memory pair is fresh-empty; reload persisted state if any.
+    if (!this.doc || (this.doc as any).isDestroyed) {
+      await this.loadOrCreate();
+    }
+    const doc = this.doc!;
+    const awareness = this.awareness!;
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
-    server.accept();
+    // hibernation: the DO may sleep while sockets stay open at the edge
+    (this.state as any).acceptWebSocket(server);
 
-    this.conns.add(server as any);
     // cancel GC alarm while someone is connected
     await this.state.storage.deleteAlarm().catch(() => {});
 
     // send sync step 1 + awareness
     const syncEncoder = encoding.createEncoder();
     encoding.writeVarUint(syncEncoder, messageSync);
-    syncProtocol.writeSyncStep1(syncEncoder, this.doc);
+    syncProtocol.writeSyncStep1(syncEncoder, doc);
     server.send(encoding.toUint8Array(syncEncoder));
 
-    const awarenessStates = this.awareness.getStates();
+    const awarenessStates = awareness.getStates();
     if (awarenessStates.size > 0) {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, messageAwareness);
-      encoding.writeVarUint8Array(enc, awarenessProtocol.encodeAwarenessUpdate(this.awareness, Array.from(awarenessStates.keys())));
+      encoding.writeVarUint8Array(enc, awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(awarenessStates.keys())));
       server.send(encoding.toUint8Array(enc));
     }
-
-    server.addEventListener('message', (event: MessageEvent) => {
-      try {
-        const data = event.data as ArrayBuffer | Uint8Array | string;
-        let uint8: Uint8Array;
-        if (data instanceof ArrayBuffer) uint8 = new Uint8Array(data);
-        else if (data instanceof Uint8Array) uint8 = data;
-        else if (typeof data === 'string') uint8 = new TextEncoder().encode(data);
-        else uint8 = new Uint8Array(data as ArrayBuffer);
-
-        const decoder = decoding.createDecoder(uint8);
-        const type = decoding.readVarUint(decoder);
-        const encoder = encoding.createEncoder();
-        if (type === messageSync) {
-          encoding.writeVarUint(encoder, messageSync);
-          syncProtocol.readSyncMessage(decoder, encoder, this.doc, server);
-          if (encoding.length(encoder) > 1) server.send(encoding.toUint8Array(encoder));
-        } else if (type === messageAwareness) {
-          awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), server);
-        }
-      } catch (e) {
-        console.error('[BoardRoom] message error', e);
-      }
-    });
-
-    // persist doc debounced (don't encode full doc on every stroke)
-    let persistTimer: number | null = null;
-    const schedulePersist = () => {
-      if (persistTimer != null) return;
-      persistTimer = setTimeout(() => {
-        persistTimer = null;
-        try { this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)).catch(() => {}); } catch {}
-      }, 1000) as unknown as number;
-    };
-    const onDocUpdate = () => schedulePersist();
-    this.doc.on('update', onDocUpdate);
-
-    const closeHandler = async () => {
-      this.conns.delete(server as any);
-      if (persistTimer != null) {
-        clearTimeout(persistTimer as unknown as number);
-        persistTimer = null;
-        // Flush pending debounce so a disconnect within 1s of the last update is not lost.
-        try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
-      }
-      // remove awareness for this connection's clientID is handled by awarenessProtocol (client will send remove on close)
-      // we also try to remove any awareness that belonged to this ws origin
-      // y-protocols doesn't auto-remove on ws close, so we rely on client sending 'removed' on beforeunload.
-      this.doc.off('update', onDocUpdate);
-      if (this.conns.size === 0) {
-        // schedule GC
-        await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
-        // persist final state
-        try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
-      }
-    };
-    server.addEventListener('close', () => void closeHandler());
-    server.addEventListener('error', () => void closeHandler());
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  async alarm(): Promise<void> {
-    if (this.conns.size === 0) {
-      // GC if still empty, then leave a fresh empty doc so a later fetch is safe
-      try { await this.state.storage.deleteAll(); } catch {}
-      this.resetRoom();
+  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+    if (!this.doc || (this.doc as any).isDestroyed) {
+      await this.loadOrCreate();
     }
+    const doc = this.doc!;
+    const awareness = this.awareness!;
+    try {
+      let uint8: Uint8Array;
+      if (message instanceof ArrayBuffer) uint8 = new Uint8Array(message);
+      else if (message instanceof Uint8Array) uint8 = message;
+      else if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
+      else uint8 = new Uint8Array(message as ArrayBuffer);
+
+      const decoder = decoding.createDecoder(uint8);
+      const type = decoding.readVarUint(decoder);
+      const encoder = encoding.createEncoder();
+      if (type === messageSync) {
+        encoding.writeVarUint(encoder, messageSync);
+        syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+        if (encoding.length(encoder) > 1) ws.send(encoding.toUint8Array(encoder));
+      } else if (type === messageAwareness) {
+        awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
+      }
+    } catch (e) {
+      console.error('[BoardRoom] message error', e);
+    }
+    await this.flush();
+  }
+
+  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
+    await this.handleSocketGone();
+  }
+
+  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+    await this.handleSocketGone();
+  }
+
+  private async handleSocketGone(): Promise<void> {
+    // y-protocols doesn't auto-remove awareness on ws close, so we rely on the client sending 'removed' on beforeunload.
+    await this.flush();
+    if (this.state.getWebSockets().length === 0) {
+      // schedule GC
+      await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
+    }
+  }
+
+  async alarm(): Promise<void> {
+    // stale alarm raced with a reconnect — someone is home, stay alive
+    if (this.state.getWebSockets().length > 0) return;
+    await this.flush();
+    if (this.state.getWebSockets().length > 0) return;
+    // GC if still empty, then leave a fresh empty doc so a later fetch is safe
+    try { await this.state.storage.deleteAll(); } catch {}
+    this.resetRoom();
   }
 }

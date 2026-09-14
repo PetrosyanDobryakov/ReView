@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.12 — unreleased
+
+### Sync cost
+- Sync rooms hibernate now: idle-but-open boards bill ~zero Durable Objects duration instead of ticking every second. Hidden tabs drop their socket and reconnect on return; empty rooms are GC'd after 90s; resync every 60s.
+
 ## 0.14.11 — unreleased
 
 ### PDF
