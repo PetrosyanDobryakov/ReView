@@ -1110,11 +1110,34 @@ function pagesArray(): Y.Array<string> {
     pages.observe((ev: Y.YArrayEvent<string>) => {
       // ponytail: ignore dedup repairs to avoid ping-pong with 3 peers
       if ((ev as unknown as { transaction?: { origin?: unknown } }).transaction?.origin === 'dedup') return;
+      // ponytail: heal FIRST — emitPageList notifies PageBar, whose
+      // currentPageId() silently heals the var without emit; healing here makes
+      // that a no-op, and the unconditional emitActivePage below (fingerprinted)
+      // guarantees the engine reloads on a real page change exactly once
+      healActivePageToList();
       emitPageList();
+      emitActivePage();
     });
     pagesObserved = true;
   }
   return pages;
+}
+
+/**
+ * Point activePageId at a live page without emitting. Callers follow with
+ * emitPageList()/emitActivePage() (both fingerprinted no-ops when unchanged).
+ */
+function healActivePageToList(): void {
+  const raw = pagesArray().toArray();
+  if (raw.length === 0) return;
+  if (!raw.includes(activePageId)) {
+    activePageId = raw[0] ?? 'main';
+    try {
+      localStorage.setItem(pageKey(currentBoardId), activePageId);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function listPages(): string[] {
@@ -1218,20 +1241,36 @@ export function deletePage(id: string): void {
   if (idx < 0) return;
   const isMain = id === 'main';
   transact(() => {
+    const doomed = new Set<string>();
     for (const key of [...board.keys()]) {
       const del = isMain ? !key.includes(':') : key.startsWith(id + ':');
-      if (del) board.delete(key);
+      if (del) {
+        board.delete(key);
+        doomed.add(key);
+      }
     }
-    const kept = order.toArray().filter((k) => {
-      const del = isMain ? !k.includes(':') : k.startsWith(id + ':');
-      return !del;
-    });
-    order.delete(0, order.length);
-    if (kept.length) order.push(kept);
+    // ponytail: delete order entries by index ranges, no full rewrite —
+    // the update stays O(deleted) instead of O(board) and always fits the wire
+    const arr = order.toArray();
+    let i = arr.length - 1;
+    while (i >= 0) {
+      if (!doomed.has(arr[i])) {
+        i--;
+        continue;
+      }
+      let j = i;
+      while (j >= 0 && doomed.has(arr[j])) j--;
+      order.delete(j + 1, i - j);
+      i = j;
+    }
     a.delete(idx, 1);
   });
-  if (currentPageId() === id) setCurrentPage(a.toArray()[0] ?? 'main');
-  else emitPageList();
+  // ponytail: deleting the active page is a real page switch — heal the var
+  // BEFORE emitPageList (whose PageBar callback would silently heal it without
+  // emit), then emitActivePage reloads the engine exactly once (fingerprinted)
+  healActivePageToList();
+  emitPageList();
+  emitActivePage();
   bumpCurrentBoard();
 }
 
