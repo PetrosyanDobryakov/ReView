@@ -4113,6 +4113,50 @@ h3 .swap-text,
   font-weight: 700;
   color: var(--chrome-accent-strong);
 }
+.syncing-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(360px, 42vw);
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--chrome-accent, #7c8cff) 40%, transparent);
+  background: color-mix(in srgb, var(--chrome-accent, #7c8cff) 12%, var(--chrome-panel));
+  color: var(--chrome-text);
+  font-size: var(--chrome-type-label);
+  white-space: nowrap;
+  overflow: hidden;
+  animation: error-in var(--chrome-dur-move) var(--chrome-ease), sync-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+/* Session-only UI hide (KeyH): chrome goes away, canvas keeps everything. */
+.app.ui-hidden .file-bar,
+.app.ui-hidden .toolbelt,
+.app.ui-hidden .style-island,
+.app.ui-hidden .pages-root {
+  display: none;
+}
+.ui-restore-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 9000;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--chrome-border);
+  background: var(--chrome-panel);
+  color: var(--chrome-text);
+  font-size: var(--chrome-type-label);
+  cursor: pointer;
+  box-shadow: var(--chrome-shadow);
+  white-space: nowrap;
+}
 .join-prompt-root {
   position: fixed;
   inset: 0;
