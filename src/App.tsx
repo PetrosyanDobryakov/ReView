@@ -184,6 +184,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
   const [joinPrompt, setJoinPrompt] = useState(false);
   const [hostOffline, setHostOffline] = useState(false);
+  const [rejoining, setRejoining] = useState(false);
+  // ponytail: UI-hide is session-only — H toggles, board switch/reload restores
+  const [uiHidden, setUiHidden] = useState(false);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -193,6 +196,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     setEphemeral(!isBoardPersistedLocally(m));
     syncWasOnline.current = false;
     setHostOffline(false);
+    setRejoining(false);
+    setUiHidden(false);
     recordBoardVisit(boardId);
   }, [boardId]);
 
@@ -223,8 +228,21 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     if (sync.online) {
       syncWasOnline.current = true;
       setHostOffline(false);
-    } else if (syncWasOnline.current && ephemeral) {
-      setHostOffline(true);
+      setRejoining(false);
+      return;
+    }
+    if (!ephemeral) {
+      setRejoining(false);
+      return;
+    }
+    if (syncWasOnline.current) {
+      // brief drop after a live session = rejoin, not a dead host
+      setRejoining(true);
+      const id = window.setTimeout(() => {
+        setRejoining(false);
+        setHostOffline(true);
+      }, 4000);
+      return () => window.clearTimeout(id);
     }
   }, [sync.online, ephemeral]);
 
@@ -488,6 +506,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setToast(message);
       window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2000);
     };
+    engine.events.onToggleUi = () => setUiHidden((v) => !v);
     // ponytail: remember viewport per board+page (localStorage), restore on enter
     const lastCameraKey = { v: '' };
     const persistCamera = () => {
@@ -776,7 +795,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }
 
   return (
-    <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
+    <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
@@ -940,6 +959,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
               <span>{t(locale, 'hostOfflineBanner')}</span>
               <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
             </button>
+          )}
+          {rejoining && ephemeral && !hostOffline && (
+            <div className="syncing-banner" role="status" aria-label={t(locale, 'syncingNow')}>
+              <span>{t(locale, 'syncingNow')}</span>
+            </div>
           )}
           {errorShown && errorView && (
             <button
@@ -1112,6 +1136,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           onSaveAsMyBoard={handleSaveAsMyBoard}
           onLater={dismissJoinPrompt}
         />
+      )}
+      {uiHidden && (
+        <button
+          type="button"
+          className="ui-restore-pill"
+          title="H"
+          aria-label={t(locale, 'showUi')}
+          onClick={() => setUiHidden(false)}
+        >
+          {t(locale, 'showUi')}
+        </button>
       )}
       {infoShown && infoView && (
         <div className={`info-modal${info ? '' : ' is-leaving'}`}>

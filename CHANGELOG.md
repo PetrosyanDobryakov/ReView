@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.14 — unreleased
+
+### UX
+- Rejoin shows a calm "Syncing…" pill instead of flashing the host-offline banner (which now appears only when the host never connected or the drop lasts).
+- KeyH hides the interface (session-only): toolbars and panels go away, a "Show interface (H)" pill stays. Reload or board switch always restores the UI, so it can't get lost. The hand tool keeps its toolbar button but lost the H hotkey.
+
 ## 0.14.13 — unreleased
 
 ### Presence
