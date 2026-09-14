@@ -187,6 +187,16 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [rejoining, setRejoining] = useState(false);
   // ponytail: UI-hide is session-only — H toggles, board switch/reload restores
   const [uiHidden, setUiHidden] = useState(false);
+  // Restore pill: 5s cooldown with a fill (teaches H), then click dismisses it.
+  const [pillReady, setPillReady] = useState(false);
+  const [pillGone, setPillGone] = useState(false);
+  useEffect(() => {
+    if (!uiHidden) return;
+    setPillReady(false);
+    setPillGone(false);
+    const id = window.setTimeout(() => setPillReady(true), 5000);
+    return () => window.clearTimeout(id);
+  }, [uiHidden]);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -1137,15 +1147,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           onLater={dismissJoinPrompt}
         />
       )}
-      {uiHidden && (
+      {uiHidden && !pillGone && (
         <button
           type="button"
           className="ui-restore-pill"
           title="H"
           aria-label={t(locale, 'showUi')}
-          onClick={() => setUiHidden(false)}
+          disabled={!pillReady}
+          onClick={() => {
+            if (pillReady) setPillGone(true);
+          }}
         >
-          {t(locale, 'showUi')}
+          <span className="ui-restore-fill" aria-hidden="true" />
+          <span className="ui-restore-label">{t(locale, 'showUi')}</span>
         </button>
       )}
       {infoShown && infoView && (

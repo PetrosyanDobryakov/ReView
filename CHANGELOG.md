@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.15 — unreleased
+
+### UX
+- The restore pill now has a 5s cooldown with a hotbar fill (teaches the H key); clicking it afterwards dismisses the pill while the UI stays hidden. H always brings the interface back.
+
 ## 0.14.14 — unreleased
 
 ### UX
