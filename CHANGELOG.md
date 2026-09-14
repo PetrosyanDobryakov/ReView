@@ -1,20 +1,9 @@
 # Changelog
 
-## 0.14.16 — unreleased
+## 0.14.17 — unreleased
 
-### UX
-- The restore pill now has a close affordance (×) with a hint tooltip: H brings the interface back, clicking dismisses the hint.
-
-## 0.14.15 — unreleased
-
-### UX
-- The restore pill now has a 5s cooldown with a hotbar fill (teaches the H key); clicking it afterwards dismisses the pill while the UI stays hidden. H always brings the interface back.
-
-## 0.14.14 — unreleased
-
-### UX
-- Rejoin shows a calm "Syncing…" pill instead of flashing the host-offline banner (which now appears only when the host never connected or the drop lasts).
-- KeyH hides the interface (session-only): toolbars and panels go away, a "Show interface (H)" pill stays. Reload or board switch always restores the UI, so it can't get lost. The hand tool keeps its toolbar button but lost the H hotkey.
+### Rollback
+- Reverted to the 0.14.13 code (H-hide UI, rejoin banner, and pill cooldown removed) after breakage in production.
 
 ## 0.14.13 — unreleased
 
