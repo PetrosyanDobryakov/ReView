@@ -4156,6 +4156,26 @@ h3 .swap-text,
   cursor: pointer;
   box-shadow: var(--chrome-shadow);
   white-space: nowrap;
+  overflow: hidden;
+}
+.ui-restore-pill:disabled {
+  cursor: default;
+}
+.ui-restore-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in srgb, var(--chrome-accent, #7c8cff) 30%, transparent);
+  animation: pill-fill 5s linear forwards;
+  pointer-events: none;
+}
+@keyframes pill-fill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.ui-restore-label {
+  position: relative;
+  z-index: 1;
 }
 .join-prompt-root {
   position: fixed;
