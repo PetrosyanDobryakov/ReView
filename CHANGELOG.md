@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.13 — unreleased
+
+### Presence
+- Fixed ghost peers after tab hide/show: the socket now suspends on the live provider instead of destroying it (recreating reset awareness clocks on the same client ID, so the hub dropped every update as stale). Both sides reappear within ~1s.
+- Cursor smoothing: dead-reckoning lead is capped (no hook past the final point on abrupt stops), zigzag corners kill slingshot velocity, and the cursor settles straight onto the target when samples stop.
+
 ## 0.14.12 — unreleased
 
 ### Sync cost

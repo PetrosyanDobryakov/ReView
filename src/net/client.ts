@@ -87,17 +87,55 @@ export class SyncClient {
   private offPeerDisplay: (() => void) | null = null;
 
   constructor() {
-    // ponytail: hidden tabs drop the socket so idle rooms can hibernate/GC —
-    // a whole night of open-but-minimized boards bills ~zero. Reconnect on return.
+    // ponytail: hidden tabs suspend the socket but KEEP the provider — destroying
+    // it resets awareness clocks on the same doc.clientID, and the hub then drops
+    // every update as stale (ghost peer). provider.disconnect/connect preserves clocks.
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-          if (this.provider) this.disconnect();
+          this.suspend();
         } else if (document.visibilityState === 'visible') {
-          if (!this.provider && this.doc && this.boardId && isSyncEnabled()) this.connect();
+          this.resume();
         }
       });
     }
+  }
+
+  /**
+   * Drop the socket on tab hide, keeping the provider + awareness clocks.
+   * viewing=false is published first (while still connected) so remotes hide
+   * the frozen cursor instead of keeping it.
+   */
+  suspend(): void {
+    if (!this.provider) return;
+    netLog.info('suspend', () => ({ boardId: this.boardId, room: this.providerRoom }));
+    this.publishBoardView(false);
+    this.clearDraft();
+    this.clearErasePreview();
+    try {
+      this.provider.disconnect();
+    } catch (err) {
+      netLog.warn('suspend disconnect error', () => ({ err }));
+    }
+    this.emitStatus();
+    this.emitPeers();
+  }
+
+  /** Reopen the socket after suspend (same provider — awareness clocks continue). */
+  resume(): void {
+    if (this.provider) {
+      if (!this.doc || !this.boardId || !isSyncEnabled()) return;
+      netLog.info('resume', () => ({ boardId: this.boardId, room: this.providerRoom }));
+      try {
+        this.provider.connect();
+      } catch (err) {
+        netLog.warn('resume connect error', () => ({ err }));
+      }
+      this.emitStatus();
+      this.emitPeers();
+      return;
+    }
+    if (this.doc && this.boardId && isSyncEnabled()) this.connect();
   }
 
   /** Bind a Y.Doc to a board room and connect if sync is enabled. */
@@ -160,6 +198,26 @@ export class SyncClient {
       syncEnabled: isSyncEnabled(),
       url: effectiveSyncUrl(),
     }));
+    // ponytail: same room = bounce the socket on the live provider. Recreating it
+    // resets awareness clocks on the same doc.clientID → hub drops us as stale.
+    if (
+      this.provider &&
+      this.doc &&
+      this.boardId &&
+      this.providerUrl === effectiveSyncUrl() &&
+      this.providerRoom === boardRoomName(this.boardId)
+    ) {
+      try {
+        this.provider.disconnect();
+        this.provider.connect();
+      } catch (err) {
+        netLog.warn('reconnect bounce error', () => ({ err }));
+      }
+      this.emitLifecycle();
+      this.emitStatus();
+      this.emitPeers();
+      return;
+    }
     this.teardownProvider();
     if (this.doc && this.boardId && isSyncEnabled()) this.connect();
     this.emitLifecycle();

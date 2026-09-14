@@ -41,6 +41,13 @@ import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
 import { readPenSlots } from '../core/penColors';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
+import {
+  aimPeerMotion,
+  initPeerMotion,
+  pushPeerSample,
+  stepPeerMotion,
+  type PeerMotionState,
+} from '../core/peerMotion';
 import { onPrefsChange } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
 import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
@@ -90,33 +97,6 @@ const PEER_TOOL_ICON: Record<string, IconName> = {
 function peerToolIcon(tool: string | null | undefined): IconName {
   if (tool && PEER_TOOL_ICON[tool]) return PEER_TOOL_ICON[tool];
   return 'select';
-}
-
-/** Game-style SmoothDamp — frame-rate independent, no overshoot. */
-function smoothDamp(
-  current: number,
-  target: number,
-  currentVelocity: number,
-  smoothTime: number,
-  dt: number,
-  maxSpeed = Infinity
-): { value: number; velocity: number } {
-  const st = Math.max(0.0001, smoothTime);
-  const omega = 2 / st;
-  const x = omega * dt;
-  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
-  let change = current - target;
-  const maxChange = maxSpeed * st;
-  change = Math.max(-maxChange, Math.min(maxChange, change));
-  const temp = (currentVelocity + omega * change) * dt;
-  let velocity = (currentVelocity - omega * temp) * exp;
-  let value = target + (change + temp) * exp;
-  // Prevent overshoot when crossing the target.
-  if (target - current > 0 === value > target) {
-    value = target;
-    velocity = 0;
-  }
-  return { value, velocity };
 }
 
 /**
@@ -311,21 +291,7 @@ export class Engine {
    * Critically-damped peer cursor state (display pose + velocity + samples).
    * Purely local — awareness rate unchanged.
    */
-  private peerLerp = new Map<
-    number,
-    {
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      tx: number;
-      ty: number;
-      prevTx: number;
-      prevTy: number;
-      sampleAt: number;
-      prevSampleAt: number;
-    }
-  >();
+  private peerLerp = new Map<number, PeerMotionState>();
   private peersAnimating = false;
   private frameDt = 1 / 60;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
@@ -372,26 +338,10 @@ export class Engine {
       }
       const cur = this.peerLerp.get(peer.id);
       if (!cur) {
-        this.peerLerp.set(peer.id, {
-          x: peer.x,
-          y: peer.y,
-          vx: 0,
-          vy: 0,
-          tx: peer.x,
-          ty: peer.y,
-          prevTx: peer.x,
-          prevTy: peer.y,
-          sampleAt: now,
-          prevSampleAt: now,
-        });
+        this.peerLerp.set(peer.id, initPeerMotion(peer.x, peer.y, now));
         shouldPaint = true;
       } else if (cur.tx !== peer.x || cur.ty !== peer.y) {
-        cur.prevTx = cur.tx;
-        cur.prevTy = cur.ty;
-        cur.prevSampleAt = cur.sampleAt;
-        cur.tx = peer.x;
-        cur.ty = peer.y;
-        cur.sampleAt = now;
+        pushPeerSample(cur, peer.x, peer.y, now);
         shouldPaint = true;
       }
     }
@@ -3715,40 +3665,18 @@ export class Engine {
       if (peer.x === null || peer.y === null) continue;
       let pos = this.peerLerp.get(peer.id);
       if (!pos) {
-        pos = {
-          x: peer.x,
-          y: peer.y,
-          vx: 0,
-          vy: 0,
-          tx: peer.x,
-          ty: peer.y,
-          prevTx: peer.x,
-          prevTy: peer.y,
-          sampleAt: now,
-          prevSampleAt: now,
-        };
+        pos = initPeerMotion(peer.x, peer.y, now);
         this.peerLerp.set(peer.id, pos);
       }
 
       let aimX = pos.tx;
       let aimY = pos.ty;
       if (!reduce) {
-        const sampleDt = Math.max(0.001, (pos.sampleAt - pos.prevSampleAt) / 1000);
-        const svx = (pos.tx - pos.prevTx) / sampleDt;
-        const svy = (pos.ty - pos.prevTy) / sampleDt;
-        const age = Math.max(0, (now - pos.sampleAt) / 1000);
-        const lead = Math.min(leadSec, Math.max(0, leadSec - age * 0.5));
-        const speed = Math.hypot(svx, svy);
-        if (speed > 8) {
-          aimX = pos.tx + svx * lead;
-          aimY = pos.ty + svy * lead;
-        }
-        const dampX = smoothDamp(pos.x, aimX, pos.vx, smoothTime, dt);
-        const dampY = smoothDamp(pos.y, aimY, pos.vy, smoothTime, dt);
-        pos.x = dampX.value;
-        pos.vx = dampX.velocity;
-        pos.y = dampY.value;
-        pos.vy = dampY.velocity;
+        // ponytail: capped lead (no post-stop hook) + straight settle when samples stop
+        const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 20 * s });
+        aimX = aim.x;
+        aimY = aim.y;
+        stepPeerMotion(pos, aimX, aimY, now, dt, smoothTime);
       } else {
         pos.x = pos.tx;
         pos.y = pos.ty;
@@ -3809,40 +3737,14 @@ export class Engine {
 
       let pos = this.peerLerp.get(peer.id);
       if (!pos) {
-        pos = {
-          x: peer.x,
-          y: peer.y,
-          vx: 0,
-          vy: 0,
-          tx: peer.x,
-          ty: peer.y,
-          prevTx: peer.x,
-          prevTy: peer.y,
-          sampleAt: now,
-          prevSampleAt: now,
-        };
+        pos = initPeerMotion(peer.x, peer.y, now);
         this.peerLerp.set(peer.id, pos);
       }
 
-      let aimX = pos.tx;
-      let aimY = pos.ty;
       if (!reduce) {
-        const sampleDt = Math.max(0.001, (pos.sampleAt - pos.prevSampleAt) / 1000);
-        const svx = (pos.tx - pos.prevTx) / sampleDt;
-        const svy = (pos.ty - pos.prevTy) / sampleDt;
-        const age = Math.max(0, (now - pos.sampleAt) / 1000);
-        const lead = Math.min(leadSec, Math.max(0, leadSec - age * 0.5));
-        const speed = Math.hypot(svx, svy);
-        if (speed > 8) {
-          aimX = pos.tx + svx * lead;
-          aimY = pos.ty + svy * lead;
-        }
-        const dampX = smoothDamp(pos.x, aimX, pos.vx, smoothTime, dt);
-        const dampY = smoothDamp(pos.y, aimY, pos.vy, smoothTime, dt);
-        pos.x = dampX.value;
-        pos.vx = dampX.velocity;
-        pos.y = dampY.value;
-        pos.vy = dampY.velocity;
+        // ponytail: same capped-lead aim as the cursor glyph (no post-stop hook)
+        const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 20 / this.camera.zoom });
+        stepPeerMotion(pos, aim.x, aim.y, now, dt, smoothTime);
       } else {
         pos.x = pos.tx;
         pos.y = pos.ty;

@@ -13,3 +13,10 @@ export {
   flushNow,
   resetWriteGate,
 } from '../src/core/writeGate';
+export {
+  aimPeerMotion,
+  initPeerMotion,
+  pushPeerSample,
+  smoothDamp,
+  stepPeerMotion,
+} from '../src/core/peerMotion';
