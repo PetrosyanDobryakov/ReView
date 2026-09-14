@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.21 — unreleased
+
+### Fix
+- Deleting the page under your feet no longer leaves an empty canvas until reload: it is a real page switch now, the engine reloads the landing page at once.
+- Peers stranded on a deleted page auto-follow to a live page with content instead of sitting on an empty one.
+- Page delete no longer rewrites the whole order array: entries drop by index ranges, so the sync update stays O(deleted) and always fits the wire.
+
 ## 0.14.20 — unreleased
 
 ### UI
