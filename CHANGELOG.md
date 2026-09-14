@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.16 — unreleased
+
+### UX
+- The restore pill now has a close affordance (×) with a hint tooltip: H brings the interface back, clicking dismisses the hint.
+
 ## 0.14.15 — unreleased
 
 ### UX

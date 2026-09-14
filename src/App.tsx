@@ -1151,8 +1151,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         <button
           type="button"
           className="ui-restore-pill"
-          title="H"
-          aria-label={t(locale, 'showUi')}
+          title={t(locale, 'pillHideHint')}
+          aria-label={`${t(locale, 'showUi')}. ${t(locale, 'pillHideHint')}`}
           disabled={!pillReady}
           onClick={() => {
             if (pillReady) setPillGone(true);
@@ -1160,6 +1160,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         >
           <span className="ui-restore-fill" aria-hidden="true" />
           <span className="ui-restore-label">{t(locale, 'showUi')}</span>
+          <span className="ui-restore-close" aria-hidden="true">
+            <Icon name="close" size={13} />
+          </span>
         </button>
       )}
       {infoShown && infoView && (
