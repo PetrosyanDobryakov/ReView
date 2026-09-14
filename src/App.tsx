@@ -184,6 +184,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [ephemeral, setEphemeral] = useState(() => !isBoardPersistedLocally(getBoard(boardId)));
   const [joinPrompt, setJoinPrompt] = useState(false);
   const [hostOffline, setHostOffline] = useState(false);
+  // ponytail: UI-hide is session-only — H toggles, board switch/reload restores
+  const [uiHidden, setUiHidden] = useState(false);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -193,6 +195,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     setEphemeral(!isBoardPersistedLocally(m));
     syncWasOnline.current = false;
     setHostOffline(false);
+    setUiHidden(false);
     recordBoardVisit(boardId);
   }, [boardId]);
 
@@ -488,6 +491,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setToast(message);
       window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2000);
     };
+    engine.events.onToggleUi = () => setUiHidden((v) => !v);
     // ponytail: remember viewport per board+page (localStorage), restore on enter
     const lastCameraKey = { v: '' };
     const persistCamera = () => {
@@ -776,7 +780,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }
 
   return (
-    <div className={`app${settingsOpen ? ' settings-open' : ''}`}>
+    <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
       <div className="canvas-wrap">
         <canvas ref={canvasRef} aria-label={t(locale, 'board')} />
         {editTarget && engine && (
@@ -835,6 +839,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         )}
       </div>
 
+      {uiHidden && (
+        <div className="ui-hidden-hint" role="status" aria-label={t(locale, 'showUi')}>
+          {t(locale, 'showUi')}
+        </div>
+      )}
       <header className="file-bar">
         <div className="island file-island">
           <button type="button" className="icon-btn" title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>

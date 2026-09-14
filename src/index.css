@@ -4113,6 +4113,33 @@ h3 .swap-text,
   font-weight: 700;
   color: var(--chrome-accent-strong);
 }
+/* Session-only UI hide (KeyH): chrome goes away, canvas keeps everything. */
+.app.ui-hidden .file-bar,
+.app.ui-hidden .toolbelt,
+.app.ui-hidden .style-island,
+.app.ui-hidden .pages-root {
+  display: none;
+}
+/* Passive hint — not a button, not clickable, no timers. H brings the UI back. */
+.ui-hidden-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 9000;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--chrome-border);
+  background: var(--chrome-panel);
+  color: var(--chrome-text);
+  font-size: var(--chrome-type-label);
+  white-space: nowrap;
+  opacity: 0.75;
+  pointer-events: none;
+}
 .join-prompt-root {
   position: fixed;
   inset: 0;
