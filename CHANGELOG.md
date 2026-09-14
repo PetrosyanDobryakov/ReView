@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.19 — unreleased
+
+### Perf
+- Dragged photos and PDFs paint as cheap placeholders until drop (no per-frame multi-MP rescale), so moving them no longer stutters.
+
 ## 0.14.18 — unreleased
 
 ### Sync worker
