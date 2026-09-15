@@ -1,3 +1,5 @@
+import { require2dContext } from './canvas2d';
+
 /** Convert PDF/TXT files into page images (data URLs) for the 'doc' shape. */
 
 export const DOC_MAX_PAGES = 60;
@@ -40,8 +42,7 @@ async function pdfPages(file: File): Promise<{ pages: string[]; truncated: boole
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(vp.width);
       canvas.height = Math.round(vp.height);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
+      const ctx = require2dContext(canvas);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
@@ -106,8 +107,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 async function txtPages(file: File): Promise<DocPages> {
   const text = await file.text();
   const canvas = pageCanvas();
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return { pages: [], ratio: PAGE_W / PAGE_H };
+  const ctx = require2dContext(canvas);
   const margin = 96;
   const font = '28px "Space Grotesk", Onest, "Segoe UI", system-ui, sans-serif';
   ctx.font = font;

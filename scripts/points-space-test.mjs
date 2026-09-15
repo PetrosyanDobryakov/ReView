@@ -43,24 +43,17 @@ enqueuePatches([['a', { x: 1 }]]);
 assert.equal(flushes, 1, 'light patch flushes immediately');
 assert.deepEqual(lastBatch, [['a', { x: 1 }]]);
 
-// Heavy patches coalesce.
+// Heavy patches coalesce with their bounds so origin and local points stay paired.
 flushes = 0;
 enqueuePatches([['a', { x: 2, points: [0, 0, 1, 1] }]]);
 enqueuePatches([['a', { x: 3, points: [0, 0, 2, 2] }]]);
-assert.equal(flushes, 2, 'light halves flush each time');
-assert.equal(
-  lastBatch.some(([, p]) => p.points !== undefined),
-  false,
-  'points deferred while gesture open'
-);
+assert.equal(flushes, 0, 'points+bounds stay pending while gesture open');
 const heavyFlushesBefore = flushes;
 endWriteGesture();
 assert.ok(flushes > heavyFlushesBefore, 'endGesture flushes heavy');
-assert.deepEqual(
-  lastBatch.find(([id]) => id === 'a')[1].points,
-  [0, 0, 2, 2],
-  'later points win'
-);
+const heavy = lastBatch.find(([id]) => id === 'a')[1];
+assert.deepEqual(heavy.points, [0, 0, 2, 2], 'later points win');
+assert.equal(heavy.x, 3, 'bounds flush with the points, not ahead of them');
 flushNow();
 resetWriteGate();
 

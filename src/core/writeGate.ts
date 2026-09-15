@@ -3,8 +3,9 @@
  *
  * Light patches (x/y/w/h/rotation/…) flush immediately — cheap on the wire
  * once polylines are shape-local.
- * Heavy patches (points/pressures/src) coalesce ~30 Hz so stroke rewrites
- * cannot explode traffic; live applier keeps local paint at pointer rate.
+ * Heavy patches (points/pressures/src) coalesce ~30 Hz. A heavy patch keeps
+ * its light fields in the same flush so a new origin is never stored against
+ * stale local points.
  */
 
 import type { ShapeView } from './shapes';
@@ -50,29 +51,6 @@ function isHeavyPatch(patch: ShapePatch): boolean {
   return patch.points !== undefined || patch.pressures !== undefined || patch.src !== undefined;
 }
 
-function splitPatch(patch: ShapePatch): { light: ShapePatch | null; heavy: ShapePatch | null } {
-  if (!isHeavyPatch(patch)) return { light: patch, heavy: null };
-  const light: ShapePatch = { ...patch };
-  const heavy: ShapePatch = {};
-  if (patch.points !== undefined) {
-    heavy.points = patch.points;
-    delete light.points;
-  }
-  if (patch.pressures !== undefined) {
-    heavy.pressures = patch.pressures;
-    delete light.pressures;
-  }
-  if (patch.src !== undefined) {
-    heavy.src = patch.src;
-    delete light.src;
-  }
-  const lightKeys = Object.keys(light).filter((k) => (light as Record<string, unknown>)[k] !== undefined);
-  return {
-    light: lightKeys.length ? light : null,
-    heavy: Object.keys(heavy).length ? heavy : null,
-  };
-}
-
 export function enqueuePatches(batch: PatchBatch): void {
   if (!batch.length) return;
 
@@ -80,17 +58,12 @@ export function enqueuePatches(batch: PatchBatch): void {
   let heavyChanged = false;
 
   for (const [id, patch] of batch) {
-    const { light, heavy } = splitPatch(patch);
-    if (light) lightBatch.push([id, light]);
-    if (heavy) {
+    if (isHeavyPatch(patch) || pendingHeavy.has(id)) {
       const prev = pendingHeavy.get(id);
-      // Keep latest light geometry with heavy so flush writes a consistent row.
-      const mergedLight = light ?? {};
-      pendingHeavy.set(
-        id,
-        prev ? mergeShapePatch(mergeShapePatch(prev, mergedLight), heavy) : mergeShapePatch(mergedLight, heavy)
-      );
+      pendingHeavy.set(id, prev ? mergeShapePatch(prev, patch) : patch);
       heavyChanged = true;
+    } else {
+      lightBatch.push([id, patch]);
     }
   }
 
@@ -112,6 +85,12 @@ export function enqueuePatch(id: string, patch: ShapePatch): void {
 
 export function flushNow(): void {
   flushHeavyNow();
+}
+
+/** Flush pending heavy patches and drop gesture depth (board leave / switch). */
+export function closeWriteGate(): void {
+  flushHeavyNow();
+  gestureDepth = 0;
 }
 
 function snapshotHeavy(): PatchBatch {
@@ -143,7 +122,7 @@ function scheduleHeavyFlush(): void {
   }, HEAVY_FLUSH_MS);
 }
 
-/** Test helper — drop pending without writing. */
+/** Test helper — drop pending without writing. Production teardown uses closeWriteGate. */
 export function resetWriteGate(): void {
   clearHeavyTimer();
   pendingHeavy = new Map();

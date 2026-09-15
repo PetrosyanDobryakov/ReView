@@ -20,7 +20,7 @@ import {
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
-import { exportBoardFile, importBoardFile, MAX_FILE_BYTES } from '../core/boardShare';
+import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
@@ -211,13 +211,17 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   };
 
   const handleCloneBoard = async (id: string) => {
-    const copy = await cloneBoard(id);
-    if (!copy) {
+    try {
+      const copy = await cloneBoard(id);
+      if (!copy) {
+        window.alert(t(locale, 'error'));
+        return;
+      }
+      refresh();
+      void refreshWeights(listBoards());
+    } catch {
       window.alert(t(locale, 'error'));
-      return;
     }
-    refresh();
-    void refreshWeights(listBoards());
   };
 
   const toggleSaveRemote = () => {
@@ -236,7 +240,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     e.target.value = '';
     if (!file) return;
     if (typeof file.size === 'number' && file.size > MAX_FILE_BYTES) {
-      showCopyToast(t(locale, 'importErrorInvalidFile'));
+      showCopyToast(t(locale, 'importErrorTooLarge'));
       return;
     }
     const res = await importBoardFile(file);
@@ -245,19 +249,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       void refreshWeights(listBoards());
       showCopyToast(t(locale, 'importSuccess'));
     } else {
-      const key =
-        res.error === 'read_failed'
-          ? 'importErrorReadFailed'
-          : res.error === 'invalid_json'
-            ? 'importErrorInvalidJson'
-            : res.error === 'invalid_file'
-              ? 'importErrorInvalidFile'
-              : res.error === 'invalid_update'
-                ? 'importErrorInvalidUpdate'
-                : res.error === 'file_too_large'
-                  ? 'importErrorInvalidFile'
-                  : 'importFailed';
-      showCopyToast(t(locale, key));
+      showCopyToast(t(locale, importErrorI18nKey(res.error)));
     }
   };
 

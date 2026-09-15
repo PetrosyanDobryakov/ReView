@@ -15,6 +15,7 @@ import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { downsamplePolyline } from '../core/pointsSpace';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
+import { syncReconnectMode } from './syncReconnect';
 import { isNetLogEnabled, netLog } from './log';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 
@@ -34,6 +35,8 @@ const ERASE_MAX_PARTIAL_VERTS = 64;
 const CURSOR_QUANT = 0.5;
 /** Self-heal rare desync without hammering the hub. */
 const RESYNC_INTERVAL_MS = 60_000;
+/** Re-publish presence so a hibernating hub that dropped in-memory awareness recovers. */
+const AWARENESS_HEARTBEAT_MS = 20_000;
 
 function quantizeCursor(pos: CursorPos): CursorPos {
   return {
@@ -85,6 +88,7 @@ export class SyncClient {
   private offProviderStatus: (() => void) | null = null;
   private offAwareness: (() => void) | null = null;
   private offPeerDisplay: (() => void) | null = null;
+  private awarenessHeartbeat: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // ponytail: hidden tabs suspend the socket but KEEP the provider — destroying
@@ -200,16 +204,17 @@ export class SyncClient {
     }));
     // ponytail: same room = bounce the socket on the live provider. Recreating it
     // resets awareness clocks on the same doc.clientID → hub drops us as stale.
-    if (
+    const liveSameEndpoint = Boolean(
       this.provider &&
-      this.doc &&
-      this.boardId &&
-      this.providerUrl === effectiveSyncUrl() &&
-      this.providerRoom === boardRoomName(this.boardId)
-    ) {
+        this.doc &&
+        this.boardId &&
+        this.providerUrl === effectiveSyncUrl() &&
+        this.providerRoom === boardRoomName(this.boardId)
+    );
+    if (syncReconnectMode(isSyncEnabled(), liveSameEndpoint) === 'bounce') {
       try {
-        this.provider.disconnect();
-        this.provider.connect();
+        this.provider!.disconnect();
+        this.provider!.connect();
       } catch (err) {
         netLog.warn('reconnect bounce error', () => ({ err }));
       }
@@ -257,15 +262,7 @@ export class SyncClient {
     this.providerUrl = url;
     this.providerRoom = room;
     this.bindProvider(provider);
-
-    if (this.lastUser) this.writePresence(this.lastUser);
-    else this.writePresence(loadUser());
-    if (this.lastCursor) this.writeCursor(this.lastCursor);
-    if (this.lastTool) this.writeTool(this.lastTool);
-    if (this.lastPage) this.writePage(this.lastPage);
-    this.writeViewing(this.lastViewing);
-    if (this.lastDraft) this.writeDraft(this.lastDraft);
-    if (this.lastErase) this.writeErasePreview(this.lastErase);
+    this.republishAwareness();
 
     this.emitStatus();
     this.emitPeers();
@@ -354,6 +351,27 @@ export class SyncClient {
       });
     }
     return [...byUser.values()];
+  }
+
+  /** Another tab of the same user still counts — compact must not run against a live replica. */
+  hasOtherAwarenessClients(): boolean {
+    const p = this.provider;
+    if (!p?.awareness) return false;
+    for (const id of p.awareness.getStates().keys()) {
+      if (id !== p.awareness.clientID) return true;
+    }
+    return false;
+  }
+
+  /** Lowest live awareness client ID in this provider; used as a deterministic leader. */
+  isAwarenessLeader(): boolean {
+    const p = this.provider;
+    if (!p?.awareness) return true;
+    let min = p.awareness.clientID;
+    for (const id of p.awareness.getStates().keys()) {
+      if (id < min) min = id;
+    }
+    return min === p.awareness.clientID;
   }
 
   publishPresence(user: UserInfo): void {
@@ -546,6 +564,17 @@ export class SyncClient {
     }
   }
 
+  private republishAwareness(): void {
+    if (this.lastUser) this.writePresence(this.lastUser);
+    else this.writePresence(loadUser());
+    if (this.lastTool) this.writeTool(this.lastTool);
+    if (this.lastPage) this.writePage(this.lastPage);
+    this.writeViewing(this.lastViewing);
+    if (this.lastCursor) this.writeCursor(this.lastCursor);
+    if (this.lastDraft) this.writeDraft(this.lastDraft);
+    if (this.lastErase) this.writeErasePreview(this.lastErase);
+  }
+
   private writePresence(user: UserInfo): void {
     try {
       this.provider?.awareness.setLocalStateField('user', user);
@@ -611,14 +640,7 @@ export class SyncClient {
         boardId: this.boardId,
       }));
       if (e.status === 'connected') {
-        if (this.lastUser) this.writePresence(this.lastUser);
-        else this.writePresence(loadUser());
-        if (this.lastTool) this.writeTool(this.lastTool);
-        if (this.lastPage) this.writePage(this.lastPage);
-        this.writeViewing(this.lastViewing);
-        if (this.lastCursor) this.writeCursor(this.lastCursor);
-        if (this.lastDraft) this.writeDraft(this.lastDraft);
-        if (this.lastErase) this.writeErasePreview(this.lastErase);
+        this.republishAwareness();
       }
       this.emitStatus();
       this.emitPeers();
@@ -635,6 +657,7 @@ export class SyncClient {
         // ponytail: don't encode full doc here — freezes on large boards
         docSize: -1,
       }));
+      if (isSynced) this.republishAwareness();
     };
     provider.on('status', onStatus);
     provider.on('sync', onSync);
@@ -644,6 +667,13 @@ export class SyncClient {
       provider.off('sync', onSync);
     };
     this.offAwareness = () => provider.awareness.off('change', onAware);
+    if (this.awarenessHeartbeat) {
+      clearInterval(this.awarenessHeartbeat);
+      this.awarenessHeartbeat = null;
+    }
+    this.awarenessHeartbeat = setInterval(() => {
+      if (this.provider?.ws?.readyState === WebSocket.OPEN) this.republishAwareness();
+    }, AWARENESS_HEARTBEAT_MS);
 
     if (!this.offPeerDisplay) {
       this.offPeerDisplay = onPeerDisplayChange(() => this.emitPeers());
@@ -661,6 +691,10 @@ export class SyncClient {
     this.offAwareness = null;
     this.offPeerDisplay?.();
     this.offPeerDisplay = null;
+    if (this.awarenessHeartbeat) {
+      clearInterval(this.awarenessHeartbeat);
+      this.awarenessHeartbeat = null;
+    }
     if (this.provider) {
       netLog.info('provider destroy', () => ({
         url: this.providerUrl,

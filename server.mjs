@@ -6,6 +6,12 @@ import { networkInterfaces } from 'os';
 import { WebSocketServer } from 'ws';
 import { setupWSConnection, docs } from 'y-websocket/bin/utils';
 import { isRoomDeleteAuthorized } from './room-delete-auth.mjs';
+import {
+  formatHostForUrl,
+  isValidRoomName,
+  roomFromDeletePath,
+  roomFromWebsocketPath,
+} from './sync/netUtil.mjs';
 
 const PORT = Number(process.env.REVIEW_SYNC_PORT) || 1234;
 const HOST = process.env.REVIEW_HOST || '0.0.0.0';
@@ -17,6 +23,11 @@ const NET_LOG =
 /** Destroy empty in-memory rooms after this idle window (no YPERSISTENCE). */
 const EMPTY_ROOM_GC_MS = Number(process.env.REVIEW_ROOM_GC_MS) || 5 * 60 * 1000;
 const ROOM_GC_TICK_MS = 30_000;
+const MAX_PAYLOAD = 32 * 1024 * 1024;
+const MAX_ROOMS = Math.max(1, Number(process.env.REVIEW_MAX_ROOMS) || 512);
+const NET_LOG_MAX_LINES = 200;
+const NET_LOG_MAX_MSG = 8_192;
+const startedAt = Date.now();
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(ROOT, 'logs', 'net');
@@ -85,6 +96,14 @@ function isPrivateV4(addr) {
   return false;
 }
 
+/** Unique-local IPv6 (fc00::/7), skip link-local fe80::/10. */
+function isPrivateV6(addr) {
+  if (!addr || typeof addr !== 'string') return false;
+  const a = addr.split('%')[0].toLowerCase();
+  if (a.startsWith('fe80:')) return false;
+  return a.startsWith('fc') || a.startsWith('fd');
+}
+
 /** Prefer Wi‑Fi/Ethernet private IPs; skip loopback, link-local, docker-ish bridges when better options exist. */
 function listLanAddresses() {
   const preferred = [];
@@ -94,11 +113,17 @@ function listLanAddresses() {
     if (!entries) continue;
     const dockerish = /^(docker|br-|veth|vmnet|vbox)/i.test(name);
     for (const entry of entries) {
-      if (entry.family !== 'IPv4' && entry.family !== 4) continue;
       if (entry.internal) continue;
+      const family = entry.family;
       const addr = entry.address;
-      if (addr.startsWith('169.254.')) continue;
-      if (!isPrivateV4(addr)) continue;
+      let ok = false;
+      if (family === 'IPv4' || family === 4) {
+        if (addr.startsWith('169.254.')) continue;
+        ok = isPrivateV4(addr);
+      } else if (family === 'IPv6' || family === 6) {
+        ok = isPrivateV6(addr);
+      }
+      if (!ok) continue;
       if (dockerish) fallback.push(addr);
       else preferred.push(addr);
     }
@@ -109,34 +134,32 @@ function listLanAddresses() {
   return unique;
 }
 
-/** Prefer typical home Wi‑Fi (192.168) over VPN/mesh 10.x when listing invite IPs. */
+/** Prefer typical home Wi‑Fi (192.168) over VPN/mesh 10.x / IPv6 ULA when listing invite IPs. */
 function lanRank(addr) {
   if (addr.startsWith('192.168.')) return 0;
   if (addr.startsWith('10.')) return 1;
+  if (addr.includes(':')) return 3;
   return 2;
 }
 
-const CORS_METHODS = 'GET, POST, DELETE, OPTIONS';
+const CORS_METHODS = 'GET, HEAD, POST, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization, X-Review-Compact-Token, X-Review-Room-Delete-Token';
 
-function sendJson(res, status, body) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
+function corsHeaders(extra = {}) {
+  return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': CORS_METHODS,
     'Access-Control-Allow-Headers': CORS_HEADERS,
+    'Access-Control-Max-Age': '86400',
     'Cache-Control': 'no-store',
-  });
-  res.end(payload);
+    ...extra,
+  };
 }
 
-/** Room name from y-websocket path (`/review-<boardId>`). */
-function roomFromReq(req) {
-  const raw = typeof req.url === 'string' ? req.url : '';
-  const path = raw.split('?')[0] || '';
-  const room = decodeURIComponent(path.replace(/^\//, '').replace(/\/$/, ''));
-  return room || '(unknown)';
+function sendJson(res, status, body) {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
+  res.end(payload);
 }
 
 function remoteFromReq(req) {
@@ -162,28 +185,47 @@ function readBody(req) {
   });
 }
 
+function healthBody() {
+  return {
+    ok: true,
+    service: 'review-sync',
+    port: PORT,
+    rooms: docs.size,
+    emptyRoomGcMs: EMPTY_ROOM_GC_MS,
+    maxPayload: MAX_PAYLOAD,
+    maxRooms: MAX_ROOMS,
+    netLog: Boolean(NET_LOG),
+    uptimeMs: Date.now() - startedAt,
+  };
+}
+
 const server = createServer(async (req, res) => {
   const url = req.url?.split('?')[0] || '/';
 
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': CORS_METHODS,
-      'Access-Control-Allow-Headers': CORS_HEADERS,
-    });
+    res.writeHead(204, corsHeaders());
     res.end();
     return;
   }
 
   if (url === '/health' || url === '/healthz') {
-    sendJson(res, 200, { ok: true, service: 'review-sync', port: PORT });
+    if (req.method === 'HEAD') {
+      res.writeHead(200, corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
+      res.end();
+      return;
+    }
+    sendJson(res, 200, healthBody());
     return;
   }
 
   // Compaction helper — client cleared IndexedDB but server still holds a huge in-memory Y.Doc.
   // Loopback or REVIEW_COMPACT_TOKEN / REVIEW_ROOM_DELETE_TOKEN only; not a LAN API.
   if (url.startsWith('/room/') && req.method === 'DELETE') {
-    const room = decodeURIComponent(url.slice(6).split('?')[0] || '');
+    const room = roomFromDeletePath(url);
+    if (!isValidRoomName(room)) {
+      sendJson(res, 400, { ok: false, error: 'bad room' });
+      return;
+    }
     if (!isRoomDeleteAuthorized(req)) {
       const remote = req.socket?.remoteAddress || '?';
       console.log(`[review:net] room DELETE denied from=${remote} room=${room}`);
@@ -240,19 +282,27 @@ const server = createServer(async (req, res) => {
     try {
       const raw = await readBody(req);
       const parsed = raw ? JSON.parse(raw) : {};
-      const lines = Array.isArray(parsed.lines) ? parsed.lines : [parsed];
+      const incoming = Array.isArray(parsed.lines) ? parsed.lines : [parsed];
+      const lines = incoming.slice(0, NET_LOG_MAX_LINES);
+      let written = 0;
       for (const line of lines) {
         if (!line || typeof line !== 'object') continue;
+        const msgRaw = line.msg;
+        const msg =
+          typeof msgRaw === 'string'
+            ? msgRaw.slice(0, NET_LOG_MAX_MSG)
+            : String(msgRaw ?? '').slice(0, NET_LOG_MAX_MSG);
         const row = {
           t: typeof line.t === 'string' ? line.t : new Date().toISOString(),
           level: typeof line.level === 'string' ? line.level : 'info',
           source: typeof line.client === 'string' ? line.client : 'client',
-          msg: typeof line.msg === 'string' ? line.msg : String(line.msg ?? ''),
+          msg,
           ...(line.data !== undefined ? { data: line.data } : {}),
         };
         appendSession(JSON.stringify(row));
+        written += 1;
       }
-      sendJson(res, 200, { ok: true, file: SESSION_REL, written: lines.length });
+      sendJson(res, 200, { ok: true, file: SESSION_REL, written });
     } catch (err) {
       fileLog('warn', 'net-log POST failed');
       sendJson(res, 400, { ok: false });
@@ -260,22 +310,31 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/plain; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-  });
+  res.writeHead(200, corsHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
   res.end('ReView — sync server');
 });
 
 const wss = new WebSocketServer({
   server,
-  maxPayload: 5 * 1024 * 1024,
+  maxPayload: MAX_PAYLOAD,
   perMessageDeflate: false,
 });
 
 wss.on('connection', (conn, req) => {
-  const room = roomFromReq(req);
+  const room = roomFromWebsocketPath(req.url);
   const remote = remoteFromReq(req);
+  if (!isValidRoomName(room)) {
+    console.log(`[review:net] ws reject bad room from=${remote} room=${room}`);
+    fileLog('warn', 'ws reject bad room', { room, from: remote });
+    try { conn.close(1008, 'bad room'); } catch {}
+    return;
+  }
+  if (!docs.has(room) && docs.size >= MAX_ROOMS) {
+    console.log(`[review:net] ws reject max rooms from=${remote} room=${room} size=${docs.size}`);
+    fileLog('warn', 'ws reject max rooms', { room, from: remote, size: docs.size });
+    try { conn.close(1013, 'too many rooms'); } catch {}
+    return;
+  }
   console.log(`[review:net] ws connect room=${room} from=${remote}`);
   fileLog('info', 'ws connect', { room, from: remote });
   conn.on('close', (code, reason) => {
@@ -287,6 +346,7 @@ wss.on('connection', (conn, req) => {
     fileLog('warn', 'ws error', { room, from: remote, err: String(err?.message ?? err) });
   });
   try {
+    req.url = `/${room}`;
     setupWSConnection(conn, req, { gc: false });
   } catch (err) {
     console.error(`[review:net] setupWSConnection failed room=${room}`, err);
@@ -340,26 +400,39 @@ function onListenError(err) {
 server.on('error', onListenError);
 wss.on('error', onListenError);
 
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[review] ${signal}, closing`);
+  fileLog('info', 'shutdown', { signal });
+  try { wss.close(); } catch {}
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2000).unref?.();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 server.listen(PORT, HOST, () => {
   const addresses = listLanAddresses();
   console.log(`[review] sync server on ${HOST}:${PORT}`);
   if (HOST === '0.0.0.0' || HOST === '::') {
     console.log(`[review]   local:   ws://localhost:${PORT}`);
     for (const ip of addresses) {
-      console.log(`[review]   network: ws://${ip}:${PORT}`);
+      console.log(`[review]   network: ws://${formatHostForUrl(ip)}:${PORT}`);
     }
     if (!addresses.length) {
-      console.log(`[review]   (no private LAN IPv4 found)`);
+      console.log(`[review]   (no private LAN address found)`);
     }
     console.log(`[review]   UI (dev): http://<lan-ip>:${process.env.REVIEW_UI_PORT || '5173'}  — friends open that, not localhost`);
   } else {
-    console.log(`[review]   ws://${HOST}:${PORT}`);
-    console.log(`[review]   UI (dev): http://${HOST}:${process.env.REVIEW_UI_PORT || '5173'}`);
+    console.log(`[review]   ws://${formatHostForUrl(HOST)}:${PORT}`);
+    console.log(`[review]   UI (dev): http://${formatHostForUrl(HOST)}:${process.env.REVIEW_UI_PORT || '5173'}`);
   }
   console.log(`[review:net] empty-room GC after ${Math.round(EMPTY_ROOM_GC_MS / 1000)}s`);
   if (NET_LOG) {
     console.log(`[review:net] session log → ${SESSION_REL}`);
     console.log(`[review:net] verbose HTTP logging on (REVIEW_NET_LOG)`);
   }
-  fileLog('info', 'listen', { addresses, port: PORT, host: HOST, emptyRoomGcMs: EMPTY_ROOM_GC_MS });
+  fileLog('info', 'listen', { addresses, port: PORT, host: HOST, emptyRoomGcMs: EMPTY_ROOM_GC_MS, maxPayload: MAX_PAYLOAD, maxRooms: MAX_ROOMS });
 });

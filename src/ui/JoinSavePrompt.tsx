@@ -31,7 +31,7 @@ export function JoinSavePrompt({ locale, onKeepOnDevice, onSaveAsMyBoard, onLate
           <button type="button" className="style-btn active" title={t(locale, 'keepOnDeviceHint')} onClick={onKeepOnDevice}>
             {t(locale, 'keepOnDevice')}
           </button>
-          <button type="button" className="style-btn" title={t(locale, 'saveAsMyBoardHint')} onClick={onSaveAsMyBoard}>
+          <button type="button" className="style-btn" data-commit-edit title={t(locale, 'saveAsMyBoardHint')} onClick={onSaveAsMyBoard}>
             {t(locale, 'saveAsMyBoard')}
           </button>
           <button type="button" className="join-prompt-later" onClick={onLater}>

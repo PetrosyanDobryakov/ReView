@@ -77,18 +77,28 @@ function migrateColorBinds(colors: ColorBinds | undefined): ColorBinds {
   return { ...DEFAULT_COLOR_BINDS, ...src };
 }
 
+function stripReservedKeyH(binds: Keybinds): Keybinds {
+  const tools = { ...binds.tools };
+  for (const k of Object.keys(tools) as Array<keyof ToolBinds>) {
+    if (tools[k] === 'KeyH') tools[k] = '';
+  }
+  const colors = { ...binds.colors };
+  for (const k of Object.keys(colors)) {
+    if (colors[k] === 'KeyH') delete colors[k];
+  }
+  return { tools, colors };
+}
+
 function load(): Keybinds {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Keybinds>;
       const tools = { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) };
-      // ponytail: KeyH is UI-hide now, not pan — drop the stale default-follow
-      if (tools.pan === 'KeyH') tools.pan = '';
-      return {
+      return stripReservedKeyH({
         tools,
         colors: migrateColorBinds(parsed.colors),
-      };
+      });
     }
   } catch {}
   return { tools: { ...DEFAULT_TOOL_BINDS }, colors: { ...DEFAULT_COLOR_BINDS } };
@@ -165,10 +175,10 @@ export function exportKeybinds(): Keybinds {
 }
 
 export function applyKeybinds(next: Keybinds): void {
-  current = {
+  current = stripReservedKeyH({
     tools: { ...DEFAULT_TOOL_BINDS, ...(next.tools ?? {}) },
     colors: migrateColorBinds(next.colors),
-  };
+  });
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {}

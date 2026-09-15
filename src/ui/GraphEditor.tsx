@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Engine, GraphEditTarget } from '../engine/Engine';
 import { compileGraph } from '../core/graphEval';
+import { graphChromeKind } from '../core/editChrome';
 import { readLocale } from '../core/locale';
 import { t } from './i18n';
 
@@ -19,33 +20,65 @@ export function GraphEditor({
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef(0);
+  const doneRef = useRef(false);
   const locale = readLocale();
   const compiled = compileGraph(value);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-    return () => window.clearTimeout(timerRef.current);
-  }, []);
-
   const preview = (expr: string) => {
-    window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      engine.commitGraphPreview(target.id, expr);
-    }, 120);
+    engine.commitGraphPreview(target.id, expr);
   };
 
   const finish = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
     window.clearTimeout(timerRef.current);
-    engine.commitGraph(target.id, value);
+    engine.commitGraphPreview(target.id, value);
+    engine.commitOpenGraphEditor();
     onDone();
   };
 
   const cancel = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
     window.clearTimeout(timerRef.current);
-    engine.commitGraph(target.id, target.expr);
+    engine.cancelGraphEditor();
     onDone();
   };
+
+  const finishRef = useRef(finish);
+  const cancelRef = useRef(cancel);
+  finishRef.current = finish;
+  cancelRef.current = cancel;
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    return () => {
+      doneRef.current = true;
+      window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  // Classify the real hit target on pointerdown (capture) before blur. Blur
+  // relatedTarget can be the toolbelt or the active tool, which used to cancel
+  // Copy/export before the click wrote the preview.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (doneRef.current) return;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (rootRef.current?.contains(t)) return;
+      const kind = graphChromeKind(t);
+      if (kind === 'keep') return;
+      if (kind === 'commit') {
+        finishRef.current();
+        return;
+      }
+      if (kind === 'cancel') cancelRef.current();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, []);
 
   const applyPreset = (expr: string) => {
     setValue(expr);
@@ -53,7 +86,21 @@ export function GraphEditor({
     inputRef.current?.focus();
   };
 
-  const left = engine.worldToScreen(target.x, target.y + target.h);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    let raf = 0;
+    const loop = () => {
+      const p = engine.worldToScreen(target.x, target.y);
+      el.style.left = `${p.x}px`;
+      el.style.top = `${p.y + 10}px`;
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [engine, target.x, target.y]);
+
+  const left = engine.worldToScreen(target.x, target.y);
 
   return (
     <div
@@ -72,13 +119,28 @@ export function GraphEditor({
           aria-label={t(locale, 'graphExpr')}
           placeholder="sin(x)"
           onChange={(e) => {
-            setValue(e.target.value);
+            const next = e.target.value;
+            setValue(next);
+            preview(next);
           }}
           onBlur={(e) => {
-            // Keep open when focus moves to a preset chip inside the editor.
-            const next = e.relatedTarget as Node | null;
+            const next = e.relatedTarget as HTMLElement | null;
             if (next && rootRef.current?.contains(next)) return;
-            finish();
+            const kind = graphChromeKind(next);
+            if (kind === 'keep') {
+              requestAnimationFrame(() => inputRef.current?.focus());
+              return;
+            }
+            if (kind === 'commit') {
+              finish();
+              return;
+            }
+            if (kind === 'cancel') {
+              cancel();
+              return;
+            }
+            window.clearTimeout(timerRef.current);
+            timerRef.current = window.setTimeout(() => finish(), 0);
           }}
           onKeyDown={(e) => {
             e.stopPropagation();

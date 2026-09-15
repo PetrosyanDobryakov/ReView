@@ -76,6 +76,31 @@ export function localToWorld(v: ShapeBox & { rotation?: number }, lx: number, ly
   };
 }
 
+/**
+ * Place a crop window so its local top-left stays at the same world point after
+ * the AABB (and therefore the rotation center) changes. Unrotated crops are a no-op.
+ */
+export function reanchorCroppedBox(
+  orig: ShapeBox & { rotation?: number },
+  cropBox: ShapeBox
+): ShapeBox {
+  const next: ShapeBox & { rotation?: number } = {
+    x: cropBox.x,
+    y: cropBox.y,
+    w: cropBox.w,
+    h: cropBox.h,
+    rotation: orig.rotation,
+  };
+  const oldTL = localToWorld(orig, cropBox.x - orig.x, cropBox.y - orig.y);
+  const newTL = localToWorld(next, 0, 0);
+  return {
+    x: next.x + (oldTL.x - newTL.x),
+    y: next.y + (oldTL.y - newTL.y),
+    w: next.w,
+    h: next.h,
+  };
+}
+
 /** Axis-aligned bounds that fully cover a possibly rotated box. */
 export function rotatedAabb(v: ShapeBox & { rotation?: number }): ShapeBox {
   const rot = shapeRotation(v);
@@ -164,6 +189,234 @@ export function reanchorRotatedResize(
   };
 }
 
+/**
+ * Unrotated width/height whose rotated AABB matches `aabbW`×`aabbH`.
+ * At 45° the system is singular — fall back to scaling the original size.
+ */
+export function unrotatedSizeMatchingAabb(
+  aabbW: number,
+  aabbH: number,
+  deg: number,
+  origW: number,
+  origH: number,
+  sx: number,
+  sy: number
+): { w: number; h: number } {
+  const rad = degToRad(deg);
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const det = c * c - s * s;
+  if (Math.abs(det) < 1e-6) {
+    return { w: Math.max(1, origW * sx), h: Math.max(1, origH * sy) };
+  }
+  const w = (c * aabbW - s * aabbH) / det;
+  const h = (c * aabbH - s * aabbW) / det;
+  if (!(w > 0) || !(h > 0) || !Number.isFinite(w) || !Number.isFinite(h)) {
+    return { w: Math.max(1, origW * sx), h: Math.max(1, origH * sy) };
+  }
+  return { w, h };
+}
+
+export type GroupResizeMember = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+  type: string;
+  locked?: boolean;
+  points?: number[];
+  strokeWidth?: number;
+};
+
+/**
+ * Scale one selected member with the group AABB. Centers move in group space;
+ * rotated boxes keep `rotation` and recover unrotated size from the scaled AABB
+ * so a 90° rect grows along the handle axis instead of the unrotated width.
+ */
+export function groupResizeMember(
+  o: GroupResizeMember,
+  origBox: ShapeBox,
+  nextBox: ShapeBox,
+  minSize: number
+): { x: number; y: number; w?: number; h?: number; points?: number[] } | null {
+  if (o.locked) return null;
+  const sx = origBox.w !== 0 ? nextBox.w / origBox.w : 1;
+  const sy = origBox.h !== 0 ? nextBox.h / origBox.h : 1;
+  const mapX = (px: number) => nextBox.x + (px - origBox.x) * sx;
+  const mapY = (py: number) => nextBox.y + (py - origBox.y) * sy;
+  const keepSize = o.type === 'text' || o.type === 'sticky';
+  if (keepSize) {
+    const cx = o.x + o.w / 2;
+    const cy = o.y + o.h / 2;
+    return { x: mapX(cx) - o.w / 2, y: mapY(cy) - o.h / 2 };
+  }
+  if (o.points && o.points.length >= 2) {
+    const pts: number[] = [];
+    for (let i = 0; i < o.points.length; i += 2) {
+      pts.push(mapX(o.points[i]), mapY(o.points[i + 1]));
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i += 2) {
+      minX = Math.min(minX, pts[i]);
+      maxX = Math.max(maxX, pts[i]);
+      minY = Math.min(minY, pts[i + 1]);
+      maxY = Math.max(maxY, pts[i + 1]);
+    }
+    const pad = (o.strokeWidth ?? 0) / 2;
+    return {
+      x: minX - pad,
+      y: minY - pad,
+      w: Math.max(minSize, maxX - minX + pad * 2),
+      h: Math.max(minSize, maxY - minY + pad * 2),
+      points: pts,
+    };
+  }
+  const c = shapeCenter(o);
+  const nc = { x: mapX(c.x), y: mapY(c.y) };
+  const absSx = Math.abs(sx);
+  const absSy = Math.abs(sy);
+  const rot = shapeRotation(o);
+  if (!rot) {
+    const nw = Math.max(minSize, o.w * absSx);
+    const nh = Math.max(minSize, o.h * absSy);
+    return { x: nc.x - nw / 2, y: nc.y - nh / 2, w: nw, h: nh };
+  }
+  const aabb = rotatedAabb(o);
+  const targetW = Math.max(minSize, aabb.w * absSx);
+  const targetH = Math.max(minSize, aabb.h * absSy);
+  const size = unrotatedSizeMatchingAabb(targetW, targetH, rot, o.w, o.h, absSx, absSy);
+  const nw = Math.max(minSize, size.w);
+  const nh = Math.max(minSize, size.h);
+  return { x: nc.x - nw / 2, y: nc.y - nh / 2, w: nw, h: nh };
+}
+
+/**
+ * Move a glued rider by mapping world points through the host's local frame.
+ * Used when the host's local space warps without a uniform scale (table
+ * insert/delete/divider). Strokes follow every point; boxes keep size.
+ */
+export function mapShapeThroughLocalMap(
+  o: GroupResizeMember,
+  origHost: ShapeBox & { rotation?: number },
+  nextHost: ShapeBox & { rotation?: number },
+  mapLocal: (lx: number, ly: number) => { x: number; y: number },
+  minSize: number
+): { x: number; y: number; w?: number; h?: number; points?: number[] } | null {
+  if (o.locked) return null;
+  const nextFrame = {
+    x: nextHost.x,
+    y: nextHost.y,
+    w: nextHost.w,
+    h: nextHost.h,
+    rotation: nextHost.rotation ?? origHost.rotation,
+  };
+  const mapPt = (px: number, py: number) => {
+    const lp = worldToLocal(origHost, px, py);
+    const mapped = mapLocal(lp.x, lp.y);
+    return localToWorld(nextFrame, mapped.x, mapped.y);
+  };
+  if (o.points && o.points.length >= 2) {
+    const pts: number[] = [];
+    for (let i = 0; i < o.points.length; i += 2) {
+      const p = mapPt(o.points[i]!, o.points[i + 1]!);
+      pts.push(p.x, p.y);
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i += 2) {
+      minX = Math.min(minX, pts[i]!);
+      maxX = Math.max(maxX, pts[i]!);
+      minY = Math.min(minY, pts[i + 1]!);
+      maxY = Math.max(maxY, pts[i + 1]!);
+    }
+    const pad = (o.strokeWidth ?? 0) / 2;
+    return {
+      x: minX - pad,
+      y: minY - pad,
+      w: Math.max(minSize, maxX - minX + pad * 2),
+      h: Math.max(minSize, maxY - minY + pad * 2),
+      points: pts,
+    };
+  }
+  const c = mapPt(o.x + o.w / 2, o.y + o.h / 2);
+  return { x: c.x - o.w / 2, y: c.y - o.h / 2 };
+}
+
+/** Keep a glued rider in the host's local frame while the host's unrotated box changes. */
+export function mapShapeThroughHostResize(
+  o: GroupResizeMember,
+  origHost: ShapeBox & { rotation?: number },
+  nextHost: ShapeBox & { rotation?: number },
+  minSize: number
+): { x: number; y: number; w?: number; h?: number; points?: number[] } | null {
+  if (o.locked) return null;
+  const sx = origHost.w !== 0 ? nextHost.w / origHost.w : 1;
+  const sy = origHost.h !== 0 ? nextHost.h / origHost.h : 1;
+  const nextFrame = {
+    x: nextHost.x,
+    y: nextHost.y,
+    w: nextHost.w,
+    h: nextHost.h,
+    rotation: nextHost.rotation ?? origHost.rotation,
+  };
+  const mapPt = (px: number, py: number) => {
+    const lp = worldToLocal(origHost, px, py);
+    return localToWorld(nextFrame, lp.x * sx, lp.y * sy);
+  };
+  if (o.type === 'text' || o.type === 'sticky') {
+    const c = mapPt(o.x + o.w / 2, o.y + o.h / 2);
+    return { x: c.x - o.w / 2, y: c.y - o.h / 2 };
+  }
+  if (o.points && o.points.length >= 2) {
+    const pts: number[] = [];
+    for (let i = 0; i < o.points.length; i += 2) {
+      const p = mapPt(o.points[i]!, o.points[i + 1]!);
+      pts.push(p.x, p.y);
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i += 2) {
+      minX = Math.min(minX, pts[i]!);
+      maxX = Math.max(maxX, pts[i]!);
+      minY = Math.min(minY, pts[i + 1]!);
+      maxY = Math.max(maxY, pts[i + 1]!);
+    }
+    const pad = (o.strokeWidth ?? 0) / 2;
+    return {
+      x: minX - pad,
+      y: minY - pad,
+      w: Math.max(minSize, maxX - minX + pad * 2),
+      h: Math.max(minSize, maxY - minY + pad * 2),
+      points: pts,
+    };
+  }
+  const c = shapeCenter(o);
+  const nc = mapPt(c.x, c.y);
+  const absSx = Math.abs(sx);
+  const absSy = Math.abs(sy);
+  const rot = shapeRotation(o);
+  if (!rot) {
+    const nw = Math.max(minSize, o.w * absSx);
+    const nh = Math.max(minSize, o.h * absSy);
+    return { x: nc.x - nw / 2, y: nc.y - nh / 2, w: nw, h: nh };
+  }
+  const aabb = rotatedAabb(o);
+  const targetW = Math.max(minSize, aabb.w * absSx);
+  const targetH = Math.max(minSize, aabb.h * absSy);
+  const size = unrotatedSizeMatchingAabb(targetW, targetH, rot, o.w, o.h, absSx, absSy);
+  const nw = Math.max(minSize, size.w);
+  const nh = Math.max(minSize, size.h);
+  return { x: nc.x - nw / 2, y: nc.y - nh / 2, w: nw, h: nh };
+}
+
 /** Rotate point arrays around a center (used for pens/arrows). */
 export function rotatePointsAround(
   points: number[],
@@ -182,4 +435,63 @@ export function rotatePointsAround(
     out.push(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
   }
   return out;
+}
+
+/**
+ * Orbit a shape around a world pivot. Pens/arrows bake the turn into points;
+ * boxes keep size and add `deltaDeg` to `rotation`.
+ */
+export function rotateShapeAround(
+  o: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    type: string;
+    points?: number[];
+    strokeWidth?: number;
+    rotation?: number;
+  },
+  cx: number,
+  cy: number,
+  deltaDeg: number
+): { x: number; y: number; w?: number; h?: number; points?: number[]; rotation?: number } {
+  if (!deltaDeg) {
+    return { x: o.x, y: o.y, rotation: o.rotation };
+  }
+  if (o.type === 'pen' || o.type === 'arrow') {
+    const pts = rotatePointsAround(o.points ?? [], cx, cy, deltaDeg);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i += 2) {
+      minX = Math.min(minX, pts[i]!);
+      maxX = Math.max(maxX, pts[i]!);
+      minY = Math.min(minY, pts[i + 1]!);
+      maxY = Math.max(maxY, pts[i + 1]!);
+    }
+    if (!Number.isFinite(minX)) return { x: o.x, y: o.y, rotation: 0 };
+    const pad = (o.strokeWidth ?? 2) / 2 + 2;
+    return {
+      points: pts,
+      x: minX - pad,
+      y: minY - pad,
+      w: maxX - minX + pad * 2,
+      h: maxY - minY + pad * 2,
+      rotation: 0,
+    };
+  }
+  const ocx = o.x + o.w / 2;
+  const ocy = o.y + o.h / 2;
+  const rad = degToRad(deltaDeg);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = ocx - cx;
+  const dy = ocy - cy;
+  return {
+    x: cx + dx * cos - dy * sin - o.w / 2,
+    y: cy + dx * sin + dy * cos - o.h / 2,
+    rotation: shapeRotation(o) + deltaDeg,
+  };
 }

@@ -1,4 +1,12 @@
 import type { ShapeBox, ShapeView } from './shapes';
+import { arrowBounds } from './shapes';
+import { rotatedAabb } from './transform';
+
+/** World AABB of a shape, including rotation and arrow curves. */
+export function visualBox(v: ShapeView): ShapeBox {
+  if (v.type === 'arrow') return arrowBounds(v);
+  return rotatedAabb(v);
+}
 
 export type AlignGuide = {
   orientation: 'v' | 'h';
@@ -32,10 +40,11 @@ export function groupBox(views: ShapeView[]): ShapeBox | null {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const v of views) {
-    x = Math.min(x, v.x);
-    y = Math.min(y, v.y);
-    maxX = Math.max(maxX, v.x + v.w);
-    maxY = Math.max(maxY, v.y + v.h);
+    const b = visualBox(v);
+    x = Math.min(x, b.x);
+    y = Math.min(y, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
   }
   return { x, y, w: maxX - x, h: maxY - y };
 }
@@ -209,7 +218,11 @@ export function alignViews(
       const dx = refBox.x - targetBox.x;
       for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
     } else if (targets.length >= 2) {
-      for (const v of targets) patches.push([v.id, { x: targetBox.x }]);
+      const left = targetBox.x;
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { x: v.x + (left - b.x) }]);
+      }
     }
   } else if (kind === 'right') {
     if (refBox) {
@@ -217,7 +230,10 @@ export function alignViews(
       for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
     } else if (targets.length >= 2) {
       const right = targetBox.x + targetBox.w;
-      for (const v of targets) patches.push([v.id, { x: right - v.w }]);
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { x: v.x + (right - (b.x + b.w)) }]);
+      }
     }
   } else if (kind === 'centerH') {
     if (refBox) {
@@ -225,14 +241,21 @@ export function alignViews(
       for (const v of targets) patches.push([v.id, { x: v.x + dx }]);
     } else if (targets.length >= 2) {
       const center = targetBox.x + targetBox.w / 2;
-      for (const v of targets) patches.push([v.id, { x: center - v.w / 2 }]);
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { x: v.x + (center - (b.x + b.w / 2)) }]);
+      }
     }
   } else if (kind === 'top') {
     if (refBox) {
       const dy = refBox.y - targetBox.y;
       for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
     } else if (targets.length >= 2) {
-      for (const v of targets) patches.push([v.id, { y: targetBox.y }]);
+      const top = targetBox.y;
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { y: v.y + (top - b.y) }]);
+      }
     }
   } else if (kind === 'bottom') {
     if (refBox) {
@@ -240,7 +263,10 @@ export function alignViews(
       for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
     } else if (targets.length >= 2) {
       const bottom = targetBox.y + targetBox.h;
-      for (const v of targets) patches.push([v.id, { y: bottom - v.h }]);
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { y: v.y + (bottom - (b.y + b.h)) }]);
+      }
     }
   } else if (kind === 'centerV') {
     if (refBox) {
@@ -248,31 +274,40 @@ export function alignViews(
       for (const v of targets) patches.push([v.id, { y: v.y + dy }]);
     } else if (targets.length >= 2) {
       const center = targetBox.y + targetBox.h / 2;
-      for (const v of targets) patches.push([v.id, { y: center - v.h / 2 }]);
+      for (const v of targets) {
+        const b = visualBox(v);
+        patches.push([v.id, { y: v.y + (center - (b.y + b.h / 2)) }]);
+      }
     }
   } else if (kind === 'distributeH') {
     if (targets.length < 3) return [];
-    const sorted = [...targets].sort((a, b) => a.x - b.x);
-    const minX = Math.min(...sorted.map((v) => v.x));
-    const maxR = Math.max(...sorted.map((v) => v.x + v.w));
-    const totalW = sorted.reduce((s, v) => s + v.w, 0);
+    const sorted = [...targets].sort((a, b) => visualBox(a).x - visualBox(b).x);
+    const boxes = sorted.map(visualBox);
+    const minX = Math.min(...boxes.map((b) => b.x));
+    const maxR = Math.max(...boxes.map((b) => b.x + b.w));
+    const totalW = boxes.reduce((s, b) => s + b.w, 0);
     const gap = (maxR - minX - totalW) / (sorted.length - 1);
     let cur = minX;
-    for (const v of sorted) {
-      patches.push([v.id, { x: cur }]);
-      cur += v.w + gap;
+    for (let i = 0; i < sorted.length; i++) {
+      const v = sorted[i]!;
+      const b = boxes[i]!;
+      patches.push([v.id, { x: v.x + (cur - b.x) }]);
+      cur += b.w + gap;
     }
   } else if (kind === 'distributeV') {
     if (targets.length < 3) return [];
-    const sorted = [...targets].sort((a, b) => a.y - b.y);
-    const minY = Math.min(...sorted.map((v) => v.y));
-    const maxB = Math.max(...sorted.map((v) => v.y + v.h));
-    const totalH = sorted.reduce((s, v) => s + v.h, 0);
+    const sorted = [...targets].sort((a, b) => visualBox(a).y - visualBox(b).y);
+    const boxes = sorted.map(visualBox);
+    const minY = Math.min(...boxes.map((b) => b.y));
+    const maxB = Math.max(...boxes.map((b) => b.y + b.h));
+    const totalH = boxes.reduce((s, b) => s + b.h, 0);
     const gap = (maxB - minY - totalH) / (sorted.length - 1);
     let cur = minY;
-    for (const v of sorted) {
-      patches.push([v.id, { y: cur }]);
-      cur += v.h + gap;
+    for (let i = 0; i < sorted.length; i++) {
+      const v = sorted[i]!;
+      const b = boxes[i]!;
+      patches.push([v.id, { y: v.y + (cur - b.y) }]);
+      cur += b.h + gap;
     }
   }
 

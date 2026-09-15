@@ -58,15 +58,21 @@ function ensureMathJax(): void {
   });
 }
 
+export function isFormulaCached(latex: string): boolean {
+  return svgCache.has(latex);
+}
+
 export function renderFormula(latex: string): CachedSvg {
   const hit = svgCache.get(latex);
   if (hit) return hit;
   ensureMathJax();
-  let entry: CachedSvg;
   const w = window as unknown as { MathJax?: { tex2svg?: (s: string, o?: object) => Element } };
   const tex2svg = mathJaxReady ? w.MathJax?.tex2svg : undefined;
+  // Pre-ready misses must not stick in the cache — Engine only dirties on
+  // onFormulaLoad, and a cached invalid entry would stay raw `$latex$` forever.
+  if (!tex2svg) return { svg: '', wEx: 0, hEx: 0, valid: false };
+  let entry: CachedSvg;
   try {
-    if (!tex2svg) throw new Error('not ready');
     const container = tex2svg(latex, { display: false });
     const svgEl = container.querySelector('svg');
     if (!svgEl) throw new Error('no svg');

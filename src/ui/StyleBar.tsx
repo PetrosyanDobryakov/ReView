@@ -3,6 +3,7 @@ import type { ToolId } from '../engine/tools';
 import type { ShapeView, TextAlign } from '../core/shapes';
 import {
   effectivePen,
+  penStrokeWidthForSize,
   updateEraserSettings,
   updatePenSettings,
   updateShapeSettings,
@@ -21,12 +22,12 @@ import { patchShapes } from '../core/store';
 import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
-import { applyFormatToEditor, type LiveTextFormat } from '../core/textEditorFormat';
+import { applyFormatToEditor, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
 import { t } from './i18n';
 import { Icon, type IconName } from './icons';
 import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
-import { hasFill } from '../core/shapes';
+import { hasFill, defaultFontSizeFor } from '../core/shapes';
 
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table'];
 const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
@@ -82,7 +83,7 @@ function formatFromShape(v: ShapeView): {
     align: v.textAlign ?? (CENTERED_TYPES.has(v.type) ? 'center' : 'left'),
     highlight: !!v.highlight,
     color: v.textColor ?? '',
-    size: v.fontSize ?? 18,
+    size: v.fontSize ?? defaultFontSizeFor(v.type),
   };
 }
 
@@ -381,7 +382,7 @@ export function StyleBar({
     if (patch.size !== undefined) shapePatch.fontSize = patch.size;
     if (patch.color !== undefined) shapePatch.textColor = patch.color;
 
-    if (textTargets.length && Object.keys(shapePatch).length) {
+    if (textTargets.length && Object.keys(shapePatch).length && !editing) {
       patchShapes(textTargets.map((v) => [v.id, shapePatch]));
       onPatched();
       if (patch.size !== undefined) {
@@ -393,12 +394,13 @@ export function StyleBar({
       const editor = getTextEditor();
       if (editor instanceof HTMLElement) {
         if (
-          patch.bold !== undefined ||
+          textOverlayAllowsRich(editTarget ?? { type: 'text' }) &&
+          (patch.bold !== undefined ||
           patch.italic !== undefined ||
           patch.underline !== undefined ||
           patch.strike !== undefined ||
           patch.highlight !== undefined ||
-          patch.color !== undefined
+          patch.color !== undefined)
         ) {
           applyFormatToEditor(editor, patch);
           onSyncEditFormat?.(editor, editTarget?.color ?? text.color);
@@ -406,28 +408,33 @@ export function StyleBar({
       }
 
       const editPatch: Partial<EditTarget> = {};
-      if (patch.bold !== undefined) editPatch.bold = patch.bold;
-      if (patch.italic !== undefined) editPatch.italic = patch.italic;
-      if (patch.underline !== undefined) editPatch.underline = patch.underline;
-      if (patch.strike !== undefined) editPatch.strike = patch.strike;
+      const cellEdit = Boolean(editTarget?.tableCell);
+      if (!cellEdit) {
+        if (patch.bold !== undefined) editPatch.bold = patch.bold;
+        if (patch.italic !== undefined) editPatch.italic = patch.italic;
+        if (patch.underline !== undefined) editPatch.underline = patch.underline;
+        if (patch.strike !== undefined) editPatch.strike = patch.strike;
+        if (patch.highlight !== undefined) editPatch.highlight = patch.highlight;
+      }
       if (patch.align !== undefined) editPatch.textAlign = patch.align;
-      if (patch.highlight !== undefined) editPatch.highlight = patch.highlight;
       if (patch.size !== undefined) editPatch.fontSize = patch.size;
       if (patch.color !== undefined) editPatch.color = patch.color;
       if (Object.keys(editPatch).length) onEditStyle(editPatch);
 
+      if (editTarget?.tableCell) {
+        delete shapePatch.bold;
+        delete shapePatch.italic;
+        delete shapePatch.underline;
+        delete shapePatch.strike;
+        delete shapePatch.highlight;
+      }
       if (editTarget?.id && Object.keys(shapePatch).length) {
         patchShapes([[editTarget.id, shapePatch]]);
         onPatched();
-        if (patch.size !== undefined && editTarget.type === 'text') {
-          onRemeasureText([editTarget.id]);
-        }
+        // Do not remasure from stored text while the overlay is open — that
+        // grows `v.w` from stale copy, while the overlay still wraps at `target.w`.
       }
       return;
-    }
-
-    if (!editing && patch.size !== undefined && textTargets.some((v) => v.type === 'text')) {
-      onRemeasureText(textTargets.filter((v) => v.type === 'text').map((v) => v.id));
     }
   };
 
@@ -514,7 +521,7 @@ export function StyleBar({
               const size = Number(e.target.value);
               updatePenSettings({ size });
               if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { strokeWidth: pen.style === 'highlighter' ? size * 4 : size }]));
+                patchShapes(penTargets.map((v) => [v.id, { strokeWidth: penStrokeWidthForSize(v, size) }]));
                 onPatched();
               }
             }}

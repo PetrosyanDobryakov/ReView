@@ -2,6 +2,14 @@ import { effectiveSyncUrl } from './config';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+/** Bracket IPv6 so it is legal in URLs. Keep in sync with `sync/netUtil.mjs`. */
+export function formatHostForUrl(host: string): string {
+  const h = host.trim();
+  if (!h) return h;
+  if (h.includes(':') && !h.startsWith('[')) return `[${h}]`;
+  return h;
+}
+
 export function isLocalHostname(hostname: string): boolean {
   const h = hostname.trim().toLowerCase();
   if (!h) return true;
@@ -75,20 +83,22 @@ function uiProtocol(): string {
 /** Board URL friends can open on the same LAN. */
 export function lanBoardUrl(boardId: string, lanHost: string): string {
   const port = uiPort();
+  const host = formatHostForUrl(lanHost);
   const needsPort = port !== '80' && port !== '443';
   const origin = needsPort
-    ? `${uiProtocol()}//${lanHost}:${port}`
-    : `${uiProtocol()}//${lanHost}`;
+    ? `${uiProtocol()}//${host}:${port}`
+    : `${uiProtocol()}//${host}`;
   return `${origin}/board/${encodeURIComponent(boardId)}`;
 }
 
 /** App home URL on a LAN host (for Settings “copy app URL”). */
 export function lanAppUrl(lanHost: string): string {
   const port = uiPort();
+  const host = formatHostForUrl(lanHost);
   const needsPort = port !== '80' && port !== '443';
   return needsPort
-    ? `${uiProtocol()}//${lanHost}:${port}/`
-    : `${uiProtocol()}//${lanHost}/`;
+    ? `${uiProtocol()}//${host}:${port}/`
+    : `${uiProtocol()}//${host}/`;
 }
 
 /** Resolve the best invite URL for a board (LAN when on localhost). */

@@ -1,5 +1,118 @@
 # Changelog
 
+## 0.14.24 — unreleased
+
+### Fix
+- Enter in the rich overlay keeps the line break when contentEditable wraps the next line in a `<div>` after a bare text node.
+- Copy, duplicate, PNG/SVG export, and `.review` download / clone commit the open text overlay and graph preview first, so the snapshot includes what you typed.
+- After a compacted snapshot the worker could delete `tail` then fail the drop check, leaving later updates only in memory. Failed drops now rewrite `tail` immediately.
+- Region export from the overlay button used a stale engine captured at mount, before Engine existed. The callback now reads the live engine from the board ref.
+- Export dialog preview follows the active page. A region pick closes when you switch pages. Leaving a board closes export and cancels crop so Apply cannot target the next board.
+- Transparent SVG uses the board paper to adapt ink, same as transparent PNG, instead of keeping near-black strokes that vanish on a dark board.
+- PDF/doc next/prev (and create/patch) clamp an out-of-range `page` so a stale index cannot sit on the last visual page while clicks do nothing.
+- Region-pick is modal the same way crop is: Delete, undo, and tool keys do not mutate the board until Escape or the rectangle is finished.
+- Toolbar Paste commits an open graph formula (same as Copy) instead of reverting it on blur.
+- Settings Disconnect no longer bounces the live websocket back on. Same-room reconnect only reuses the socket while sync stays enabled.
+- Clicking a table [+] / [−] while a cell overlay is open commits the cell and still inserts or removes the row/column.
+- A failed 2D context while encoding an imported image now surfaces the same error toast as a decode failure.
+- Escape after a live StyleBar font-size change remasures the text box so the stored glyphs still fit.
+- When MathJax finishes loading, text shapes that were measured as raw `$latex$` reflow to the real formula size.
+- Closing the tab (pagehide) writes an open graph preview into the doc the same way it flushes the text overlay, instead of dropping the typed formula.
+- Graph Copy/export commit on the pointerdown hit target (`data-commit-edit` wins over `.toolbelt` / `.tool-btn`), so blur cannot restore `sin(x)` before the click writes the preview.
+- File-bar download and Join Save-as commit the text overlay immediately (`data-commit-edit`), same as toolbar copy, instead of racing a 160ms blur timer.
+- Graph copy / export / delete write the preview once through `commitOpenEditors`. Blur onto those buttons no longer also `finish()`, and `graphBlurCancels` ignores commit-edit / keep-edit so a `.tool-btn` is not cancel-vs-commit order-sensitive. Delete commits first so the formula overlay closes.
+- PDF/TXT import asks a shared `require2dContext` helper for a 2D canvas; missing context still fails the import.
+- Undo after a mid-edit font-size change remasures the text box without adding another undo step, so the remaining size still fits.
+- The pages menu portal divides by `--ui-scale`, same as the members menu, so it stays under the trigger when chrome is scaled.
+- Switching tools while a graph editor is open cancels on blur when focus moves to a tool or page control, so a `setTimeout(0)` commit cannot beat the toolbar click and keep the typed formula.
+- Font-size remasure of a selected text shape (overlay closed) no longer runs twice for one slider change.
+- Home / board-leave chrome is `data-dismiss-edit`, so an open graph editor cancels instead of committing a half-typed formula when you leave.
+- Toolbar undo/redo is ignored while a text or graph overlay is open (same as the keyboard path), and those buttons do not steal overlay focus.
+- Reset crop writes restored geometry and deletes crop keys in one transaction, so remotes never see a full box with the old crop window still applied.
+- Mid-edit font-size changes no longer remasure from stored copy, so the overlay wrap and the commit box stay the same.
+- Font-size remasure of existing text uses bold/italic from `richHtml` spans, not only the shape-level flags.
+- Leaving a board mid-gesture resets write-gate depth after flushing, so the next board does not keep coalescing patches at 30 Hz.
+- SVG (and the on-canvas page label) clamp an out-of-range PDF/doc page the same way the canvas does — last page, not first.
+- Escape after rotate restores an originally upright shape: `rotation` is written as `0` so the Y key is deleted instead of keeping the mid-gesture angle.
+- Switching tools (keyboard or toolbar) while a pointer gesture is down cancels that gesture the same way Escape does — dragged images drop their placeholders, write-gate depth closes, and a half-drawn connector is aborted. Crop and export-region pick stay modal.
+- Escape after a move/rotate of a frame restores glue on a rider connector, not only its position.
+- Clearing connector ports flushes pending stroke geometry first, so rotate/group-resize unglue does not snap the arrow back to a stale doc pose between pointer moves.
+- WebP import/paste keeps alpha (encoded as PNG). JPEG is only used for JPEG files.
+- Transparent PNG export on Orbit paper keeps a true alpha background. `background: null` is no longer treated as “missing” and filled with the Orbit void.
+- SVG stickies omit the default yellow border the canvas skips. Graph curves use the same paper-adapted stroke as pens.
+- Export Download is disabled until the preview blob matches the selected format, so a fast PNG→SVG switch cannot save the old bytes under a new extension.
+- Rich paste that sanitizes to nothing falls back to `text/plain`. Transparent or near-white HTML backgrounds are not treated as highlights.
+- Graph formula preview paints locally and does not write the doc, so Escape cannot leave an undo step that brings the cancelled expression back.
+- Committing text wraps using bold/italic from the rich HTML, so Ctrl+B in the overlay does not under-measure the box.
+- Lasso hit-tests the filled silhouette of diamonds, triangles, ellipses, and other non-rect shapes (plus any lasso vertex inside the fill). A loop around an empty AABB corner no longer selects; a loop around a real vertex still does. Rect corners and pen/arrow strokes are unchanged.
+- Tall flowchart terminators hit-test the same vertical capsule the canvas and SVG paint (`r = min(w,h)/2`), so a click on the top cap selects and a click beside the waist does not.
+- Exporting the selection paints only the selected shapes (plus glued riders), not every neighbor that intersects the AABB. Copy-as-image already did this; PNG/JPEG/SVG/PDF export now match.
+- Click-to-type text wraps to the overlay width on commit, so a long line without Enter does not become one huge unwrapped shape. Pasted plain text uses the same wrap width.
+- Switching pages while click-to-type is open commits the new text on the page where typing started, not the destination page. If that origin page is deleted first, the text lands on the healed live page instead of under a dead prefix.
+- Resizing a table or frame scales a rotated rider's visual AABB the same way group-resize does, so a 90° rectangle on a table grows along the handle instead of its unrotated width.
+- Applying a crop on a rotated image keeps the crop window in world space. Reset crop restores that same pose. The old path wrote the unrotated AABB and the picture jumped. Stickies and pens glued to the photo follow the crop/reset, same as "reset to original size."
+- Cut copies only unlocked shapes (the same set Delete removes). Cutting a locked selection no longer overwrites the clipboard.
+- Context-menu paste drops at the right-click, not the camera center. `pasteAt` is set when the menu opens. Image and plain-text paste use that same point, and dismissing the menu clears it so a later Ctrl+V is not pulled to the old click. Toolbar / context Paste reads a newer system shape marker even when this tab still holds an older in-memory copy.
+- Nudging or dragging a connected arrow without its endpoints unglues it. Rotating, group-resizing, or aligning only the connector does the same. Moving either node still rebakes the connector. Resizing a glued arrow disconnects it first so the stroke is not warped and then yanked back.
+- Rebaking a connected arrow stores the same visual bounds as create (curve + head), so handles match the painted stroke. Eight-point cubics keep that curve after unglue, instead of collapsing to the start–control chord. Resizing, rotating, or group-resizing a free arrow rebakes those same visual bounds.
+- Gesture patches that rewrite a polyline keep the new box and the new points in one doc write, so remotes never see a moved AABB against a stale stroke.
+- Clicking a connected-arrow resize handle without dragging leaves it glued. The first resize move disconnects it; Escape restores `fromId` / `toId` / ports from the pointer-down snapshot.
+- Gesture patches that rewrite a polyline keep the new box and the new points in one doc write, so remotes never see a moved AABB against a stale stroke.
+- Align uses locked members as anchors instead of ignoring them. The context menu offers Align when the selection is the whole board, and Distribute only when at least three unlocked shapes can move.
+- Worker empty-room GC no longer deletes storage if a persist is still dirty or queued.
+- StyleBar format while editing writes the shape once (no double undo). Table-cell edits no longer stamp whole-table bold/italic from the overlay, and the overlay target does not pick up cell bold/italic/highlight. Closing the text overlay after an external commit does not commit twice.
+- Dropping or pasting an image captures the page and world position immediately, so a slow decode cannot land the photo on a page you switched to or at a camera you panned to. PDF/TXT import and clipboard paste (including delayed `getAsString`) capture the same way.
+- Enter on a graph opens the formula editor; Enter on an image starts crop. Locked graphs do not open. Table cells and frame titles no longer accept rich shortcuts or HTML paste that the commit would throw away.
+- Free arrows store the visual bounds of the curve and head, so handles and marquee match what is painted.
+- Pinch-zoom applies zoom immediately (same as pan) so the two-finger pan is not scaled by a stale eased zoom.
+- Switching tools while a table cell is open writes the cell through `commitText` → `commitTableCell`, so the overlay text lands in `cells[]` instead of the table's title field.
+- Lasso and click hit-tests follow the painted arrow curve and filled head, not the start–end chord. Marquee uses the same visual bounds as the spatial grid.
+- Copying or duplicating a connected arrow without both endpoints keeps the clone as a free arrow. The old path remapped one end and dropped the other, so paste left a half-glued connector.
+- Lasso hits pen and arrow strokes and the corners of rotated boxes, not only the bounding-box center. A loop in the hollow of a U-shaped stroke no longer selects it.
+- The brush-size slider scales a selected highlighter from that stroke's alpha, not the current pen-tool style. Marker and highlighter buttons still convert the selection to the chosen style.
+- Table [+]/[−] pills sit apart from each other and from the east connect port, so the plus-shaped port cursor no longer lands on remove-column. Hover on a pill is a pointer, not a crosshair.
+- Frame titles, table header cells, and labelled-shape overlays use the same font, first-line clip, and ink as the canvas. Clicks on table [+]/[−] do not start a select gesture.
+- Auto-compact never rebuilds a board that once had a remote collaborator. A 2-minute awareness grace is not a replica set: hidden remote tabs drop the websocket, then a rebuild duplicates shapes when they return. Manual compact still runs when no live replica is present. Solo boards that never synced with anyone else still auto-compact tombstone bloat.
+- Group-resize of rotated shapes scales each member's visual AABB with the selection, so a 90° rectangle grows along the handle instead of its unrotated width. Stickies/text keep size and track by center; pen points follow the group transform.
+- SVG export wraps sticky/text/flowchart/table copy to the box, keeps bold/italic/underline/strike, and embeds MathJax formulas when they have already rendered. One-vertex pen leftovers export as filled dots. Stickies without `textColor` use the same dark ink as the canvas.
+- Connected flowchart arrows store cubic controls in world space so rotating a node bends the curve with the port, not along the unrotated east/west axis.
+- Double-clicking a rotated table picks the cell under the pointer and the editor overlay rotates with the table. Objects ride the table's rotated rectangle, not its AABB.
+- Switching tools while a graph editor is open restores the original expression (same as Escape). The input blurs onto the tool button before `onClick`; commit is deferred so cancel still wins. Worker full persist keeps the tail when the doc mutates during the encode/write, so a concurrent update is not deleted with an empty pending queue.
+- A deleted page heals onto a remaining page that still has shapes, not always `pages[0]`.
+- SVG text without `textColor` follows the export paper via `displayInk` / `themeFor` (light paper is dark ink, not `#eceae4`).
+
+## 0.14.23 — unreleased
+
+### Fix
+- Compact no longer rebuilds a board that is not actually smaller. The old 8MB force path compacted clean photo boards, then a hidden tab's replica merged duplicates back in.
+- Compact skips while another same-origin tab still holds the board (localStorage heartbeat) or a remote peer was seen in the last two minutes. Hidden tabs drop the websocket, so awareness alone was not enough.
+- Compact waits for a real IndexedDB commit after the rebuild, same barrier as clone/import.
+- Sharing an oversized board reports "too large" instead of a generic failure.
+- Resetting or re-cropping an image with a zero crop fraction no longer produces Infinity geometry.
+- SVG export clips cropped photos and draws arrowheads. JPEG-in-PDF `/Length` matches the stream bytes (no extra newline).
+- Inline formulas that render before MathJax finishes loading are not cached as permanent failures.
+- Toolbar paste of copied shapes (when the paste event is blocked) restores shapes instead of dumping the JSON as a text object.
+- Toolbar / context Paste reads the system clipboard (cross-tab copies and post-reload paste). A later copy on another tab replaces the in-memory clipboard instead of being ignored.
+- Rotating a flowchart node (or group) reattaches connector arrows to the new port positions.
+- Graph editor previews the curve while typing, not only after Enter or a preset.
+- SVG export draws graph curves and keeps sticky/text line breaks.
+- Deleting a board from Home no longer drops it from the list when IndexedDB delete is blocked or fails.
+- Worker room persist serializes blob writes so overlapping flush/tail cannot drop the newer document.
+
+## 0.14.22 — unreleased
+
+### Fix
+- Importing a .review file no longer leaves an empty orphan board when the IndexedDB write fails.
+- Duplicating a board waits for a real IDB flush (not an 80ms sleep), fails instead of handing you a blank copy, and deletes the copy if the write does not commit.
+- Oversized boards report "too large" on export again. Load no longer collapsed that case into a generic failure.
+- Partial erase now clips stylus pressure with the stroke, so remaining ink keeps its width.
+- SVG export draws PDF pages as images and flowchart nodes as their real shapes instead of empty rectangles.
+- Compact treats another tab of the same user as a live peer, treats DELETE 404 as a successful wipe, and stays detached if the server room cannot be cleared (so tombstones cannot crawl back in).
+- Duplicate page ids are deduped only by the lowest awareness client ID, including other tabs of the same user (the roster hides those, so both tabs used to rewrite the list).
+- Durable Object blobs commit a generation pointer only after every chunk exists. A crash mid-write leaves the previous document readable.
+- Restoring a keybind profile cannot rebind H (UI-hide is reserved). Pan copy no longer claims H.
+- Flowchart nodes persist the 16px shape font, matching what the canvas already draws.
+
 ## 0.14.21 — unreleased
 
 ### Fix
@@ -11,6 +124,16 @@
 
 ### UI
 - H hides the interface again (session-only, resets on board switch / reload). No pill, no cooldown, no buttons — just a passive hint; H brings everything back. Pan is unbound from H (H is reserved for UI-hide).
+
+### Deploy
+- Root `wrangler.toml` now has `[build] command = "npm run build"` so `wrangler versions upload` / `wrangler deploy` actually produce `dist/` before upload.
+
+### Sync backend
+- Cloudflare rooms persist Yjs as chunked blobs (under the 2 MiB SQLite `put()` row limit) plus a hibernation-safe update tail, so photo boards no longer vanish after the isolate sleeps.
+- Hibernation restore re-sends sync step 1 to live sockets; awareness client IDs live on websocket attachments and are removed on close (no ghost peers).
+- Empty Worker rooms can be DELETE'd without a secret after detach (same outcome as the 90s GC), so compact on `workers.dev` actually wipes the Durable Object. Occupied rooms still need a token. Node LAN DELETE is still loopback-or-token.
+- Node sync server: 32 MB websocket payload (matches `.review` export), room-name validation, max rooms, HEAD `/health`, richer health JSON, CORS Max-Age, SIGTERM drain, unique-local IPv6 in `/lan`.
+- Clients republish awareness on sync and on a 20s heartbeat so a sleeping hub does not strand cursors.
 
 ## 0.14.19 — unreleased
 

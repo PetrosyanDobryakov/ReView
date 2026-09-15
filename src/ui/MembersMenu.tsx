@@ -20,6 +20,7 @@ import {
 } from '../core/user';
 import { Icon } from './icons';
 import { t } from './i18n';
+import { zoomedPortalPosition } from './portalPlace';
 import { onPrefsChange } from '../core/prefs';
 
 function Face({ color, title }: { color: string; title?: string }) {
@@ -158,19 +159,15 @@ export function MembersMenu({
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
-    const width = 280;
-    const scaledWidth = width * scale;
-    const gap = 8 * scale;
-    const scaledHeight = 400 * scale;
-    // right edge of menu = right edge of trigger (под иконкой)
-    const visualLeft = rect.right - scaledWidth;
-    const visualRightBound = window.innerWidth - scaledWidth - 8 * scale;
-    const clampedVisualLeft = Math.min(Math.max(8 * scale, visualLeft), visualRightBound);
-    const visualBelow = rect.bottom + gap;
-    const visualAbove = rect.top - gap - scaledHeight;
-    const flip = visualBelow + scaledHeight > window.innerHeight - 8 * scale && visualAbove >= 8 * scale;
-    const visualTop = Math.max(8 * scale, flip ? visualAbove : visualBelow);
-    setMenuStyle({ left: clampedVisualLeft / scale, top: visualTop / scale });
+    setMenuStyle(
+      zoomedPortalPosition(rect, {
+        width: 280,
+        estimatedHeight: 400,
+        align: 'right',
+        scale,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
+    );
   }, []);
 
   useLayoutEffect(() => {

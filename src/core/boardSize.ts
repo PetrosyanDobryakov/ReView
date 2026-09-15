@@ -169,8 +169,8 @@ export async function deleteBoardDatabase(boardId: string): Promise<boolean> {
       };
       req.onsuccess = () => done(true);
       req.onerror = () => done(false);
-      // Blocked often still completes later; treat as soft failure so callers can warn.
-      req.onblocked = () => done(false);
+      // Blocked often still completes — wait for success/error/timeout.
+      req.onblocked = () => {};
       globalThis.setTimeout(() => done(false), 4000);
     } catch {
       resolve(false);

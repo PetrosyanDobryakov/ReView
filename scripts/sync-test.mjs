@@ -10,7 +10,8 @@ import { createServer as createNetServer } from 'node:net';
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { isLoopbackAddress, isRoomDeleteAuthorized } from '../room-delete-auth.mjs';
+import { isLoopbackAddress, isRoomDeleteAuthorized, compactTokenFromHeaders } from '../room-delete-auth.mjs';
+import WebSocket from 'ws';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -462,5 +463,56 @@ await withServer({ netLog: false, token, host: '0.0.0.0' }, async (port) => {
   }
 });
 
+assert.equal(
+  compactTokenFromHeaders({ 'x-review-compact-token': ['s3cret', 'other'] }),
+  's3cret',
+  'array compact token header uses the first value'
+);
+assert.equal(compactTokenFromHeaders({ authorization: ['Bearer s3cret'] }), 's3cret');
+
 console.log('sync-test: DELETE /room auth verified');
+
+await withServer({ netLog: false }, async (port) => {
+  const health = await fetch(`${httpBase(port)}/health`);
+  assert.equal(health.status, 200);
+  const hb = await health.json();
+  assert.equal(hb.ok, true);
+  assert.equal(hb.service, 'review-sync');
+  assert.equal(typeof hb.rooms, 'number');
+  assert.equal(hb.maxPayload, 32 * 1024 * 1024);
+  assert.equal(typeof hb.maxRooms, 'number');
+  assert.equal(hb.netLog, false);
+
+  const head = await fetch(`${httpBase(port)}/health`, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+
+  const opt = await fetch(`${httpBase(port)}/lan`, { method: 'OPTIONS' });
+  assert.equal(opt.status, 204);
+  assert.ok(opt.headers.get('access-control-max-age'));
+
+  const badDel = await fetch(`${httpBase(port)}/room/${encodeURIComponent('foo/bar')}`, { method: 'DELETE' });
+  assert.equal(badDel.status, 400, 'slash in room name is 400');
+
+  const emptyDel = await fetch(`${httpBase(port)}/room/`, { method: 'DELETE' });
+  assert.equal(emptyDel.status, 400, 'empty room name is 400');
+
+  await new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/foo/bar`);
+    const t = setTimeout(() => reject(new Error('bad room ws timeout')), 4000);
+    ws.on('close', (code) => {
+      clearTimeout(t);
+      try {
+        assert.equal(code, 1008, 'invalid room websocket closes 1008');
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
+    ws.on('error', () => {
+      /* close follows */
+    });
+  });
+});
+
+console.log('sync-test: health + room validation verified');
 process.exit(0);

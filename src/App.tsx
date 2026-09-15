@@ -33,6 +33,7 @@ import {
   onActivePageChange,
   onBoardReady,
   currentPageId,
+  getCurrentBoardId,
 } from './core/store';
 import {
   onSyncStatus,
@@ -50,7 +51,7 @@ import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, saveBoardLocally, isBoardPersistedLocally, boardUrl, recordBoardVisit } from './core/boards';
 import { cloneBoard } from './core/boardClone';
-import { exportBoardFile, importBoardFile } from './core/boardShare';
+import { exportBoardFile, importBoardFile, importErrorI18nKey } from './core/boardShare';
 import {
   boardRenameMode,
   commitBoardRename,
@@ -64,7 +65,7 @@ import { readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale, type LocaleId } from './core/locale';
 import { loadUser, onUserChange, saveUser } from './core/user';
 import { MOTION, useExitPresence } from './ui/motion';
-import { readLiveFormat, type LiveTextFormat } from './core/textEditorFormat';
+import { flushOpenTextEditor, persistOpenEditors, readLiveFormat, type LiveTextFormat } from './core/textEditorFormat';
 import { JoinSavePrompt } from './ui/JoinSavePrompt';
 import { navigateThemed } from './ui/navTransition';
 import { isOrbitPaper } from './core/orbit';
@@ -152,6 +153,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, [editTarget]);
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
+  const [pageEpoch, setPageEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [pen, setPen] = useState({ ...settings.pen });
@@ -251,14 +253,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   };
 
   const handleSaveAsMyBoard = () => {
-    void cloneBoard(boardId).then((copy) => {
-      if (!copy) {
+    commitOpenEditors();
+    void cloneBoard(boardId)
+      .then((copy) => {
+        if (!copy) {
+          setError(t(readLocale(), 'error'));
+          return;
+        }
+        dismissJoinPrompt();
+        navigateThemed(navigate, boardUrl(copy.id));
+      })
+      .catch(() => {
         setError(t(readLocale(), 'error'));
-        return;
-      }
-      dismissJoinPrompt();
-      navigateThemed(navigate, boardUrl(copy.id));
-    });
+      });
   };
 
   useEffect(() => {
@@ -298,7 +305,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           window.setTimeout(() => setToast((cur) => (cur === t(locale, 'importSuccess') ? null : cur)), 2000);
           navigateThemed(navigate, boardUrl(res.board.id));
         } else {
-          setError(t(locale, 'importFailed'));
+          setError(t(locale, importErrorI18nKey(res.error)));
         }
       });
       return;
@@ -317,16 +324,25 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       return;
     }
     const locale = readLocale();
+    const pos = at ?? { x: e.camera.x, y: e.camera.y };
+    const pageId = currentPageId();
+    const boardId = getCurrentBoardId();
     fileToDocPages(file)
       .then(({ pages, ratio, truncated }) => {
+        if (getCurrentBoardId() !== boardId) return;
+        const live = engineRef.current;
+        if (!live?.alive) return;
         if (!pages.length) {
           setError(t(locale, 'docFailed'));
           return;
         }
-        e.addDocument(pages, ratio, at);
+        live.addDocument(pages, ratio, pos, pageId);
         if (truncated) setError(t(locale, 'docTruncated'));
       })
-      .catch(() => setError(t(locale, 'docFailed')));
+      .catch(() => {
+        if (getCurrentBoardId() !== boardId) return;
+        setError(t(locale, 'docFailed'));
+      });
   };
   const handleFileRef = useRef(handleFile);
   handleFileRef.current = handleFile;
@@ -430,15 +446,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, [boardId]);
 
   useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    engine.events.onExportRegion = (rect) => {
-      if (!rect) return;
-      setExportState({ source: 'region', rect });
-    };
-  }, []);
-
-  useEffect(() => {
     // Re-init if leaveBoard nulled the id (Strict Mode remount / HMR).
     initBoard(boardId);
     setEphemeral(!persistence);
@@ -464,6 +471,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     };
     engine.events.onTool = (id) => setTool(id);
     engine.events.onEditText = (target) => {
+      editTargetRef.current = target;
       setEditLiveFormat(null);
       setEditTarget(target);
     };
@@ -471,21 +479,18 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     // while typing) — commit current text synchronously before it is lost.
     engine.events.onRequestCommitText = () => {
       const cur = editTargetRef.current;
-      const el = textEditorRef.current;
       if (!cur) return;
-      try {
-        if (cur.tableCell && cur.id) {
-          engineRef.current?.commitTableCell(cur.id, cur.tableCell.row, cur.tableCell.col, el?.innerText ?? cur.text ?? '');
-        } else {
-          engineRef.current?.commitText(cur.id, el?.innerText ?? cur.text ?? '', cur, el?.innerHTML ?? cur.richHtml);
-        }
-      } catch {}
+      flushOpenTextEditor(engineRef.current, cur, textEditorRef.current);
+      editTargetRef.current = null;
       setEditTarget(null);
       setEditLiveFormat(null);
       textEditorRef.current = null;
-      engineRef.current?.cancelTextEdit();
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
+    engine.events.onExportRegion = (rect) => {
+      if (!rect) return;
+      setExportState({ source: 'region', rect });
+    };
     engine.events.onError = (message) => setError(message);
     engine.events.onToast = (message) => {
       setToast(message);
@@ -514,8 +519,16 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     // restore immediately; defer fitContent fallback to after board sync
     restoreCamera();
     const cameraPersistTimer = window.setInterval(persistCamera, 500);
-    const onPageHidePersist = () => persistCamera();
-    window.addEventListener('pagehide', onPageHidePersist);
+    const onPageHidePersist = () => {
+      // Capture so this runs before main.tsx leaveBoard() destroys the Y.Doc.
+      const { text } = persistOpenEditors(engineRef.current, editTargetRef.current, textEditorRef.current);
+      if (text) {
+        editTargetRef.current = null;
+        textEditorRef.current = null;
+      }
+      persistCamera();
+    };
+    window.addEventListener('pagehide', onPageHidePersist, true);
     window.addEventListener('beforeunload', onPageHidePersist);
     let prevPageId = currentPageId();
     const onCameraPageChange = () => {
@@ -529,6 +542,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       } catch {}
       prevPageId = currentPageId();
       publishPage(prevPageId);
+      setPageEpoch((n) => n + 1);
+      setExportState((s) => (s?.source === 'region' ? null : s));
       // restore new page viewport (or keep if no saved)
       if (!restoreCamera()) {
         // keep current camera — don't auto-fit and jump the user
@@ -611,8 +626,22 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     const offSync = onSyncStatus(setSync);
     return () => {
       persistCamera();
+      flushOpenTextEditor(engine, editTargetRef.current, textEditorRef.current);
+      engine.cancelGraphEditor();
+      editTargetRef.current = null;
+      setEditTarget(null);
+      setEditLiveFormat(null);
+      textEditorRef.current = null;
+      setEditGraph(null);
+      setExportState(null);
+      setCropActive(false);
+      setCanCrop(false);
+      setMenu(null);
+      setInfo(null);
+      setSelectionCount(0);
+      setSelected([]);
       window.clearInterval(cameraPersistTimer);
-      window.removeEventListener('pagehide', onPageHidePersist);
+      window.removeEventListener('pagehide', onPageHidePersist, true);
       window.removeEventListener('beforeunload', onPageHidePersist);
       offCameraPage();
       offBoardReady();
@@ -626,18 +655,33 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, [boardId]);
 
   const handleTool = (id: ToolId) => {
-    if (editTarget) {
-      try { engineRef.current?.commitText(editTarget.id, textEditorRef.current?.innerText ?? editTarget.text ?? '', editTarget, textEditorRef.current?.innerHTML ?? editTarget.richHtml); } catch {}
+    const engine = engineRef.current;
+    const cur = editTargetRef.current;
+    flushOpenTextEditor(engine, cur, textEditorRef.current);
+    if (cur) {
+      editTargetRef.current = null;
       setEditTarget(null);
       setEditLiveFormat(null);
       textEditorRef.current = null;
-      engineRef.current?.cancelTextEdit();
     }
     if (editGraph) {
-      engineRef.current?.cancelGraphEditor();
+      engine?.cancelGraphEditor();
       setEditGraph(null);
     }
     setTool(id);
+  };
+
+  const commitOpenEditors = () => {
+    const engine = engineRef.current;
+    const cur = editTargetRef.current;
+    const { graph } = persistOpenEditors(engine, cur, textEditorRef.current);
+    if (cur) {
+      editTargetRef.current = null;
+      setEditTarget(null);
+      setEditLiveFormat(null);
+      textEditorRef.current = null;
+    }
+    if (graph) setEditGraph(null);
   };
 
   useEffect(() => {
@@ -646,12 +690,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   const engine = engineRef.current;
 
+  const dismissMenu = () => {
+    engineRef.current?.setPasteAnchor(null);
+    setMenu(null);
+  };
+
   useEffect(() => {
     if (!menu) return;
     const close = (e: PointerEvent) => {
       const el = document.querySelector('.ctx-menu');
       if (el && e.target instanceof Node && el.contains(e.target)) return;
-      setMenu(null);
+      dismissMenu();
     };
     window.addEventListener('pointerdown', close);
     return () => window.removeEventListener('pointerdown', close);
@@ -661,7 +710,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (menu) {
-        setMenu(null);
+        dismissMenu();
         return;
       }
       if (info) {
@@ -673,8 +722,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menu, info, settingsOpen]);
-
-  const closeMenu = () => setMenu(null);
   const menuShown = useExitPresence(Boolean(menu), MOTION.overlay);
   const infoShown = useExitPresence(Boolean(info), MOTION.overlay);
   const errorShown = useExitPresence(Boolean(error), MOTION.enter);
@@ -690,9 +737,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     if (menuView.shapeId) {
       const shapeId = menuView.shapeId;
       menuItems.push(
-        { label: t(locale, 'ctxCopy'), hint: `${modKey()}+C`, run: () => e?.copySelection() },
-        { label: t(locale, 'ctxCopyImage'), hint: `${modKey()}+Shift+C`, run: () => e?.copySelectionAsImage() },
-        { label: t(locale, 'ctxDuplicate'), hint: `${modKey()}+D`, run: () => e?.duplicateSelection() },
+        { label: t(locale, 'ctxCopy'), hint: `${modKey()}+C`, run: () => { commitOpenEditors(); e?.copySelection(); } },
+        { label: t(locale, 'ctxCopyImage'), hint: `${modKey()}+Shift+C`, run: () => { commitOpenEditors(); e?.copySelectionAsImage(); } },
+        { label: t(locale, 'ctxDuplicate'), hint: `${modKey()}+D`, run: () => { commitOpenEditors(); e?.duplicateSelection(); } },
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
       if (menuView.type === 'image') {
@@ -736,8 +783,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         .map((id) => e?.views.get(id))
         .filter((v): v is ShapeView => Boolean(v));
       const others = shapeCount - selViews.length;
-      const canAlign = others > 0;
-      const canDistribute = selViews.length >= 3;
+      const unlockedSel = selViews.filter((v) => !v.locked);
+      const canAlign = others > 0 || (selViews.length >= 2 && unlockedSel.length >= 1);
+      const canDistribute = unlockedSel.length >= 3;
       if (canAlign) {
         const alignKinds: Array<[MessageKey, AlignKind]> = [
           ['alignLeft', 'left'],
@@ -775,7 +823,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         }
       );
     } else {
-      menuItems.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => e?.pasteSelection() });
+      menuItems.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => void e?.pasteFromClipboard() });
     }
   }
 
@@ -792,11 +840,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             }}
             onFormatChange={setEditLiveFormat}
             onDone={(value, html) => {
+              if (!editTargetRef.current) return;
               if (editTarget.tableCell && editTarget.id) {
                 engine.commitTableCell(editTarget.id, editTarget.tableCell.row, editTarget.tableCell.col, value);
               } else {
                 engine.commitText(editTarget.id, value, editTarget, html);
               }
+              editTargetRef.current = null;
               setEditTarget(null);
               setEditLiveFormat(null);
               textEditorRef.current = null;
@@ -808,6 +858,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             }}
             onCancel={() => {
               engine.cancelTextEdit();
+              editTargetRef.current = null;
               setEditTarget(null);
               setEditLiveFormat(null);
               textEditorRef.current = null;
@@ -830,6 +881,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             hasSelection={selectionCount > 0}
             selectionRevision={selectionRevision}
             shapeRevision={shapeCount}
+            pageRevision={pageEpoch}
             onPickAgain={() => {
               setExportState(null);
               engineRef.current?.beginExportPick();
@@ -846,7 +898,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       )}
       <header className="file-bar">
         <div className="island file-island">
-          <button type="button" className="icon-btn" title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
+          <button type="button" className="icon-btn" data-dismiss-edit title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
             <Icon name="home" />
           </button>
           <div className="island-sep" />
@@ -894,10 +946,34 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <div className="island-sep" />
           <PageBar locale={locale} />
           <div className="island-sep" />
-          <button type="button" className="icon-btn" title={t(locale, 'undo')} aria-label={t(locale, 'undo')} disabled={!canUndo} onClick={() => undoManager.undo()}>
+          <button
+            type="button"
+            className="icon-btn"
+            data-keep-edit
+            title={t(locale, 'undo')}
+            aria-label={t(locale, 'undo')}
+            disabled={!canUndo || Boolean(editTarget || editGraph)}
+            onClick={() => {
+              if (engineRef.current?.editing) return;
+              undoManager.undo();
+              engineRef.current?.remeasureAfterHistory();
+            }}
+          >
             <Icon name="undo" />
           </button>
-          <button type="button" className="icon-btn" title={t(locale, 'redo')} aria-label={t(locale, 'redo')} disabled={!canRedo} onClick={() => undoManager.redo()}>
+          <button
+            type="button"
+            className="icon-btn"
+            data-keep-edit
+            title={t(locale, 'redo')}
+            aria-label={t(locale, 'redo')}
+            disabled={!canRedo || Boolean(editTarget || editGraph)}
+            onClick={() => {
+              if (engineRef.current?.editing) return;
+              undoManager.redo();
+              engineRef.current?.remeasureAfterHistory();
+            }}
+          >
             <Icon name="redo" />
           </button>
           <div className="island-sep" />
@@ -917,9 +993,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           <button
             type="button"
             className="icon-btn"
+            data-commit-edit
             title={t(locale, 'exportBoardHint')}
             aria-label={t(locale, 'exportBoard')}
-            onClick={() => void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); setToast(msg); setTimeout(() => setToast(null), 1800); }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); })}
+            onClick={() => {
+              commitOpenEditors();
+              void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); setToast(msg); setTimeout(() => setToast(null), 1800); }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); });
+            }}
           >
             <Icon name="download" />
           </button>
@@ -1034,15 +1114,28 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         canCrop={canCrop}
         cropActive={cropActive}
         onTool={handleTool}
-        onDelete={() => engine?.deleteSelection()}
-        onCopy={() => engine?.copySelection()}
-        onPaste={() => engine?.pasteSelection()}
-        onDuplicate={() => engine?.duplicateSelection()}
+        onDelete={() => {
+          commitOpenEditors();
+          engineRef.current?.deleteSelection();
+        }}
+        onCopy={() => {
+          commitOpenEditors();
+          engineRef.current?.copySelection();
+        }}
+        onPaste={() => {
+          commitOpenEditors();
+          void engineRef.current?.pasteFromClipboard();
+        }}
+        onDuplicate={() => {
+          commitOpenEditors();
+          engineRef.current?.duplicateSelection();
+        }}
         onInsertImage={() => fileRef.current?.click()}
         onCrop={() => engine?.startCropSelected()}
         onApplyCrop={() => engine?.applyCrop()}
         onCancelCrop={() => engine?.cancelCrop()}
         onExport={() => {
+          commitOpenEditors();
           const e = engineRef.current;
           if (!e) return;
           if (selectionCount > 0 && e.selectionBounds()) {
@@ -1095,7 +1188,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         >
           {menuItems.map((item, index) =>
             item.holdMs ? (
-              <HoldCtxItem key={item.label} item={item} index={index} onDone={() => { item.run(); closeMenu(); }} />
+              <HoldCtxItem key={item.label} item={item} index={index} onDone={() => { item.run(); dismissMenu(); }} />
             ) : (
               <button
                 type="button"
@@ -1104,7 +1197,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
                 style={{ animationDelay: `${index * 18}ms` }}
                 onClick={() => {
                   item.run();
-                  closeMenu();
+                  dismissMenu();
                 }}
               >
                 <span>{item.label}</span>
