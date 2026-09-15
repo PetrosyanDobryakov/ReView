@@ -1,14 +1,23 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TABLE_FONT, TEXT_FONT, relativeLuminance, tableGrid, themeFor } from '../core/shapes';
+import { COLORS, defaultFontSizeFor, docPageIndex, shapeHasTextField, relativeLuminance, tableGrid, themeFor } from '../core/shapes';
 import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync, ensureP2pAttached, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { attachSync, detachSync, ensureP2pAttached, hasDistinctRemoteCollaborators, hasRemoteCollaborators, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
+import {
+  boardHadRemoteCollaborators,
+  compactSavesEnough,
+  hasOtherLocalReplicas,
+  noteDistinctRemote,
+  remotePeerRecentlySeen,
+  startReplicaHeartbeat,
+  stopReplicaHeartbeat,
+} from './compactGuard';
 import { effectiveSyncUrl, isLoopbackSyncHostname, loopbackSyncHttpBase } from '../net/config';
 import { syncClient } from '../net/client';
-import { p2pClient } from '../net/p2p';
 import { netLog } from '../net/log';
 import { sanitizeRichHtml } from './richText';
 import {
@@ -24,10 +33,13 @@ import {
   enqueuePatch,
   enqueuePatches,
   flushNow as flushWriteGate,
+  closeWriteGate,
   type PatchBatch,
 } from './writeGate';
 
 export const LOCAL_ORIGIN = 'local';
+/** Geometry follow-up (remeasure after undo) — not captured on the undo stack. */
+export const LAYOUT_ORIGIN = 'layout';
 const LEGACY_MIGRATION_KEY = 'review-v1-migrated';
 
 // --- per-board state ---
@@ -111,12 +123,29 @@ function attachPersistence(boardId: string): void {
 
 let compactInFlight = false;
 
+function compactHasLiveReplica(): boolean {
+  if (!currentBoardId) return false;
+  if (hasDistinctRemoteCollaborators()) {
+    noteDistinctRemote(currentBoardId);
+    return true;
+  }
+  // Other tabs of this user: live awareness blocks compact, but must not latch history.
+  if (hasRemoteCollaborators()) return true;
+  if (hasOtherLocalReplicas(currentBoardId)) return true;
+  if (remotePeerRecentlySeen(currentBoardId)) return true;
+  return false;
+}
+
 /** Heuristic: trigger compaction when Y.Doc is bloated vs live content. */
 async function maybeAutoCompact(): Promise<void> {
   if (!currentBoardId || !persistence || compactInFlight) return;
   try {
-    if (syncClient.collectPeers().length > 0 || p2pClient.collectPeers().length > 0) {
-      netLog.info('autoCompact skipped (peers present)', () => ({ boardId: currentBoardId }));
+    if (boardHadRemoteCollaborators(currentBoardId)) {
+      netLog.info('autoCompact skipped (board had remote collaborators)', () => ({ boardId: currentBoardId }));
+      return;
+    }
+    if (compactHasLiveReplica()) {
+      netLog.info('autoCompact skipped (replicas present)', () => ({ boardId: currentBoardId }));
       return;
     }
     const before = Y.encodeStateAsUpdate(doc).length;
@@ -236,6 +265,7 @@ export function initBoard(boardId: string): void {
     try { ensureP2pAttached(doc, boardId); } catch {}
     return;
   }
+  closeWriteGate();
   try { undoManager.clear(); } catch {}
   try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
@@ -278,6 +308,7 @@ export function initBoard(boardId: string): void {
   emitPageList();
   emitActivePage();
   attachSync(doc, boardId);
+  startReplicaHeartbeat(boardId, hasDistinctRemoteCollaborators);
   // If p2p was enabled after initial load, ensure it attaches too
   try { ensureP2pAttached(doc, boardId); } catch {}
   // Ephemeral boards never get an IDB 'synced' — still notify the engine immediately.
@@ -289,8 +320,9 @@ export function initBoard(boardId: string): void {
 
 /** Tear down sync and clear the active board id (tab close / switch board). */
 export function leaveBoard(): void {
-  flushWriteGate();
+  closeWriteGate();
   flushBoardUpdated();
+  stopReplicaHeartbeat();
   try { undoManager.clear(); } catch {}
   try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
@@ -313,7 +345,7 @@ export function leaveBoard(): void {
 
 /** Leave the board view but keep sync + last cursor (navigate to home, still on site). */
 export function pauseBoardView(): void {
-  flushWriteGate();
+  closeWriteGate();
   flushBoardUpdated();
   publishBoardView(false);
   publishDraft(null);
@@ -553,11 +585,22 @@ function readStoredPageId(): string {
   }
 }
 
+/**
+ * Keep a listed id; otherwise prefer a page that still has live shapes over
+ * whatever happens to sit at list[0].
+ */
+export function preferredListedPageId(
+  list: readonly string[],
+  preferred: string | null | undefined,
+  hasLiveShapes: (pageId: string) => boolean
+): string {
+  if (preferred && list.includes(preferred)) return preferred;
+  return list.find((id) => hasLiveShapes(id)) ?? list[0] ?? 'main';
+}
+
 function syncActivePageFromStorage(): void {
   const list = listPages();
-  let cur = readStoredPageId();
-  if (!list.includes(cur)) cur = list[0] ?? 'main';
-  activePageId = cur;
+  activePageId = preferredListedPageId(list, readStoredPageId(), pageHasLiveShapes);
 }
 
 function pageListEmitKey(): string {
@@ -633,7 +676,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     stroke: (m.get('stroke') as string) ?? COLORS.stroke,
     strokeWidth: (m.get('strokeWidth') as number) ?? 2,
     text: m.get('text') as string | undefined,
-    fontSize: (m.get('fontSize') as number | undefined) ?? (type === 'sticky' ? STICKY_FONT : ['rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display'].includes(type) ? SHAPE_FONT : type === 'table' ? TABLE_FONT : TEXT_FONT),
+    fontSize: (m.get('fontSize') as number | undefined) ?? defaultFontSizeFor(type),
     textColor: m.get('textColor') as string | undefined,
     bold: m.get('bold') === true,
     italic: m.get('italic') === true,
@@ -696,13 +739,9 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   m.set('fill', v.fill);
   m.set('stroke', v.stroke);
   m.set('strokeWidth', v.strokeWidth);
-  const textTypes = new Set(['sticky', 'text', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
-  if (textTypes.has(v.type)) {
+  if (shapeHasTextField(v.type)) {
     m.set('text', v.text ?? '');
-    m.set(
-      'fontSize',
-      v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : v.type === 'table' ? TABLE_FONT : TEXT_FONT)
-    );
+    m.set('fontSize', v.fontSize ?? defaultFontSizeFor(v.type));
     if (v.textColor) m.set('textColor', v.textColor);
     if (v.bold) m.set('bold', true);
     if (v.italic) m.set('italic', true);
@@ -732,7 +771,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     const arr = new Y.Array<string>();
     arr.insert(0, v.pages);
     m.set('pages', arr);
-    m.set('page', v.page ?? 0);
+    m.set('page', docPageIndex(v.page, v.pages.length));
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
@@ -770,10 +809,10 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   return m;
 }
 
-export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }): string {
+export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }, pageId?: string): string {
   const id = v.id ?? makeId();
   const m = createShapeYMap({ ...v, id } as ShapeView);
-  const key = currentPagePrefix() + id;
+  const key = pagePrefix(liveBoardPageId(pageId)) + id;
   // Structural adds flush any coalesced gesture patches first so order stays sane.
   flushWriteGate();
   transact(() => {
@@ -804,9 +843,13 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       arr.insert(0, toLocalPoints(value as number[], originX, originY));
       m.set('points', arr);
     } else if (key === 'pressures' && Array.isArray(value)) {
-      const arr = new Y.Array<number>();
-      arr.insert(0, value as number[]);
-      m.set('pressures', arr);
+      if (!(value as number[]).length) {
+        m.delete('pressures');
+      } else {
+        const arr = new Y.Array<number>();
+        arr.insert(0, value as number[]);
+        m.set('pressures', arr);
+      }
     } else if (key === 'pages' && Array.isArray(value)) {
       const arr = new Y.Array<string>();
       arr.insert(0, value as string[]);
@@ -830,6 +873,13 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
     } else {
       m.set(key, value);
     }
+  }
+  if (patch.page !== undefined || patch.pages) {
+    const pages = m.get('pages') as Y.Array<string> | undefined;
+    if (!pages || typeof pages.length !== 'number') return;
+    const stored = (m.get('page') as number) ?? 0;
+    const clamped = docPageIndex(patch.page !== undefined ? Number(patch.page) : stored, pages.length);
+    if (clamped !== stored) m.set('page', clamped);
   }
 }
 
@@ -866,6 +916,33 @@ export function patchShapes(patches: Array<[string, Partial<ShapeView>]>): void 
   enqueuePatches(patches);
 }
 
+/** Write geometry without an undo item (follow-up after undo/redo remasure). */
+export function patchShapesUntracked(patches: Array<[string, Partial<ShapeView>]>): void {
+  if (!patches.length) return;
+  flushWriteGate();
+  doc.transact(() => {
+    for (const [id, patch] of patches) patchShapeInternal(id, patch);
+  }, LAYOUT_ORIGIN);
+  bumpCurrentBoard();
+}
+
+/** Geometry plus key deletes in one Yjs transaction (reset-crop must not flash full box + old crop). */
+export function patchShapesClearingKeys(
+  patches: Array<[string, Partial<ShapeView>]>,
+  clear: Array<[string, readonly string[]]>
+): void {
+  flushWriteGate();
+  transact(() => {
+    for (const [id, patch] of patches) patchShapeInternal(id, patch);
+    for (const [id, keys] of clear) {
+      const m = board.get(id);
+      if (!m) continue;
+      for (const key of keys) m.delete(key);
+    }
+  });
+  bumpCurrentBoard();
+}
+
 /** Force pending coalesced patches into the doc (tests / before structural ops). */
 export function flushPendingPatches(): void {
   flushWriteGate();
@@ -891,21 +968,40 @@ function bumpCurrentBoard(): void {
 /**
  * Wipe the in-memory Y.Doc on the local sync server after compact.
  * Prefer loopback so DELETE is authorized even when the UI was opened via a LAN IP.
- * Never fall back to an unauthenticated DELETE against a LAN/public host.
+ * Never fall back to an unauthenticated DELETE against a LAN/public host on Node.
+ * Cloudflare rooms may be cleared without a token once empty (same as 90s GC).
  */
-async function deleteServerRoomForCompact(room: string): Promise<void> {
+async function deleteServerRoomForCompact(room: string): Promise<boolean> {
   const path = `/room/${encodeURIComponent(room)}`;
   const loopbackUrl = `${loopbackSyncHttpBase()}${path}`;
-  try {
-    const res = await fetch(loopbackUrl, { method: 'DELETE' });
-    if (res.ok) {
-      fileLogFallback('info', 'compact cleared server room', { room, via: 'loopback' });
-      return;
+
+  async function tryDelete(url: string, via: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const res = await fetch(url, { method: 'DELETE' });
+        if (res.ok || res.status === 404) {
+          fileLogFallback('info', 'compact cleared server room', { room, via, attempt, status: res.status });
+          return true;
+        }
+        if (res.status === 403 && attempt < 4) {
+          await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+          continue;
+        }
+        netLog.warn('compact room DELETE rejected', () => ({ room, via, status: res.status, attempt }));
+        return false;
+      } catch (e) {
+        if (attempt < 4) {
+          await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+          continue;
+        }
+        netLog.warn('compact room DELETE failed', () => ({ room, via, err: String(e) }));
+        return false;
+      }
     }
-    netLog.warn('compact loopback DELETE rejected', () => ({ room, status: res.status }));
-  } catch (e) {
-    netLog.warn('compact loopback DELETE failed', () => ({ room, err: String(e) }));
+    return false;
   }
+
+  if (await tryDelete(loopbackUrl, 'loopback')) return true;
 
   let syncHost = '';
   let syncUrl = '';
@@ -913,25 +1009,17 @@ async function deleteServerRoomForCompact(room: string): Promise<void> {
     syncUrl = effectiveSyncUrl();
     syncHost = new URL(syncUrl).hostname;
   } catch {
-    return;
+    return false;
   }
-  if (!isLoopbackSyncHostname(syncHost) || syncHost === '127.0.0.1') {
-    if (!isLoopbackSyncHostname(syncHost)) {
-      netLog.warn('compact skipped non-loopback room DELETE', () => ({ room, host: syncHost }));
-    }
-    return;
-  }
-  try {
+  if (isLoopbackSyncHostname(syncHost) && syncHost !== '127.0.0.1') {
     const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
-    const res = await fetch(`${base}${path}`, { method: 'DELETE' });
-    if (res.ok) {
-      fileLogFallback('info', 'compact cleared server room', { room, via: 'loopback-alias' });
-      return;
-    }
-    netLog.warn('compact alias DELETE rejected', () => ({ room, status: res.status }));
-  } catch (e) {
-    netLog.warn('compact alias DELETE failed', () => ({ room, err: String(e) }));
+    if (await tryDelete(`${base}${path}`, 'loopback-alias')) return true;
   }
+  if (!isLoopbackSyncHostname(syncHost)) {
+    const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
+    return tryDelete(`${base}${path}`, 'sync-url');
+  }
+  return false;
 }
 
 /**
@@ -950,8 +1038,8 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     } catch {
       return { before: 0, after: 0, didCompact: false };
     }
-    if (syncClient.collectPeers().length > 0 || p2pClient.collectPeers().length > 0) {
-      netLog.info('compact skipped (peers present)', () => ({ boardId, before }));
+    if (compactHasLiveReplica()) {
+      netLog.info('compact skipped (replicas present)', () => ({ boardId, before }));
       return { before, after: before, didCompact: false };
     }
     // Build compact doc
@@ -990,15 +1078,16 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
       compact.destroy();
       return { before, after: before, didCompact: false };
     }
-    // only replace if meaningful saving or before huge
-    if (after >= before * 0.7 && before < 8 * 1024 * 1024) {
+    // only replace if the rebuild actually drops tombstone weight
+    if (!compactSavesEnough(before, after)) {
       compact.destroy();
       return { before, after, didCompact: false };
     }
     netLog.info('compactBoard start', () => ({ boardId, before, after, shapes: board.size, orderLen: order.length }));
     const persistLocally = Boolean(persistence) && shouldPersist(boardId);
-    // detach before destroying
+    // detach before destroying — wait for the socket to drop so empty-room DELETE is allowed
     detachSync();
+    await new Promise((r) => setTimeout(r, 80));
     // clear old IndexedDB database content
     try {
       await persistence?.clearData();
@@ -1034,18 +1123,35 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     if (persistLocally) {
       persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
       try {
-        await (persistence as unknown as { whenSynced: Promise<void> }).whenSynced;
-      } catch {}
+        await withIdbTimeout(
+          (persistence as unknown as { whenSynced: Promise<void> }).whenSynced,
+          `compactBoard:${boardId}`
+        );
+      } catch (e) {
+        netLog.warn('compact idb sync failed', () => ({ err: String(e) }));
+      }
+      try {
+        const flushed = await flushIndexedDbPersistence(persistence);
+        if (!flushed) netLog.warn('compact idb flush failed', () => ({ boardId }));
+      } catch (e) {
+        netLog.warn('compact idb flush failed', () => ({ err: String(e) }));
+      }
     } else {
       persistence = null;
     }
     // clear server in-memory room (it still holds 372MB Y.Doc)
+    let wiped = false;
     try {
-      await deleteServerRoomForCompact(`review-${boardId}`);
+      wiped = await deleteServerRoomForCompact(`review-${boardId}`);
     } catch (e) {
       netLog.warn('compact clear server room failed', () => ({ err: String(e) }));
     }
-    attachSync(doc, boardId);
+    if (wiped) {
+      attachSync(doc, boardId);
+    } else {
+      // Re-attaching without a wipe merges the old tombstoned room back in.
+      netLog.warn('compact left sync detached — server wipe failed', () => ({ boardId }));
+    }
     bumpCurrentBoard();
     emitBoardReady();
     netLog.info('compactBoard done', () => ({ boardId, before, after }));
@@ -1068,6 +1174,9 @@ if (typeof window !== 'undefined') {
 }
 
 export function clearShapeKeys(id: string, keys: string[]): void {
+  // Flush coalesced geometry first so the observer does not rebuild the view
+  // from a stale doc while a heavy (points) patch is still pending.
+  flushWriteGate();
   transact(() => {
     const m = board.get(id);
     if (!m) return;
@@ -1123,6 +1232,20 @@ function pagesArray(): Y.Array<string> {
   return pages;
 }
 
+function pageHasLiveShapes(pageId: string): boolean {
+  if (pageId === 'main') {
+    for (const key of board.keys()) {
+      if (!key.includes(':')) return true;
+    }
+    return false;
+  }
+  const prefix = pageId + ':';
+  for (const key of board.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 /**
  * Point activePageId at a live page without emitting. Callers follow with
  * emitPageList()/emitActivePage() (both fingerprinted no-ops when unchanged).
@@ -1130,13 +1253,12 @@ function pagesArray(): Y.Array<string> {
 function healActivePageToList(): void {
   const raw = pagesArray().toArray();
   if (raw.length === 0) return;
-  if (!raw.includes(activePageId)) {
-    activePageId = raw[0] ?? 'main';
-    try {
-      localStorage.setItem(pageKey(currentBoardId), activePageId);
-    } catch {
-      /* ignore */
-    }
+  if (raw.includes(activePageId)) return;
+  activePageId = preferredListedPageId(raw, null, pageHasLiveShapes);
+  try {
+    localStorage.setItem(pageKey(currentBoardId), activePageId);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -1157,15 +1279,9 @@ export function listPages(): string[] {
     }
   }
   if (dup) {
-    // ponytail: only leader dedups to avoid 3-peer ping-pong
-    try {
-      const peers = syncClient.collectPeers();
-      const selfAwareness =
-        (syncClient as unknown as { provider?: { awareness: { clientID: number } } }).provider?.awareness.clientID ??
-        doc.clientID;
-      const min = Math.min(selfAwareness, ...peers.map((p) => p.id));
-      if (selfAwareness !== min) return uniq;
-    } catch {}
+    // ponytail: only leader dedups to avoid 3-peer ping-pong (other tabs of
+    // the same user still count — collectPeers hides those)
+    if (!syncClient.isAwarenessLeader()) return uniq;
     queueMicrotask(() => {
       doc.transact(() => {
         const cur = a.toArray();
@@ -1186,17 +1302,33 @@ export function listPages(): string[] {
 export function currentPageId(): string {
   const list = listPages();
   if (!list.includes(activePageId)) {
-    activePageId = list[0] ?? 'main';
+    activePageId = preferredListedPageId(list, null, pageHasLiveShapes);
   }
   return activePageId;
 }
 
 export function currentPagePrefix(): string {
-  const id = currentPageId();
-  return id === 'main' ? '' : id + ':';
+  return pagePrefix(currentPageId());
 }
 
-/** Hot-path page filter ��� uses in-memory activePageId only (no storage / Y reads). */
+function pagePrefix(pageId: string): string {
+  return pageId === 'main' ? '' : pageId + ':';
+}
+
+/** Drop a captured page id if that page was deleted before the shape landed. */
+export function liveBoardPageId(pageId?: string | null): string {
+  if (pageId) {
+    const listed = pagesArray();
+    if (listed.length === 0) {
+      if (pageId === 'main') return pageId;
+    } else if (listed.toArray().includes(pageId)) {
+      return pageId;
+    }
+  }
+  return currentPageId();
+}
+
+/** Hot-path page filter: uses in-memory activePageId only (no storage / Y reads). */
 export function isOnActivePage(key: string): boolean {
   if (activePageId === 'main') return !key.includes(':');
   return key.startsWith(activePageId + ':');

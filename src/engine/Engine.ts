@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, SHAPE_FONT, STICKY_FONT, TABLE_FONT, TEXT_FONT, BOARD_TYPEFACE, boardFont, containedIn, withAlpha } from '../core/shapes';
+import { COLORS, defaultFontSizeFor, docPageIndex, docPageStep, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -10,32 +10,36 @@ import {
   hasFill,
   onImageLoad,
   pointInShape,
+  shapeLassoProbes,
   displayInk,
   readableTextOn,
+  tableAxisIndex,
   tableCellAt,
   tableCellRect,
   tableGrid,
-  tableRiderIds,
+  hostRiderIds,
   themeFor,
   intersects,
   normalizeBox,
-  arrowBounds,
   measureMixedLine,
+  arrowHitPolyline,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, ROTATE_HANDLE_OFFSET_PX } from '../core/transform';
+import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
+import { shapesFromClipboardText } from '../core/clipboardShapes';
 import { t } from '../ui/i18n';
 import { readLocale } from '../core/locale';
+import { splitStrokeByErasedIndices } from './strokeClip';
 import type { ShapeBox, ShapeView } from '../core/shapes';
-import { HANDLES, Tools, pointInPolygon } from './tools';
+import { HANDLES, Tools, pointInPolygon, polylineHitsPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
 import { sendCursor, publishTool } from '../net';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
-import { computeSnap, groupBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
-import { portPos, portDir, PORTS, EDGE_PORTS, type PortId } from '../core/shapes';
+import { computeSnap, groupBox, visualBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
+import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
@@ -180,7 +184,8 @@ function paintPeerToolGlyph(
 }
 
 import { settings } from '../core/settings';
-import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich, sanitizeRichHtml } from '../core/richText';
+import { htmlStoresRichMarkup, spansToPlain, htmlToSpans, parseStoredRich, sanitizeRichHtml, measureStyleFromSpans } from '../core/richText';
+import { wrapLinesByWidth } from '../core/textLayout';
 
 export interface EditTarget {
   id: string | null;
@@ -203,6 +208,8 @@ export interface EditTarget {
   highlight: boolean;
   /** Table cell being edited (overlay covers one cell, commit writes cells[]). */
   tableCell?: { row: number; col: number };
+  /** Degrees. Overlay rotates around the cell's world top-left. */
+  rotation?: number;
 }
 
 export interface GraphEditTarget {
@@ -287,6 +294,12 @@ export class Engine {
   events: EngineEvents = {};
   editing = false;
   editId: string | null = null;
+  /** False after destroy — async image/paste must not write into the next board. */
+  alive = true;
+  /** Page the open overlay was started on (new text must not land after a page switch). */
+  private editPageId: string | null = null;
+  private graphEditId: string | null = null;
+  private graphEditOrig = '';
   remotePeers: PeerCursor[] = [];
   /**
    * Bitmap shapes currently dragged locally — painted as cheap placeholders
@@ -377,6 +390,8 @@ export class Engine {
   private paperFill = '';
   private paperT0 = 0;
   private pointerDown = false;
+  /** True only when this press called `dragTool.onDown` (chrome clicks must not fire onUp). */
+  private toolArmed = false;
   private panDrag = false;
   private lastStats = '';
   private dragTool: Tool;
@@ -385,6 +400,7 @@ export class Engine {
   private offPrefs: () => void = () => {};
   private erasing = new Set<string>();
   private partialErase = new Map<string, Set<number>>();
+  private lastEraseAt: { x: number; y: number } | null = null;
   private pointers = new Map<number, { x: number; y: number }>();
   private gesture: { dist: number; mid: { x: number; y: number } } | null = null;
   private crop: {
@@ -427,7 +443,7 @@ export class Engine {
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
-    this.canvas.addEventListener('pointercancel', this.onPointerUp);
+    this.canvas.addEventListener('pointercancel', this.onPointerCancel);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
     this.canvas.addEventListener('dblclick', this.onDblClick);
     this.canvas.addEventListener('pointerleave', this.onPointerLeave);
@@ -435,7 +451,11 @@ export class Engine {
     this.canvas.addEventListener('auxclick', this.onAuxClick);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onWindowBlur);
     window.addEventListener('paste', this.onPaste);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
+    }
     // File drops are owned by App (images + PDF/TXT) so we don't double-insert.
     this.bindStore();
     store.setLiveViewApplier((batch) => this.applyLivePatches(batch));
@@ -450,7 +470,7 @@ export class Engine {
       this.dirty = true;
     });
     this.offFormulaLoad = onFormulaLoad(() => {
-      this.dirty = true;
+      this.remeasureTextShapes([...this.views.keys()]);
     });
     this.dragTool = this.tool;
     if (typeof matchMedia === 'function') {
@@ -512,8 +532,7 @@ export class Engine {
   }
 
   private spatialBox(v: ShapeView): ShapeBox {
-    if (v.type === 'arrow') return arrowBounds(v);
-    return rotatedAabb(v);
+    return visualBox(v);
   }
 
   private loadActivePage(): void {
@@ -528,12 +547,14 @@ export class Engine {
   }
 
   resetToPage(): void {
-    if (this.editing) {
-      this.editing = false;
-      this.editId = null;
-      this.events.onEditText?.(null);
-      this.events.onEditGraph?.(null);
-    }
+    this.cancelTransientUi();
+    if (this.graphEditId) this.cancelGraphEditor();
+    else if (this.editing) this.events.onRequestCommitText?.();
+    this.editing = false;
+    this.editId = null;
+    this.editPageId = null;
+    this.events.onEditText?.(null);
+    this.events.onEditGraph?.(null);
     this.boundPageId = store.currentPageId();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
@@ -545,7 +566,20 @@ export class Engine {
     this.snapGuides = [];
     this.events.onSelection?.([]);
     this.loadActivePage();
+    this.rebakeConnectedArrows();
     this.dirty = true;
+  }
+
+  /** Upgrade legacy 4-point connected arrows so cubics follow rotated ports. */
+  private rebakeConnectedArrows(): void {
+    const hosts = new Set<string>();
+    for (const v of this.views.values()) {
+      if (v.type === 'arrow' && v.fromId && v.toId && (v.points?.length ?? 0) < 8) {
+        hosts.add(v.fromId);
+        hosts.add(v.toId);
+      }
+    }
+    if (hosts.size) this.updateConnectedArrows(hosts);
   }
 
   contentBox(): ShapeBox | null {
@@ -554,6 +588,16 @@ export class Engine {
 
   selectionBounds(): ShapeBox | null {
     return this.boundsOf([...this.selection]);
+  }
+
+  /** Selection plus glued riders — export must not clip notes that sit on a table. */
+  selectionExportBounds(): ShapeBox | null {
+    return this.boundsOf(this.selectionExportIds());
+  }
+
+  /** Selected shapes plus glued riders and joining connectors, in board z-order. */
+  selectionExportIds(): string[] {
+    return this.idsWithRidersInOrder(this.selection);
   }
 
   private boundsOf(ids: string[]): ShapeBox | null {
@@ -592,7 +636,7 @@ export class Engine {
 
   exportCanvas(
     box: ShapeBox,
-    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null }
+    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background?: string | null; ids?: Iterable<string> }
   ): HTMLCanvasElement | null {
     if (box.w <= 0 || box.h <= 0) return null;
     const pad = 4;
@@ -610,24 +654,24 @@ export class Engine {
       ctx.setTransform(opts.scale, 0, 0, opts.scale, -exportBox.x * opts.scale, -exportBox.y * opts.scale);
       const paper = store.viewPaperBg();
       const theme = themeFor(paper);
-      const bgFill = opts.background ?? (orbitPaperActive(paper, paper) ? ORBIT_PAPER : null);
+      // `null` is a real request for alpha (ExportDialog Transparent). `??`
+      // would treat that as missing and fill Orbit paper over the PNG.
+      const bgFill =
+        opts.background !== undefined
+          ? opts.background
+          : orbitPaperActive(paper, paper)
+            ? ORBIT_PAPER
+            : null;
       if (bgFill) {
         ctx.fillStyle = bgFill;
         ctx.fillRect(exportBox.x, exportBox.y, exportBox.w, exportBox.h);
       }
-      const ord = store.order;
-      for (let i = 0; i < ord.length; i++) {
-        const id = ord.get(i);
-        if (!store.isOnActivePage(id)) continue;
-        const v = this.views.get(id);
-        if (!v) continue;
-        const vb = this.spatialBox(v);
-        if (!intersects(vb, exportBox)) continue;
+      for (const v of this.viewsInBox(box, opts.ids)) {
         try {
           drawShape(ctx, v, theme.text, paper);
         } catch (err) {
           // ponytail: one bad shape must not kill the whole export
-          console.warn('[review] export skipped shape', id, v.type, err);
+          console.warn('[review] export skipped shape', v.id, v.type, err);
         }
       }
       return canvas;
@@ -636,13 +680,15 @@ export class Engine {
     }
   }
 
-  private viewsInBox(box: ShapeBox): ShapeView[] {
+  private viewsInBox(box: ShapeBox, ids?: Iterable<string>): ShapeView[] {
     const pad = 4;
     const exportBox = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 };
+    const allow = ids ? new Set(ids) : null;
     const out: ShapeView[] = [];
     const ord = store.order;
     for (let i = 0; i < ord.length; i++) {
       const id = ord.get(i);
+      if (allow && !allow.has(id)) continue;
       if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (!v) continue;
@@ -654,12 +700,13 @@ export class Engine {
 
   exportSvg(
     box: ShapeBox,
-    opts: { background: string | null }
+    opts: { background: string | null; ids?: Iterable<string> }
   ): { blob: Blob; width: number; height: number } | null {
     if (box.w <= 0 || box.h <= 0) return null;
-    const views = this.viewsInBox(box);
+    const views = this.viewsInBox(box, opts.ids);
     const { svg, width, height } = shapesToSvg(views, {
       background: opts.background,
+      inkPaper: store.viewPaperBg(),
       pad: 4,
       clip: box,
     });
@@ -672,13 +719,14 @@ export class Engine {
 
   async exportPdf(
     box: ShapeBox,
-    opts: { scale: number; quality?: number; background: string | null }
+    opts: { scale: number; quality?: number; background: string | null; ids?: Iterable<string> }
   ): Promise<{ blob: Blob; width: number; height: number } | null> {
     const raster = await this.exportBlob(box, {
       scale: opts.scale,
       format: 'jpeg',
       quality: opts.quality ?? 0.9,
       background: opts.background ?? '#ffffff',
+      ids: opts.ids,
     });
     if (!raster) return null;
     const jpeg = new Uint8Array(await raster.blob.arrayBuffer());
@@ -692,7 +740,7 @@ export class Engine {
 
   exportBlob(
     box: ShapeBox,
-    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null }
+    opts: { scale: number; format: 'png' | 'jpeg'; quality?: number; background: string | null; ids?: Iterable<string> }
   ): Promise<{ blob: Blob; width: number; height: number } | null> {
     const canvas = this.exportCanvas(box, opts);
     if (!canvas) return Promise.resolve(null);
@@ -711,12 +759,14 @@ export class Engine {
   }
 
   destroy(): void {
+    this.alive = false;
+    this.cancelTransientUi();
     cancelAnimationFrame(this.rafId);
     this.resizer.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
-    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerCancel);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('dblclick', this.onDblClick);
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
@@ -724,7 +774,11 @@ export class Engine {
     this.canvas.removeEventListener('auxclick', this.onAuxClick);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onWindowBlur);
     window.removeEventListener('paste', this.onPaste);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    }
     if (this.observedBoard) {
       try {
         this.observedBoard.unobserve(this.onStore);
@@ -770,6 +824,11 @@ export class Engine {
   }
 
   setTool(id: ToolId): void {
+    // Keyboard / toolbar switches must abort an in-flight pointer gesture the
+    // same way Escape does. Otherwise select-drag leaves mediaProxy placeholders
+    // and an elevated write-gate, and a half-drawn connector stays armed.
+    // Crop and export-region pick are modal layers; leave those alone.
+    if (this.pointerDown || this.connecting) this.abortPointerGesture();
     this.active = id;
     this.override = null;
     // ponytail: drawing tools drop the selection — the frame hides off-select
@@ -810,7 +869,7 @@ export class Engine {
         next.points = v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy));
       }
       this.views.set(id, next);
-      this.grid.upsert(id, next);
+      this.grid.upsert(id, this.spatialBox(next));
     }
     this.dirty = true;
   }
@@ -1070,14 +1129,7 @@ export class Engine {
       if (!from || !to) continue;
       const fromPort = (v.fromPort as PortId) || 'e';
       const toPort = (v.toPort as PortId) || 'w';
-      const a = portPos(from, fromPort, 0);
-      const b = portPos(to, toPort, 0);
-      const pad = 6;
-      const minX = Math.min(a.x, b.x) - pad;
-      const minY = Math.min(a.y, b.y) - pad;
-      const maxX = Math.max(a.x, b.x) + pad;
-      const maxY = Math.max(a.y, b.y) + pad;
-      patches.push([id, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
+      patches.push([id, connectedArrowGeometry(from, to, fromPort, toPort, v)]);
     }
     if (patches.length) store.patchShapes(patches);
   }
@@ -1094,27 +1146,32 @@ export class Engine {
     if (!this.selection.size) return;
     const patches: Array<[string, Partial<ShapeView>]> = [];
     const moved = new Set<string>();
+    const unglue: string[] = [];
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.locked) continue;
+      if (v.type === 'arrow' && v.fromId && v.toId) continue;
       moved.add(id);
       patches.push([id, { x: v.x + dx, y: v.y + dy }]);
     }
-    // tables carry objects placed on them (keyboard nudge included)
-    const tableIds = [...moved].filter((id) => this.views.get(id)?.type === 'table');
-    if (tableIds.length) {
-      for (const rid of tableRiderIds([...this.views.values()], tableIds)) {
-        const rv = this.views.get(rid);
-        if (!rv || rv.locked || moved.has(rid)) continue;
-        moved.add(rid);
-        patches.push([rid, { x: rv.x + dx, y: rv.y + dy }]);
-      }
+    const riderIds = hostRiderIds([...this.views.values()], moved);
+    for (const rid of riderIds) {
+      const rv = this.views.get(rid);
+      if (!rv || rv.locked || moved.has(rid)) continue;
+      moved.add(rid);
+      patches.push([rid, { x: rv.x + dx, y: rv.y + dy }]);
     }
-    // update connected arrows
+    for (const id of this.selection) {
+      const v = this.views.get(id);
+      if (!v || v.locked || v.type !== 'arrow' || !v.fromId || !v.toId) continue;
+      if (moved.has(v.fromId) || moved.has(v.toId)) continue;
+      unglue.push(id);
+      moved.add(id);
+      patches.push([id, { x: v.x + dx, y: v.y + dy }]);
+    }
     for (const [aid, av] of this.views) {
       if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
       if (!moved.has(av.fromId) && !moved.has(av.toId)) continue;
-      // skip if arrow itself is being moved
       if (moved.has(aid)) continue;
       const from = this.views.get(av.fromId);
       const to = this.views.get(av.toId);
@@ -1125,16 +1182,10 @@ export class Engine {
       const ty = moved.has(av.toId) ? to.y + dy : to.y;
       const fromBox = { ...from, x: fx, y: fy } as ShapeView;
       const toBox = { ...to, x: tx, y: ty } as ShapeView;
-      const a = portPos(fromBox, (av.fromPort as PortId) || 'e', 0);
-      const b = portPos(toBox, (av.toPort as PortId) || 'w', 0);
-      const pad = 6;
-      const minX = Math.min(a.x, b.x) - pad;
-      const minY = Math.min(a.y, b.y) - pad;
-      const maxX = Math.max(a.x, b.x) + pad;
-      const maxY = Math.max(a.y, b.y) + pad;
-      patches.push([aid, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
+      patches.push([aid, connectedArrowGeometry(fromBox, toBox, (av.fromPort as PortId) || 'e', (av.toPort as PortId) || 'w', av)]);
     }
     if (patches.length) store.patchShapes(patches);
+    for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
   }
 
   clearSnapGuides(): void {
@@ -1157,10 +1208,11 @@ export class Engine {
     const box = groupBox(movingViews);
     if (!box) return { dx, dy, guides: [] };
     const movedBox: ShapeBox = { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
+    const riderSkip = new Set(hostRiderIds([...this.views.values()], [...originals.keys()]));
     const otherBoxes: ShapeBox[] = [];
     for (const [id, v] of this.views) {
-      if (originals.has(id)) continue;
-      otherBoxes.push({ x: v.x, y: v.y, w: v.w, h: v.h });
+      if (originals.has(id) || riderSkip.has(id)) continue;
+      otherBoxes.push(visualBox(v));
     }
     const threshold = 8 / this.camera.zoom;
     const res = computeSnap(movedBox, otherBoxes, threshold);
@@ -1178,14 +1230,18 @@ export class Engine {
     const selected = [...this.selection].map((id) => this.views.get(id)).filter(Boolean) as ShapeView[];
     const unlocked = selected.filter((v) => !v.locked);
     if (!unlocked.length) return;
-    // Multi-select aligns within the selection. Single-select aligns to other board shapes.
+    const lockedIds = new Set(selected.filter((v) => v.locked).map((v) => v.id));
+    // Multi-select aligns within the selection (locked members stay put as anchors).
+    // Single unlocked shape aligns to other board shapes.
     const others =
-      unlocked.length >= 2
+      selected.length >= 2
         ? []
         : [...this.views.values()].filter((v) => !this.selection.has(v.id) && store.isOnActivePage(v.id));
     let patches: Array<[string, Partial<ShapeView>]> = [];
     if (kind === 'centerH' || kind === 'centerV' || kind === 'left' || kind === 'right' || kind === 'top' || kind === 'bottom') {
-      if (unlocked.length >= 2 || others.length) {
+      if (selected.length >= 2) {
+        patches = alignViews(selected, [], kind).filter(([id]) => !lockedIds.has(id));
+      } else if (others.length) {
         patches = alignViews(unlocked, others, kind);
       } else {
         return;
@@ -1193,7 +1249,46 @@ export class Engine {
     } else if (kind === 'distributeH' || kind === 'distributeV') {
       patches = alignViews(unlocked, [], kind);
     }
-    if (patches.length) store.patchShapes(patches);
+    if (patches.length) {
+      const claimed = new Set(patches.map(([id]) => id));
+      const extra: Array<[string, Partial<ShapeView>]> = [];
+      for (const [id, patch] of patches) {
+        const host = this.views.get(id);
+        if (!host) continue;
+        const ddx = (patch.x ?? host.x) - host.x;
+        const ddy = (patch.y ?? host.y) - host.y;
+        if (!ddx && !ddy) continue;
+        for (const rid of hostRiderIds([...this.views.values()], [id])) {
+          if (claimed.has(rid)) continue;
+          const rv = this.views.get(rid);
+          if (!rv || rv.locked) continue;
+          claimed.add(rid);
+          extra.push([rid, { x: rv.x + ddx, y: rv.y + ddy }]);
+        }
+      }
+      const batch = [...patches, ...extra];
+      const moved = new Set<string>();
+      const applied: Array<[string, Partial<ShapeView>]> = [];
+      const unglue: string[] = [];
+      for (const [id, patch] of batch) {
+        const v = this.views.get(id);
+        if (!v || v.locked) continue;
+        if (v.type === 'arrow' && v.fromId && v.toId) continue;
+        moved.add(id);
+        applied.push([id, patch]);
+      }
+      for (const [id, patch] of batch) {
+        const v = this.views.get(id);
+        if (!v || v.locked || v.type !== 'arrow' || !v.fromId || !v.toId) continue;
+        if (moved.has(v.fromId) || moved.has(v.toId)) continue;
+        unglue.push(id);
+        moved.add(id);
+        applied.push([id, patch]);
+      }
+      if (applied.length) store.patchShapes(applied);
+      for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
+      this.updateConnectedArrows(moved);
+    }
   }
 
   private unlockedIds(): string[] {
@@ -1203,7 +1298,7 @@ export class Engine {
   deleteSelection(): void {
     const ids = this.unlockedIds();
     if (!ids.length) return;
-    store.removeShapes(ids);
+    store.removeShapes(this.idsWithRidersInOrder(ids));
   }
 
   private clipboard: ShapeView[] = [];
@@ -1211,21 +1306,24 @@ export class Engine {
   private pasteAt: { x: number; y: number } | null = null;
 
   /** Clone clipboard shapes with remapped ids and connector endpoints. */
-  private cloneShapes(source: ShapeView[], dx: number, dy: number): string[] {
+  private cloneShapes(source: ShapeView[], dx: number, dy: number, pageId?: string): string[] {
     const idMap = new Map<string, string>();
     const ids: string[] = [];
     for (const v of source) {
-      const newKey = store.addShape({
-        ...v,
-        id: undefined,
-        x: v.x + dx,
-        y: v.y + dy,
-        points: v.points ? v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) : undefined,
-        fromId: undefined,
-        fromPort: undefined,
-        toId: undefined,
-        toPort: undefined,
-      });
+      const newKey = store.addShape(
+        {
+          ...v,
+          id: undefined,
+          x: v.x + dx,
+          y: v.y + dy,
+          points: v.points ? v.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) : undefined,
+          fromId: undefined,
+          fromPort: undefined,
+          toId: undefined,
+          toPort: undefined,
+        },
+        pageId
+      );
       idMap.set(v.id, newKey);
       ids.push(newKey);
     }
@@ -1235,14 +1333,14 @@ export class Engine {
       if (v.type !== 'arrow') continue;
       const fromId = v.fromId ? idMap.get(v.fromId) : undefined;
       const toId = v.toId ? idMap.get(v.toId) : undefined;
-      if (!fromId && !toId) continue;
+      if (!fromId || !toId) continue;
       patches.push([
         ids[i],
         {
           fromId,
           toId,
-          fromPort: fromId ? v.fromPort : undefined,
-          toPort: toId ? v.toPort : undefined,
+          fromPort: v.fromPort,
+          toPort: v.toPort,
         },
       ]);
     }
@@ -1251,45 +1349,71 @@ export class Engine {
   }
 
   copySelection(): void {
-    this.clipboard = [];
-    for (const id of this.selection) {
-      const v = this.views.get(id);
-      if (v) this.clipboard.push(structuredClone(v));
-    }
+    this.clipboard = this.shapesForClipboardFrom(this.selection);
     this.pasteN = 0;
-    // also write a marker to system clipboard so a subsequent Ctrl+V via paste event can restore shapes
+    this.writeClipboardMarker();
+  }
+
+  cutSelection(): void {
+    const ids = this.unlockedIds();
+    if (!ids.length) return;
+    this.clipboard = this.shapesForClipboardFrom(ids);
+    this.pasteN = 0;
+    this.writeClipboardMarker();
+    this.deleteSelection();
+  }
+
+  /** World point for the next paste (context-menu paste). */
+  setPasteAnchor(pt: { x: number; y: number } | null): void {
+    this.pasteAt = pt;
+  }
+
+  private consumePasteAnchor(): { x: number; y: number } | null {
+    const a = this.pasteAt;
+    this.pasteAt = null;
+    return a;
+  }
+
+  private resolvePastePos(explicit?: { x: number; y: number }): { x: number; y: number } {
+    return explicit ?? this.consumePasteAnchor() ?? { x: this.camera.x, y: this.camera.y };
+  }
+
+  private writeClipboardMarker(): void {
     try {
       const marker = JSON.stringify({ __reviewShapes: this.clipboard });
       navigator.clipboard?.writeText(marker).catch(() => {});
     } catch {}
   }
 
-  cutSelection(): void {
-    this.copySelection();
-    this.deleteSelection();
-  }
-
-  pasteSelection(): void {
+  pasteSelection(anchor?: { x: number; y: number }, pageId?: string): void {
+    const pinned = anchor ?? this.consumePasteAnchor();
     if (!this.clipboard.length) return;
     this.pasteN += 1;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const v of this.clipboard) {
-      minX = Math.min(minX, v.x);
-      minY = Math.min(minY, v.y);
-      maxX = Math.max(maxX, v.x + v.w);
-      maxY = Math.max(maxY, v.y + v.h);
+    const clipBox = groupBox(this.clipboard);
+    if (clipBox) {
+      minX = clipBox.x;
+      minY = clipBox.y;
+      maxX = clipBox.x + clipBox.w;
+      maxY = clipBox.y + clipBox.h;
+    } else {
+      for (const v of this.clipboard) {
+        minX = Math.min(minX, v.x);
+        minY = Math.min(minY, v.y);
+        maxX = Math.max(maxX, v.x + v.w);
+        maxY = Math.max(maxY, v.y + v.h);
+      }
     }
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    const drift = (((this.pasteN - 1) % 8) * 24) / this.camera.zoom;
-    const anchor = this.pasteAt;
-    this.pasteAt = null;
-    const dx = (anchor ? anchor.x : this.camera.x) - cx + (anchor ? 0 : drift);
-    const dy = (anchor ? anchor.y : this.camera.y) - cy + (anchor ? 0 : drift);
-    const ids = this.cloneShapes(this.clipboard, dx, dy);
+    const at = pinned ?? { x: this.camera.x, y: this.camera.y };
+    const drift = pinned ? 0 : (((this.pasteN - 1) % 8) * 24) / this.camera.zoom;
+    const dx = at.x - cx + drift;
+    const dy = at.y - cy + drift;
+    const ids = this.cloneShapes(this.clipboard, dx, dy, pageId);
     this.setSelection(ids);
     this.setTool('select');
   }
@@ -1297,25 +1421,61 @@ export class Engine {
   duplicateSelection(): void {
     if (!this.selection.size) return;
     const off = 40 / this.camera.zoom;
-    const source: ShapeView[] = [];
-    for (const id of this.selection) {
-      const v = this.views.get(id);
-      if (v) source.push(structuredClone(v));
-    }
-    const ids = this.cloneShapes(source, off, off);
+    const ids = this.cloneShapes(this.shapesForClipboard(), off, off);
     this.setSelection(ids);
     this.setTool('select');
   }
 
+  /** Selected ids plus glued riders and connectors that join them, in board z-order. */
+  private idsWithRidersInOrder(ids: Iterable<string>): string[] {
+    const set = new Set(ids);
+    if (!set.size) return [];
+    for (const rid of hostRiderIds([...this.views.values()], set)) set.add(rid);
+    for (const [id, v] of this.views) {
+      if (v.type !== 'arrow' || set.has(id) || !v.fromId || !v.toId) continue;
+      if (set.has(v.fromId) && set.has(v.toId)) set.add(id);
+    }
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      const id = ord.get(i);
+      if (!set.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    for (const id of set) {
+      if (seen.has(id) || !this.views.has(id)) continue;
+      out.push(id);
+    }
+    return out;
+  }
+
+  private shapesForClipboardFrom(ids: Iterable<string>): ShapeView[] {
+    const out: ShapeView[] = [];
+    for (const id of this.idsWithRidersInOrder(ids)) {
+      const v = this.views.get(id);
+      if (v) out.push(structuredClone(v));
+    }
+    return out;
+  }
+
+  /** Selected shapes plus glued riders and joining connectors, in board z-order. */
+  private shapesForClipboard(): ShapeView[] {
+    return this.shapesForClipboardFrom(this.selection);
+  }
+
   bringFront(): void {
-    if (!this.selection.size) return;
-    store.moveOrderToFront([...this.selection]);
+    const ids = this.idsWithRidersInOrder(this.selection);
+    if (!ids.length) return;
+    store.moveOrderToFront(ids);
     this.dirty = true;
   }
 
   sendBack(): void {
-    if (!this.selection.size) return;
-    store.moveOrderToBack([...this.selection]);
+    const ids = this.idsWithRidersInOrder(this.selection);
+    if (!ids.length) return;
+    store.moveOrderToBack(ids);
     this.dirty = true;
   }
 
@@ -1334,30 +1494,8 @@ export class Engine {
   }
 
   private selectionCanvas(ids: string[]): HTMLCanvasElement | null {
-    // include annotations that sit on top of selected images
-    const all = [...ids];
-    for (const id of ids) {
-      const v = this.views.get(id);
-      if (v?.type !== 'image') continue;
-      for (const a of this.annotationsOn(v)) {
-        if (!all.includes(a.id)) all.push(a.id);
-      }
-    }
-    ids = all;
-    let box: ShapeBox | null = null;
-    for (const id of ids) {
-      const v = this.views.get(id);
-      if (!v) continue;
-      const b = this.spatialBox(v);
-      box = box
-        ? {
-            x: Math.min(box.x, b.x),
-            y: Math.min(box.y, b.y),
-            w: Math.max(box.x + box.w, b.x + b.w) - Math.min(box.x, b.x),
-            h: Math.max(box.y + box.h, b.y + b.h) - Math.min(box.y, b.y),
-          }
-        : { ...b };
-    }
+    ids = this.idsWithRidersInOrder(ids);
+    const box = this.boundsOf(ids);
     if (!box) return null;
     const pad = 8;
     const canvas = document.createElement('canvas');
@@ -1388,7 +1526,7 @@ export class Engine {
       if (sid === v.id || sv.locked) continue;
       if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
       if (!store.isOnActivePage(sid)) continue;
-      if (containedIn(sv, v)) out.push(sv);
+      if (containedInShape(sv, v)) out.push(sv);
     }
     return out;
   }
@@ -1501,20 +1639,34 @@ export class Engine {
   }
 
   scaleSelectionToOriginal(): void {
+    const batch: Array<[string, Partial<ShapeView>]> = [];
+    const touched = new Set<string>();
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.type !== 'image') continue;
       const img = getImage(v.src ?? '');
       if (!img || !img.complete || !img.naturalWidth) continue;
+      const f = cropFractions(v);
+      const nw = img.naturalWidth * f.w;
+      const nh = img.naturalHeight * f.h;
       const cx = v.x + v.w / 2;
       const cy = v.y + v.h / 2;
-      store.patchShape(id, {
-        x: cx - img.naturalWidth / 2,
-        y: cy - img.naturalHeight / 2,
-        w: img.naturalWidth,
-        h: img.naturalHeight,
-      });
+      const orig = { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation };
+      const next = { x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh, rotation: v.rotation };
+      batch.push([id, { x: next.x, y: next.y, w: nw, h: nh }]);
+      touched.add(id);
+      for (const rid of hostRiderIds([...this.views.values()], [id])) {
+        if (touched.has(rid)) continue;
+        const rv = this.views.get(rid);
+        if (!rv || rv.locked) continue;
+        const mapped = mapShapeThroughHostResize(rv, orig, next, 1);
+        if (!mapped) continue;
+        touched.add(rid);
+        batch.push([rid, mapped]);
+      }
     }
+    if (batch.length) store.patchShapes(batch);
+    if (touched.size) this.updateConnectedArrows(touched);
   }
 
   exportCsvSelection(): void {
@@ -1582,7 +1734,7 @@ export class Engine {
     this.camera.zoomAt(this.w / 2, this.h / 2, this.w / 2, this.h / 2, factor);
   }
 
-  insertImageFile(file: File, at?: { x: number; y: number }): void {
+  insertImageFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
     const locale = readLocale();
     if (!file.type.startsWith('image/')) {
       this.events.onError?.(t(locale, 'imageFailed'));
@@ -1592,12 +1744,17 @@ export class Engine {
       this.events.onError?.(t(locale, 'imageTooLarge'));
       return;
     }
+    const pos = this.resolvePastePos(at);
+    const page = pageId ?? store.currentPageId();
+    const boardId = store.getCurrentBoardId();
     const reader = new FileReader();
     reader.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
     reader.onload = () => {
+      if (!this.alive || store.getCurrentBoardId() !== boardId) return;
       const img = new Image();
       img.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
       img.onload = () => {
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const maxStore = 1600;
         const storeScale = Math.min(1, maxStore / Math.max(img.naturalWidth, img.naturalHeight));
         const sw = Math.max(1, Math.round(img.naturalWidth * storeScale));
@@ -1606,27 +1763,31 @@ export class Engine {
         scratch.width = sw;
         scratch.height = sh;
         const sctx = scratch.getContext('2d');
-        if (!sctx) return;
+        if (!sctx) {
+          this.events.onError?.(t(locale, 'imageFailed'));
+          return;
+        }
         sctx.drawImage(img, 0, 0, sw, sh);
-        const jpeg = file.type === 'image/jpeg' || file.type === 'image/jpg' || file.type === 'image/webp';
+        const jpeg = file.type === 'image/jpeg' || file.type === 'image/jpg';
         const src = jpeg ? scratch.toDataURL('image/jpeg', 0.85) : scratch.toDataURL('image/png');
         const maxShow = 600;
         const showScale = Math.min(1, maxShow / Math.max(sw, sh));
         const w = Math.max(1, sw * showScale);
         const h = Math.max(1, sh * showScale);
-        const pos =
-          at ?? this.camera.screenToWorld(this.w / 2, this.h / 2, this.w / 2, this.h / 2);
-        const id = store.addShape({
-          type: 'image',
-          x: pos.x - w / 2,
-          y: pos.y - h / 2,
-          w,
-          h,
-          fill: 'transparent',
-          stroke: 'transparent',
-          strokeWidth: 0,
-          src,
-        });
+        const id = store.addShape(
+          {
+            type: 'image',
+            x: pos.x - w / 2,
+            y: pos.y - h / 2,
+            w,
+            h,
+            fill: 'transparent',
+            stroke: 'transparent',
+            strokeWidth: 0,
+            src,
+          },
+          page
+        );
         this.setSelection([id]);
       };
       img.src = String(reader.result);
@@ -1640,24 +1801,27 @@ export class Engine {
     return Boolean(v && v.type === 'image' && !v.locked);
   }
 
-  addDocument(pages: string[], ratio: number, at?: { x: number; y: number }): string | null {
+  addDocument(pages: string[], ratio: number, at?: { x: number; y: number }, pageId?: string): string | null {
     if (!pages.length) return null;
     const maxShow = 560;
     const w = maxShow;
     const h = Math.round(maxShow / (ratio || 0.707));
-    const pos = at ?? this.camera.screenToWorld(this.w / 2, this.h / 2, this.w / 2, this.h / 2);
-    const id = store.addShape({
-      type: 'doc',
-      x: pos.x - w / 2,
-      y: pos.y - h / 2,
-      w,
-      h,
-      fill: 'transparent',
-      stroke: 'transparent',
-      strokeWidth: 0,
-      pages,
-      page: 0,
-    });
+    const pos = at ?? { x: this.camera.x, y: this.camera.y };
+    const id = store.addShape(
+      {
+        type: 'doc',
+        x: pos.x - w / 2,
+        y: pos.y - h / 2,
+        w,
+        h,
+        fill: 'transparent',
+        stroke: 'transparent',
+        strokeWidth: 0,
+        pages,
+        page: 0,
+      },
+      pageId
+    );
     this.setSelection([id]);
     return id;
   }
@@ -1673,13 +1837,12 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const left = v.x * z + ox;
-    const right = (v.x + v.w) * z + ox;
-    const cy = (v.y + v.h / 2) * z + oy;
-    const off = 26;
+    const off = 26 / z;
+    const left = localToWorld(v, -off, v.h / 2);
+    const right = localToWorld(v, v.w + off, v.h / 2);
     return [
-      { side: 'prev', x: left - off, y: cy },
-      { side: 'next', x: right + off, y: cy },
+      { side: 'prev', x: left.x * z + ox, y: left.y * z + oy },
+      { side: 'next', x: right.x * z + ox, y: right.y * z + oy },
     ];
   }
 
@@ -1719,16 +1882,17 @@ export class Engine {
       ctx.lineJoin = 'round';
       ctx.stroke();
     }
-    const page = (v.page ?? 0) + 1;
     const total = v.pages?.length ?? 0;
+    const page = docPageIndex(v.page, total) + 1;
     ctx.font = '12px "Space Grotesk", Onest, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     const label = `${page} / ${total}`;
     const tw = ctx.measureText(label).width;
     const z = this.camera.zoom;
-    const lx = (v.x + v.w / 2) * z + (this.w / 2 - this.camera.x * z);
-    const ly = (v.y + v.h) * z + (this.h / 2 - this.camera.y * z) + 8;
+    const bottom = localToWorld(v, v.w / 2, v.h);
+    const lx = bottom.x * z + (this.w / 2 - this.camera.x * z);
+    const ly = bottom.y * z + (this.h / 2 - this.camera.y * z) + 8;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.beginPath();
     ctx.roundRect(lx - tw / 2 - 8, ly, tw + 16, 20, 10);
@@ -1746,9 +1910,8 @@ export class Engine {
     for (const zone of this.docArrowZones(v)) {
       if (Math.hypot(sx - zone.x, sy - zone.y) <= r) {
         const pages = v.pages?.length ?? 0;
-        const cur = v.page ?? 0;
-        const next = zone.side === 'prev' ? Math.max(0, cur - 1) : Math.min(pages - 1, cur + 1);
-        if (next !== cur) store.patchShape(v.id, { page: next });
+        const next = docPageStep(v.page, pages, zone.side === 'prev' ? -1 : 1);
+        if (next !== (v.page ?? 0)) store.patchShape(v.id, { page: next });
         this.dirty = true;
         return true;
       }
@@ -1761,15 +1924,11 @@ export class Engine {
     const id = [...this.selection][0];
     const v = this.views.get(id);
     if (!v || v.type !== 'image' || v.locked) return;
-    const f = { x: v.cropX ?? 0, y: v.cropY ?? 0, w: v.cropW ?? 1, h: v.cropH ?? 1 };
-    const fullW = v.w / f.w;
-    const fullH = v.h / f.h;
-    const fullX = v.x - (f.x / f.w) * v.w;
-    const fullY = v.y - (f.y / f.h) * v.h;
+    const full = uncroppedBox(v);
     this.crop = {
       id,
       box: { x: v.x, y: v.y, w: v.w, h: v.h },
-      full: { x: fullX, y: fullY, w: fullW, h: fullH },
+      full: { x: full.x, y: full.y, w: full.w, h: full.h },
       mode: 'idle',
       start: { x: 0, y: 0 },
       origBox: { x: v.x, y: v.y, w: v.w, h: v.h },
@@ -1797,11 +1956,19 @@ export class Engine {
     const cropY = (c.box.y - c.full.y) / c.full.h;
     const cropW = c.box.w / c.full.w;
     const cropH = c.box.h / c.full.h;
-    store.patchShape(c.id, {
-      x: c.box.x,
-      y: c.box.y,
-      w: c.box.w,
-      h: c.box.h,
+    const v = this.views.get(c.id);
+    if (!v || v.type !== 'image') {
+      this.cancelCrop();
+      return;
+    }
+    const placed = reanchorCroppedBox(v, c.box);
+    const orig = { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation };
+    const next = { x: placed.x, y: placed.y, w: placed.w, h: placed.h, rotation: v.rotation };
+    this.patchHostAndRiders(c.id, orig, next, {
+      x: placed.x,
+      y: placed.y,
+      w: placed.w,
+      h: placed.h,
       cropX,
       cropY,
       cropW,
@@ -1815,23 +1982,55 @@ export class Engine {
 
   resetCropSelected(): void {
     if (!this.selection.size) return;
+    const touched: string[] = [];
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v || v.type !== 'image' || v.locked) continue;
       if (v.cropW === undefined && v.cropH === undefined) continue;
-      const f = { x: v.cropX ?? 0, y: v.cropY ?? 0, w: v.cropW ?? 1, h: v.cropH ?? 1 };
-      const w = v.w / f.w;
-      const h = v.h / f.h;
-      const x = v.x - (f.x / f.w) * v.w;
-      const y = v.y - (f.y / f.h) * v.h;
-      store.patchShape(id, { x, y, w, h });
-      store.clearShapeKeys(id, ['cropX', 'cropY', 'cropW', 'cropH']);
+      const full = restoreUncroppedBox(v);
+      const orig = { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation };
+      const next = { x: full.x, y: full.y, w: full.w, h: full.h, rotation: v.rotation };
+      this.patchHostAndRiders(
+        id,
+        orig,
+        next,
+        { x: full.x, y: full.y, w: full.w, h: full.h },
+        ['cropX', 'cropY', 'cropW', 'cropH']
+      );
+      touched.push(id);
     }
+    if (touched.length) this.updateConnectedArrows(new Set(touched));
     this.dirty = true;
+  }
+
+  private patchHostAndRiders(
+    id: string,
+    orig: { x: number; y: number; w: number; h: number; rotation?: number },
+    next: { x: number; y: number; w: number; h: number; rotation?: number },
+    hostPatch: Partial<ShapeView>,
+    clearHostKeys?: readonly string[]
+  ): void {
+    const batch: Array<[string, Partial<ShapeView>]> = [[id, hostPatch]];
+    const touched = new Set([id]);
+    for (const rid of hostRiderIds([...this.views.values()], [id])) {
+      if (touched.has(rid)) continue;
+      const rv = this.views.get(rid);
+      if (!rv || rv.locked) continue;
+      const mapped = mapShapeThroughHostResize(rv, orig, next, 1);
+      if (!mapped) continue;
+      touched.add(rid);
+      batch.push([rid, rv.type === 'arrow' && mapped.points ? withArrowVisualBounds(rv, mapped) : mapped]);
+    }
+    if (clearHostKeys?.length) store.patchShapesClearingKeys(batch, [[id, clearHostKeys]]);
+    else store.patchShapes(batch);
+    this.updateConnectedArrows(touched);
   }
 
   private onPaste = (e: ClipboardEvent): void => {
     if (this.editing) return;
+    const at = this.consumePasteAnchor() ?? undefined;
+    const pageId = store.currentPageId();
+    const boardId = store.getCurrentBoardId();
     const items = e.clipboardData?.items;
     if (items) {
       for (const item of items) {
@@ -1839,7 +2038,7 @@ export class Engine {
           const file = item.getAsFile();
           if (file) {
             e.preventDefault();
-            this.insertImageFile(file);
+            this.insertImageFile(file, at, pageId);
             return;
           }
         }
@@ -1848,63 +2047,69 @@ export class Engine {
         if (item.type === 'text/plain') {
           e.preventDefault();
           item.getAsString((text) => {
+            if (!this.alive || store.getCurrentBoardId() !== boardId) return;
             const trimmed = text.replace(/\r\n/g, '\n').trim();
             if (!trimmed) {
-              this.pasteSelection();
+              this.pasteSelection(at, pageId);
               return;
             }
-            // if this is our internal shapes marker, paste shapes instead of text
-            try {
-              const parsed = JSON.parse(trimmed);
-              if (parsed && Array.isArray(parsed.__reviewShapes) && parsed.__reviewShapes.length) {
-                // restore internal buffer if it was cleared (new tab)
-                if (!this.clipboard.length) this.clipboard = parsed.__reviewShapes.map((v: ShapeView) => structuredClone(v));
-                this.pasteSelection();
-                return;
-              }
-            } catch {}
-            this.insertPlainText(trimmed);
+            const fromMarker = shapesFromClipboardText(trimmed);
+            if (fromMarker) {
+              this.clipboard = fromMarker.map((v) => structuredClone(v as ShapeView));
+              this.pasteSelection(at, pageId);
+              return;
+            }
+            this.insertPlainText(trimmed, at, pageId);
           });
           return;
         }
       }
     }
     e.preventDefault();
-    this.pasteSelection();
+    this.pasteSelection(at, pageId);
   };
 
-  private insertPlainText(text: string): void {
+  private insertPlainText(text: string, at?: { x: number; y: number }, pageId?: string): void {
     const fontSize = settings.text.size;
     const color = settings.text.color;
-    const measured = this.measureTextWrapped(text, fontSize, 320, {
+    const measured = this.measureTextWrapped(text, fontSize, TEXT_TOOL_WRAP_W, {
       bold: settings.text.bold,
       italic: settings.text.italic,
     });
-    const id = store.addShape({
-      type: 'text',
-      x: this.camera.x - measured.w / 2,
-      y: this.camera.y - measured.h / 2,
-      w: measured.w,
-      h: measured.h,
-      fill: 'transparent',
-      stroke: 'transparent',
-      strokeWidth: 0,
-      text,
-      fontSize,
-      textColor: color,
-      bold: settings.text.bold,
-      italic: settings.text.italic,
-      underline: settings.text.underline,
-      strike: settings.text.strike,
-      textAlign: settings.text.align,
-      highlight: settings.text.highlight,
-    });
+    const pos = this.resolvePastePos(at);
+    const id = store.addShape(
+      {
+        type: 'text',
+        x: pos.x - measured.w / 2,
+        y: pos.y - measured.h / 2,
+        w: measured.w,
+        h: measured.h,
+        fill: 'transparent',
+        stroke: 'transparent',
+        strokeWidth: 0,
+        text,
+        fontSize,
+        textColor: color,
+        bold: settings.text.bold,
+        italic: settings.text.italic,
+        underline: settings.text.underline,
+        strike: settings.text.strike,
+        textAlign: settings.text.align,
+        highlight: settings.text.highlight,
+      },
+      pageId
+    );
     this.setSelection([id]);
     this.setTool('select');
   }
 
   async pasteFromClipboard(): Promise<void> {
-    // ponytail: prioritize system image (PrintScreen) over internal board buffer
+    const at = this.consumePasteAnchor() ?? undefined;
+    const pageId = store.currentPageId();
+    const boardId = store.getCurrentBoardId();
+    const stillHere = () => this.alive && store.getCurrentBoardId() === boardId;
+    // ponytail: system clipboard wins — PrintScreen image, then a shape marker or
+    // plain text, then the in-memory buffer (writeText can fail on http).
     try {
       const items = await Promise.race([
         (navigator.clipboard as unknown as { read?: () => Promise<ClipboardItem[]> }).read
@@ -1912,33 +2117,57 @@ export class Engine {
           : Promise.resolve(null as ClipboardItem[] | null),
         new Promise<ClipboardItem[] | null>((resolve) => setTimeout(() => resolve(null), 220)),
       ]);
+      if (!stillHere()) return;
       if (items) {
         for (const item of items) {
-          const type = item.types.find((t) => t.startsWith('image/'));
+          const type = [...item.types].find((t) => t.startsWith('image/'));
           if (type) {
             const blob = await item.getType(type);
-            this.insertImageFile(new File([blob], 'clipboard.png', { type }));
+            if (!stillHere()) return;
+            this.insertImageFile(new File([blob], 'clipboard.png', { type }), at, pageId);
             return;
           }
+        }
+        for (const item of items) {
+          if (![...item.types].includes('text/plain')) continue;
+          const blob = await item.getType('text/plain');
+          const trimmed = (await blob.text()).replace(/\r\n/g, '\n').trim();
+          if (!stillHere()) return;
+          if (!trimmed) continue;
+          const fromMarker = shapesFromClipboardText(trimmed);
+          if (fromMarker) {
+            this.clipboard = fromMarker.map((v) => structuredClone(v as ShapeView));
+            this.pasteSelection(at, pageId);
+            return;
+          }
+          this.insertPlainText(trimmed, at, pageId);
+          return;
         }
       }
     } catch {
       /* no permission or not a secure context — fall through to internal */
     }
+    if (!stillHere()) return;
     if (this.clipboard.length) {
-      this.pasteSelection();
+      this.pasteSelection(at, pageId);
       return;
     }
-    // fallback: try text via clipboard.readText (when paste event is blocked)
     try {
       const txt = await navigator.clipboard.readText();
+      if (!stillHere()) return;
       const trimmed = txt.replace(/\r\n/g, '\n').trim();
       if (trimmed) {
-        this.insertPlainText(trimmed);
+        const fromMarker = shapesFromClipboardText(trimmed);
+        if (fromMarker) {
+          this.clipboard = fromMarker.map((v) => structuredClone(v as ShapeView));
+          this.pasteSelection(at, pageId);
+          return;
+        }
+        this.insertPlainText(trimmed, at, pageId);
         return;
       }
     } catch {}
-    this.pasteSelection();
+    this.pasteSelection(at, pageId);
   }
 
   resetZoom(): void {
@@ -1970,7 +2199,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'doc' || v.type === 'graph') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -1981,7 +2210,7 @@ export class Engine {
     // typing) must commit the current text first — otherwise the new target
     // overwrites the overlay content and typed text is lost without a commit.
     if (this.editing && this.editId !== id) this.events.onRequestCommitText?.();
-    const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display';
+    const centered = v.type === 'rect' || v.type === 'ellipse' || v.type === 'diamond' || v.type === 'triangle' || v.type === 'parallelogram' || v.type === 'hexagon' || v.type === 'cylinder' || v.type === 'terminator' || v.type === 'subroutine' || v.type === 'display' || v.type === 'frame';
     let color: string;
     if (v.type === 'sticky') {
       color = v.textColor ?? '#3a2f00';
@@ -1989,18 +2218,19 @@ export class Engine {
       // ponytail: stored color never mutates — TextOverlay will displayInk per viewer paper
       color = v.textColor ?? themeFor(store.viewPaperBg()).text;
     }
+    const tl = localToWorld(v, 0, 0);
     this.editing = true;
     this.editId = id;
+    this.editPageId = store.currentPageId();
     this.events.onEditText?.({
       id,
-      x: v.x,
-      y: v.y,
+      x: tl.x,
+      y: tl.y,
       w: v.w,
-      h: v.h,
-      text: v.text ?? '',
-      richHtml: v.richHtml,
-      fontSize:
-        v.fontSize ?? (v.type === 'sticky' ? STICKY_FONT : v.type === 'rect' || v.type === 'ellipse' ? SHAPE_FONT : TEXT_FONT),
+      h: v.type === 'frame' ? frameHeaderHeight(v.h) : v.h,
+      text: v.type === 'frame' ? frameTitleLine(v.text) : (v.text ?? ''),
+      richHtml: v.type === 'frame' ? undefined : v.richHtml,
+      fontSize: v.fontSize ?? defaultFontSizeFor(v.type),
       color,
       type: v.type,
       centered,
@@ -2008,8 +2238,9 @@ export class Engine {
       italic: !!v.italic,
       underline: !!v.underline,
       strike: !!v.strike,
-      textAlign: v.textAlign ?? (centered ? 'center' : 'left'),
+      textAlign: v.textAlign ?? (v.type === 'frame' ? 'left' : centered ? 'center' : 'left'),
       highlight: !!v.highlight,
+      rotation: shapeRotation(v),
     });
   }
 
@@ -2029,17 +2260,22 @@ export class Engine {
     const c = Math.min(grid.cols - 1, Math.max(0, col));
     this.tableActive.set(id, { r, c });
     const rect = tableCellRect(v, r, c);
+    const localX = rect.x - v.x;
+    const localY = rect.y - v.y;
+    const tl = localToWorld(v, localX, localY);
     const size = v.fontSize ?? TABLE_FONT;
     // ponytail: the overlay sits on the cell fill, not the board — contrast against it
     const paper = store.viewPaperBg();
     const base = v.textColor ?? themeFor(paper).text;
     const color = hasFill(v.fill) ? readableTextOn(base, v.fill) : base;
+    const style = tableCellStyle(v, r, grid.header);
     this.editing = true;
     this.editId = id;
+    this.editPageId = store.currentPageId();
     this.events.onEditText?.({
       id,
-      x: rect.x,
-      y: rect.y,
+      x: tl.x,
+      y: tl.y,
       w: rect.w,
       h: rect.h,
       text: grid.cells[r * grid.cols + c] ?? '',
@@ -2047,13 +2283,14 @@ export class Engine {
       color,
       type: 'table',
       centered: false,
-      bold: false,
-      italic: false,
-      underline: false,
-      strike: false,
-      textAlign: 'left',
+      bold: style.bold,
+      italic: style.italic,
+      underline: style.underline,
+      strike: style.strike,
+      textAlign: style.textAlign,
       highlight: false,
       tableCell: { row: r, col: c },
+      rotation: shapeRotation(v),
     });
   }
 
@@ -2079,6 +2316,7 @@ export class Engine {
   commitTableCell(id: string, row: number, col: number, text: string): void {
     this.editing = false;
     this.editId = null;
+    this.editPageId = null;
     const v = this.views.get(id);
     if (!v || v.type !== 'table') return;
     const grid = tableGrid(v);
@@ -2101,6 +2339,37 @@ export class Engine {
     };
   }
 
+  /** Remap glued riders through a table's old→new local frame, then patch the table. */
+  private patchTableStructure(
+    id: string,
+    tablePatch: Partial<ShapeView>,
+    mapLocal: (lx: number, ly: number) => { x: number; y: number }
+  ): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table') return;
+    const orig = { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation };
+    const next = {
+      x: tablePatch.x ?? v.x,
+      y: tablePatch.y ?? v.y,
+      w: tablePatch.w ?? v.w,
+      h: tablePatch.h ?? v.h,
+      rotation: v.rotation,
+    };
+    const batch: Array<[string, Partial<ShapeView>]> = [[id, tablePatch]];
+    const moved = new Set<string>([id]);
+    for (const rid of hostRiderIds([...this.views.values()], [id])) {
+      const rv = this.views.get(rid);
+      if (!rv || rv.locked) continue;
+      const mapped = mapShapeThroughLocalMap(rv, orig, next, mapLocal, 1);
+      if (!mapped) continue;
+      batch.push([rid, mapped]);
+      moved.add(rid);
+    }
+    store.patchShapes(batch);
+    this.updateConnectedArrows(moved);
+    this.dirty = true;
+  }
+
   /** Insert a row: the table grows by one donor-height row (no cell shrinking). */
   tableInsertRow(id: string, at?: number): void {
     const v = this.views.get(id);
@@ -2116,8 +2385,10 @@ export class Engine {
     abs.splice(row, 0, donorH);
     const total = v.h + donorH;
     this.tableActive.set(id, { r: row, c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows + 1, cells, rowH: abs.map((a) => a / total), h: total });
-    this.dirty = true;
+    this.patchTableStructure(id, { rows: grid.rows + 1, cells, rowH: abs.map((a) => a / total), h: total }, (lx, ly) => {
+      const idx = tableAxisIndex(grid.rowH, v.h ? ly / v.h : 0);
+      return { x: lx, y: idx >= row ? ly + donorH : ly };
+    });
   }
 
   /** Insert a column: the table grows by one donor-width column. */
@@ -2138,8 +2409,10 @@ export class Engine {
     abs.splice(col, 0, donorW);
     const total = v.w + donorW;
     this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: col });
-    store.patchShape(id, { cols: grid.cols + 1, cells, colW: abs.map((a) => a / total), w: total });
-    this.dirty = true;
+    this.patchTableStructure(id, { cols: grid.cols + 1, cells, colW: abs.map((a) => a / total), w: total }, (lx, ly) => {
+      const idx = tableAxisIndex(grid.colW, v.w ? lx / v.w : 0);
+      return { x: idx >= col ? lx + donorW : lx, y: ly };
+    });
   }
 
   /** Delete a row: the table shrinks by the removed height. */
@@ -2156,8 +2429,10 @@ export class Engine {
       .filter((_, i) => i !== row)
       .map((f) => (f * v.h) / total);
     this.tableActive.set(id, { r: Math.min(row, grid.rows - 2), c: this.tableActiveCell(id).c });
-    store.patchShape(id, { rows: grid.rows - 1, cells, rowH: fracs, h: total });
-    this.dirty = true;
+    this.patchTableStructure(id, { rows: grid.rows - 1, cells, rowH: fracs, h: total }, (lx, ly) => {
+      const idx = tableAxisIndex(grid.rowH, v.h ? ly / v.h : 0);
+      return { x: lx, y: idx > row ? ly - removedH : ly };
+    });
   }
 
   /** Delete a column: the table shrinks by the removed width. */
@@ -2174,8 +2449,10 @@ export class Engine {
       .filter((_, i) => i !== col)
       .map((f) => (f * v.w) / total);
     this.tableActive.set(id, { r: this.tableActiveCell(id).r, c: Math.min(col, grid.cols - 2) });
-    store.patchShape(id, { cols: grid.cols - 1, cells, colW: fracs, w: total });
-    this.dirty = true;
+    this.patchTableStructure(id, { cols: grid.cols - 1, cells, colW: fracs, w: total }, (lx, ly) => {
+      const idx = tableAxisIndex(grid.colW, v.w ? lx / v.w : 0);
+      return { x: idx > col ? lx - removedW : lx, y: ly };
+    });
   }
 
   tableToggleHeader(id: string): void {
@@ -2185,30 +2462,33 @@ export class Engine {
     this.dirty = true;
   }
 
-  /** [+]/[−] pills around the single selected table (push/pop row / column at the end). */
+  /** [+]/[−] pills around the single selected table (push/pop row / column at the end). Local frame. */
   private tablePlusPills(
     v: ShapeView
-  ): Array<{ kind: 'row' | 'col' | 'delRow' | 'delCol'; x: number; y: number; r: number }> {
+  ): Array<{ kind: 'row' | 'col' | 'delRow' | 'delCol'; lx: number; ly: number; r: number }> {
     const s = 1 / this.camera.zoom;
-    const cx = v.x + v.w / 2;
-    const cy = v.y + v.h / 2;
+    const out = TABLE_PILL_OUT * s;
+    const split = TABLE_PILL_SPLIT * s;
+    const r = TABLE_PILL_R * s;
     return [
-      { kind: 'col', x: v.x + v.w + 16 * s, y: cy - 14 * s, r: 10 * s },
-      { kind: 'delCol', x: v.x + v.w + 16 * s, y: cy + 14 * s, r: 10 * s },
-      { kind: 'row', x: cx - 14 * s, y: v.y + v.h + 16 * s, r: 10 * s },
-      { kind: 'delRow', x: cx + 14 * s, y: v.y + v.h + 16 * s, r: 10 * s },
+      { kind: 'col', lx: v.w + out, ly: v.h / 2 - split, r },
+      { kind: 'delCol', lx: v.w + out, ly: v.h / 2 + split, r },
+      { kind: 'row', lx: v.w / 2 - split, ly: v.h + out, r },
+      { kind: 'delRow', lx: v.w / 2 + split, ly: v.h + out, r },
     ];
   }
 
-  private hitTablePlus(wx: number, wy: number): { id: string; kind: 'row' | 'col' | 'delRow' | 'delCol' } | null {
-    if (this.editing || this.active !== 'select' || this.override) return null;
+  /** Hit the selected table's [+]/[−] chrome (add must not share a disk with the east port). */
+  hitTablePlus(wx: number, wy: number): { id: string; kind: 'row' | 'col' | 'delRow' | 'delCol' } | null {
+    if (this.active !== 'select' || this.override) return null;
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return null;
     const slop = 4 / this.camera.zoom;
     for (const p of this.tablePlusPills(v)) {
-      if (Math.hypot(wx - p.x, wy - p.y) <= p.r + slop) return { id, kind: p.kind };
+      const world = localToWorld(v, p.lx, p.ly);
+      if (Math.hypot(wx - world.x, wy - world.y) <= p.r + slop) return { id, kind: p.kind };
     }
     return null;
   }
@@ -2223,18 +2503,18 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.type !== 'table' || v.locked) return null;
     const g = tableGrid(v);
-    const p = shapeRotation(v) ? worldToLocal(v, wx, wy) : { x: wx, y: wy };
+    const p = worldToLocal(v, wx, wy);
     const slop = 6 / this.camera.zoom;
-    if (p.y < v.y - slop || p.y > v.y + v.h + slop || p.x < v.x - slop || p.x > v.x + v.w + slop) return null;
+    if (p.y < -slop || p.y > v.h + slop || p.x < -slop || p.x > v.w + slop) return null;
     let acc = 0;
     for (let i = 1; i < g.cols; i++) {
-      acc += g.colW[i - 1];
-      if (Math.abs(p.x - (v.x + acc * v.w)) <= slop) return { shapeId: id, kind: 'col', index: i };
+      acc += g.colW[i - 1]!;
+      if (Math.abs(p.x - acc * v.w) <= slop) return { shapeId: id, kind: 'col', index: i };
     }
     acc = 0;
     for (let i = 1; i < g.rows; i++) {
-      acc += g.rowH[i - 1];
-      if (Math.abs(p.y - (v.y + acc * v.h)) <= slop) return { shapeId: id, kind: 'row', index: i };
+      acc += g.rowH[i - 1]!;
+      if (Math.abs(p.y - acc * v.h) <= slop) return { shapeId: id, kind: 'row', index: i };
     }
     return null;
   }
@@ -2247,11 +2527,12 @@ export class Engine {
     const fmt = settings.text;
     this.editing = true;
     this.editId = null;
+    this.editPageId = store.currentPageId();
     this.events.onEditText?.({
       id: null,
       x,
       y,
-      w: 240,
+      w: TEXT_TOOL_WRAP_W,
       h: 30,
       text: '',
       fontSize,
@@ -2268,45 +2549,85 @@ export class Engine {
   }
 
   cancelTextEdit(): void {
+    const id = this.editId;
     this.editing = false;
     this.editId = null;
+    this.editPageId = null;
+    if (id) this.remeasureTextShapes([id]);
   }
 
   openGraphEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.type !== 'graph') return;
+    if (!v || v.type !== 'graph' || v.locked) return;
     this.editing = true;
+    this.graphEditId = id;
+    this.graphEditOrig = v.expr ?? 'sin(x)';
     store.beginGesture();
+    const bottomLeft = localToWorld(v, 0, v.h);
     this.events.onEditGraph?.({
       id,
-      x: v.x,
-      y: v.y,
+      x: bottomLeft.x,
+      y: bottomLeft.y,
       w: v.w,
       h: v.h,
       expr: v.expr ?? 'sin(x)',
     });
   }
 
+  /** Write the locally previewed formula into the doc (export / clone / copy). */
+  commitOpenGraphEditor(): boolean {
+    const id = this.graphEditId;
+    if (!id) return false;
+    const live = this.views.get(id);
+    this.commitGraph(id, live?.expr ?? this.graphEditOrig);
+    this.events.onEditGraph?.(null);
+    return true;
+  }
+
   commitGraph(id: string, expr: string): void {
+    if (this.graphEditId !== id) return;
+    const live = this.views.get(id);
     this.editing = false;
-    store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    this.graphEditId = null;
+    this.graphEditOrig = '';
+    if (live && !live.locked) {
+      store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    }
     store.endGesture();
     this.dirty = true;
   }
 
   commitGraphPreview(id: string, expr: string): void {
-    store.patchShape(id, { expr: expr.trim() || 'sin(x)' });
+    if (this.graphEditId !== id) return;
+    const live = this.views.get(id);
+    if (!live || live.locked) return;
+    // Local paint only — a doc write would be undoable and would leak a cancelled
+    // formula back in on Ctrl+Z. Remotes see the curve on commit.
+    this.views.set(id, { ...live, expr: expr.trim() || 'sin(x)' });
     this.dirty = true;
   }
 
   cancelGraphEditor(): void {
+    if (this.graphEditId) {
+      const live = this.views.get(this.graphEditId);
+      if (live) this.views.set(this.graphEditId, { ...live, expr: this.graphEditOrig || 'sin(x)' });
+    }
+    this.graphEditId = null;
+    this.graphEditOrig = '';
     this.editing = false;
     store.endGesture();
+    this.dirty = true;
   }
 
   commitText(id: string | null, text: string, target: EditTarget, richHtml?: string): void {
+    if (target.tableCell && id) {
+      this.commitTableCell(id, target.tableCell.row, target.tableCell.col, text);
+      return;
+    }
     this.editing = false;
     this.editId = null;
+    const pageId = this.editPageId;
+    this.editPageId = null;
     // ponytail: stored color never mutates — display adapts per viewer paper
     const color = target.color;
     const baseStyle = {
@@ -2344,8 +2665,10 @@ export class Engine {
         strike: target.strike || undefined,
         textAlign: target.textAlign !== 'left' ? target.textAlign : undefined,
         highlight: target.highlight || undefined,
-      });
-      const size = this.measureText(trimmed, target.fontSize, target);
+      }, pageId ?? undefined);
+      const fontSize = target.fontSize ?? TEXT_FONT;
+      const wrapW = Math.max(target.w || TEXT_TOOL_WRAP_W, fontSize * 2);
+      const size = this.measureTextWrapped(trimmed, fontSize, wrapW, measureStyleFromSpans(spans, target));
       store.patchShape(newId, { w: size.w, h: size.h });
       this.setSelection([]);
     } else {
@@ -2357,8 +2680,8 @@ export class Engine {
         return;
       }
       const patch: Partial<ShapeView> = {
-        text: plain,
-        richHtml: storeRich ?? '',
+        text: v.type === 'frame' ? frameTitleLine(plain) : plain,
+        richHtml: v.type === 'frame' ? '' : storeRich ?? '',
         // ponytail: persist the size the overlay edited with — shapes created
         // before fontSize existed (or imported) would otherwise drift from it.
         ...(target.fontSize !== undefined ? { fontSize: target.fontSize } : {}),
@@ -2371,12 +2694,16 @@ export class Engine {
         highlight: target.highlight,
       };
       if (v.type === 'text') {
-        // keep the user's frame width; recompute height from wrapped lines
+        // keep the user's frame width; recompute height from wrapped lines.
+        // Keyboard B/I/U updates the HTML without flipping target.bold — wrap
+        // from the rich spans so fully bolded text is not measured as regular.
+        const fontSize = target.fontSize ?? v.fontSize ?? TEXT_FONT;
+        const measure = measureStyleFromSpans(spans, target);
         const size = this.measureTextWrapped(
           plain,
-          v.fontSize ?? TEXT_FONT,
-          Math.max(v.w, (v.fontSize ?? TEXT_FONT) * 2),
-          { bold: target.bold, italic: target.italic }
+          fontSize,
+          Math.max(v.w, fontSize * 2),
+          { bold: measure.bold, italic: measure.italic }
         );
         patch.w = Math.max(v.w, size.w);
         patch.h = size.h;
@@ -2397,7 +2724,7 @@ export class Engine {
     for (const line of lines) {
       maxW = Math.max(maxW, measureMixedLine(this.ctx, line, fontSize));
     }
-    return { w: maxW + 4, h: lines.length * fontSize * 1.3 };
+    return { w: maxW + 4, h: lines.length * fontSize * TEXT_LINE_HEIGHT };
   }
 
   /** Height of `text` when wrapped to `maxW`, plus the widest wrapped line. */
@@ -2408,42 +2735,48 @@ export class Engine {
     fmt: { bold?: boolean; italic?: boolean } = {}
   ): { w: number; h: number } {
     this.ctx.font = boardFont(fontSize, fmt);
-    const lines: string[] = [];
-    for (const raw of text.split('\n')) {
-      if (!raw) {
-        lines.push('');
-        continue;
-      }
-      let line = '';
-      for (const word of raw.split(/\s+/)) {
-        const test = line ? line + ' ' + word : word;
-        if (line && measureMixedLine(this.ctx, test, fontSize) > maxW) {
-          lines.push(line);
-          line = word;
-        } else {
-          line = test;
-        }
-      }
-      if (line) lines.push(line);
-    }
+    const measure = (s: string) => measureMixedLine(this.ctx, s, fontSize);
+    const lines = wrapLinesByWidth(text, maxW, measure);
     let w = 0;
-    for (const line of lines) w = Math.max(w, measureMixedLine(this.ctx, line, fontSize));
-    return { w: w + 4, h: lines.length * fontSize * 1.3 };
+    for (const line of lines) w = Math.max(w, measure(line));
+    return { w: w + 4, h: Math.max(1, lines.length) * fontSize * TEXT_LINE_HEIGHT };
   }
 
   /** Reflow bounds after font / wrap changes on existing text shapes. */
-  remeasureTextShapes(ids: string[]): void {
+  remeasureTextShapes(ids: string[], recordUndo = true): void {
+    const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const id of ids) {
       const v = this.views.get(id);
       if (!v || v.type !== 'text') continue;
       const fontSize = v.fontSize ?? TEXT_FONT;
-      const size = this.measureTextWrapped(v.text ?? '', fontSize, Math.max(v.w, fontSize * 2), {
+      const spans = parseStoredRich(v.text ?? '', v.richHtml, {
         bold: v.bold,
         italic: v.italic,
+        underline: v.underline,
+        strike: v.strike,
+        highlight: v.highlight,
+        color: v.textColor,
       });
-      store.patchShape(id, { w: Math.max(v.w, size.w), h: size.h });
+      const measure = measureStyleFromSpans(spans, v);
+      const size = this.measureTextWrapped(v.text ?? '', fontSize, Math.max(v.w, fontSize * 2), {
+        bold: measure.bold,
+        italic: measure.italic,
+      });
+      const nextW = Math.max(v.w, size.w);
+      const nextH = size.h;
+      if (Math.abs(nextW - v.w) < 0.51 && Math.abs(nextH - v.h) < 0.51) continue;
+      patches.push([id, { w: nextW, h: nextH }]);
+    }
+    if (patches.length) {
+      if (recordUndo) store.patchShapes(patches);
+      else store.patchShapesUntracked(patches);
     }
     this.dirty = true;
+  }
+
+  /** After undo/redo: reflow text to the restored font without adding another undo step. */
+  remeasureAfterHistory(): void {
+    this.remeasureTextShapes([...this.views.keys()], false);
   }
 
   /** World point under a client (viewport) coordinate — used by App file drops. */
@@ -2473,20 +2806,6 @@ export class Engine {
         const m = store.board.get(key);
         if (m) {
           const v = { ...store.readShape(m), id: key };
-          // for connected arrows, recompute points from current port positions if needed
-          if (v.type === 'arrow' && v.fromId && v.toId) {
-            const from = this.views.get(v.fromId) ?? (store.board.has(v.fromId) ? store.readShape(store.board.get(v.fromId)!) : null);
-            const to = this.views.get(v.toId) ?? (store.board.has(v.toId) ? store.readShape(store.board.get(v.toId)!) : null);
-            // if we have both endpoints, ensure points reflect port positions (in case observer fired before move)
-            if (from && to) {
-              const a = portPos(from as ShapeView, (v.fromPort as PortId) || 'e', 0);
-              const b = portPos(to as ShapeView, (v.toPort as PortId) || 'w', 0);
-              // keep stored points in sync if needed (will be patched via updateConnectedArrows on move, but ensure here)
-              v.points = [a.x, a.y, b.x, b.y];
-              const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
-              v.x = minX; v.y = minY; v.w = maxX - minX; v.h = maxY - minY;
-            }
-          }
           this.views.set(key, v);
           this.grid.upsert(key, this.spatialBox(v));
           this.attachShape(key, m);
@@ -2582,12 +2901,15 @@ export class Engine {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.pointers.size >= 2) {
+      this.abortConnecting();
       this.cancelToolDrag();
       this.pointerDown = false;
+      this.toolArmed = false;
       this.updateGesture();
       return;
     }
     this.pointerDown = true;
+    this.toolArmed = false;
     if (this.exportPick) {
       if (e.button === 0) {
         const p = this.pointerInfo(e);
@@ -2600,10 +2922,12 @@ export class Engine {
       const p = this.pointerInfo(e);
       const grabbed = this.cropHitHandle(p.screen.x, p.screen.y);
       const f = this.crop.full;
+      const lp = this.cropWorldToBox(p.world.x, p.world.y);
+      const eps = 1e-4;
       const farOutside =
         !grabbed &&
         e.button === 0 &&
-        (p.world.x < f.x || p.world.x > f.x + f.w || p.world.y < f.y || p.world.y > f.y + f.h);
+        (lp.x < f.x - eps || lp.x > f.x + f.w + eps || lp.y < f.y - eps || lp.y > f.y + f.h + eps);
       if (farOutside) {
         this.cancelCrop();
         return;
@@ -2619,23 +2943,28 @@ export class Engine {
       e.preventDefault();
       return;
     }
-    if (this.editing) return;
     try {
       const info = this.pointerInfo(e);
       if (e.button === 0) {
         const plus = this.hitTablePlus(info.world.x, info.world.y);
         if (plus) {
+          if (this.editing) this.events.onRequestCommitText?.();
           const gv = this.views.get(plus.id);
           const grid = gv && gv.type === 'table' ? tableGrid(gv) : null;
           if (plus.kind === 'row') this.tableInsertRow(plus.id, grid ? grid.rows : undefined);
           else if (plus.kind === 'col') this.tableInsertCol(plus.id, grid ? grid.cols : undefined);
           else if (plus.kind === 'delRow') this.tableRemoveRow(plus.id, grid ? grid.rows - 1 : undefined);
           else this.tableRemoveCol(plus.id, grid ? grid.cols - 1 : undefined);
+          this.pointerDown = false;
           this.dirty = true;
           return;
         }
       }
-      if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) return;
+      if (this.editing) return;
+      if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) {
+        this.pointerDown = false;
+        return;
+      }
       // Rotate knob wins over connect ports (north port sits near the stem).
       const onRotate = this.hitRotateHandle(info.screen.x, info.screen.y);
       const onHandle = onRotate ? null : this.hitHandle(info.screen.x, info.screen.y);
@@ -2651,6 +2980,7 @@ export class Engine {
       }
       let target = this.tool;
       this.dragTool = target;
+      this.toolArmed = true;
       target.onDown(this, info);
     } catch (err) {
       console.error('[review] pointerdown error:', err);
@@ -2691,11 +3021,12 @@ export class Engine {
           this.setCursor(CROP_CURSORS[h]);
         } else {
           const c = this.crop;
+          const lp = this.cropWorldToBox(p.world.x, p.world.y);
           const inside =
-            p.world.x >= c.box.x &&
-            p.world.x <= c.box.x + c.box.w &&
-            p.world.y >= c.box.y &&
-            p.world.y <= c.box.y + c.box.h;
+            lp.x >= c.box.x &&
+            lp.x <= c.box.x + c.box.w &&
+            lp.y >= c.box.y &&
+            lp.y <= c.box.y + c.box.h;
           this.setCursor(inside ? 'move' : 'default');
         }
       }
@@ -2734,8 +3065,12 @@ export class Engine {
     }
     if (!this.pointerDown && !this.connecting && this.selection.size) {
       const info = this.pointerInfo(e);
-      // Keep connect ports quiet while the pointer is on resize or rotate chrome.
-      if (this.hitRotateHandle(info.screen.x, info.screen.y) || this.hitHandle(info.screen.x, info.screen.y)) {
+      // Keep connect ports quiet while the pointer is on resize, rotate, or table [+]/[−].
+      if (
+        this.hitTablePlus(info.world.x, info.world.y) ||
+        this.hitRotateHandle(info.screen.x, info.screen.y) ||
+        this.hitHandle(info.screen.x, info.screen.y)
+      ) {
         if (this.hoverPort) {
           this.hoverPort = null;
           this.dirty = true;
@@ -2769,7 +3104,10 @@ export class Engine {
 
   private onPointerUp = (e: PointerEvent): void => {
     this.pointers.delete(e.pointerId);
-    if (this.pointers.size < 2) this.gesture = null;
+    if (this.pointers.size < 2) {
+      this.gesture = null;
+      if (!this.panDrag) this.camera.instant = false;
+    }
     this.pointerDown = false;
     if (this.connecting) {
       const info = this.pointerInfo(e);
@@ -2801,10 +3139,24 @@ export class Engine {
         const fromV = this.views.get(fromId);
         const toV = this.views.get(toId);
         if (fromV && toV) {
-          const a = portPos(fromV, fromPort, 0);
-          const b = portPos(toV, toPort, 0);
-          const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
-          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: settings.shape.strokeWidth, arrowHead: settings.shape.arrowHead, points: [a.x, a.y, b.x, b.y], fromId, fromPort, toId, toPort } as ShapeView);
+          const geom = connectedArrowGeometry(fromV, toV, fromPort, toPort, {
+            strokeWidth: settings.shape.strokeWidth,
+            arrowHead: settings.shape.arrowHead,
+          });
+          const draft = {
+            type: 'arrow' as const,
+            ...geom,
+            fill: 'transparent',
+            stroke: settings.shape.stroke,
+            strokeWidth: settings.shape.strokeWidth,
+            arrowHead: settings.shape.arrowHead,
+            fromId,
+            fromPort,
+            toId,
+            toPort,
+          };
+          const box = arrowBounds(draft as ShapeView);
+          const id = store.addShape({ ...draft, ...box } as ShapeView);
           this.setSelection([id]);
         }
       } else {
@@ -2812,8 +3164,20 @@ export class Engine {
         if (fromV) {
           const a = portPos(fromV, fromPort, 0);
           const b = info.world;
-          const pad = 6; const minX = Math.min(a.x, b.x) - pad; const minY = Math.min(a.y, b.y) - pad; const maxX = Math.max(a.x, b.x) + pad; const maxY = Math.max(a.y, b.y) + pad;
-          const id = store.addShape({ type: 'arrow', x: minX, y: minY, w: maxX - minX, h: maxY - minY, fill: 'transparent', stroke: settings.shape.stroke, strokeWidth: settings.shape.strokeWidth, arrowHead: settings.shape.arrowHead, points: [a.x, a.y, b.x, b.y] } as ShapeView);
+          const draft = {
+            type: 'arrow' as const,
+            fill: 'transparent',
+            stroke: settings.shape.stroke,
+            strokeWidth: settings.shape.strokeWidth,
+            arrowHead: settings.shape.arrowHead,
+            points: [a.x, a.y, b.x, b.y],
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          };
+          const box = arrowBounds(draft as ShapeView);
+          const id = store.addShape({ ...draft, ...box } as ShapeView);
           this.setSelection([id]);
         }
       }
@@ -2856,7 +3220,12 @@ export class Engine {
       }
       return;
     }
-    if (this.editing) return;
+    if (this.editing) {
+      this.toolArmed = false;
+      return;
+    }
+    if (!this.toolArmed) return;
+    this.toolArmed = false;
     try {
       this.dragTool.onUp(this, this.pointerInfo(e));
     } catch (err) {
@@ -2924,6 +3293,58 @@ export class Engine {
     this.dragTool.cancel(this);
   }
 
+  /** Abort connector + in-progress tool pointer without touching crop / export pick. */
+  private abortConnecting(): void {
+    if (!this.connecting) return;
+    this.connecting = null;
+    this.hoverPort = null;
+    this.setCursor(this.toolCursor());
+  }
+
+  private abortPointerGesture(): void {
+    this.abortConnecting();
+    if (this.pointerDown) {
+      this.cancelToolDrag();
+      this.pointerDown = false;
+      this.toolArmed = false;
+      this.pointers.clear();
+      this.gesture = null;
+    }
+  }
+
+  /** Palm reject / capture loss must not commit a connector or export region. */
+  private onPointerCancel = (e: PointerEvent): void => {
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size < 2) {
+      this.gesture = null;
+      if (!this.panDrag) this.camera.instant = false;
+    }
+    this.abortConnecting();
+    if (this.pointerDown) {
+      this.cancelToolDrag();
+      this.pointerDown = false;
+      this.toolArmed = false;
+    }
+    if (this.exportPick) {
+      this.exportAnchor = null;
+      this.exportRect = null;
+    }
+    if (this.panDrag) {
+      this.panDrag = false;
+      this.camera.instant = false;
+    }
+    this.setCursor(this.toolCursor());
+    this.dirty = true;
+  };
+
+  /** Drop crop, export pick, connector, and in-progress tool without committing. */
+  private cancelTransientUi(): void {
+    if (this.crop) this.cancelCrop();
+    if (this.exportPick) this.cancelExportPick();
+    this.abortPointerGesture();
+    this.dirty = true;
+  }
+
   private updateGesture(): void {
     const pts = [...this.pointers.values()];
     if (pts.length < 2) return;
@@ -2934,6 +3355,7 @@ export class Engine {
     const mx = mid.x - rect.left;
     const my = mid.y - rect.top;
     if (this.gesture) {
+      this.camera.instant = true;
       if (this.gesture.dist > 1 && dist > 1) {
         this.camera.zoomAt(mx, my, this.w / 2, this.h / 2, dist / this.gesture.dist);
       }
@@ -2950,11 +3372,16 @@ export class Engine {
     this.dirty = true;
   }
 
+  noteEraseAt(world: { x: number; y: number }): void {
+    this.lastEraseAt = world;
+  }
+
   commitErase(): void {
     if (settings.eraser.mode === 'partial') this.applyPartialErase();
     else if (this.erasing.size) store.removeShapes([...this.erasing]);
     this.erasing = new Set();
     this.partialErase = new Map();
+    this.lastEraseAt = null;
     this.dirty = true;
   }
 
@@ -2973,18 +3400,24 @@ export class Engine {
           store.removeShapes([id]);
           continue;
         }
-        // Two-point straight line: mid-hit marks both ends — split around brush center.
+        // Two-point straight line: mid-hit marks both ends — split around the brush.
         if (pts.length === 4 && indices.has(0) && indices.has(1)) {
           const ax = pts[0];
           const ay = pts[1];
           const bx = pts[2];
           const by = pts[3];
-          const mx = (ax + bx) / 2;
-          const my = (ay + by) / 2;
-          const gap = Math.max(v.strokeWidth, 8);
           const len = Math.hypot(bx - ax, by - ay) || 1;
           const ux = (bx - ax) / len;
           const uy = (by - ay) / len;
+          let mx = (ax + bx) / 2;
+          let my = (ay + by) / 2;
+          const brush = this.lastEraseAt;
+          if (brush) {
+            const t = Math.max(0, Math.min(1, ((brush.x - ax) * ux + (brush.y - ay) * uy) / len));
+            mx = ax + ux * t * len;
+            my = ay + uy * t * len;
+          }
+          const gap = Math.max(v.strokeWidth, 8);
           const a2x = mx - ux * gap;
           const a2y = my - uy * gap;
           const b1x = mx + ux * gap;
@@ -2997,21 +3430,23 @@ export class Engine {
           };
           const seg0 = [ax, ay, a2x, a2y];
           const seg1 = [b1x, b1y, bx, by];
-          store.patchShape(id, { points: seg0, ...this.penBox(seg0, v.strokeWidth) });
-          store.addShape({ type: 'pen', ...style, points: seg1, ...this.penBox(seg1, v.strokeWidth) });
+          const p0 = v.pressures?.[0];
+          const p1 = v.pressures?.[1] ?? p0;
+          store.patchShape(id, {
+            points: seg0,
+            pressures: p0 !== undefined ? [p0, p0] : [],
+            ...this.penBox(seg0, v.strokeWidth),
+          });
+          store.addShape({
+            type: 'pen',
+            ...style,
+            points: seg1,
+            pressures: p1 !== undefined ? [p1, p1] : undefined,
+            ...this.penBox(seg1, v.strokeWidth),
+          });
           continue;
         }
-        const segments: number[][] = [];
-        let cur: number[] = [];
-        for (let i = 0; i < pts.length; i += 2) {
-          if (indices.has(i / 2)) {
-            if (cur.length >= 2) segments.push(cur);
-            cur = [];
-          } else {
-            cur.push(pts[i], pts[i + 1]);
-          }
-        }
-        if (cur.length >= 2) segments.push(cur);
+        const segments = splitStrokeByErasedIndices(pts, v.pressures, indices);
         if (!segments.length) {
           store.removeShapes([id]);
           continue;
@@ -3022,13 +3457,18 @@ export class Engine {
           strokeWidth: v.strokeWidth,
           alpha: v.alpha,
         };
-        store.patchShape(id, { points: segments[0], ...this.penBox(segments[0], v.strokeWidth) });
+        store.patchShape(id, {
+          points: segments[0]!.points,
+          pressures: segments[0]!.pressures ?? [],
+          ...this.penBox(segments[0]!.points, v.strokeWidth),
+        });
         for (let s = 1; s < segments.length; s++) {
           store.addShape({
             type: 'pen',
             ...style,
-            points: segments[s],
-            ...this.penBox(segments[s], v.strokeWidth),
+            points: segments[s]!.points,
+            pressures: segments[s]!.pressures,
+            ...this.penBox(segments[s]!.points, v.strokeWidth),
           });
         }
       }
@@ -3065,9 +3505,48 @@ export class Engine {
     for (const id of this.grid.query({ x: minX, y: minY, w: maxX - minX, h: maxY - minY })) {
       if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
-      if (v && pointInPolygon(v.x + v.w / 2, v.y + v.h / 2, pts)) ids.push(id);
+      if (!v) continue;
+      if (v.type === 'pen' && v.points && v.points.length >= 2) {
+        if (polylineHitsPolygon(v.points, pts)) ids.push(id);
+        continue;
+      }
+      if (v.type === 'arrow') {
+        const poly = arrowHitPolyline(v);
+        if (poly.length >= 2 && polylineHitsPolygon(poly, pts)) ids.push(id);
+        continue;
+      }
+      const probes = shapeLassoProbes(v);
+      if (probes.some((p) => pointInPolygon(p.x, p.y, pts))) {
+        ids.push(id);
+        continue;
+      }
+      if (pts.some((p) => pointInShape(v, p.x, p.y))) ids.push(id);
     }
     return ids;
+  }
+
+  private cropHost(): ShapeView | null {
+    return this.crop ? this.views.get(this.crop.id) ?? null : null;
+  }
+
+  /** Pointer in the crop box's unrotated frame (same space as `crop.box`). */
+  private cropWorldToBox(wx: number, wy: number): { x: number; y: number } {
+    const v = this.cropHost();
+    if (!v || !shapeRotation(v)) return { x: wx, y: wy };
+    const p = worldToLocal(v, wx, wy);
+    return { x: v.x + p.x, y: v.y + p.y };
+  }
+
+  private cropLocalDelta(from: { x: number; y: number }, to: { x: number; y: number }): { dx: number; dy: number } {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const v = this.cropHost();
+    const rot = v ? shapeRotation(v) : 0;
+    if (!rot) return { dx, dy };
+    const rad = -degToRad(rot);
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return { dx: dx * cos - dy * sin, dy: dx * sin + dy * cos };
   }
 
   private cropPointerDown(e: PointerEvent): void {
@@ -3075,9 +3554,10 @@ export class Engine {
     if (!c) return;
     const p = this.pointerInfo(e);
     const h = this.cropHitHandle(p.screen.x, p.screen.y);
+    const lp = this.cropWorldToBox(p.world.x, p.world.y);
     if (h) {
       c.mode = h;
-    } else if (p.world.x >= c.box.x && p.world.x <= c.box.x + c.box.w && p.world.y >= c.box.y && p.world.y <= c.box.y + c.box.h) {
+    } else if (lp.x >= c.box.x && lp.x <= c.box.x + c.box.w && lp.y >= c.box.y && lp.y <= c.box.y + c.box.h) {
       c.mode = 'move';
     } else {
       return;
@@ -3096,17 +3576,14 @@ export class Engine {
     const maxX = c.full.x + c.full.w;
     const maxY = c.full.y + c.full.h;
     const minSize = 8 / this.camera.zoom;
+    const { dx, dy } = this.cropLocalDelta(c.start, p.world);
     if (c.mode === 'move') {
-      const dx = p.world.x - c.start.x;
-      const dy = p.world.y - c.start.y;
       let x = c.origBox.x + dx;
       let y = c.origBox.y + dy;
       x = Math.max(minX, Math.min(x, maxX - c.origBox.w));
       y = Math.max(minY, Math.min(y, maxY - c.origBox.h));
       c.box = { x, y, w: c.origBox.w, h: c.origBox.h };
     } else {
-      const dx = p.world.x - c.start.x;
-      const dy = p.world.y - c.start.y;
       let x = c.origBox.x;
       let y = c.origBox.y;
       let w = c.origBox.w;
@@ -3143,15 +3620,21 @@ export class Engine {
   private cropHitHandle(sx: number, sy: number): HandleId | null {
     const c = this.crop;
     if (!c) return null;
+    const v = this.cropHost();
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
+    const wx = (sx - ox) / z;
+    const wy = (sy - oy) / z;
     let best: HandleId | null = null;
     let bestD = Infinity;
     for (const handle of HANDLES) {
       const [fx, fy] = HANDLE_POS[handle];
-      const hx = (c.box.x + fx * c.box.w) * z + ox;
-      const hy = (c.box.y + fy * c.box.h) * z + oy;
+      const localX = c.box.x - (v?.x ?? 0) + fx * c.box.w;
+      const localY = c.box.y - (v?.y ?? 0) + fy * c.box.h;
+      const world = v ? localToWorld(v, localX, localY) : { x: c.box.x + fx * c.box.w, y: c.box.y + fy * c.box.h };
+      const hx = world.x * z + ox;
+      const hy = world.y * z + oy;
       const d = Math.hypot(hx - sx, hy - sy);
       if (d < bestD) {
         bestD = d;
@@ -3159,19 +3642,19 @@ export class Engine {
       }
     }
     if (bestD <= 22) return best;
-    const bx = c.box.x * z + ox;
-    const by = c.box.y * z + oy;
-    const bw = c.box.w * z;
-    const bh = c.box.h * z;
-    const nearL = Math.abs(sx - bx) <= 16;
-    const nearR = Math.abs(sx - (bx + bw)) <= 16;
-    const nearT = Math.abs(sy - by) <= 16;
-    const nearB = Math.abs(sy - (by + bh)) <= 16;
+    const lp = this.cropWorldToBox(wx, wy);
+    const slop = 16 / z;
+    const nearL = Math.abs(lp.x - c.box.x) <= slop;
+    const nearR = Math.abs(lp.x - (c.box.x + c.box.w)) <= slop;
+    const nearT = Math.abs(lp.y - c.box.y) <= slop;
+    const nearB = Math.abs(lp.y - (c.box.y + c.box.h)) <= slop;
+    const inX = lp.x >= c.box.x - slop && lp.x <= c.box.x + c.box.w + slop;
+    const inY = lp.y >= c.box.y - slop && lp.y <= c.box.y + c.box.h + slop;
     let h = '';
-    if (nearT) h += 'n';
-    else if (nearB) h += 's';
-    if (nearL) h += 'w';
-    else if (nearR) h += 'e';
+    if (nearT && inX) h += 'n';
+    else if (nearB && inX) h += 's';
+    if (nearL && inY) h += 'w';
+    else if (nearR && inY) h += 'e';
     return (h || null) as HandleId | null;
   }
 
@@ -3182,6 +3665,7 @@ export class Engine {
     if (!v) return;
     const s = 1 / this.camera.zoom;
     ctx.save();
+    withShapeRotation(ctx, v, () => {
     const img = getImage(v.src ?? '');
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.globalAlpha = 0.35;
@@ -3227,6 +3711,7 @@ export class Engine {
       ctx.fill();
       ctx.stroke();
     }
+    });
     ctx.restore();
   }
 
@@ -3241,6 +3726,7 @@ export class Engine {
 
   private openContextMenu(e: PointerEvent): void {
     const p = this.pointerInfo(e);
+    this.pasteAt = p.world;
     let id = this.hitTest(p.world.x, p.world.y);
     if (!id) id = this.hitSelectedBounds(p.world.x, p.world.y);
     const sp = this.worldToScreen(p.world.x, p.world.y);
@@ -3261,7 +3747,7 @@ export class Engine {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     const target = e.target;
-    if (target instanceof HTMLElement) {
+    if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement) {
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
     }
@@ -3269,17 +3755,24 @@ export class Engine {
     if (this.crop) {
       if (e.key === 'Escape') {
         e.preventDefault();
-        this.cancelCrop();
+        this.cancelTransientUi();
       } else if (e.key === 'Enter') {
         e.preventDefault();
         this.applyCrop();
       }
       return;
     }
+    if (this.exportPick) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.cancelTransientUi();
+      }
+      return;
+    }
     if (this.editing) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === ' ') {
-      if (target instanceof HTMLElement && target.closest('button, [role="switch"]')) return;
+      if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement && target.closest('button, [role="switch"]')) return;
       e.preventDefault();
       if (!this.override) {
         this.override = 'pan';
@@ -3288,19 +3781,24 @@ export class Engine {
       return;
     }
     if (e.key === 'Escape') {
-      this.setSelection([]);
+      e.preventDefault();
+      const picking = this.exportPick;
+      this.cancelTransientUi();
+      if (!picking) this.setSelection([]);
       return;
     }
     if (mod && e.code === 'KeyZ') {
       e.preventDefault();
       if (e.shiftKey) store.undoManager.redo();
       else store.undoManager.undo();
+      this.remeasureAfterHistory();
       this.events.onSelection?.([...this.selection]);
       return;
     }
     if (mod && e.code === 'KeyY') {
       e.preventDefault();
       store.undoManager.redo();
+      this.remeasureAfterHistory();
       this.events.onSelection?.([...this.selection]);
       return;
     }
@@ -3363,7 +3861,11 @@ export class Engine {
       return;
     }
     if (e.key === 'Enter' && this.selection.size === 1) {
-      this.openTextEditor([...this.selection][0]);
+      const id = [...this.selection][0];
+      const type = this.views.get(id)?.type;
+      if (type === 'graph') this.openGraphEditor(id);
+      else if (type === 'image') this.startCropSelected();
+      else this.openTextEditor(id);
       return;
     }
     if (e.key.startsWith('Arrow') && this.selection.size) {
@@ -3425,11 +3927,35 @@ export class Engine {
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
-    if (e.key === ' ' && this.override === 'pan') {
+    if (e.key === ' ') this.clearSpacePan();
+  };
+
+  /** Space-to-pan and middle-button pan stick if keyup/pointerup never arrives (alt-tab). */
+  private clearSpacePan(): void {
+    if (this.override === 'pan') {
       this.override = null;
       this.setCursor(this.toolCursor());
+      this.dirty = true;
     }
+  }
+
+  private onWindowBlur = (): void => {
+    this.clearHeldPan();
   };
+
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState !== 'visible') this.clearHeldPan();
+  };
+
+  private clearHeldPan(): void {
+    this.clearSpacePan();
+    if (this.panDrag) {
+      this.panDrag = false;
+      this.camera.instant = false;
+      this.setCursor(this.toolCursor());
+      this.dirty = true;
+    }
+  }
 
   private loop = (t: number): void => {
     try {
@@ -3537,11 +4063,13 @@ export class Engine {
     const draw = (v: ShapeView) => {
       // dragged bitmaps paint as placeholders — full image returns on drop
       if ((v.type === 'image' || v.type === 'doc') && this.mediaProxy.has(v.id)) {
-        ctx.fillStyle = v.type === 'doc' ? '#ffffff' : '#2e2e2b';
-        ctx.fillRect(v.x, v.y, v.w, v.h);
-        ctx.strokeStyle = '#454540';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(v.x, v.y, v.w, v.h);
+        withShapeRotation(ctx, v, () => {
+          ctx.fillStyle = v.type === 'doc' ? '#ffffff' : '#2e2e2b';
+          ctx.fillRect(v.x, v.y, v.w, v.h);
+          ctx.strokeStyle = '#454540';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(v.x, v.y, v.w, v.h);
+        });
         return;
       }
       // hide canvas text of the shape being edited — the overlay renders it
@@ -3582,9 +4110,11 @@ export class Engine {
         ctx.strokeStyle = '#c96a62';
         ctx.lineWidth = 2.2 * zInv;
         ctx.setLineDash([7 * zInv, 5 * zInv]);
-        ctx.strokeRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
-        ctx.fillStyle = 'rgba(201,106,98,0.14)';
-        ctx.fillRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
+        withShapeRotation(ctx, v, () => {
+          ctx.strokeRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
+          ctx.fillStyle = 'rgba(201,106,98,0.14)';
+          ctx.fillRect(v.x - 3 * zInv, v.y - 3 * zInv, v.w + 6 * zInv, v.h + 6 * zInv);
+        });
         ctx.restore();
       } else {
         drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
@@ -3989,8 +4519,10 @@ export class Engine {
           // ponytail: tables get FigJam-style [+]/[−] pills (push/pop row / column) + active-cell frame
           if (v.type === 'table') {
             for (const p of this.tablePlusPills(v)) {
+              const px = v.x + p.lx;
+              const py = v.y + p.ly;
               ctx.beginPath();
-              ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+              ctx.arc(px, py, p.r, 0, Math.PI * 2);
               ctx.fillStyle = handleFill;
               ctx.fill();
               ctx.strokeStyle = COLORS.selection;
@@ -4001,11 +4533,11 @@ export class Engine {
               ctx.lineWidth = 2 * s;
               ctx.lineCap = 'round';
               ctx.beginPath();
-              ctx.moveTo(p.x - g, p.y);
-              ctx.lineTo(p.x + g, p.y);
+              ctx.moveTo(px - g, py);
+              ctx.lineTo(px + g, py);
               if (p.kind === 'row' || p.kind === 'col') {
-                ctx.moveTo(p.x, p.y - g);
-                ctx.lineTo(p.x, p.y + g);
+                ctx.moveTo(px, py - g);
+                ctx.lineTo(px, py + g);
               }
               ctx.stroke();
             }
@@ -4125,14 +4657,15 @@ export class Engine {
     ctx.lineJoin = 'round';
     ctx.shadowColor = 'rgba(0,0,0,0.18)';
     ctx.shadowBlur = 4 * s;
-    const fromDir = portDir(this.connecting.fromPort);
+    const fromDir = worldPortDir(this.connecting.fromPort, shapeRotation(fromV));
     const dist = Math.hypot(bx - a.x, by - a.y);
     const off = Math.min(80, dist * 0.35);
     let c1x = a.x + fromDir.x * off, c1y = a.y + fromDir.y * off;
     let c2x = bx, c2y = by;
     let endAng = Math.atan2(by - a.y, bx - a.x);
     if (toPort) {
-      const toDir = portDir(toPort);
+      const hv = this.views.get(this.hoverPort!.shapeId);
+      const toDir = worldPortDir(toPort, hv ? shapeRotation(hv) : 0);
       c2x = bx + toDir.x * off;
       c2y = by + toDir.y * off;
       endAng = Math.atan2(by - c2y, bx - c2x);

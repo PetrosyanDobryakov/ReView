@@ -1,8 +1,8 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, portPos, displayInk, withAlpha, hasFill, type PortId, arrowBendSign } from '../core/shapes';
-import { drawPenStroke, containedIn, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, tableCarries, tableGrid } from '../core/shapes';
+import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, tableGrid, mapAlongTableFractions } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -11,8 +11,18 @@ import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, reanchorRotatedResize, rotatePointsAround, rotatedAabb, shapeRotation, snapRotationDeg, worldToLocal } from '../core/transform';
+import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld } from '../core/transform';
+import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
+
+/** Rebake free-arrow AABB from the painted curve whenever points change. */
+function bakedArrowGeom<T extends { points?: number[] }>(
+  style: Pick<ShapeView, 'type' | 'strokeWidth' | 'arrowHead'>,
+  patch: T
+): T | (T & { x: number; y: number; w: number; h: number }) {
+  if (style.type !== 'arrow' || !patch.points || patch.points.length < 4) return patch;
+  return withArrowVisualBounds(style, patch);
+}
 
 /** Square a drag box around the original anchor (handles upward / leftward Shift draws). */
 function squareFromAnchor(start: { x: number; y: number }, cur: { x: number; y: number }): ShapeBox {
@@ -123,6 +133,10 @@ export class SelectTool extends Tool {
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
+    if (engine.hitTablePlus(p.world.x, p.world.y)) {
+      engine.setCursor('pointer');
+      return;
+    }
     if (engine.hitRotateHandle(p.screen.x, p.screen.y)) {
       engine.setCursor('grab');
       return;
@@ -177,6 +191,7 @@ export class SelectTool extends Tool {
           const vv = engine.views.get(id);
           if (vv) this.originals.set(id, { ...vv, points: vv.points ? [...vv.points] : undefined });
         }
+        this.snapshotRiders(engine);
         const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = 0;
@@ -186,6 +201,7 @@ export class SelectTool extends Tool {
       if (v && !v.locked) {
         this.mode = 'rotate';
         this.originals.set(rotHit, { ...v, points: v.points ? [...v.points] : undefined });
+        this.snapshotRiders(engine);
         const c = { x: v.x + v.w / 2, y: v.y + v.h / 2 };
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = shapeRotation(v);
@@ -202,11 +218,15 @@ export class SelectTool extends Tool {
           const v = engine.views.get(id);
           if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
         }
+        this.snapshotRiders(engine);
         return;
       }
       this.resizing = h;
       const v = engine.views.get(h.shapeId);
-      if (v) this.originals.set(h.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
+      if (v) {
+        this.originals.set(h.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
+      }
+      this.snapshotRiders(engine);
       return;
     }
     // interior table dividers win over move/marquee (single selected table only)
@@ -216,7 +236,7 @@ export class SelectTool extends Tool {
         const v = engine.views.get(div.shapeId);
         if (v && v.type === 'table' && !v.locked) {
           const grid = tableGrid(v);
-          const local = shapeRotation(v) ? worldToLocal(v, p.world.x, p.world.y) : { x: p.world.x, y: p.world.y };
+          const local = worldToLocal(v, p.world.x, p.world.y);
           this.tableDiv = {
             shapeId: div.shapeId,
             kind: div.kind,
@@ -226,6 +246,8 @@ export class SelectTool extends Tool {
             startX: local.x,
             startY: local.y,
           };
+          this.originals.set(div.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
+          this.snapshotRiders(engine);
           this.mode = 'tablediv';
           return;
         }
@@ -256,7 +278,10 @@ export class SelectTool extends Tool {
         if (v) this.originals.set(id, { ...v, points: v.points ? [...v.points] : undefined });
       }
       const canMove = hit ? engine.selection.has(hit) && !this.originals.get(hit)?.locked : engine.selection.size > 0 && [...engine.selection].some((id) => !engine.views.get(id)?.locked);
-      if (canMove) this.mode = 'move';
+      if (canMove) {
+        this.mode = 'move';
+        this.snapshotRiders(engine);
+      }
       else if (!hitTarget) {
         this.mode = 'marquee';
         this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
@@ -281,80 +306,69 @@ export class SelectTool extends Tool {
       const t = this.tableDiv;
       const v = engine.views.get(t.shapeId);
       if (!v || v.type !== 'table') return;
-      const local = shapeRotation(v) ? worldToLocal(v, p.world.x, p.world.y) : { x: p.world.x, y: p.world.y };
+      const local = worldToLocal(v, p.world.x, p.world.y);
       const at = t.kind === 'col' ? local.x : local.y;
       const from = t.kind === 'col' ? t.startX : t.startY;
       const minF = Math.min(0.2, 28 / Math.max(1, t.span));
       const next = shiftTableDivider(t.fracs, t.index, (at - from) / Math.max(1, t.span), minF);
-      store.patchShape(t.shapeId, t.kind === 'col' ? { colW: next } : { rowH: next });
+      const host = this.originals.get(t.shapeId) ?? v;
+      const mapLocal = (lx: number, ly: number) => {
+        if (t.kind === 'col') {
+          const fx = host.w ? lx / host.w : 0;
+          return { x: mapAlongTableFractions(t.fracs, next, fx) * host.w, y: ly };
+        }
+        const fy = host.h ? ly / host.h : 0;
+        return { x: lx, y: mapAlongTableFractions(t.fracs, next, fy) * host.h };
+      };
+      const batch: Array<[string, Partial<ShapeView>]> = [
+        [t.shapeId, t.kind === 'col' ? { colW: next } : { rowH: next }],
+      ];
+      for (const [id, o] of this.stuck) {
+        const mapped = mapShapeThroughLocalMap(o, host, host, mapLocal, 1);
+        if (mapped) batch.push([id, mapped]);
+      }
+      store.patchShapes(batch);
+      engine.updateConnectedArrows(new Set([t.shapeId, ...this.stuck.keys()]));
       return;
     }
     if (this.mode === 'rotate') {
-      // group rotate
+      let pivot: { x: number; y: number };
+      let delta: number;
       if (this.groupOrigBox) {
         const box = this.groupOrigBox;
-        const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
-        const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
-        let deg = ((ang - this.rotateStartAngle) * 180) / Math.PI;
-        deg = snapRotationDeg(deg, Boolean(p.shift) || !readPrefs().rotateSnap);
-        const delta = deg;
-        const patches: Array<[string, Partial<ShapeView>]> = [];
-        for (const [id, o] of this.originals) {
-          if (o.locked) continue;
-          if (o.type === 'pen' || o.type === 'arrow') {
-            const pts = rotatePointsAround(o.points ?? [], c.x, c.y, delta);
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (let i = 0; i < pts.length; i += 2) {
-              minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
-              minY = Math.min(minY, pts[i + 1]); maxY = Math.max(maxY, pts[i + 1]);
-            }
-            const pad = (o.strokeWidth ?? 2) / 2 + 2;
-            patches.push([id, { points: pts, x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, rotation: 0 }]);
-          } else {
-            const cx = o.x + o.w / 2;
-            const cy = o.y + o.h / 2;
-            const dx = cx - c.x;
-            const dy = cy - c.y;
-            const rad = (delta * Math.PI) / 180;
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-            const nx = c.x + dx * cos - dy * sin;
-            const ny = c.y + dx * sin + dy * cos;
-            const curRot = shapeRotation(o);
-            patches.push([id, { x: nx - o.w / 2, y: ny - o.h / 2, rotation: curRot + delta }]);
-          }
-        }
-      if (patches.length) store.patchShapes(patches);
-        return;
-      }
-      const [id, o] = [...this.originals.entries()][0] ?? [];
-      if (!id || !o) return;
-      const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
-      const ang = Math.atan2(p.world.y - c.y, p.world.x - c.x);
-      let deg = this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI;
-      // Soft H/V magnet when prefs.rotateSnap is on; Shift = free.
-      deg = snapRotationDeg(deg, Boolean(p.shift) || !readPrefs().rotateSnap);
-      if (o.type === 'pen' || o.type === 'arrow') {
-        // Bake rotation into points; keep AABB rebuilt from points.
-        const delta = deg - this.rotateOrigDeg;
-        const pts = rotatePointsAround(o.points ?? [], c.x, c.y, delta);
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let i = 0; i < pts.length; i += 2) {
-          minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
-          minY = Math.min(minY, pts[i + 1]); maxY = Math.max(maxY, pts[i + 1]);
-        }
-        const pad = (o.strokeWidth ?? 2) / 2 + 2;
-        store.patchShape(id, {
-          points: pts,
-          x: minX - pad,
-          y: minY - pad,
-          w: maxX - minX + pad * 2,
-          h: maxY - minY + pad * 2,
-          rotation: 0,
-        });
+        pivot = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
+        delta = snapRotationDeg(((ang - this.rotateStartAngle) * 180) / Math.PI, Boolean(p.shift) || !readPrefs().rotateSnap);
       } else {
-        store.patchShape(id, { rotation: deg });
+        const o = [...this.originals.values()][0];
+        if (!o) return;
+        pivot = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+        const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
+        const deg = snapRotationDeg(
+          this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI,
+          Boolean(p.shift) || !readPrefs().rotateSnap
+        );
+        delta = deg - this.rotateOrigDeg;
       }
+      const patches: Array<[string, Partial<ShapeView>]> = [];
+      const rotatingHosts = new Set<string>();
+      for (const [id, o] of [...this.originals, ...this.stuck]) {
+        if (o.locked) continue;
+        if (o.type === 'arrow' && o.fromId && o.toId) continue;
+        rotatingHosts.add(id);
+        patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
+      }
+      const unglue: string[] = [];
+      for (const [id, o] of [...this.originals, ...this.stuck]) {
+        if (o.locked || o.type !== 'arrow' || !o.fromId || !o.toId) continue;
+        if (rotatingHosts.has(o.fromId) || rotatingHosts.has(o.toId)) continue;
+        unglue.push(id);
+        rotatingHosts.add(id);
+        patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
+      }
+      if (patches.length) store.patchShapes(patches);
+      for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
+      engine.updateConnectedArrows(rotatingHosts);
       return;
     }
     if (this.mode === 'move') {
@@ -371,72 +385,22 @@ export class SelectTool extends Tool {
         engine.clearSnapGuides();
       }
       const patches: Array<[string, Partial<ShapeView>]> = [];
-      for (const [id, o] of this.originals) {
+      const movingHosts = new Set<string>();
+      for (const [id, o] of [...this.originals, ...this.stuck]) {
         if (o.locked) continue;
-        // Local-space polylines: translation is x/y only (no points rewrite).
+        if (o.type === 'arrow' && o.fromId && o.toId) continue;
+        movingHosts.add(id);
         patches.push([id, { x: o.x + dx, y: o.y + dy }]);
       }
-      // also move connected arrows
-      const movedIds = new Set(patches.map(([id]) => id));
-      // annotations (text/sticky/pen) sitting on a moved image or PDF stick to it
-      for (const [, o] of this.originals) {
-        if (o.type !== 'image' && o.type !== 'doc') continue;
-        for (const [sid, sv] of engine.views) {
-          if (movedIds.has(sid) || this.originals.has(sid)) continue;
-          if (sv.locked) continue;
-          if (sv.type !== 'text' && sv.type !== 'sticky' && sv.type !== 'pen') continue;
-          // snapshot at drag start; containment is checked against that snapshot
-          let base = this.stuck.get(sid);
-          if (!base) {
-            if (!containedIn(sv, o)) continue;
-            base = { ...sv, points: sv.points ? [...sv.points] : undefined };
-            this.stuck.set(sid, base);
-          }
-          patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
-          movedIds.add(sid);
-        }
+      const unglue: string[] = [];
+      for (const [id, o] of [...this.originals, ...this.stuck]) {
+        if (o.locked || o.type !== 'arrow' || !o.fromId || !o.toId) continue;
+        if (movingHosts.has(o.fromId) || movingHosts.has(o.toId)) continue;
+        unglue.push(id);
+        movingHosts.add(id);
+        patches.push([id, { x: o.x + dx, y: o.y + dy }]);
       }
-      // frames carry contained shapes with them
-      for (const [, o] of this.originals) {
-        if (o.type !== 'frame') continue;
-        for (const [sid, sv] of engine.views) {
-          if (movedIds.has(sid) || this.originals.has(sid)) continue;
-          if (sv.locked) continue;
-          let base = this.stuck.get(sid);
-          if (!base) {
-            if (!containedIn(sv, o)) continue;
-            base = { ...sv, points: sv.points ? [...sv.points] : undefined };
-            this.stuck.set(sid, base);
-          }
-          patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
-          movedIds.add(sid);
-        }
-      }
-      // tables carry objects placed on them (fixpoint: nested tables cascade).
-      // ponytail: like image/frame riders — snapshot once, re-patch EVERY move
-      // from the snapshot (skipping stuck here would freeze riders after move#1).
-      for (let pass = 0; pass < 4; pass++) {
-        let added = false;
-        const carriers: ShapeView[] = [...this.originals.values(), ...this.stuck.values()];
-        for (const o of carriers) {
-          if (o.type !== 'table') continue;
-          const obox = rotatedAabb(o);
-          for (const [sid, sv] of engine.views) {
-            if (movedIds.has(sid) || this.originals.has(sid)) continue;
-            if (sv.locked) continue;
-            let base = this.stuck.get(sid);
-            if (!base) {
-              if (!tableCarries(obox, sv)) continue;
-              base = { ...sv, points: sv.points ? [...sv.points] : undefined };
-              this.stuck.set(sid, base);
-              added = true;
-            }
-            patches.push([sid, { x: base.x + dx, y: base.y + dy }]);
-            movedIds.add(sid);
-          }
-        }
-        if (!added) break;
-      }
+      const movedIds = movingHosts;
       for (const [aid, av] of engine.views) {
         if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
         if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
@@ -444,26 +408,21 @@ export class SelectTool extends Tool {
         const from = engine.views.get(av.fromId);
         const to = engine.views.get(av.toId);
         if (!from || !to) continue;
-        const fromOrig = this.originals.get(av.fromId);
-        const toOrig = this.originals.get(av.toId);
+        const fromOrig = this.originals.get(av.fromId) ?? this.stuck.get(av.fromId);
+        const toOrig = this.originals.get(av.toId) ?? this.stuck.get(av.toId);
         const fx = fromOrig ? fromOrig.x + dx : from.x;
         const fy = fromOrig ? fromOrig.y + dy : from.y;
         const tx = toOrig ? toOrig.x + dx : to.x;
         const ty = toOrig ? toOrig.y + dy : to.y;
         const fromBox = { ...from, x: fx, y: fy } as ShapeView;
         const toBox = { ...to, x: tx, y: ty } as ShapeView;
-        const a = portPos(fromBox, (av.fromPort as PortId) || 'e', 0);
-        const b = portPos(toBox, (av.toPort as PortId) || 'w', 0);
-        const pad = 6;
-        const minX = Math.min(a.x, b.x) - pad;
-        const minY = Math.min(a.y, b.y) - pad;
-        const maxX = Math.max(a.x, b.x) + pad;
-        const maxY = Math.max(a.y, b.y) + pad;
-        patches.push([aid, { x: minX, y: minY, w: maxX - minX, h: maxY - minY, points: [a.x, a.y, b.x, b.y] }]);
+        const geom = connectedArrowGeometry(fromBox, toBox, (av.fromPort as PortId) || 'e', (av.toPort as PortId) || 'w', av);
+        patches.push([aid, geom]);
       }
       if (patches.length) {
         store.patchShapes(patches);
       }
+      for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
     } else if (this.mode === 'marquee' && this.marquee) {
       this.marquee = normalizeBox(this.start, p.world);
     } else if (this.groupResizing && this.groupOrigBox) {
@@ -480,7 +439,7 @@ export class SelectTool extends Tool {
           if (!store.isOnActivePage(id)) continue;
           const v = engine.views.get(id);
           if (!v) continue;
-          const b = v.type === 'arrow' ? v : rotatedAabb(v);
+          const b = visualBox(v);
           if (intersects(b, this.marquee)) ids.push(id);
         }
         engine.setSelection(p.shift ? [...new Set([...engine.selection, ...ids])] : ids);
@@ -489,11 +448,16 @@ export class SelectTool extends Tool {
       }
     }
     if (this.resizing) {
-      engine.updateConnectedArrows(new Set([this.resizing.shapeId]));
+      engine.updateConnectedArrows(new Set([this.resizing.shapeId, ...this.stuck.keys()]));
+    }
+    if (this.mode === 'tablediv' && this.tableDiv) {
+      engine.updateConnectedArrows(new Set([this.tableDiv.shapeId, ...this.stuck.keys()]));
     }
     if (this.groupResizing && this.groupOrigBox) {
-      // update arrows connected to any of the group
-      engine.updateConnectedArrows(new Set([...this.originals.keys()]));
+      engine.updateConnectedArrows(new Set([...this.originals.keys(), ...this.stuck.keys()]));
+    }
+    if (this.mode === 'rotate') {
+      engine.updateConnectedArrows(new Set([...this.originals.keys(), ...this.stuck.keys()]));
     }
     this.mode = 'idle';
     this.resizing = null;
@@ -509,8 +473,10 @@ export class SelectTool extends Tool {
   }
 
   cancel(engine: Engine): void {
+    const touched = new Set([...this.originals.keys(), ...this.stuck.keys()]);
     if (this.tableDiv) {
       const t = this.tableDiv;
+      touched.add(t.shapeId);
       store.patchShape(t.shapeId, t.kind === 'col' ? { colW: [...t.fracs] } : { rowH: [...t.fracs] });
     }
     if (this.originals.size) {
@@ -525,7 +491,10 @@ export class SelectTool extends Tool {
             h: o.h,
             points: o.points ? [...o.points] : undefined,
             fontSize: o.fontSize,
-            rotation: o.rotation,
+            // Upright originals omit `rotation`; patching `undefined` is a no-op
+            // and would leave the mid-gesture angle in the doc.
+            rotation: o.rotation ?? 0,
+            ...(o.fromId ? { fromId: o.fromId, fromPort: o.fromPort, toId: o.toId, toPort: o.toPort } : {}),
           },
         ]);
       }
@@ -538,12 +507,14 @@ export class SelectTool extends Tool {
             w: o.w,
             h: o.h,
             points: o.points ? [...o.points] : undefined,
-            rotation: o.rotation,
+            rotation: o.rotation ?? 0,
+            ...(o.fromId ? { fromId: o.fromId, fromPort: o.fromPort, toId: o.toId, toPort: o.toPort } : {}),
           },
         ]);
       }
       if (patches.length) store.patchShapes(patches);
     }
+    if (touched.size) engine.updateConnectedArrows(touched);
     this.mode = 'idle';
     this.resizing = null;
     this.groupResizing = null;
@@ -555,6 +526,17 @@ export class SelectTool extends Tool {
     engine.mediaProxy.clear();
     engine.clearSnapGuides();
     store.endGesture();
+  }
+
+  private snapshotRiders(engine: Engine): void {
+    const hostIds = [...this.originals.keys()];
+    if (!hostIds.length) return;
+    for (const rid of hostRiderIds([...engine.views.values()], hostIds)) {
+      if (this.originals.has(rid) || this.stuck.has(rid)) continue;
+      const sv = engine.views.get(rid);
+      if (!sv) continue;
+      this.stuck.set(rid, { ...sv, points: sv.points ? [...sv.points] : undefined });
+    }
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -576,6 +558,9 @@ export class SelectTool extends Tool {
     if (!r) return;
     const orig = this.originals.get(r.shapeId);
     if (!orig || orig.locked) return;
+    if (orig.type === 'arrow' && orig.fromId && orig.toId) {
+      store.clearShapeKeys(r.shapeId, ['fromId', 'fromPort', 'toId', 'toPort']);
+    }
     let dx = p.world.x - this.start.x;
     let dy = p.world.y - this.start.y;
     const rot = shapeRotation(orig);
@@ -673,7 +658,7 @@ export class SelectTool extends Tool {
             bottom: r.handle.includes('n') ? ny + nh : orig.y + nh,
           }
         );
-        store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: nw, h: nh, fontSize });
+        this.commitHostResize(engine, r.shapeId, orig, { x: anchored.x, y: anchored.y, w: nw, h: nh, fontSize }, MIN);
         return;
       }
       // edge handles: E/W change wrap width; N/S keep wrap width and pad height
@@ -690,7 +675,7 @@ export class SelectTool extends Tool {
           top: orig.y,
           bottom: orig.y + measured.h,
         });
-        store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: wrapW, h: measured.h });
+        this.commitHostResize(engine, r.shapeId, orig, { x: anchored.x, y: anchored.y, w: wrapW, h: measured.h }, MIN);
         return;
       }
       const pad = Math.max(0, h - measured.h);
@@ -703,7 +688,7 @@ export class SelectTool extends Tool {
         top: ny,
         bottom: ny + textH,
       });
-      store.patchShape(r.shapeId, { x: anchored.x, y: anchored.y, w: orig.w, h: textH });
+      this.commitHostResize(engine, r.shapeId, orig, { x: anchored.x, y: anchored.y, w: orig.w, h: textH }, MIN);
       return;
     }
     {
@@ -719,10 +704,35 @@ export class SelectTool extends Tool {
       for (let i = 0; i < orig.points.length; i += 2) {
         points.push(left + (orig.points[i] - orig.x) * sx, top + (orig.points[i + 1] - orig.y) * sy);
       }
-      store.patchShape(r.shapeId, { x, y, w, h, points });
+      const geom =
+        orig.type === 'arrow' ? withArrowVisualBounds(orig, { points }) : { x, y, w, h, points };
+      this.commitHostResize(engine, r.shapeId, orig, geom, MIN);
     } else {
-      store.patchShape(r.shapeId, { x, y, w, h });
+      this.commitHostResize(engine, r.shapeId, orig, { x, y, w, h }, MIN);
     }
+  }
+
+  private commitHostResize(
+    engine: Engine,
+    hostId: string,
+    orig: ShapeView,
+    patch: Partial<ShapeView>,
+    minSize: number
+  ): void {
+    const next = {
+      x: patch.x ?? orig.x,
+      y: patch.y ?? orig.y,
+      w: patch.w ?? orig.w,
+      h: patch.h ?? orig.h,
+      rotation: orig.rotation,
+    };
+    const batch: Array<[string, Partial<ShapeView>]> = [[hostId, patch]];
+    for (const [id, o] of this.stuck) {
+      const mapped = mapShapeThroughHostResize(o, orig, next, minSize);
+      if (mapped) batch.push([id, bakedArrowGeom(o, mapped)]);
+    }
+    store.patchShapes(batch);
+    engine.updateConnectedArrows(new Set([hostId, ...this.stuck.keys()]));
   }
 
   private resizeGroup(engine: Engine, p: PointerInfo): void {
@@ -747,38 +757,27 @@ export class SelectTool extends Tool {
     if (w < MIN) { w = MIN; x = (left + right) / 2 - w / 2; }
     if (h < MIN) { h = MIN; y = (top + bottom) / 2 - h / 2; }
     const patches: Array<[string, Partial<ShapeView>]> = [];
-    for (const [id, o] of this.originals) {
+    const nextBox = { x, y, w, h };
+    const hosts = new Set<string>();
+    for (const [id, o] of [...this.originals, ...this.stuck]) {
       if (o.locked) continue;
-      // text/sticky: keep size, only spread positions (distance between objects)
-      if (o.type === 'text' || o.type === 'sticky') {
-        const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
-        const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
-        const nx = x + relX * w;
-        const ny = y + relY * h;
-        patches.push([id, { x: nx, y: ny }]);
-        continue;
+      if (o.type === 'arrow' && o.fromId && o.toId) continue;
+      hosts.add(id);
+    }
+    const unglue: string[] = [];
+    for (const [id, o] of [...this.originals, ...this.stuck]) {
+      if (o.locked) continue;
+      if (o.type === 'arrow' && o.fromId && o.toId) {
+        if (hosts.has(o.fromId) || hosts.has(o.toId)) continue;
+        unglue.push(id);
       }
-      const relX = origBox.w !== 0 ? (o.x - origBox.x) / origBox.w : 0;
-      const relY = origBox.h !== 0 ? (o.y - origBox.y) / origBox.h : 0;
-      const relW = origBox.w !== 0 ? o.w / origBox.w : 0;
-      const relH = origBox.h !== 0 ? o.h / origBox.h : 0;
-      const nx = x + relX * w;
-      const ny = y + relY * h;
-      const nw = Math.max(MIN, relW * w);
-      const nh = Math.max(MIN, relH * h);
-      if (o.points) {
-        const psx = o.w !== 0 ? nw / o.w : 1;
-        const psy = o.h !== 0 ? nh / o.h : 1;
-        const pts: number[] = [];
-        for (let i = 0; i < o.points.length; i += 2) {
-          pts.push(nx + (o.points[i] - o.x) * psx, ny + (o.points[i + 1] - o.y) * psy);
-        }
-        patches.push([id, { x: nx, y: ny, w: nw, h: nh, points: pts }]);
-      } else {
-        patches.push([id, { x: nx, y: ny, w: nw, h: nh }]);
-      }
+      const next = groupResizeMember(o, origBox, nextBox, MIN);
+      if (!next) continue;
+      patches.push([id, bakedArrowGeom(o, next)]);
     }
     if (patches.length) store.patchShapes(patches);
+    for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
+    engine.updateConnectedArrows(new Set([...hosts, ...unglue]));
   }
 }
 
@@ -916,7 +915,7 @@ export class PenTool extends Tool {
             fill: 'transparent',
             stroke: pen.color,
             strokeWidth: Math.max(settings.shape.strokeWidth, pen.width),
-            arrowHead: settings.shape.arrowHead,
+            arrowHead: guess.kind === 'line' ? 0 : settings.shape.arrowHead,
             points: [guess.x0, guess.y0, guess.x1, guess.y1],
           });
           this.pts = [];
@@ -1045,7 +1044,34 @@ abstract class BoxTool extends Tool {
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
+    const extra =
+      this.shapeType === 'rect'
+        ? { cornerRadius: settings.shape.rounded ? RECT_CORNER_RADIUS : 0 }
+        : {};
+    const id = this.finishShape(p, extra);
+    if (!id) return;
+    if (this.shapeType === 'sticky') engine.openTextEditor(id);
+    if (this.shapeType === 'graph') engine.openGraphEditor(id);
+  }
+
+  cancel(_engine: Engine): void {
+    this.resetDraw();
+  }
+
+  protected resetDraw(): void {
+    this.start = this.cur = null;
+    this.shift = false;
+    this.movedScreen = 0;
+  }
+
+  protected previewBox(): ShapeBox | null {
+    if (!this.start || !this.cur) return null;
+    return this.shift ? squareFromAnchor(this.start, this.cur) : normalizeBox(this.start, this.cur);
+  }
+
+  /** Click places the default size; drag honours Shift-to-square. */
+  protected commitDrawnBox(p: PointerInfo): ShapeBox | null {
+    if (!this.start || !this.cur) return null;
     this.shift = p.shift;
     let box: ShapeBox;
     if (this.movedScreen < 3) {
@@ -1055,37 +1081,43 @@ abstract class BoxTool extends Tool {
         w: this.defaultW,
         h: this.defaultH,
       };
-    } else if (this.shift) {
-      box = squareFromAnchor(this.start, this.cur);
     } else {
-      box = normalizeBox(this.start, this.cur);
+      box = this.previewBox() ?? normalizeBox(this.start, this.cur);
     }
-    const id = store.addShape({
+    this.resetDraw();
+    return box;
+  }
+
+  protected finishShape(p: PointerInfo, extra: Partial<ShapeView> = {}): string | null {
+    const box = this.commitDrawnBox(p);
+    if (!box) return null;
+    const { fill, stroke, strokeWidth, ...rest } = extra;
+    return store.addShape({
       type: this.shapeType,
       ...box,
-      fill: shapeFillValue(),
-      stroke: settings.shape.stroke,
-      strokeWidth: settings.shape.strokeWidth,
-      ...(this.shapeType === 'rect'
-        ? { cornerRadius: settings.shape.rounded ? RECT_CORNER_RADIUS : 0 }
-        : {}),
+      fill: fill ?? shapeFillValue(),
+      stroke: stroke ?? settings.shape.stroke,
+      strokeWidth: strokeWidth ?? settings.shape.strokeWidth,
+      ...rest,
     });
-    this.start = null;
-    this.cur = null;
-    this.shift = false;
-    if (this.shapeType === 'sticky') engine.openTextEditor(id);
-    if (this.shapeType === 'graph') engine.openGraphEditor(id);
   }
 
-  cancel(_engine: Engine): void {
-    this.start = null;
-    this.cur = null;
-    this.shift = false;
-  }
-
-  protected previewBox(): ShapeBox | null {
-    if (!this.start || !this.cur) return null;
-    return this.shift ? squareFromAnchor(this.start, this.cur) : normalizeBox(this.start, this.cur);
+  /** Save + dash stroke; caller fills/strokes the path then restore(). */
+  protected beginPreview(engine: Engine, ctx: CanvasRenderingContext2D): ShapeBox | null {
+    const box = this.previewBox();
+    if (!box) return null;
+    const s = 1 / engine.camera.zoom;
+    const fill = shapeFillValue();
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    if (hasFill(fill)) {
+      ctx.fillStyle = fill.length === 7 ? fill + '22' : withAlpha(fill, 0.13);
+    } else {
+      ctx.fillStyle = 'transparent';
+    }
+    return box;
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -1137,18 +1169,8 @@ export class StickyTool extends BoxTool {
   readonly defaultH = 120;
 
   onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) {
-      box = {
-        x: p.world.x - this.defaultW / 2,
-        y: p.world.y - this.defaultH / 2,
-        w: this.defaultW,
-        h: this.defaultH,
-      };
-    } else {
-      box = normalizeBox(this.start, this.cur);
-    }
+    const box = this.commitDrawnBox(p);
+    if (!box) return;
     const id = store.addShape({
       type: 'sticky',
       ...box,
@@ -1158,14 +1180,12 @@ export class StickyTool extends BoxTool {
       strokeWidth: 2,
       textColor: '#3a2f00',
     });
-    this.start = null;
-    this.cur = null;
     engine.openTextEditor(id);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
+    const box = this.previewBox();
+    if (!box) return;
     const s = 1 / engine.camera.zoom;
     const orbit = isOrbitPaper(store.viewPaperBg());
     const fill = orbit ? ORBIT_DRAW.sticky : COLORS.sticky;
@@ -1189,33 +1209,12 @@ export class GraphTool extends BoxTool {
   readonly defaultH = 300;
 
   onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    this.shift = p.shift;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) {
-      box = {
-        x: p.world.x - this.defaultW / 2,
-        y: p.world.y - this.defaultH / 2,
-        w: this.defaultW,
-        h: this.defaultH,
-      };
-    } else if (this.shift) {
-      box = squareFromAnchor(this.start, this.cur);
-    } else {
-      box = normalizeBox(this.start, this.cur);
-    }
-    const id = store.addShape({
-      type: 'graph',
-      ...box,
+    const id = this.finishShape(p, {
       fill: 'transparent',
-      stroke: settings.shape.stroke,
       strokeWidth: 2.25,
       expr: 'sin(x)',
     });
-    this.start = null;
-    this.cur = null;
-    this.shift = false;
-    engine.openGraphEditor(id);
+    if (id) engine.openGraphEditor(id);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -1251,21 +1250,8 @@ export class TableTool extends BoxTool {
   readonly defaultH = TABLE_DEFAULT_ROWS * TABLE_CELL_H;
 
   onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    this.shift = p.shift;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) {
-      box = {
-        x: p.world.x - this.defaultW / 2,
-        y: p.world.y - this.defaultH / 2,
-        w: this.defaultW,
-        h: this.defaultH,
-      };
-    } else if (this.shift) {
-      box = squareFromAnchor(this.start, this.cur);
-    } else {
-      box = normalizeBox(this.start, this.cur);
-    }
+    const box = this.commitDrawnBox(p);
+    if (!box) return;
     const cols = Math.min(8, Math.max(1, Math.round(box.w / TABLE_CELL_W)));
     const rows = Math.min(12, Math.max(1, Math.round(box.h / TABLE_CELL_H)));
     store.addShape({
@@ -1279,9 +1265,6 @@ export class TableTool extends BoxTool {
       cells: normalizeTableCells(cols, rows),
       header: true,
     });
-    this.start = null;
-    this.cur = null;
-    this.shift = false;
     // ponytail: no auto-edit — drop back to select, unselected, so the board stays navigable
     engine.setTool('select');
   }
@@ -1321,36 +1304,29 @@ export class TableTool extends BoxTool {
   }
 }
 
-export class DiamondTool extends BoxTool {
+/** Flowchart nodes share fill/stroke/Shift with BoxTool; some skip the text overlay. */
+abstract class FlowchartTool extends BoxTool {
+  protected openEditorOnCreate = true;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    const id = this.finishShape(p);
+    if (!id) return;
+    if (this.openEditorOnCreate) engine.openTextEditor(id);
+    else engine.setTool('select');
+  }
+}
+
+export class DiamondTool extends FlowchartTool {
   readonly id = 'diamond';
   readonly shapeType = 'diamond';
   readonly defaultW = 140;
   readonly defaultH = 100;
-  onUp(engine: Engine, p: PointerInfo): void {
-    void engine;
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) {
-      box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    } else {
-      box = normalizeBox(this.start, this.cur);
-    }
-    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null;
-    this.cur = null;
-    engine.openTextEditor(id);
-  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
-    const s = 1 / engine.camera.zoom;
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
-    ctx.save();
-    ctx.strokeStyle = COLORS.selection;
-    ctx.fillStyle = settings.shape.fill + '22';
-    ctx.lineWidth = 1.5 * s;
-    ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();
     ctx.moveTo(cx, box.y);
     ctx.lineTo(box.x + box.w, cy);
@@ -1368,27 +1344,15 @@ export class FrameTool extends BoxTool {
   readonly shapeType = 'frame';
   readonly defaultW = 420;
   readonly defaultH = 300;
-  cancel(_engine: Engine): void {
-    this.start = null;
-    this.cur = null;
-  }
+
   onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    this.shift = p.shift;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) {
-      box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    } else if (this.shift) {
-      box = squareFromAnchor(this.start, this.cur);
-    } else {
-      box = normalizeBox(this.start, this.cur);
-    }
-    const id = store.addShape({ type: this.shapeType, ...box, fill: 'rgba(255,255,255,0.06)', stroke: settings.shape.stroke, strokeWidth: 2, text: t(readLocale(), 'frameDefault') });
-    this.start = null;
-    this.cur = null;
-    this.shift = false;
-    engine.openTextEditor(id);
+    const id = this.finishShape(p, {
+      fill: 'rgba(255,255,255,0.06)',
+      text: t(readLocale(), 'frameDefault'),
+    });
+    if (id) engine.openTextEditor(id);
   }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     const box = this.previewBox();
     if (!box) return;
@@ -1402,115 +1366,169 @@ export class FrameTool extends BoxTool {
     ctx.roundRect(box.x, box.y, box.w, box.h, 8);
     ctx.fill();
     ctx.stroke();
-    // header hint
     ctx.fillStyle = 'rgba(236,234,228,0.09)';
     ctx.fillRect(box.x, box.y, box.w, 18);
     ctx.restore();
   }
 }
 
-export class TriangleTool extends BoxTool {
+export class TriangleTool extends FlowchartTool {
   readonly id = 'triangle';
   readonly shapeType = 'triangle';
   readonly defaultW = 140;
   readonly defaultH = 110;
-  onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    else box = normalizeBox(this.start, this.cur);
-    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id);
-  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
-    const s = 1 / engine.camera.zoom;
-    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5 * s; ctx.setLineDash([4*s,4*s]);
-    ctx.beginPath(); ctx.moveTo(box.x+box.w/2, box.y); ctx.lineTo(box.x, box.y+box.h); ctx.lineTo(box.x+box.w, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    ctx.beginPath();
+    ctx.moveTo(box.x + box.w / 2, box.y);
+    ctx.lineTo(box.x, box.y + box.h);
+    ctx.lineTo(box.x + box.w, box.y + box.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
-export class ParallelogramTool extends BoxTool {
+export class ParallelogramTool extends FlowchartTool {
   readonly id = 'parallelogram';
   readonly shapeType = 'parallelogram';
   readonly defaultW = 160;
   readonly defaultH = 90;
-  onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    else box = normalizeBox(this.start, this.cur);
-    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id);
-  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
-    const s = 1 / engine.camera.zoom; const skew = box.w*0.2;
-    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
-    ctx.beginPath(); ctx.moveTo(box.x+skew, box.y); ctx.lineTo(box.x+box.w, box.y); ctx.lineTo(box.x+box.w-skew, box.y+box.h); ctx.lineTo(box.x, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    const skew = box.w * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(box.x + skew, box.y);
+    ctx.lineTo(box.x + box.w, box.y);
+    ctx.lineTo(box.x + box.w - skew, box.y + box.h);
+    ctx.lineTo(box.x, box.y + box.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
-export class HexagonTool extends BoxTool {
+export class HexagonTool extends FlowchartTool {
   readonly id = 'hexagon';
   readonly shapeType = 'hexagon';
   readonly defaultW = 150;
   readonly defaultH = 100;
-  onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    else box = normalizeBox(this.start, this.cur);
-    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id);
-  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
-    const s = 1 / engine.camera.zoom; const cy = box.y+box.h/2;
-    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
-    ctx.beginPath(); ctx.moveTo(box.x+box.w*0.25, box.y); ctx.lineTo(box.x+box.w*0.75, box.y); ctx.lineTo(box.x+box.w, cy); ctx.lineTo(box.x+box.w*0.75, box.y+box.h); ctx.lineTo(box.x+box.w*0.25, box.y+box.h); ctx.lineTo(box.x, cy); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    const cy = box.y + box.h / 2;
+    ctx.beginPath();
+    ctx.moveTo(box.x + box.w * 0.25, box.y);
+    ctx.lineTo(box.x + box.w * 0.75, box.y);
+    ctx.lineTo(box.x + box.w, cy);
+    ctx.lineTo(box.x + box.w * 0.75, box.y + box.h);
+    ctx.lineTo(box.x + box.w * 0.25, box.y + box.h);
+    ctx.lineTo(box.x, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
-export class CylinderTool extends BoxTool {
+export class CylinderTool extends FlowchartTool {
   readonly id = 'cylinder';
   readonly shapeType = 'cylinder';
   readonly defaultW = 120;
   readonly defaultH = 140;
-  onUp(engine: Engine, p: PointerInfo): void {
-    if (!this.start || !this.cur) return;
-    let box: ShapeBox;
-    if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW / 2, y: p.world.y - this.defaultH / 2, w: this.defaultW, h: this.defaultH };
-    else box = normalizeBox(this.start, this.cur);
-    const id = store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 });
-    this.start = null; this.cur = null; engine.openTextEditor(id);
-  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
-    if (!this.start || !this.cur) return;
-    const box = normalizeBox(this.start, this.cur);
-    const s = 1 / engine.camera.zoom; const ry = Math.min(box.h*0.15, 18); const rx = box.w/2, cx = box.x+rx;
-    ctx.save(); ctx.strokeStyle = COLORS.selection; ctx.fillStyle = settings.shape.fill + '22'; ctx.lineWidth = 1.5*s; ctx.setLineDash([4*s,4*s]);
-    ctx.beginPath(); ctx.moveTo(box.x, box.y+ry); ctx.lineTo(box.x, box.y+box.h-ry); ctx.ellipse(cx, box.y+box.h-ry, rx, ry, 0,0,Math.PI); ctx.lineTo(box.x+box.w, box.y+ry); ctx.ellipse(cx, box.y+ry, rx, ry, 0,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(cx, box.y+ry, rx, ry, 0,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    const ry = Math.min(box.h * 0.15, 18);
+    const rx = box.w / 2;
+    const cx = box.x + rx;
+    ctx.beginPath();
+    ctx.moveTo(box.x, box.y + ry);
+    ctx.lineTo(box.x, box.y + box.h - ry);
+    ctx.ellipse(cx, box.y + box.h - ry, rx, ry, 0, 0, Math.PI);
+    ctx.lineTo(box.x + box.w, box.y + ry);
+    ctx.ellipse(cx, box.y + ry, rx, ry, 0, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, box.y + ry, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
-export class TerminatorTool extends BoxTool {
-  readonly id = 'terminator'; readonly shapeType = 'terminator'; readonly defaultW = 140; readonly defaultH = 60;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.setTool('select'); }
-  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; const r=box.h/2; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, r); ctx.fill(); ctx.stroke(); ctx.restore(); }
+export class TerminatorTool extends FlowchartTool {
+  readonly id = 'terminator';
+  readonly shapeType = 'terminator';
+  readonly defaultW = 140;
+  readonly defaultH = 60;
+  protected openEditorOnCreate = false;
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, box.h / 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
-export class SubroutineTool extends BoxTool {
-  readonly id = 'subroutine'; readonly shapeType = 'subroutine'; readonly defaultW = 160; readonly defaultH = 80;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.setTool('select'); }
-  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(box.x+8, box.y); ctx.lineTo(box.x+8, box.y+box.h); ctx.moveTo(box.x+box.w-8, box.y); ctx.lineTo(box.x+box.w-8, box.y+box.h); ctx.stroke(); ctx.restore(); }
+
+export class SubroutineTool extends FlowchartTool {
+  readonly id = 'subroutine';
+  readonly shapeType = 'subroutine';
+  readonly defaultW = 160;
+  readonly defaultH = 80;
+  protected openEditorOnCreate = false;
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(box.x + 8, box.y);
+    ctx.lineTo(box.x + 8, box.y + box.h);
+    ctx.moveTo(box.x + box.w - 8, box.y);
+    ctx.lineTo(box.x + box.w - 8, box.y + box.h);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
-export class DisplayTool extends BoxTool {
-  readonly id = 'display'; readonly shapeType = 'display'; readonly defaultW = 150; readonly defaultH = 80;
-  onUp(engine: Engine, p: PointerInfo): void { if (!this.start || !this.cur) return; let box: ShapeBox; if (this.movedScreen < 3) box = { x: p.world.x - this.defaultW/2, y: p.world.y - this.defaultH/2, w: this.defaultW, h: this.defaultH }; else box = normalizeBox(this.start, this.cur); store.addShape({ type: this.shapeType, ...box, fill: settings.shape.fill, stroke: settings.shape.stroke, strokeWidth: 2 }); this.start=null; this.cur=null; engine.setTool('select'); }
-  render(engine: Engine, ctx: CanvasRenderingContext2D): void { if (!this.start || !this.cur) return; const box = normalizeBox(this.start, this.cur); const s=1/engine.camera.zoom; ctx.save(); ctx.strokeStyle=COLORS.selection; ctx.fillStyle=settings.shape.fill+'22'; ctx.lineWidth=1.5*s; ctx.setLineDash([4*s,4*s]); ctx.beginPath(); ctx.moveTo(box.x, box.y); ctx.lineTo(box.x+box.w*0.85, box.y); ctx.lineTo(box.x+box.w, box.y+box.h/2); ctx.lineTo(box.x+box.w*0.85, box.y+box.h); ctx.lineTo(box.x, box.y+box.h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
+
+export class DisplayTool extends FlowchartTool {
+  readonly id = 'display';
+  readonly shapeType = 'display';
+  readonly defaultW = 150;
+  readonly defaultH = 80;
+  protected openEditorOnCreate = false;
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    ctx.beginPath();
+    ctx.moveTo(box.x, box.y);
+    ctx.lineTo(box.x + box.w * 0.85, box.y);
+    ctx.lineTo(box.x + box.w, box.y + box.h / 2);
+    ctx.lineTo(box.x + box.w * 0.85, box.y + box.h);
+    ctx.lineTo(box.x, box.y + box.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 export class ArrowTool extends Tool {
@@ -1541,23 +1559,20 @@ export class ArrowTool extends Tool {
       this.cur = null;
       return;
     }
-    const pad = 6;
-    const minX = Math.min(this.start.x, end.x) - pad;
-    const minY = Math.min(this.start.y, end.y) - pad;
-    const maxX = Math.max(this.start.x, end.x) + pad;
-    const maxY = Math.max(this.start.y, end.y) + pad;
-    store.addShape({
-      type: 'arrow',
-      x: minX,
-      y: minY,
-      w: maxX - minX,
-      h: maxY - minY,
+    const draft = {
+      type: 'arrow' as const,
       fill: 'transparent',
       stroke: settings.shape.stroke,
       strokeWidth: settings.shape.strokeWidth,
       arrowHead: settings.shape.arrowHead,
       points: [this.start.x, this.start.y, end.x, end.y],
-    });
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+    const box = arrowBounds(draft as ShapeView);
+    store.addShape({ ...draft, ...box });
     this.start = null;
     this.cur = null;
   }
@@ -1662,6 +1677,13 @@ function circleHitsShape(cx: number, cy: number, r: number, v: ShapeView): boole
     }
     return false;
   }
+  if (shapeRotation(v)) {
+    const local = worldToLocal(v, cx, cy);
+    const nx = Math.max(0, Math.min(local.x, v.w));
+    const ny = Math.max(0, Math.min(local.y, v.h));
+    const world = localToWorld(v, nx, ny);
+    return Math.hypot(cx - world.x, cy - world.y) <= r;
+  }
   const nx = Math.max(v.x, Math.min(cx, v.x + v.w));
   const ny = Math.max(v.y, Math.min(cy, v.y + v.h));
   return Math.hypot(cx - nx, cy - ny) <= r;
@@ -1755,6 +1777,7 @@ export class EraserTool extends Tool {
   }
 
   private eraseAt(engine: Engine, world: { x: number; y: number }): void {
+    engine.noteEraseAt(world);
     const r = settings.eraser.size;
     const partial = settings.eraser.mode === 'partial';
     const box = { x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 };
@@ -1801,6 +1824,52 @@ export function pointInPolygon(px: number, py: number, pts: Array<{ x: number; y
     if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+function segmentsIntersect(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number
+): boolean {
+  const den = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+  if (Math.abs(den) < 1e-12) return false;
+  const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / den;
+  const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
+/** True if any polyline vertex is inside the polygon or any segment crosses an edge. */
+export function polylineHitsPolygon(points: number[], poly: Array<{ x: number; y: number }>): boolean {
+  if (poly.length < 3 || points.length < 2) return false;
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    if (pointInPolygon(points[i]!, points[i + 1]!, poly)) return true;
+  }
+  for (let i = 0; i + 3 < points.length; i += 2) {
+    for (let j = 0; j < poly.length; j++) {
+      const a = poly[j]!;
+      const b = poly[(j + 1) % poly.length]!;
+      if (
+        segmentsIntersect(
+          points[i]!,
+          points[i + 1]!,
+          points[i + 2]!,
+          points[i + 3]!,
+          a.x,
+          a.y,
+          b.x,
+          b.y
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 export class LassoTool extends Tool {

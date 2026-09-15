@@ -23,6 +23,7 @@ export {
   lanAppUrl,
   lanBoardUrl,
   resolveInviteBoardUrl,
+  formatHostForUrl,
 } from './lan';
 export type { LanInfo } from './lan';
 
@@ -37,6 +38,19 @@ import type * as Y from 'yjs';
 export function attachSync(doc: Y.Doc, boardId: string): void {
   syncClient.attach(doc, boardId);
   if (isP2pEnabled()) p2pClient.attach(doc, boardId);
+}
+
+/** True when any other awareness client is in the room, including another tab of the same user. */
+export function hasRemoteCollaborators(): boolean {
+  return syncClient.hasOtherAwarenessClients() || p2pClient.hasOtherAwarenessClients();
+}
+
+/**
+ * True when a different user id is in the roster. Other tabs of the same local
+ * user are hidden from collectPeers and must not latch auto-compact off.
+ */
+export function hasDistinctRemoteCollaborators(): boolean {
+  return syncClient.collectPeers().length > 0 || p2pClient.collectPeers().length > 0;
 }
 
 /** Leave the board session (stops WS + p2p, clears attachment). */

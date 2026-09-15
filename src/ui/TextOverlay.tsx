@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { EditTarget } from '../engine/Engine';
 import type { Engine } from '../engine/Engine';
-import { boardFont, displayInk } from '../core/shapes';
+import { boardFont, overlayDisplayColor, textOverlayLineHeight, textOverlayPaddingCss, textOverlayWidthPx } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
 import { spansToHtml, plainToSpans, sanitizeRichHtml } from '../core/richText';
-import { readLiveFormat, type LiveTextFormat } from '../core/textEditorFormat';
+import { overlayFinishNow, overlayKeepEdit } from '../core/editChrome';
+import { readLiveFormat, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
 
 export function TextOverlay({
   target,
@@ -31,9 +32,14 @@ export function TextOverlay({
   const armedRef = useRef(false);
   const zoom = engine.camera.zoom;
   const pos = engine.worldToScreen(target.x, target.y);
-  const fontPx = Math.max(12, Math.round(target.fontSize * zoom));
+  const fontPx = Math.max(0.5, target.fontSize * zoom);
+  const overlayW = textOverlayWidthPx(target, zoom);
+  const lineHeight = textOverlayLineHeight(target.type);
   const isCentered = target.centered;
-  const displayColor = target.type === 'text' ? displayInk(target.color, viewPaperBg()) : target.color;
+  const isFrame = target.type === 'frame';
+  const allowsRich = textOverlayAllowsRich(target);
+  const view = target.id ? engine.views.get(target.id) : undefined;
+  const displayColor = overlayDisplayColor(target, view, viewPaperBg());
   const align = target.textAlign ?? (isCentered ? 'center' : 'left');
 
   const emitFormat = () => {
@@ -47,9 +53,9 @@ export function TextOverlay({
     if (!el) return;
     armedRef.current = false;
     doneRef.current = false;
-    if (target.richHtml && target.richHtml.includes('<')) {
+    if (allowsRich && target.richHtml && target.richHtml.includes('<')) {
       el.innerHTML = sanitizeRichHtml(target.richHtml);
-    } else if (target.bold || target.italic || target.underline || target.strike || target.highlight) {
+    } else if (allowsRich && (target.bold || target.italic || target.underline || target.strike || target.highlight)) {
       el.innerHTML = spansToHtml(
         plainToSpans(target.text, {
           bold: target.bold,
@@ -99,17 +105,21 @@ export function TextOverlay({
     const loop = () => {
       const z = engine.camera.zoom;
       const p = engine.worldToScreen(target.x, target.y);
-      const size = Math.max(12, Math.round(target.fontSize * z));
+      const size = Math.max(0.5, target.fontSize * z);
       el.style.left = `${p.x}px`;
       el.style.top = `${p.y}px`;
-      el.style.width = `${Math.max(isCentered ? 20 : 120, target.w * z)}px`;
+      el.style.width = `${textOverlayWidthPx(target, z)}px`;
       el.style.fontSize = `${size}px`;
       el.style.font = boardFont(size, target);
+      el.style.padding = textOverlayPaddingCss(target, z);
+      el.style.lineHeight = String(textOverlayLineHeight(target.type));
+      el.style.overflow = isCentered ? 'hidden' : 'visible';
+      el.style.whiteSpace = isFrame ? 'nowrap' : 'pre-wrap';
       if (isCentered) {
         el.style.height = `${target.h * z}px`;
         el.style.minHeight = `${target.h * z}px`;
       } else {
-        el.style.minHeight = `${size * 1.3}px`;
+        el.style.minHeight = `${size * textOverlayLineHeight(target.type)}px`;
         el.style.height = 'auto';
       }
       raf = requestAnimationFrame(loop);
@@ -167,9 +177,9 @@ export function TextOverlay({
       style={{
         left: pos.x,
         top: pos.y,
-        width: Math.max(isCentered ? 20 : 120, target.w * zoom),
+        width: overlayW,
         height: isCentered ? target.h * zoom : undefined,
-        minHeight: isCentered ? target.h * zoom : fontPx * 1.3,
+        minHeight: isCentered ? target.h * zoom : fontPx * lineHeight,
         font: boardFont(fontPx, target),
         color: displayColor,
         caretColor: displayColor,
@@ -183,11 +193,15 @@ export function TextOverlay({
               : 'center'
           : undefined,
         textAlign: align,
+        lineHeight,
         background: 'transparent',
         borderRadius: target.highlight && target.type === 'text' ? 4 : undefined,
-        padding: isCentered ? '0 8px' : target.type === 'sticky' ? '8px' : target.highlight ? '2px 4px' : '0',
-        overflow: isCentered ? 'hidden' : undefined,
+        padding: textOverlayPaddingCss(target, zoom),
+        overflow: isCentered ? 'hidden' : 'visible',
+        whiteSpace: isFrame ? 'nowrap' : undefined,
         boxSizing: 'border-box',
+        transform: target.rotation ? `rotate(${target.rotation}deg)` : undefined,
+        transformOrigin: 'top left',
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
@@ -199,6 +213,9 @@ export function TextOverlay({
           // dragged right away; Tab keeps fast multi-cell entry (moves right).
           e.preventDefault();
           finish(true);
+        } else if (isFrame && e.key === 'Enter') {
+          e.preventDefault();
+          finish(true);
         } else if (target.tableCell && e.key === 'Tab') {
           e.preventDefault();
           finish(true);
@@ -206,19 +223,19 @@ export function TextOverlay({
         } else if (e.key === 'Escape') {
           e.preventDefault();
           finish(false);
-        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        } else if (allowsRich && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
           e.preventDefault();
           document.execCommand('bold');
           emitFormat();
-        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        } else if (allowsRich && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
           e.preventDefault();
           document.execCommand('italic');
           emitFormat();
-        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+        } else if (allowsRich && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
           e.preventDefault();
           document.execCommand('underline');
           emitFormat();
-        } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') {
+        } else if (allowsRich && (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') {
           e.preventDefault();
           document.execCommand('strikeThrough');
           emitFormat();
@@ -228,9 +245,10 @@ export function TextOverlay({
         e.preventDefault();
         const html = e.clipboardData.getData('text/html');
         const text = e.clipboardData.getData('text/plain');
-        if (html && html.includes('<')) {
+        if (allowsRich && html && html.includes('<')) {
           const safe = sanitizeRichHtml(html);
-          document.execCommand('insertHTML', false, safe);
+          if (safe.trim()) document.execCommand('insertHTML', false, safe);
+          else document.execCommand('insertText', false, text);
         } else {
           document.execCommand('insertText', false, text);
         }
@@ -244,8 +262,14 @@ export function TextOverlay({
           return;
         }
         const related = e.relatedTarget as HTMLElement | null;
-        if (related?.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
-          // toolbar click -> commit instead of refocus (fix flowchart insert lock)
+        if (overlayKeepEdit(related)) {
+          requestAnimationFrame(() => {
+            if (!doneRef.current) ref.current?.focus();
+          });
+          return;
+        }
+        if (overlayFinishNow(related)) {
+          // toolbar / file-bar / save-as: commit instead of refocus (flowchart insert lock)
           finish(true);
           return;
         }
@@ -254,8 +278,8 @@ export function TextOverlay({
           blurTimer.current = null;
           const active = document.activeElement;
           if (ref.current && (active === ref.current || ref.current.contains(active))) return;
-          if (active instanceof HTMLElement && active.closest('.style-island, .pen-pop, .chrome-select-pop, .pen-slots, .toolbelt, .block-scheme-popover, .tool-btn')) {
-            finish(true);
+          if (overlayKeepEdit(active)) {
+            ref.current?.focus();
             return;
           }
           finish(true);

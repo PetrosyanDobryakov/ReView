@@ -1,6 +1,11 @@
 name = "review"
 compatibility_date = "2026-08-29"
 
+# Wrangler runs this before `wrangler deploy` and `wrangler versions upload`.
+# Without it, Cloudflare uploads a stale/empty dist/.
+[build]
+command = "npm run build"
+
 [assets]
 directory = "./dist"
 not_found_handling = "single-page-application"

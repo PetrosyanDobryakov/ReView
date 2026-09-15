@@ -5,6 +5,7 @@ import { Icon } from './icons';
 import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { onPeers } from '../net';
+import { zoomedPortalPosition } from './portalPlace';
 
 export function PageBar({ locale }: { locale: LocaleId }) {
   const menuId = useId();
@@ -42,14 +43,16 @@ export function PageBar({ locale }: { locale: LocaleId }) {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const width = 240;
-    const gap = 8;
-    const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
-    const estimatedHeight = 280;
-    const below = rect.bottom + gap;
-    const above = rect.top - gap - estimatedHeight;
-    const flip = below + estimatedHeight > window.innerHeight - 8 && above >= 8;
-    setMenuStyle({ left, top: Math.max(8, flip ? above : below) });
+    const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+    setMenuStyle(
+      zoomedPortalPosition(rect, {
+        width: 240,
+        estimatedHeight: 280,
+        align: 'left',
+        scale,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
+    );
   }, []);
 
   useLayoutEffect(() => {

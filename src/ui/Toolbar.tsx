@@ -455,27 +455,27 @@ export function Toolbar({
         <div className="toolbelt-sep" />
         <div className="tool-group">
           {hasSelection && (
-            <button type="button" className="tool-btn" title={t(locale, 'delete')} aria-label={t(locale, 'delete')} onClick={onDelete}>
+            <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'delete')} aria-label={t(locale, 'delete')} onClick={onDelete}>
               <Icon name="trash" size={TOOLBELT_ICON_SIZE} />
             </button>
           )}
           {hasSelection && (
-            <button type="button" className="tool-btn" title={t(locale, 'copy')} aria-label={t(locale, 'copy')} onClick={onCopy}>
+            <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'copy')} aria-label={t(locale, 'copy')} onClick={onCopy}>
               <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
             </button>
           )}
-          <button type="button" className="tool-btn" title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
+          <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
             <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
           </button>
           {hasSelection && (
-            <button type="button" className="tool-btn" title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} onClick={onDuplicate}>
+            <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} onClick={onDuplicate}>
               <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
             </button>
           )}
         </div>
         <div className="toolbelt-sep" />
         <div className="tool-group">
-          <button type="button" className="tool-btn" title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
+          <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
             <Icon name="download" size={TOOLBELT_ICON_SIZE} />
           </button>
           <div className="tool-media-slot">

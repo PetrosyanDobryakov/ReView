@@ -36,14 +36,29 @@ export function compactTokenFromEnv(env = process.env) {
 }
 
 /**
+ * @param {unknown} value
+ */
+function headerString(value) {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string' && item.length > 0) return item;
+    }
+  }
+  return '';
+}
+
+/**
  * @param {import('http').IncomingHttpHeaders | undefined} headers
  */
 export function compactTokenFromHeaders(headers) {
   if (!headers) return '';
-  const named = headers['x-review-compact-token'] || headers['x-review-room-delete-token'] || '';
-  if (typeof named === 'string' && named.length > 0) return named;
-  const auth = headers.authorization;
-  if (typeof auth === 'string') {
+  const named =
+    headerString(headers['x-review-compact-token']) ||
+    headerString(headers['x-review-room-delete-token']);
+  if (named) return named;
+  const auth = headerString(headers.authorization);
+  if (auth) {
     const m = /^Bearer\s+(\S+)/i.exec(auth.trim());
     if (m) return m[1];
   }

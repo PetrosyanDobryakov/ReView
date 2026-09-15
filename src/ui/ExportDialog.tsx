@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Engine } from '../engine/Engine';
 import type { ShapeBox } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
+import { exportDownloadEnabled } from '../core/exportVector';
 import type { LocaleId } from '../core/locale';
 import { t } from './i18n';
 
@@ -16,6 +17,7 @@ export function ExportDialog({
   hasSelection,
   selectionRevision,
   shapeRevision,
+  pageRevision,
   onPickAgain,
   onClose,
 }: {
@@ -28,6 +30,8 @@ export function ExportDialog({
   selectionRevision?: number;
   /** Bumps when board content changes (for whole-board export preview). */
   shapeRevision?: number;
+  /** Bumps when the active page changes so whole-page preview is not reused. */
+  pageRevision?: number;
   onPickAgain: () => void;
   onClose: () => void;
 }) {
@@ -37,6 +41,7 @@ export function ExportDialog({
   const [quality, setQuality] = useState(0.85);
   const [transparent, setTransparent] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFormat, setPreviewFormat] = useState<ExportFormat | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -44,39 +49,45 @@ export function ExportDialog({
 
   const box: ShapeBox | null = useMemo(() => {
     if (source === 'region') return rect;
-    if (source === 'selection') return engine.selectionBounds();
+    if (source === 'selection') return engine.selectionExportBounds();
     return engine.contentBox();
-  }, [source, rect, engine, selectionRevision, shapeRevision]);
+  }, [source, rect, engine, selectionRevision, shapeRevision, pageRevision]);
 
   useEffect(() => {
     if (!box) {
       setPreviewUrl(null);
+      setPreviewFormat(null);
       setFileSize(null);
       setDims(null);
       setExportError(null);
       return;
     }
+    setPreviewUrl(null);
+    setPreviewFormat(null);
     let cancelled = false;
     const id = window.setTimeout(async () => {
       try {
         const bg =
           format === 'jpeg' || format === 'pdf' || !transparent ? viewPaperBg() : null;
+        const ids = source === 'selection' ? engine.selectionExportIds() : undefined;
         let result: { blob: Blob; width: number; height: number } | null = null;
         if (format === 'svg') {
-          result = engine.exportSvg(box, { background: bg });
+          result = engine.exportSvg(box, { background: bg, ids });
         } else if (format === 'pdf') {
-          result = await engine.exportPdf(box, { scale, quality, background: bg ?? '#ffffff' });
+          result = await engine.exportPdf(box, { scale, quality, background: bg ?? '#ffffff', ids });
         } else {
           result = await engine.exportBlob(box, {
             scale,
             format,
             quality,
             background: bg,
+            ids,
           });
         }
         if (cancelled) return;
         if (!result) {
           setPreviewUrl(null);
+          setPreviewFormat(null);
           setFileSize(null);
           setDims(null);
           setExportError(t(locale, 'exportFailed'));
@@ -86,6 +97,7 @@ export function ExportDialog({
         const url = URL.createObjectURL(result.blob);
         urlRef.current = url;
         setPreviewUrl(url);
+        setPreviewFormat(format);
         setFileSize(result.blob.size);
         setDims({ w: result.width, h: result.height });
         setExportError(null);
@@ -93,6 +105,7 @@ export function ExportDialog({
         console.error('[review] export failed:', err);
         if (!cancelled) {
           setPreviewUrl(null);
+          setPreviewFormat(null);
           setFileSize(null);
           setDims(null);
           setExportError(t(locale, 'exportFailed'));
@@ -103,7 +116,7 @@ export function ExportDialog({
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [box, scale, format, quality, transparent, locale]);
+  }, [box, scale, format, quality, transparent, locale, source, pageRevision]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -246,8 +259,8 @@ export function ExportDialog({
             {fileSize !== null ? fmtSize(fileSize) : ''}
           </span>
           <a
-            className={`style-btn export-download${previewUrl ? '' : ' disabled'}`}
-            href={previewUrl ?? undefined}
+            className={`style-btn export-download${exportDownloadEnabled(previewUrl, previewFormat, format) ? '' : ' disabled'}`}
+            href={exportDownloadEnabled(previewUrl, previewFormat, format) ? previewUrl ?? undefined : undefined}
             download={`review-${dims?.w ?? 0}x${dims?.h ?? 0}.${ext}`}
           >
             {t(locale, 'exportDownload')}

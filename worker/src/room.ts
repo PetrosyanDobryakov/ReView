@@ -3,88 +3,124 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
+import { canClearRoom, isRoomDeleteAuthorized } from './auth';
+import {
+  MAX_WS_MESSAGE,
+  createAsyncGate,
+  deleteBlob,
+  mergeTails,
+  readBlob,
+  shouldFullPersist,
+  writeBlob,
+  canDropPersistedTail,
+  canGcEmptyRoom,
+} from './persist';
 
 const messageSync = 0;
 const messageAwareness = 1;
-// const messageAuth = 2;
 
-const EMPTY_GC_MS = 90 * 1000;
+export const EMPTY_GC_MS = 90 * 1000;
 
-interface RoomEnv {
-  REVIEW_COMPACT_TOKEN?: string;
-  REVIEW_ROOM_DELETE_TOKEN?: string;
-}
+type SocketAttachment = { clients: number[] };
 
-function compactTokenFromEnv(env: RoomEnv | unknown): string {
-  const e = (env || {}) as RoomEnv;
-  const a = e.REVIEW_COMPACT_TOKEN;
-  const b = e.REVIEW_ROOM_DELETE_TOKEN;
-  if (typeof a === 'string' && a.length > 0) return a;
-  if (typeof b === 'string' && b.length > 0) return b;
-  return '';
-}
-
-function compactTokenFromHeaders(headers: Headers): string {
-  const named =
-    headers.get('X-Review-Compact-Token') ||
-    headers.get('X-Review-Room-Delete-Token') ||
-    '';
-  if (named.length > 0) return named;
-  const auth = headers.get('Authorization');
-  if (auth) {
-    const m = /^Bearer\s+(\S+)/i.exec(auth.trim());
-    if (m) return m[1];
+function readAttachment(ws: WebSocket): SocketAttachment {
+  try {
+    const raw = (ws as WebSocket & { deserializeAttachment?: () => unknown }).deserializeAttachment?.();
+    if (raw && typeof raw === 'object' && Array.isArray((raw as SocketAttachment).clients)) {
+      return {
+        clients: (raw as SocketAttachment).clients.filter((n) => typeof n === 'number'),
+      };
+    }
+  } catch {
+    /* attachment missing after first frame */
   }
-  return '';
+  return { clients: [] };
 }
 
-function tokensMatch(provided: string, expected: string): boolean {
-  if (!expected || !provided) return false;
-  const enc = new TextEncoder();
-  const a = enc.encode(provided);
-  const b = enc.encode(expected);
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a[i]! ^ b[i]!;
-  return out === 0;
+function writeAttachment(ws: WebSocket, att: SocketAttachment): void {
+  try {
+    (ws as WebSocket & { serializeAttachment?: (v: unknown) => void }).serializeAttachment?.(att);
+  } catch {
+    /* hibernation attachment is best-effort */
+  }
 }
 
-/** Defense in depth inside the DO — same fail-closed rule as the Worker edge. */
-function isRoomDeleteAuthorized(request: Request, env: unknown): boolean {
-  const expected = compactTokenFromEnv(env);
-  if (!expected) return false;
-  return tokensMatch(compactTokenFromHeaders(request.headers), expected);
+function trackAwarenessClients(
+  ws: unknown,
+  added: number[],
+  updated: number[],
+  removed: number[],
+): void {
+  if (!ws || typeof (ws as WebSocket).serializeAttachment !== 'function') return;
+  const socket = ws as WebSocket;
+  const set = new Set(readAttachment(socket).clients);
+  for (const id of added) set.add(id);
+  for (const id of updated) set.add(id);
+  for (const id of removed) set.delete(id);
+  writeAttachment(socket, { clients: [...set] });
 }
 
 /**
  * Yjs room with hibernatable WebSockets: the DO sleeps between messages, so
- * idle-but-connected tabs bill ~zero duration. No per-connection state lives
- * in memory — sockets come from state.getWebSockets(), the doc from storage.
+ * idle-but-connected tabs bill ~zero duration. Socket identity lives on
+ * websocket attachments (survives hibernation). The CRDT is stored as chunked
+ * blobs so photo boards can exceed the 2 MiB SQLite `put()` row limit.
  */
 export class BoardRoom implements DurableObject {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
-  /** Set by the doc 'update' handler; flushed to storage before sleeping. */
+  /** Unpersisted CRDT mutations since the last full encode. */
   private dirty = false;
-  /** Last message-time persist (throttle — full-doc encode+put per message stalls floods). */
+  /** Incremental updates not yet merged into the `tail` blob (copied; Yjs recycles buffers). */
+  private pending: Uint8Array[] = [];
+  /** Last full-doc persist (throttle — encode+put is O(doc)). */
   private lastPersist = 0;
+  /** Bumps on every CRDT update so full persist can tell a snapshot is stale. */
+  private persistGen = 0;
+  /** Serialize blob writes — overlapping flushFull/flushTail can drop the newer encode. */
+  private readonly persist = createAsyncGate();
 
   constructor(private state: DurableObjectState, private env: unknown) {
     this.state.blockConcurrencyWhile(async () => {
       await this.loadOrCreate();
+      const sockets = this.state.getWebSockets();
+      if (sockets.length > 0) {
+        // Hibernation restore: in-memory doc/awareness were empty. Force a
+        // state-vector round-trip so clients send anything the tail missed.
+        this.sendSyncStep1ToAll(sockets);
+      }
     });
   }
 
-  /** Restore the doc from storage (fresh empty pair when nothing stored). */
   private async loadOrCreate(): Promise<void> {
-    const doc = new Y.Doc({ gc: false } as any);
     try {
-      const stored = await this.state.storage.get<Uint8Array>('doc');
-      if (stored) Y.applyUpdate(doc, stored);
-    } catch {}
+      this.doc?.destroy();
+    } catch {
+      /* */
+    }
+    try {
+      (this.awareness as { destroy?: () => void } | null)?.destroy?.();
+    } catch {
+      /* */
+    }
+    const doc = new Y.Doc({ gc: false } as Record<string, unknown>);
+    try {
+      const stored = await readBlob(this.state.storage, 'doc');
+      if (stored && stored.length) Y.applyUpdate(doc, stored);
+    } catch (err) {
+      console.error('[BoardRoom] load doc failed', err);
+    }
+    try {
+      const tail = await readBlob(this.state.storage, 'tail');
+      if (tail && tail.length) Y.applyUpdate(doc, tail);
+    } catch (err) {
+      console.error('[BoardRoom] load tail failed', err);
+    }
     this.doc = doc;
     this.awareness = new awarenessProtocol.Awareness(doc);
     this.dirty = false;
+    this.pending = [];
+    this.persistGen = 0;
     this.bindBroadcastHandlers();
   }
 
@@ -94,83 +130,185 @@ export class BoardRoom implements DurableObject {
     const awareness = this.awareness!;
     doc.on('update', (update: Uint8Array, origin: unknown) => {
       this.dirty = true;
+      this.persistGen += 1;
+      this.pending.push(update.slice());
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, messageSync);
       syncProtocol.writeUpdate(encoder, update);
       this.broadcast(encoding.toUint8Array(encoder), origin);
     });
 
-    awareness.on('update', ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
-      const changed = added.concat(updated).concat(removed);
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, messageAwareness);
-      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(awareness, changed));
-      this.broadcast(encoding.toUint8Array(encoder), origin);
-    });
+    awareness.on(
+      'update',
+      (
+        { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
+        origin: unknown,
+      ) => {
+        trackAwarenessClients(origin, added, updated, removed);
+        const changed = added.concat(updated).concat(removed);
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, messageAwareness);
+        encoding.writeVarUint8Array(
+          encoder,
+          awarenessProtocol.encodeAwarenessUpdate(awareness, changed),
+        );
+        this.broadcast(encoding.toUint8Array(encoder), origin);
+      },
+    );
   }
 
   private broadcast(msg: Uint8Array, origin: unknown): void {
     for (const ws of this.state.getWebSockets()) {
       if (ws === origin) continue;
-      try { ws.send(msg); } catch {}
+      try {
+        ws.send(msg);
+      } catch {
+        /* peer gone */
+      }
     }
   }
 
-  /** Persist every applied mutation synchronously — a hibernating DO may be
-   * evicted at any time, so in-memory debounce would lose data. */
-  private async flush(): Promise<void> {
-    if (!this.dirty || !this.doc) return;
-    this.dirty = false;
-    try { await this.state.storage.put('doc', Y.encodeStateAsUpdate(this.doc)); } catch {}
+  private sendSyncStep1(ws: WebSocket): void {
+    if (!this.doc) return;
+    const syncEncoder = encoding.createEncoder();
+    encoding.writeVarUint(syncEncoder, messageSync);
+    syncProtocol.writeSyncStep1(syncEncoder, this.doc);
+    try {
+      ws.send(encoding.toUint8Array(syncEncoder));
+    } catch {
+      /* */
+    }
+  }
+
+  private sendSyncStep1ToAll(sockets: WebSocket[]): void {
+    for (const ws of sockets) this.sendSyncStep1(ws);
+  }
+
+  private sendAwarenessSnapshot(ws: WebSocket): void {
+    if (!this.awareness) return;
+    const awarenessStates = this.awareness.getStates();
+    if (awarenessStates.size === 0) return;
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, messageAwareness);
+    encoding.writeVarUint8Array(
+      enc,
+      awarenessProtocol.encodeAwarenessUpdate(this.awareness, Array.from(awarenessStates.keys())),
+    );
+    try {
+      ws.send(encoding.toUint8Array(enc));
+    } catch {
+      /* */
+    }
+  }
+
+  /** Merge pending updates into the `tail` blob (O(update), hibernation-safe). */
+  private async flushTailUnlocked(): Promise<void> {
+    if (!this.pending.length) return;
+    const batch = this.pending;
+    this.pending = [];
+    try {
+      const prev = await readBlob(this.state.storage, 'tail');
+      const merged = mergeTails(prev, batch);
+      if (merged) await writeBlob(this.state.storage, 'tail', merged);
+    } catch (err) {
+      // Put the batch back so a later flushFull / retry can recover.
+      this.pending = batch.concat(this.pending);
+      this.dirty = true;
+      console.error('[BoardRoom] tail persist failed', err);
+    }
+  }
+
+  /** Full-doc encode into chunked `doc`. Keep a tail if updates arrived during the write. */
+  private async flushFullUnlocked(): Promise<void> {
+    if (!this.doc) return;
+    await this.flushTailUnlocked();
+    try {
+      const encodeGen = this.persistGen;
+      await writeBlob(this.state.storage, 'doc', Y.encodeStateAsUpdate(this.doc));
+      await this.flushTailUnlocked();
+      if (!canDropPersistedTail(encodeGen, this.persistGen, this.pending.length)) {
+        this.dirty = true;
+        return;
+      }
+      await deleteBlob(this.state.storage, 'tail');
+      if (!canDropPersistedTail(encodeGen, this.persistGen, this.pending.length)) {
+        this.dirty = true;
+        await this.flushTailUnlocked();
+        return;
+      }
+      this.dirty = false;
+      this.lastPersist = Date.now();
+    } catch (err) {
+      this.dirty = true;
+      console.error('[BoardRoom] full persist failed', err);
+    }
+  }
+
+  private async flushFull(): Promise<void> {
+    await this.persist(() => this.flushFullUnlocked());
   }
 
   /**
-   * Message-time persist, throttled: full-doc encode+put per message is O(doc)
-   * and stalls the single-threaded DO under drag floods on photo boards.
-   * First dirty message after idle always persists (hibernation-eviction safe);
-   * stragglers heal from clients via state vectors on reconnect.
+   * Always persist a tail before the handler returns (hibernation would otherwise
+   * drop in-memory updates). Full encode at most once per second.
    */
   private async maybePersist(): Promise<void> {
-    if (!this.dirty) return;
-    const now = Date.now();
-    if (now - this.lastPersist < 1000) return;
-    this.lastPersist = now;
-    await this.flush();
+    await this.persist(async () => {
+      await this.flushTailUnlocked();
+      if (!this.dirty) return;
+      if (!shouldFullPersist(this.lastPersist, Date.now())) return;
+      await this.flushFullUnlocked();
+    });
   }
 
   /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
   private resetRoom(): void {
-    try { this.doc?.destroy(); } catch {}
-    try { (this.awareness as any)?.destroy(); } catch {}
-    this.doc = new Y.Doc({ gc: false } as any);
+    try {
+      this.doc?.destroy();
+    } catch {
+      /* */
+    }
+    try {
+      (this.awareness as { destroy?: () => void } | null)?.destroy?.();
+    } catch {
+      /* */
+    }
+    this.doc = new Y.Doc({ gc: false } as Record<string, unknown>);
     this.awareness = new awarenessProtocol.Awareness(this.doc);
     this.dirty = false;
+    this.pending = [];
+    this.persistGen = 0;
+    this.lastPersist = 0;
     this.bindBroadcastHandlers();
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const cors = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
-    // handle DELETE /room/<name> for compatibility (clear)
     if (request.method === 'DELETE' && url.pathname.startsWith('/room/')) {
-      if (!isRoomDeleteAuthorized(request, this.env)) {
-        return new Response(JSON.stringify({ ok: false }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-        });
+      const authorized = isRoomDeleteAuthorized(request, this.env);
+      const sockets = this.state.getWebSockets();
+      if (!canClearRoom(authorized, sockets.length)) {
+        return new Response(JSON.stringify({ ok: false }), { status: 403, headers: cors });
       }
-      for (const ws of this.state.getWebSockets()) { try { ws.close(1000, 'room cleared'); } catch {} }
+      for (const ws of sockets) {
+        try {
+          ws.close(1000, 'room cleared');
+        } catch {
+          /* */
+        }
+      }
       this.resetRoom();
       await this.state.storage.deleteAll();
-      return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: cors });
     }
 
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected websocket', { status: 426 });
     }
 
-    // After alarm() GC the in-memory pair is fresh-empty; reload persisted state if any.
-    if (!this.doc || (this.doc as any).isDestroyed) {
+    if (!this.doc || (this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) {
       await this.loadOrCreate();
     }
     const doc = this.doc!;
@@ -178,13 +316,11 @@ export class BoardRoom implements DurableObject {
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
-    // hibernation: the DO may sleep while sockets stay open at the edge
-    (this.state as any).acceptWebSocket(server);
+    this.state.acceptWebSocket(server);
+    writeAttachment(server, { clients: [] });
 
-    // cancel GC alarm while someone is connected
     await this.state.storage.deleteAlarm().catch(() => {});
 
-    // send sync step 1 + awareness
     const syncEncoder = encoding.createEncoder();
     encoding.writeVarUint(syncEncoder, messageSync);
     syncProtocol.writeSyncStep1(syncEncoder, doc);
@@ -194,7 +330,10 @@ export class BoardRoom implements DurableObject {
     if (awarenessStates.size > 0) {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, messageAwareness);
-      encoding.writeVarUint8Array(enc, awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(awarenessStates.keys())));
+      encoding.writeVarUint8Array(
+        enc,
+        awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(awarenessStates.keys())),
+      );
       server.send(encoding.toUint8Array(enc));
     }
 
@@ -202,8 +341,10 @@ export class BoardRoom implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    if (!this.doc || (this.doc as any).isDestroyed) {
+    if (!this.doc || (this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) {
       await this.loadOrCreate();
+      this.sendSyncStep1(ws);
+      this.sendAwarenessSnapshot(ws);
     }
     const doc = this.doc!;
     const awareness = this.awareness!;
@@ -213,6 +354,11 @@ export class BoardRoom implements DurableObject {
       else if (message instanceof Uint8Array) uint8 = message;
       else if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
       else uint8 = new Uint8Array(message as ArrayBuffer);
+
+      if (uint8.byteLength > MAX_WS_MESSAGE) {
+        console.error('[BoardRoom] message too large', uint8.byteLength);
+        return;
+      }
 
       const decoder = decoding.createDecoder(uint8);
       const type = decoding.readVarUint(decoder);
@@ -231,29 +377,43 @@ export class BoardRoom implements DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
-    await this.handleSocketGone();
+    await this.handleSocketGone(ws);
   }
 
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-    await this.handleSocketGone();
+    await this.handleSocketGone(ws);
   }
 
-  private async handleSocketGone(): Promise<void> {
-    // y-protocols doesn't auto-remove awareness on ws close, so we rely on the client sending 'removed' on beforeunload.
-    await this.flush();
+  private async handleSocketGone(ws: WebSocket): Promise<void> {
+    if (this.awareness) {
+      const clients = readAttachment(ws).clients;
+      if (clients.length) {
+        try {
+          awarenessProtocol.removeAwarenessStates(this.awareness, clients, null);
+        } catch {
+          /* */
+        }
+      }
+    }
+    await this.flushFull();
     if (this.state.getWebSockets().length === 0) {
-      // schedule GC
       await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
     }
   }
 
   async alarm(): Promise<void> {
-    // stale alarm raced with a reconnect — someone is home, stay alive
-    if (this.state.getWebSockets().length > 0) return;
-    await this.flush();
-    if (this.state.getWebSockets().length > 0) return;
-    // GC if still empty, then leave a fresh empty doc so a later fetch is safe
-    try { await this.state.storage.deleteAll(); } catch {}
+    if (this.dirty || this.pending.length) await this.flushFull();
+    if (!canGcEmptyRoom(this.state.getWebSockets().length, this.dirty, this.pending.length)) {
+      if (this.state.getWebSockets().length === 0) {
+        await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
+      }
+      return;
+    }
+    try {
+      await this.state.storage.deleteAll();
+    } catch {
+      /* */
+    }
     this.resetRoom();
   }
 }

@@ -59,6 +59,11 @@ export class Camera {
     this.tz = newZoom;
     this.tx = wx - (sx - halfW) / newZoom;
     this.ty = wy - (sy - halfH) / newZoom;
+    if (this.instant) {
+      this.zoom = this.tz;
+      this.x = this.tx;
+      this.y = this.ty;
+    }
   }
 
   setZoom(zoom: number): void {

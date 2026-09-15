@@ -2,7 +2,13 @@ export {
   localToWorld,
   reanchorRotatedResize,
   resizeAnchorFractions,
+  rotateShapeAround,
   shapeCenter,
+  groupResizeMember,
+  mapShapeThroughHostResize,
+  mapShapeThroughLocalMap,
+  rotatedAabb,
+  unrotatedSizeMatchingAabb,
 } from '../src/core/transform';
 export { downsamplePolyline, toLocalPoints, toWorldPoints } from '../src/core/pointsSpace';
 export {
@@ -20,3 +26,24 @@ export {
   smoothDamp,
   stepPeerMotion,
 } from '../src/core/peerMotion';
+export {
+  boardHadRemoteCollaborators,
+  compactBlockedByRecentPeer,
+  compactSavesEnough,
+  hasOtherLocalReplicas,
+  lastRemotePeerAt,
+  markBoardHadRemote,
+  noteDistinctRemote,
+  noteRemotePeer,
+  parseReplicaMap,
+  pruneReplicaMap,
+  replicaMapHasOther,
+  remotePeerRecentlySeen,
+  replicaTabId,
+  touchReplica,
+  releaseReplica,
+  REPLICA_TTL_MS,
+} from '../src/core/compactGuard';
+export { wrapLinesByWidth, estimateTextWidth } from '../src/core/textLayout';
+export { wrapRichLines } from '../src/core/richText';
+export { shapesFromClipboardText } from '../src/core/clipboardShapes';

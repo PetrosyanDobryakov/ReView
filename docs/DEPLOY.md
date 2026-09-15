@@ -15,9 +15,10 @@ No backend storage is used on Vercel. The public board is the static SPA; each b
 
 Same static build, same P2P/file-share flow. Do not add `public/_redirects` with `/* /index.html 200`. Wrangler uploads `dist` as Workers static assets, and `html_handling` strips `.html` / `/index`. That splat rewrite then matches again and Cloudflare rejects the deploy with error 100324 (infinite redirect loop).
 
-1. Create a Pages or Workers project from the same repo. Build with `npm run build`; output is `dist`. Repo-root `wrangler.toml` sets `name = "review"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
-2. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable`.
-3. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS`, so websocket sync is not attempted at `ws://host:1234`, and P2P is on unless the user turns it off.
+1. Create a Pages or Workers project from the same repo. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
+2. Upload a new Worker version (does not flip 100% production traffic): `npx wrangler versions upload`. Build + ship immediately: `npx wrangler deploy`. Same as npm scripts `cf:version` / `cf:deploy`. Wrangler runs `npm run build` first because of `[build] command`. Sync hub is a separate Worker: `cd worker && npx wrangler deploy`.
+3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable`.
+4. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS`, so websocket sync is not attempted at `ws://host:1234`, and P2P is on unless the user turns it off.
 
 
 ## Self-hosted
@@ -33,7 +34,7 @@ This is the default collab path.
 
 The sync server binds `0.0.0.0:1234` and exposes `GET /lan` with private IPv4 addresses so a host on `localhost` can still copy a usable invite. If phones cannot connect, allow Node through the OS firewall on private networks.
 
-Do **not** expose port `1234` to the public internet unprotected. File logging (`GET`/`POST /net-log`) is off unless `REVIEW_NET_LOG=1`. `DELETE /room/<name>` (host-side compaction) is **not** a LAN API: it requires a loopback client (`127.0.0.1` / `::1`) or `REVIEW_COMPACT_TOKEN` / `REVIEW_ROOM_DELETE_TOKEN` (`X-Review-Compact-Token`, `X-Review-Room-Delete-Token`, or `Authorization: Bearer`). Unauthorized DELETE returns `403 { ok: false }`.
+Do **not** expose port `1234` to the public internet unprotected. File logging (`GET`/`POST /net-log`) is off unless `REVIEW_NET_LOG=1`. `DELETE /room/<name>` (host-side compaction) is **not** a LAN API: it requires a loopback client (`127.0.0.1` / `::1`) or `REVIEW_COMPACT_TOKEN` / `REVIEW_ROOM_DELETE_TOKEN` (`X-Review-Compact-Token`, `X-Review-Room-Delete-Token`, or `Authorization: Bearer`). Unauthorized DELETE returns `403 { ok: false }`. Invalid room names return `400`. Websocket payloads are capped at 32 MB (same as `.review` export). `GET /health` reports room count, payload cap, and GC window. The Cloudflare worker allows unauthenticated DELETE only when the room has zero sockets (occupied rooms still need the secret).
 
 ## Build
 
@@ -54,7 +55,7 @@ npm run preview   # local check of the production build
 npm run server
 ```
 
-Listens on `0.0.0.0:1234`. Rooms are per board: `review-<boardId>`. The browser connects to `ws(s)://<same-host>:1234`.
+Listens on `0.0.0.0:1234`. Rooms are per board: `review-<boardId>` (letters, digits, `.`, `_`, `-`; max 200 chars). The browser connects to `ws(s)://<same-host>:1234`. Websocket messages up to 32 MB. Empty in-memory rooms are GC'd after 5 minutes (`REVIEW_ROOM_GC_MS`). Cap live rooms with `REVIEW_MAX_ROOMS` (default 512).
 
 If the page is served over HTTPS, the client uses `wss://`. Put a reverse proxy in front of the websocket, or terminate TLS on the same host.
 

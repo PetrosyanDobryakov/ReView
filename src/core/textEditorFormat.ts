@@ -2,6 +2,11 @@
 
 const HILITE_HEX = '#ffe27a';
 
+/** Tables store plain cell strings; frames store a single title line. Rich overlay markup cannot persist there. */
+export function textOverlayAllowsRich(target: { type?: string | null; tableCell?: unknown }): boolean {
+  return !target.tableCell && target.type !== 'frame';
+}
+
 export type LiveTextFormat = {
   bold: boolean;
   italic: boolean;
@@ -169,4 +174,69 @@ export function applyFormatToEditor(root: HTMLElement, patch: EditorFormatPatch)
     }
   }
   root.dispatchEvent(new InputEvent('input', { bubbles: true }));
+}
+
+type FlushTextTarget = {
+  id: string | null;
+  text?: string;
+  richHtml?: string;
+  tableCell?: { row: number; col: number } | null;
+};
+
+/** Commit an open overlay into the engine (board leave, tool switch, page switch). Duck-typed so App can call it without an Engine import cycle. */
+export function flushOpenTextEditor<T extends FlushTextTarget>(
+  engine:
+    | {
+        editing?: boolean;
+        commitTableCell(id: string, row: number, col: number, text: string): void;
+        commitText(id: string | null, text: string, target: T, html?: string): void;
+        cancelTextEdit(): void;
+      }
+    | null
+    | undefined,
+  target: T | null | undefined,
+  el: { innerText: string; innerHTML: string } | null | undefined
+): boolean {
+  if (!engine || !target) return false;
+  // Overlay blur / a prior flush already committed — do not addShape again.
+  if (engine.editing === false) {
+    engine.cancelTextEdit();
+    return false;
+  }
+  try {
+    if (target.tableCell && target.id) {
+      engine.commitTableCell(
+        target.id,
+        target.tableCell.row,
+        target.tableCell.col,
+        el?.innerText ?? target.text ?? ''
+      );
+    } else {
+      engine.commitText(target.id, el?.innerText ?? target.text ?? '', target, el?.innerHTML ?? target.richHtml);
+    }
+  } catch {
+    /* overlay or doc may already be gone */
+  }
+  engine.cancelTextEdit();
+  return true;
+}
+
+type PersistEngine<T extends FlushTextTarget> = {
+  editing?: boolean;
+  commitTableCell(id: string, row: number, col: number, text: string): void;
+  commitText(id: string | null, text: string, target: T, html?: string): void;
+  cancelTextEdit(): void;
+  commitOpenGraphEditor?: () => boolean;
+};
+
+/** Text overlay + graph preview into the doc (copy/export, tab close). */
+export function persistOpenEditors<T extends FlushTextTarget>(
+  engine: PersistEngine<T> | null | undefined,
+  target: T | null | undefined,
+  el: { innerText: string; innerHTML: string } | null | undefined
+): { text: boolean; graph: boolean } {
+  return {
+    text: flushOpenTextEditor(engine, target, el),
+    graph: Boolean(engine?.commitOpenGraphEditor?.()),
+  };
 }

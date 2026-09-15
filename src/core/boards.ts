@@ -218,8 +218,10 @@ export function deleteBoard(id: string): void {
 }
 
 export async function deleteBoardData(id: string): Promise<boolean> {
+  const ok = await deleteBoardDatabase(id);
+  if (!ok) return false;
   deleteBoard(id);
-  return deleteBoardDatabase(id);
+  return true;
 }
 
 /** Mark a remote board as kept on this device (local copy). Keeps remote status. */

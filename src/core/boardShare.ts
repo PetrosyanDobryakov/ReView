@@ -7,9 +7,10 @@
  */
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence, storeState } from 'y-indexeddb';
-import { getBoard, createBoard, type BoardMeta } from './boards';
-import { getCurrentBoardId, doc } from './store';
+import { IndexeddbPersistence } from 'y-indexeddb';
+import { getBoard, createBoard, deleteBoardData, type BoardMeta } from './boards';
+import { getCurrentBoardId, doc, flushPendingPatches } from './store';
+import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 
 const FILE_VERSION = 1;
 const FILE_EXT = '.review';
@@ -84,19 +85,8 @@ function dbName(boardId: string): string {
   return `review-v1-${boardId}`;
 }
 
-// IndexeddbPersistence.whenSynced only resolves on 'synced' (y-indexeddb.js:80) and
-// _db (y-indexeddb.js:71/83) has no timeout/reject path, so IDB blocked/quota
-// can hang forever — race every await with a timeout.
-const PERSIST_SYNC_TIMEOUT_MS = 3500;
-
 function withSyncTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timeout after ${PERSIST_SYNC_TIMEOUT_MS}ms`)), PERSIST_SYNC_TIMEOUT_MS);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  }) as Promise<T>;
+  return withIdbTimeout(promise, label);
 }
 
 async function destroyPersist(persist: IndexeddbPersistence): Promise<void> {
@@ -108,39 +98,50 @@ async function destroyPersist(persist: IndexeddbPersistence): Promise<void> {
   } catch {}
 }
 
-async function loadUpdateForBoard(boardId: string): Promise<Uint8Array | null> {
+export type LoadUpdateResult =
+  | { ok: true; update: Uint8Array }
+  | { ok: false; error: 'load_failed' | 'too_large' };
+
+export async function loadUpdateForBoard(boardId: string): Promise<LoadUpdateResult> {
   if (getCurrentBoardId() === boardId) {
     try {
+      flushPendingPatches();
       const u = Y.encodeStateAsUpdate(doc);
-      if (u.length > MAX_UPDATE_BYTES) return null;
-      return u;
+      if (u.length > MAX_UPDATE_BYTES) return { ok: false, error: 'too_large' };
+      return { ok: true, update: u };
     } catch {
-      return null;
+      return { ok: false, error: 'load_failed' };
     }
   }
   const tmp = new Y.Doc();
   const persist = new IndexeddbPersistence(dbName(boardId), tmp);
   try {
     await withSyncTimeout(persist.whenSynced as Promise<unknown>, `loadUpdateForBoard:${boardId}`) as Promise<unknown>;
-    if (tmp.getMap('shapes').size === 0 && tmp.getArray('order').length === 0 && tmp.getArray('pages').length === 0) {
-      // still export — empty board is valid (meta only)
-    }
     const u = Y.encodeStateAsUpdate(tmp);
-    if (u.length > MAX_UPDATE_BYTES) return null;
-    return u;
+    if (u.length > MAX_UPDATE_BYTES) return { ok: false, error: 'too_large' };
+    return { ok: true, update: u };
   } catch (err) {
     try { console.warn('[boardShare] loadUpdateForBoard failed', boardId, err); } catch {}
-    return null;
+    return { ok: false, error: 'load_failed' };
   } finally {
     await destroyPersist(persist);
     tmp.destroy();
   }
 }
 
-async function writeUpdateToBoard(boardId: string, update: Uint8Array): Promise<void> {
+async function flushPersist(persist: IndexeddbPersistence): Promise<boolean> {
+  return flushIndexedDbPersistence(persist);
+}
+
+export async function writeUpdateToBoard(
+  boardId: string,
+  update: Uint8Array,
+  mutate?: (tmp: Y.Doc) => void
+): Promise<void> {
   if (update.length > MAX_UPDATE_BYTES) throw new Error('update too large');
   if (getCurrentBoardId() === boardId) {
     Y.applyUpdate(doc, update);
+    mutate?.(doc);
     return;
   }
   const tmp = new Y.Doc();
@@ -148,63 +149,9 @@ async function writeUpdateToBoard(boardId: string, update: Uint8Array): Promise<
   try {
     await withSyncTimeout(persist.whenSynced as Promise<unknown>, `writeUpdateToBoard:${boardId}`) as Promise<unknown>;
     Y.applyUpdate(tmp, update);
-    // y-indexeddb's _storeUpdate is fire-and-forget (addAutoKey without
-    // awaiting the transaction), so destroy() can race the flush. Use the
-    // public storeState() helper which targets the correct objectStore
-    // internally and returns a promise that resolves after the IndexedDB
-    // transaction commits — no private _db or hardcoded 'updates' name.
-    let flushed = false;
-    try {
-      await Promise.race([
-        (storeState as unknown as (p: unknown, f?: boolean) => Promise<void>)(persist, true).then(() => {
-          flushed = true;
-        }),
-        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
-      ]);
-    } catch {
-      // storage failure — fall through to best-effort yield
-    }
-    if (!flushed) {
-      // Fallback barrier using public persist.db and dynamic store names
-      // (avoids hardcoding 'updates' / private _db).
-      const db = (persist as unknown as { db: IDBDatabase | null }).db;
-      if (db) {
-        const names = Array.from(db.objectStoreNames);
-        const target = names.find((n) => n !== 'custom') ?? names[0];
-        if (target) {
-          await new Promise<void>((resolve) => {
-            let settled = false;
-            const done = () => {
-              if (!settled) {
-                settled = true;
-                resolve();
-              }
-            };
-            try {
-              const tx = db.transaction([target], 'readwrite');
-              tx.oncomplete = done;
-              tx.onerror = done;
-              tx.onabort = done;
-              try {
-                const req = tx.objectStore(target).count();
-                req.onsuccess = () => {};
-                req.onerror = done;
-              } catch {
-                done();
-              }
-              setTimeout(done, 2000);
-            } catch {
-              done();
-            }
-          });
-        } else {
-          await new Promise<void>((r) => setTimeout(r, 80));
-        }
-      } else {
-        await new Promise<void>((r) => setTimeout(r, 80));
-      }
-    }
-    // Yield one macrotask so lib0 rtop promise continuations settle.
+    mutate?.(tmp);
+    const flushed = await flushPersist(persist);
+    if (!flushed) throw new Error('idb flush failed');
     await new Promise<void>((r) => setTimeout(r, 0));
   } finally {
     await destroyPersist(persist);
@@ -222,11 +169,12 @@ export type BoardFileError = 'missing' | 'load_failed' | 'too_large';
 export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile } | { error: BoardFileError }> {
   const meta = getBoard(boardId);
   if (!meta) return { error: 'missing' };
-  const update = await loadUpdateForBoard(boardId);
-  if (!update) {
-    try { console.warn('[boardShare] buildBoardFile: no update for board', boardId); } catch {}
-    return { error: 'load_failed' };
+  const loaded = await loadUpdateForBoard(boardId);
+  if (!loaded.ok) {
+    try { console.warn('[boardShare] buildBoardFile: no update for board', boardId, loaded.error); } catch {}
+    return { error: loaded.error };
   }
+  const update = loaded.update;
   if (update.length > MAX_UPDATE_BYTES) return { error: 'too_large' };
   // pre-check predicted base64/JSON size before 4/3x blowup + JSON.stringify + Blob triple allocation
   const predictedB64Len = Math.ceil(update.length / 3) * 4;
@@ -304,16 +252,16 @@ export async function exportBoardFile(boardId: string): Promise<'ok' | 'too_larg
 }
 
 /** Share via Web Share API when available, otherwise fall back to download. */
-export async function shareBoard(boardId: string): Promise<'shared' | 'downloaded' | 'failed'> {
+export async function shareBoard(boardId: string): Promise<'shared' | 'downloaded' | 'failed' | 'too_large'> {
   const built = await buildBoardFile(boardId);
-  if (!('file' in built)) return 'failed';
+  if (!('file' in built)) return built.error === 'too_large' ? 'too_large' : 'failed';
   const file = built.file;
-  if (file.update.length > MAX_BASE64_CHARS) return 'failed';
+  if (file.update.length > MAX_BASE64_CHARS) return 'too_large';
   const meta = getBoard(boardId);
   const filename = `${safeFileName(meta?.name ?? boardId)}${FILE_EXT}`;
   // guard JSON.stringify + Blob triple allocation with max-bytes cap
   const json = JSON.stringify(file);
-  if (json.length > MAX_FILE_BYTES) return 'failed';
+  if (json.length > MAX_FILE_BYTES) return 'too_large';
   const blob = new Blob([json], { type: MIME_JSON });
   try {
     const nav = navigator as unknown as { share?: (d: unknown) => Promise<void>; canShare?: (d: unknown) => boolean };
@@ -340,9 +288,45 @@ export async function shareBoard(boardId: string): Promise<'shared' | 'downloade
   return 'downloaded';
 }
 
+export type ImportErrorCode =
+  | 'file_too_large'
+  | 'read_failed'
+  | 'invalid_json'
+  | 'invalid_file'
+  | 'invalid_update'
+  | 'write_failed';
+
 export type ImportResult =
   | { ok: true; board: BoardMeta }
-  | { ok: false; error: string };
+  | { ok: false; error: ImportErrorCode };
+
+export function importErrorI18nKey(
+  error: string
+):
+  | 'importErrorReadFailed'
+  | 'importErrorInvalidJson'
+  | 'importErrorInvalidFile'
+  | 'importErrorInvalidUpdate'
+  | 'importErrorTooLarge'
+  | 'importErrorWriteFailed'
+  | 'importFailed' {
+  switch (error) {
+    case 'read_failed':
+      return 'importErrorReadFailed';
+    case 'invalid_json':
+      return 'importErrorInvalidJson';
+    case 'invalid_file':
+      return 'importErrorInvalidFile';
+    case 'invalid_update':
+      return 'importErrorInvalidUpdate';
+    case 'file_too_large':
+      return 'importErrorTooLarge';
+    case 'write_failed':
+      return 'importErrorWriteFailed';
+    default:
+      return 'importFailed';
+  }
+}
 
 function parseBoardFile(raw: unknown): BoardFile | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -401,7 +385,8 @@ export async function importBoardFile(file: File): Promise<ImportResult> {
   try {
     await writeUpdateToBoard(created.id, update);
   } catch {
-    // board meta exists even if content write failed
+    await deleteBoardData(created.id);
+    return { ok: false, error: 'write_failed' };
   }
   return { ok: true, board: created };
 }

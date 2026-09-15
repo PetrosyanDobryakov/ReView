@@ -56,6 +56,36 @@ function normalizeCssColor(raw: string): string | undefined {
   return `#${hex(Number(m[1]))}${hex(Number(m[2]))}${hex(Number(m[3]))}`;
 }
 
+/** True when a CSS background is a real highlight, not page chrome or a zero-alpha fill. */
+export function cssBackgroundIsHighlight(value: string | undefined): boolean {
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  if (!v || v === 'transparent' || v === 'none' || v === 'inherit' || v === 'initial') return false;
+  const rgba = v.match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/);
+  if (rgba && Number(rgba[1]) === 0) return false;
+  const hex = normalizeCssColor(value);
+  if (hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    // Word/Docs paste white or near-white cell chrome as a background.
+    if (lum > 0.92) return false;
+  }
+  return true;
+}
+
+/** Wrap/measure flags: keyboard shortcuts update HTML without flipping EditTarget.bold. */
+export function measureStyleFromSpans(
+  spans: Array<{ bold?: boolean; italic?: boolean }>,
+  fallback: { bold?: boolean; italic?: boolean } = {}
+): { bold: boolean; italic: boolean } {
+  return {
+    bold: Boolean(fallback.bold || spans.some((s) => s.bold)),
+    italic: Boolean(fallback.italic || spans.some((s) => s.italic)),
+  };
+}
+
 /** Flatten contentEditable HTML into styled spans (newlines preserved). */
 export function htmlToSpans(html: string): RichSpan[] {
   const root = document.createElement('div');
@@ -88,7 +118,7 @@ export function htmlToSpans(html: string): RichSpan[] {
     if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL' || el.style.textDecoration.includes('line-through')) {
       next.strike = true;
     }
-    if (tag === 'MARK' || el.style.backgroundColor) next.highlight = true;
+    if (tag === 'MARK' || cssBackgroundIsHighlight(el.style.backgroundColor)) next.highlight = true;
     if (tag === 'FONT') {
       const c = el.getAttribute('color');
       if (c) {
@@ -101,7 +131,7 @@ export function htmlToSpans(html: string): RichSpan[] {
       if (nc) next.color = nc;
     }
     if (BLOCK_TAGS.has(tag) && spans.length && !spans[spans.length - 1].text.endsWith('\n')) {
-      // block boundary
+      spans.push({ ...style, text: '\n' });
     }
     for (const child of Array.from(el.childNodes)) walk(child, next);
     if (tag === 'DIV' || tag === 'P' || tag === 'LI') {
@@ -186,6 +216,43 @@ export function parseStoredRich(text: string | undefined, html: string | undefin
   return plainToSpans(text ?? '', base);
 }
 
+/** Wrap rich spans to `maxWidth`. Whitespace tokens stay attached to the line they fit on. */
+export function wrapRichLines(
+  spans: RichSpan[],
+  maxWidth: number,
+  measureRun: (run: RichSpan) => number
+): RichSpan[][] {
+  const paragraphs: RichSpan[][] = [[]];
+  for (const s of spans) {
+    const parts = s.text.split('\n');
+    for (let pi = 0; pi < parts.length; pi++) {
+      if (pi > 0) paragraphs.push([]);
+      if (parts[pi].length) paragraphs[paragraphs.length - 1].push({ ...s, text: parts[pi] });
+    }
+  }
+  const out: RichSpan[][] = [];
+  for (const para of paragraphs) {
+    const lines: RichSpan[][] = [[]];
+    let lineW = 0;
+    for (const run of para) {
+      const words = run.text.split(/(\$[^$]+\$|\s+)/);
+      for (const word of words) {
+        if (!word) continue;
+        const piece: RichSpan = { ...run, text: word };
+        const w = measureRun(piece);
+        if (lineW && lineW + w > maxWidth && !/^\s+$/.test(word)) {
+          lines.push([]);
+          lineW = 0;
+        }
+        lines[lines.length - 1].push(piece);
+        lineW += w;
+      }
+    }
+    out.push(...lines);
+  }
+  return out;
+}
+
 /** Draw wrapped rich spans. `fontFn` builds a CSS font string for a run. */
 export function drawRichBlock(
   ctx: CanvasRenderingContext2D,
@@ -203,85 +270,53 @@ export function drawRichBlock(
     maxBottom?: number;
   }
 ): void {
-  type Run = RichSpan;
-  const paragraphs: Run[][] = [[]];
-  for (const s of spans) {
-    const parts = s.text.split('\n');
-    for (let pi = 0; pi < parts.length; pi++) {
-      if (pi > 0) paragraphs.push([]);
-      if (parts[pi].length) paragraphs[paragraphs.length - 1].push({ ...s, text: parts[pi] });
-    }
-  }
-
-  const measureRun = (run: Run) => {
+  const measureRun = (run: RichSpan) => {
     ctx.font = opts.fontFn(opts.fontSize, run);
     return ctx.measureText(run.text).width;
   };
 
   let y = originY;
-  for (const para of paragraphs) {
-    if (opts.maxBottom !== undefined && y > opts.maxBottom) break;
-    const lines: Run[][] = [[]];
-    let lineW = 0;
-    const pushLine = () => {
-      lines.push([]);
-      lineW = 0;
-    };
-    for (const run of para) {
-      const words = run.text.split(/(\s+)/);
-      for (const word of words) {
-        if (!word) continue;
-        const piece: Run = { ...run, text: word };
-        const w = measureRun(piece);
-        if (lineW && lineW + w > maxWidth && !/^\s+$/.test(word)) {
-          pushLine();
-        }
-        lines[lines.length - 1].push(piece);
-        lineW += w;
+  for (const line of wrapRichLines(spans, maxWidth, measureRun)) {
+    if (opts.maxBottom !== undefined && y > opts.maxBottom) return;
+    let w = 0;
+    for (const r of line) w += measureRun(r);
+    let x =
+      opts.align === 'center'
+        ? originX + (maxWidth - w) / 2
+        : opts.align === 'right'
+          ? originX + maxWidth - w
+          : originX;
+    for (const r of line) {
+      ctx.font = opts.fontFn(opts.fontSize, r);
+      const rw = ctx.measureText(r.text).width;
+      if (r.highlight && opts.highlightFill) {
+        ctx.fillStyle = opts.highlightFill;
+        ctx.fillRect(x - 1, y - 1, rw + 2, opts.fontSize * 1.15);
       }
-    }
-    for (const line of lines) {
-      if (opts.maxBottom !== undefined && y > opts.maxBottom) return;
-      let w = 0;
-      for (const r of line) w += measureRun(r);
-      let x =
-        opts.align === 'center'
-          ? originX + (maxWidth - w) / 2
-          : opts.align === 'right'
-            ? originX + maxWidth - w
-            : originX;
-      for (const r of line) {
-        ctx.font = opts.fontFn(opts.fontSize, r);
-        const rw = ctx.measureText(r.text).width;
-        if (r.highlight && opts.highlightFill) {
-          ctx.fillStyle = opts.highlightFill;
-          ctx.fillRect(x - 1, y - 1, rw + 2, opts.fontSize * 1.15);
+      const runColor = r.color ?? opts.color;
+      ctx.fillStyle = runColor;
+      ctx.textBaseline = 'top';
+      ctx.fillText(r.text, x, y);
+      if (r.underline || r.strike) {
+        ctx.strokeStyle = runColor;
+        ctx.lineWidth = Math.max(1, opts.fontSize / 16);
+        if (r.underline) {
+          const uy = y + opts.fontSize * 0.95;
+          ctx.beginPath();
+          ctx.moveTo(x, uy);
+          ctx.lineTo(x + rw, uy);
+          ctx.stroke();
         }
-        const runColor = r.color ?? opts.color;
-        ctx.fillStyle = runColor;
-        ctx.textBaseline = 'top';
-        ctx.fillText(r.text, x, y);
-        if (r.underline || r.strike) {
-          ctx.strokeStyle = runColor;
-          ctx.lineWidth = Math.max(1, opts.fontSize / 16);
-          if (r.underline) {
-            const uy = y + opts.fontSize * 0.95;
-            ctx.beginPath();
-            ctx.moveTo(x, uy);
-            ctx.lineTo(x + rw, uy);
-            ctx.stroke();
-          }
-          if (r.strike) {
-            const sy = y + opts.fontSize * 0.55;
-            ctx.beginPath();
-            ctx.moveTo(x, sy);
-            ctx.lineTo(x + rw, sy);
-            ctx.stroke();
-          }
+        if (r.strike) {
+          const sy = y + opts.fontSize * 0.55;
+          ctx.beginPath();
+          ctx.moveTo(x, sy);
+          ctx.lineTo(x + rw, sy);
+          ctx.stroke();
         }
-        x += rw;
       }
-      y += opts.lineHeight;
+      x += rw;
     }
+    y += opts.lineHeight;
   }
 }

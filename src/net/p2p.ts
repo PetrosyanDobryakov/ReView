@@ -229,6 +229,16 @@ class P2pClient {
     return [...byUser.values()];
   }
 
+  /** Another tab of the same user still counts — compact must not run against a live replica. */
+  hasOtherAwarenessClients(): boolean {
+    const p = this.provider as unknown as { awareness?: { getStates(): Map<number, unknown>; clientID: number } } | null;
+    if (!p?.awareness) return false;
+    for (const id of p.awareness.getStates().keys()) {
+      if (id !== p.awareness.clientID) return true;
+    }
+    return false;
+  }
+
   publishPresence(user: UserInfo): void { this.lastUser = user; this.write('user', user); }
   publishTool(tool: string): void {
     if (this.lastTool === tool) return;

@@ -224,3 +224,13 @@ export function effectivePen(): { color: string; width: number; alpha: number } 
   }
   return { color: settings.pen.color, width: settings.pen.size, alpha: 1 };
 }
+
+/** Highlighter strokes store translucent alpha; marker strokes are opaque. */
+export function strokeIsHighlighter(v: { alpha?: number }): boolean {
+  return (v.alpha ?? 1) < 0.99;
+}
+
+/** Brush-size slider: scale from the selected stroke, not the current tool style. */
+export function penStrokeWidthForSize(v: { alpha?: number }, size: number): number {
+  return strokeIsHighlighter(v) ? size * 4 : size;
+}

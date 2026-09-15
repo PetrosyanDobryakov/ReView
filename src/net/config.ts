@@ -86,6 +86,8 @@ export function isSyncEnabled(): boolean {
   return isSyncAvailable();
 }
 
+export { syncReconnectMode } from './syncReconnect';
+
 export function isP2pEnabled(): boolean {
   // Dedicated DO sync on workers.dev/pages.dev -> no P2P needed (was spamming wss://signaling.yjs.dev and causing lag)
   if (typeof location !== 'undefined') {

@@ -1,8 +1,9 @@
 import { formulaImage, renderFormula } from './formula';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
-import { shapeRotation, worldToLocal, withShapeRotation, localToWorld, rotatedAabb } from './transform';
+import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
 import { drawRichBlock, parseStoredRich } from './richText';
+import { wrapLinesByWidth } from './textLayout';
 import { isOrbitPaper } from './orbit';
 import {
   isClassicStickyText,
@@ -134,11 +135,93 @@ export function portDir(port: PortId): { x: number; y: number } {
   }
 }
 
+/** Outward port axis in world space after the shape's rotation. */
+export function worldPortDir(port: PortId, rotationDeg = 0): { x: number; y: number } {
+  const d = portDir(port);
+  if (!rotationDeg) return { x: d.x, y: d.y };
+  const rad = degToRad(rotationDeg);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return { x: d.x * cos - d.y * sin, y: d.x * sin + d.y * cos };
+}
+
+/** Connected-arrow endpoints + cubic controls in world space. */
+export function connectedArrowGeometry(
+  from: ShapeView,
+  to: ShapeView,
+  fromPort: PortId,
+  toPort: PortId,
+  style?: Pick<ShapeView, 'strokeWidth' | 'arrowHead'>
+): { points: number[]; x: number; y: number; w: number; h: number } {
+  const a = portPos(from, fromPort, 0);
+  const b = portPos(to, toPort, 0);
+  const fromDir = worldPortDir(fromPort, shapeRotation(from));
+  const toDir = worldPortDir(toPort, shapeRotation(to));
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  const offset = Math.min(80, dist * 0.35);
+  const c1x = a.x + fromDir.x * offset;
+  const c1y = a.y + fromDir.y * offset;
+  const c2x = b.x + toDir.x * offset;
+  const c2y = b.y + toDir.y * offset;
+  const points = [a.x, a.y, c1x, c1y, c2x, c2y, b.x, b.y];
+  return withArrowVisualBounds(style ?? { strokeWidth: 2 }, { points });
+}
+
 export interface ShapeBox {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+export type CropBox = Pick<ShapeView, 'cropX' | 'cropY' | 'cropW' | 'cropH'>;
+
+/** Treat 0/NaN crop fractions as a full frame so reset/export never divide by zero. */
+export function cropFractions(v: CropBox): { x: number; y: number; w: number; h: number } {
+  const w = typeof v.cropW === 'number' && v.cropW > 0 && Number.isFinite(v.cropW) ? v.cropW : 1;
+  const h = typeof v.cropH === 'number' && v.cropH > 0 && Number.isFinite(v.cropH) ? v.cropH : 1;
+  const x = typeof v.cropX === 'number' && Number.isFinite(v.cropX) ? v.cropX : 0;
+  const y = typeof v.cropY === 'number' && Number.isFinite(v.cropY) ? v.cropY : 0;
+  return { x, y, w, h };
+}
+
+export function imageHasCrop(v: CropBox): boolean {
+  return v.cropX !== undefined || v.cropY !== undefined || v.cropW !== undefined || v.cropH !== undefined;
+}
+
+/** World box of the uncropped bitmap from the currently displayed (possibly cropped) box. */
+export function uncroppedBox(v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'> & CropBox): ShapeBox {
+  const f = cropFractions(v);
+  const w = v.w / f.w;
+  const h = v.h / f.h;
+  return {
+    x: v.x - (f.x / f.w) * v.w,
+    y: v.y - (f.y / f.h) * v.h,
+    w,
+    h,
+  };
+}
+
+/**
+ * World AABB of the full bitmap after a (possibly rotated) crop.
+ * `uncroppedBox` is the local-frame full rect used by the crop overlay;
+ * reset must reanchor so the crop window's world top-left stays put.
+ */
+export function restoreUncroppedBox(
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'rotation'> & CropBox
+): ShapeBox {
+  const f = cropFractions(v);
+  const full = uncroppedBox(v);
+  if (!v.rotation) return full;
+  const restored = { ...full, rotation: v.rotation };
+  const want = localToWorld(v, 0, 0);
+  const got = localToWorld(restored, f.x * full.w, f.y * full.h);
+  return {
+    x: full.x + (want.x - got.x),
+    y: full.y + (want.y - got.y),
+    w: full.w,
+    h: full.h,
+  };
 }
 
 export const BOARD_TYPEFACE = '"Space Grotesk", Onest, "Segoe UI", system-ui, sans-serif';
@@ -214,12 +297,125 @@ export const TEXT_FONT = 18;
 export const SHAPE_FONT = 16;
 /** Table cell text size. */
 export const TABLE_FONT = 14;
+/** Line box for sticky notes and flowchart labels (canvas, overlay, SVG). */
+export const LABEL_LINE_HEIGHT = 1.25;
+/** Line box for free text and table cells. */
+export const TEXT_LINE_HEIGHT = 1.3;
+
+export function textOverlayLineHeight(type: string | null | undefined): number {
+  return type === 'text' || type === 'table' ? TEXT_LINE_HEIGHT : LABEL_LINE_HEIGHT;
+}
+
+const LABELLED_SHAPE_TYPES: ReadonlySet<ShapeType> = new Set([
+  'rect',
+  'ellipse',
+  'diamond',
+  'frame',
+  'triangle',
+  'parallelogram',
+  'hexagon',
+  'cylinder',
+  'terminator',
+  'subroutine',
+  'display',
+]);
+
+/** Shapes that persist a `text` / `fontSize` field on the Y.Map. */
+export function shapeHasTextField(type: ShapeType): boolean {
+  return type === 'sticky' || type === 'text' || type === 'table' || LABELLED_SHAPE_TYPES.has(type);
+}
+
+/** Clamp a PDF/doc page index into `[0, count-1]` (empty list → 0). */
+export function docPageIndex(page: number | null | undefined, count: number): number {
+  if (count <= 0) return 0;
+  return Math.min(Math.max(0, page ?? 0), count - 1);
+}
+
+/** Next/prev from a possibly out-of-range stored page (display uses the clamp). */
+export function docPageStep(page: number | null | undefined, count: number, dir: -1 | 1): number {
+  const cur = docPageIndex(page, count);
+  if (count <= 0) return 0;
+  return Math.min(Math.max(0, cur + dir), count - 1);
+}
+
+/** Fallback font size when a shape has no stored `fontSize`. */
+export function defaultFontSizeFor(type: ShapeType): number {
+  if (type === 'sticky') return STICKY_FONT;
+  if (type === 'table') return TABLE_FONT;
+  if (LABELLED_SHAPE_TYPES.has(type)) return SHAPE_FONT;
+  return TEXT_FONT;
+}
 /** Default table grid for click-created tables. */
 export const TABLE_DEFAULT_COLS = 3;
 export const TABLE_DEFAULT_ROWS = 4;
 /** Approximate cell size used to derive cols/rows from a drag box. */
 export const TABLE_CELL_W = 140;
 export const TABLE_CELL_H = 56;
+/** Table [+]/[−] chrome: world = value / zoom so the pills stay screen-sized. */
+export const TABLE_PILL_OUT = 22;
+export const TABLE_PILL_SPLIT = 22;
+export const TABLE_PILL_R = 10;
+/** Click-to-type text tool: overlay wrap width in world px (commit uses the same). */
+export const TEXT_TOOL_WRAP_W = 240;
+/** World-space insets for sticky / table / flowchart labels (overlay scales these by zoom). */
+export const STICKY_TEXT_PAD = 8;
+export const TABLE_CELL_PAD_X = 10;
+export const TABLE_CELL_PAD_TOP = 8;
+export const SHAPE_LABEL_PAD_X = 8;
+export const FRAME_LABEL_PAD_X = 10;
+
+/** Frame title bar height (canvas, overlay, and SVG share this). */
+export function frameHeaderHeight(h: number): number {
+  return Math.min(28, h * 0.22);
+}
+
+/** Frames paint a single header line; extra newlines never reach the canvas. */
+export function frameTitleLine(text: string | undefined): string {
+  return (text ?? '').split('\n')[0] ?? '';
+}
+
+/** Header row is bold even when the table itself is not. Overlay and SVG share this. */
+export function tableCellStyle(
+  v: Pick<ShapeView, 'bold' | 'italic' | 'underline' | 'strike' | 'textAlign'>,
+  row: number,
+  header: boolean
+): { bold: boolean; italic: boolean; underline: boolean; strike: boolean; textAlign: TextAlign } {
+  return {
+    bold: (header && row === 0) || !!v.bold,
+    italic: !!v.italic,
+    underline: !!v.underline,
+    strike: !!v.strike,
+    textAlign: v.textAlign ?? 'left',
+  };
+}
+
+/** CSS padding so the overlay wraps at the same world width as canvas labels. */
+export function textOverlayPaddingCss(
+  kind: { type?: string | null; centered?: boolean; highlight?: boolean; w?: number },
+  zoom: number
+): string {
+  const z = Math.max(0.01, zoom);
+  const px = (n: number) => `${n * z}px`;
+  if (kind.type === 'table') return `${px(TABLE_CELL_PAD_TOP)} ${px(TABLE_CELL_PAD_X)}`;
+  if (kind.type === 'sticky') return px(STICKY_TEXT_PAD);
+  if (kind.type === 'diamond' || kind.type === 'triangle') {
+    const w = kind.w ?? 0;
+    const inner = shapeLabelInnerWidth(kind.type, w);
+    return `0 ${px(Math.max(0, (w - inner) / 2))}`;
+  }
+  if (kind.type === 'frame') return `0 ${px(FRAME_LABEL_PAD_X)}`;
+  if (kind.centered) return `0 ${px(SHAPE_LABEL_PAD_X)}`;
+  return '0';
+}
+
+/** Overlay CSS width in screen pixels (matches the shape box; no 120px floor). */
+export function textOverlayWidthPx(
+  target: { centered?: boolean; w: number },
+  zoom: number
+): number {
+  const z = Math.max(0.01, zoom);
+  return Math.max(target.centered ? 20 : 8, target.w * z);
+}
 /** Legacy default for rects drawn before the sharp/rounded option existed. */
 export const DEFAULT_RECT_RADIUS = 6;
 
@@ -277,6 +473,47 @@ export function shiftTableDivider(fracs: number[], i: number, delta: number, min
   return out;
 }
 
+/** Which column/row a 0…1 offset falls in. */
+export function tableAxisIndex(fracs: number[], t: number): number {
+  if (!fracs.length) return 0;
+  const tt = Math.max(0, Math.min(1 - 1e-12, t));
+  let acc = 0;
+  for (let i = 0; i < fracs.length; i++) {
+    acc += fracs[i]!;
+    if (tt <= acc + 1e-12) return i;
+  }
+  return fracs.length - 1;
+}
+
+/** Map a 0…1 offset through a same-length fraction change (divider drag). */
+export function mapAlongTableFractions(from: number[], to: number[], t: number): number {
+  if (from.length !== to.length || from.length === 0) return t;
+  const oldE = [0];
+  const newE = [0];
+  let os = 0;
+  let ns = 0;
+  for (let i = 0; i < from.length; i++) {
+    os += from[i]!;
+    ns += to[i]!;
+    oldE.push(os);
+    newE.push(ns);
+  }
+  oldE[oldE.length - 1] = 1;
+  newE[newE.length - 1] = 1;
+  const tt = Math.max(0, Math.min(1, t));
+  let i = 0;
+  for (; i < oldE.length - 2; i++) {
+    if (tt <= oldE[i + 1]! + 1e-12) break;
+  }
+  const a0 = oldE[i]!;
+  const a1 = oldE[i + 1]!;
+  const b0 = newE[i]!;
+  const b1 = newE[i + 1]!;
+  const span = a1 - a0;
+  const u = span > 1e-12 ? (tt - a0) / span : 0;
+  return b0 + u * (b1 - b0);
+}
+
 export function tableGrid(
   v: Pick<ShapeView, 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'>
 ): TableGrid {
@@ -316,13 +553,16 @@ export function tableCellRect(
 }
 
 export function tableCellAt(
-  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'>,
+  v: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'cols' | 'rows' | 'cells' | 'header' | 'colW' | 'rowH'> & {
+    rotation?: number;
+  },
   px: number,
   py: number
 ): { row: number; col: number } {
+  const local = shapeRotation(v) ? worldToLocal(v, px, py) : { x: px - v.x, y: py - v.y };
   const g = tableGrid(v);
-  const fx = v.w > 0 ? (px - v.x) / v.w : 0;
-  const fy = v.h > 0 ? (py - v.y) / v.h : 0;
+  const fx = v.w > 0 ? local.x / v.w : 0;
+  const fy = v.h > 0 ? local.y / v.h : 0;
   let col = g.cols - 1;
   for (let c = 0; c < g.cols; c++) {
     if (fx < tableCum(g.colW, c + 1)) {
@@ -359,7 +599,7 @@ export function tableRiderIds(
       for (const rid of riding) {
         const t = byId.get(rid);
         if (!t || t.type !== 'table') continue;
-        if (tableCarries(rotatedAabb(t as ShapeView), s)) {
+        if (tableCarries(t as ShapeView, s)) {
           riding.add(s.id);
           added = true;
           break;
@@ -374,24 +614,30 @@ export function tableRiderIds(
 
 /**
  * Tray rule: a shape rides the table when its center is on it.
- * Freehand marks and notes (pen, arrow, sticky, text) always belong where
- * drawn — no size check. Sheet-like shapes (rect, ellipse, image, frame, doc,
- * graph, nested tables) must also fit, so huge backgrounds underneath stay put.
+ * Freehand marks and notes (pen, unconnected arrow, sticky, text) always belong
+ * where drawn — no size check. Connected arrows follow ports, so they must not
+ * ride (that would yank the far end off its shape). Sheet-like shapes (rect,
+ * ellipse, image, frame, doc, graph, nested tables) must also fit, so huge
+ * backgrounds underneath stay put.
  */
 export function tableCarries(
-  t: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'>,
-  s: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'type'>
+  t: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'> & { rotation?: number },
+  s: Pick<ShapeView, 'x' | 'y' | 'w' | 'h' | 'type'> & { fromId?: string; toId?: string }
 ): boolean {
   const tol = 2;
   const cx = s.x + s.w / 2;
   const cy = s.y + s.h / 2;
-  if (cx < t.x - tol || cy < t.y - tol || cx > t.x + t.w + tol || cy > t.y + t.h + tol) return false;
+  const local = shapeRotation(t)
+    ? worldToLocal(t, cx, cy)
+    : { x: cx - t.x, y: cy - t.y };
+  if (local.x < -tol || local.y < -tol || local.x > t.w + tol || local.y > t.h + tol) return false;
+  if (s.type === 'arrow' && s.fromId && s.toId) return false;
   if (s.type === 'pen' || s.type === 'arrow' || s.type === 'sticky' || s.type === 'text') return true;
   return s.w <= t.w + tol * 2 && s.h <= t.h + tol * 2;
 }
 
 export function arrowHeadLength(v: Pick<ShapeView, 'arrowHead' | 'strokeWidth'>): number {
-  if (typeof v.arrowHead === 'number' && v.arrowHead > 0) return v.arrowHead;
+  if (typeof v.arrowHead === 'number') return Math.max(0, v.arrowHead);
   return Math.max(10, v.strokeWidth * 3.5);
 }
 
@@ -494,7 +740,7 @@ export function intersects(a: ShapeBox, b: ShapeBox): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-/** `inner` lies fully inside `outer` (with tolerance). */
+/** `inner` lies fully inside `outer` (with tolerance). Axis-aligned boxes only. */
 export function containedIn(inner: ShapeBox, outer: ShapeBox, tol = 2): boolean {
   return (
     inner.x >= outer.x - tol &&
@@ -502,6 +748,71 @@ export function containedIn(inner: ShapeBox, outer: ShapeBox, tol = 2): boolean 
     inner.x + inner.w <= outer.x + outer.w + tol &&
     inner.y + inner.h <= outer.y + outer.h + tol
   );
+}
+
+/** `inner`'s corners lie in `outer`'s local unrotated frame (rotation-aware). */
+export function containedInShape(
+  inner: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'> & { rotation?: number },
+  outer: Pick<ShapeView, 'x' | 'y' | 'w' | 'h'> & { rotation?: number },
+  tol = 2
+): boolean {
+  const corners = [
+    localToWorld(inner, 0, 0),
+    localToWorld(inner, inner.w, 0),
+    localToWorld(inner, inner.w, inner.h),
+    localToWorld(inner, 0, inner.h),
+  ];
+  for (const p of corners) {
+    const local = worldToLocal(outer, p.x, p.y);
+    if (local.x < -tol || local.y < -tol || local.x > outer.w + tol || local.y > outer.h + tol) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const IMAGE_RIDER_TYPES = new Set(['text', 'sticky', 'pen']);
+
+/**
+ * Shapes that should translate/rotate with a moved host: table trays (cascading),
+ * annotations glued to a photo/PDF, and anything nested in a frame.
+ */
+export function hostRiderIds(
+  shapes: Array<Pick<ShapeView, 'id' | 'x' | 'y' | 'w' | 'h' | 'type' | 'locked'> & { rotation?: number }>,
+  hostIds: Set<string> | string[]
+): string[] {
+  const byId = new Map(shapes.map((s) => [s.id, s]));
+  const skip = new Set([...hostIds]);
+  const riding = new Set<string>();
+
+  const addFrom = (host: (typeof shapes)[number]) => {
+    if (host.type === 'table') {
+      for (const id of tableRiderIds(shapes, [host.id])) {
+        if (!skip.has(id)) riding.add(id);
+      }
+      return;
+    }
+    if (host.type !== 'image' && host.type !== 'doc' && host.type !== 'frame') return;
+    for (const s of shapes) {
+      if (skip.has(s.id) || riding.has(s.id) || s.locked) continue;
+      if ((host.type === 'image' || host.type === 'doc') && !IMAGE_RIDER_TYPES.has(s.type)) continue;
+      if (containedInShape(s, host)) riding.add(s.id);
+    }
+  };
+
+  for (const id of hostIds) {
+    const host = byId.get(id);
+    if (host) addFrom(host);
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    const before = riding.size;
+    for (const id of [...riding]) {
+      const host = byId.get(id);
+      if (host) addFrom(host);
+    }
+    if (riding.size === before) break;
+  }
+  return [...riding];
 }
 
 type Point = { x: number; y: number };
@@ -520,24 +831,29 @@ function arrowCurve(v: ShapeView): ArrowCurve | null {
   if (pts.length < 4) return null;
 
   const start = { x: pts[0], y: pts[1] };
-  const end = { x: pts[2], y: pts[3] };
   const fromPort = isPortId(v.fromPort) ? v.fromPort : null;
   const toPort = isPortId(v.toPort) ? v.toPort : null;
   const isConnected = Boolean(v.fromId && v.toId && fromPort && toPort);
 
+  if (pts.length >= 8) {
+    const control1 = { x: pts[2], y: pts[3] };
+    const control2 = { x: pts[4], y: pts[5] };
+    const end = { x: pts[6], y: pts[7] };
+    let endAngle = Math.atan2(end.y - control2.y, end.x - control2.x);
+    if (!isFinite(endAngle)) {
+      endAngle = Math.atan2(end.y - start.y, end.x - start.x);
+    }
+    return { kind: 'cubic', start, control1, control2, end, endAngle };
+  }
+
+  const end = { x: pts[2], y: pts[3] };
   if (isConnected && fromPort && toPort) {
     const fromDir = portDir(fromPort);
     const toDir = portDir(toPort);
     const dist = Math.hypot(end.x - start.x, end.y - start.y);
     const offset = Math.min(80, dist * 0.35);
-    const control1 = {
-      x: start.x + fromDir.x * offset,
-      y: start.y + fromDir.y * offset,
-    };
-    const control2 = {
-      x: end.x + toDir.x * offset,
-      y: end.y + toDir.y * offset,
-    };
+    const control1 = { x: start.x + fromDir.x * offset, y: start.y + fromDir.y * offset };
+    const control2 = { x: end.x + toDir.x * offset, y: end.y + toDir.y * offset };
     let endAngle = Math.atan2(end.y - control2.y, end.x - control2.x);
     if (!isFinite(endAngle)) {
       endAngle = Math.atan2(end.y - start.y, end.x - start.x);
@@ -608,18 +924,71 @@ function sampleArrowCurve(curve: ArrowCurve, segments = 24): number[] {
   return points;
 }
 
+function arrowHeadTips(curve: ArrowCurve, head: number): { x1: number; y1: number; x2: number; y2: number } {
+  return {
+    x1: curve.end.x - head * Math.cos(curve.endAngle - 0.42),
+    y1: curve.end.y - head * Math.sin(curve.endAngle - 0.42),
+    x2: curve.end.x - head * Math.cos(curve.endAngle + 0.42),
+    y2: curve.end.y - head * Math.sin(curve.endAngle + 0.42),
+  };
+}
+
+function pointInTriangle(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number
+): boolean {
+  const v0x = cx - ax;
+  const v0y = cy - ay;
+  const v1x = bx - ax;
+  const v1y = by - ay;
+  const v2x = px - ax;
+  const v2y = py - ay;
+  const dot00 = v0x * v0x + v0y * v0y;
+  const dot01 = v0x * v1x + v0y * v1y;
+  const dot02 = v0x * v2x + v0y * v2y;
+  const dot11 = v1x * v1x + v1y * v1y;
+  const dot12 = v1x * v2x + v1y * v2y;
+  const den = dot00 * dot11 - dot01 * dot01;
+  if (Math.abs(den) < 1e-12) return false;
+  const u = (dot11 * dot02 - dot01 * dot12) / den;
+  const v = (dot00 * dot12 - dot01 * dot02) / den;
+  return u >= 0 && v >= 0 && u + v <= 1;
+}
+
+/** Stored AABB for an arrow whose stroke is `patch.points` (curve + head). */
+export function withArrowVisualBounds<T extends { points?: number[] }>(
+  style: Pick<ShapeView, 'strokeWidth' | 'arrowHead'>,
+  patch: T
+): T & ShapeBox {
+  const box = arrowBounds({
+    id: '',
+    type: 'arrow',
+    points: patch.points,
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    fill: 'transparent',
+    stroke: '#000000',
+    strokeWidth: style.strokeWidth ?? 2,
+    arrowHead: style.arrowHead,
+  });
+  return { ...patch, ...box };
+}
+
 export function arrowBounds(v: ShapeView): ShapeBox {
   const curve = arrowCurve(v);
   if (!curve) return { x: v.x, y: v.y, w: v.w, h: v.h };
 
   const points = sampleArrowCurve(curve);
-  const head = arrowHeadLength(v);
-  points.push(
-    curve.end.x - head * Math.cos(curve.endAngle - 0.42),
-    curve.end.y - head * Math.sin(curve.endAngle - 0.42),
-    curve.end.x - head * Math.cos(curve.endAngle + 0.42),
-    curve.end.y - head * Math.sin(curve.endAngle + 0.42)
-  );
+  const head = arrowHeadTips(curve, arrowHeadLength(v));
+  points.push(head.x1, head.y1, head.x2, head.y2);
 
   let minX = Infinity;
   let minY = Infinity;
@@ -640,6 +1009,39 @@ export function arrowBounds(v: ShapeView): ShapeBox {
   };
 }
 
+export function describeArrow(
+  v: ShapeView,
+  ox = 0,
+  oy = 0
+): { pathD: string; head: [number, number, number, number, number, number] } | null {
+  const curve = arrowCurve(v);
+  if (!curve) return null;
+  const sx = curve.start.x + ox;
+  const sy = curve.start.y + oy;
+  const ex = curve.end.x + ox;
+  const ey = curve.end.y + oy;
+  let pathD: string;
+  if (curve.kind === 'cubic') {
+    pathD = `M${sx} ${sy} C${curve.control1.x + ox} ${curve.control1.y + oy} ${curve.control2.x + ox} ${curve.control2.y + oy} ${ex} ${ey}`;
+  } else if (curve.kind === 'quadratic') {
+    pathD = `M${sx} ${sy} Q${curve.control.x + ox} ${curve.control.y + oy} ${ex} ${ey}`;
+  } else {
+    pathD = `M${sx} ${sy} L${ex} ${ey}`;
+  }
+  const tip = arrowHeadTips(curve, arrowHeadLength(v));
+  return { pathD, head: [ex, ey, tip.x1 + ox, tip.y1 + oy, tip.x2 + ox, tip.y2 + oy] };
+}
+
+/** Sampled shaft plus arrowhead outline — same geometry used to paint and hit-test. */
+export function arrowHitPolyline(v: ShapeView): number[] {
+  const curve = arrowCurve(v);
+  if (!curve) return v.points && v.points.length >= 2 ? v.points.slice() : [];
+  const points = sampleArrowCurve(curve);
+  const tip = arrowHeadTips(curve, arrowHeadLength(v));
+  points.push(curve.end.x, curve.end.y, tip.x1, tip.y1, curve.end.x, curve.end.y, tip.x2, tip.y2);
+  return points;
+}
+
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   // Pens/arrows store world-space points; rotation is baked in when applied.
   if (v.type === 'pen') {
@@ -647,9 +1049,11 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   }
   if (v.type === 'arrow') {
     const curve = arrowCurve(v);
-    return curve
-      ? pointNearPolyline(sampleArrowCurve(curve), px, py, v.strokeWidth / 2 + 3)
-      : false;
+    if (!curve) return false;
+    const tol = v.strokeWidth / 2 + 3;
+    if (pointNearPolyline(sampleArrowCurve(curve), px, py, tol)) return true;
+    const tip = arrowHeadTips(curve, arrowHeadLength(v));
+    return pointInTriangle(px, py, curve.end.x, curve.end.y, tip.x1, tip.y1, tip.x2, tip.y2);
   }
   const rotated = Boolean(shapeRotation(v));
   const box = rotated ? { ...v, x: 0, y: 0, rotation: 0 } : v;
@@ -730,14 +1134,25 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
       return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
     }
     case 'terminator': {
-      const r = box.h / 2;
-      if (x < box.x + r) {
-        const dx = x - (box.x + r), dy = y - (box.y + r);
-        return dx * dx + dy * dy <= r * r;
-      }
-      if (x > box.x + box.w - r) {
-        const dx = x - (box.x + box.w - r), dy = y - (box.y + r);
-        return dx * dx + dy * dy <= r * r;
+      const r = Math.min(box.w, box.h) / 2;
+      if (box.w >= box.h) {
+        if (x < box.x + r) {
+          const dx = x - (box.x + r), dy = y - (box.y + r);
+          return dx * dx + dy * dy <= r * r;
+        }
+        if (x > box.x + box.w - r) {
+          const dx = x - (box.x + box.w - r), dy = y - (box.y + r);
+          return dx * dx + dy * dy <= r * r;
+        }
+      } else {
+        if (y < box.y + r) {
+          const dx = x - (box.x + r), dy = y - (box.y + r);
+          return dx * dx + dy * dy <= r * r;
+        }
+        if (y > box.y + box.h - r) {
+          const dx = x - (box.x + r), dy = y - (box.y + box.h - r);
+          return dx * dx + dy * dy <= r * r;
+        }
       }
       return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
     }
@@ -761,6 +1176,70 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
     default:
       return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
   }
+}
+
+/**
+ * World-space points that lie on the filled silhouette, used by lasso so a
+ * loop around an empty AABB corner of a diamond/ellipse does not select, while
+ * a loop around a real vertex (or a rect corner) still does.
+ */
+export function shapeLassoProbes(v: ShapeView): Array<{ x: number; y: number }> {
+  const local: Array<{ x: number; y: number }> = [{ x: v.w / 2, y: v.h / 2 }];
+  switch (v.type) {
+    case 'diamond':
+    case 'ellipse':
+      local.push(
+        { x: v.w / 2, y: 0 },
+        { x: v.w, y: v.h / 2 },
+        { x: v.w / 2, y: v.h },
+        { x: 0, y: v.h / 2 }
+      );
+      break;
+    case 'triangle':
+      local.push({ x: v.w / 2, y: 0 }, { x: 0, y: v.h }, { x: v.w, y: v.h });
+      break;
+    case 'parallelogram': {
+      const skew = v.w * 0.2;
+      local.push(
+        { x: skew, y: 0 },
+        { x: v.w, y: 0 },
+        { x: v.w - skew, y: v.h },
+        { x: 0, y: v.h }
+      );
+      break;
+    }
+    case 'hexagon':
+      local.push(
+        { x: v.w * 0.25, y: 0 },
+        { x: v.w * 0.75, y: 0 },
+        { x: v.w, y: v.h / 2 },
+        { x: v.w * 0.75, y: v.h },
+        { x: v.w * 0.25, y: v.h },
+        { x: 0, y: v.h / 2 }
+      );
+      break;
+    case 'display':
+      local.push(
+        { x: 0, y: 0 },
+        { x: v.w * 0.85, y: 0 },
+        { x: v.w, y: v.h / 2 },
+        { x: v.w * 0.85, y: v.h },
+        { x: 0, y: v.h }
+      );
+      break;
+    case 'cylinder':
+    case 'terminator':
+      local.push(
+        { x: v.w / 2, y: 0 },
+        { x: v.w, y: v.h / 2 },
+        { x: v.w / 2, y: v.h },
+        { x: 0, y: v.h / 2 }
+      );
+      break;
+    default:
+      local.push({ x: 0, y: 0 }, { x: v.w, y: 0 }, { x: v.w, y: v.h }, { x: 0, y: v.h });
+  }
+  return local.map((p) => localToWorld(v, p.x, p.y));
 }
 
 /** Min distance from a point to an open polyline (single vertex = point distance). */
@@ -923,60 +1402,17 @@ function paintPenStroke(
   ctx.restore();
 }
 
-function splitOverlongWord(
-  ctx: CanvasRenderingContext2D,
-  word: string,
-  maxWidth: number,
-  fontSize: number
-): string[] {
-  const chunks: string[] = [];
-  let chunk = '';
-  for (const char of word) {
-    const next = chunk + char;
-    if (chunk && measureMixedLine(ctx, next, fontSize) > maxWidth) {
-      chunks.push(chunk);
-      chunk = char;
-    } else {
-      chunk = next;
-    }
-  }
-  if (chunk) chunks.push(chunk);
-  return chunks;
-}
-
 export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const lines: string[] = [];
-  // Use measureMixedLine so $formula$ width matches drawMixedLine / commit height.
   const sizeMatch = /([\d.]+)px/.exec(ctx.font);
   const fontSize = sizeMatch ? Number(sizeMatch[1]) : 16;
-  for (const raw of text.split('\n')) {
-    if (!raw) {
-      lines.push('');
-      continue;
-    }
-    let line = '';
-    for (const word of raw.split(/\s+/)) {
-      if (measureMixedLine(ctx, word, fontSize) > maxWidth) {
-        if (line) {
-          lines.push(line);
-          line = '';
-        }
-        const chunks = splitOverlongWord(ctx, word, maxWidth, fontSize);
-        lines.push(...chunks.slice(0, -1));
-        line = chunks.at(-1) ?? '';
-        continue;
-      }
-      const test = line ? line + ' ' + word : word;
-      if (line && measureMixedLine(ctx, test, fontSize) > maxWidth) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = test;
-      }
-    }
-    lines.push(line);
-  }
-  return lines;
+  return wrapLinesByWidth(text, maxWidth, (s) => measureMixedLine(ctx, s, fontSize));
+}
+
+/** Inner wrap width for a shape's title / label. Overlay padding and SVG export share this. */
+export function shapeLabelInnerWidth(type: string | null | undefined, w: number): number {
+  if (type === 'diamond') return Math.max(20, (w * 11) / 20);
+  if (type === 'triangle') return Math.max(20, (w * 3) / 5);
+  return Math.max(20, w - SHAPE_LABEL_PAD_X * 2);
 }
 
 export interface TextRun {
@@ -1049,6 +1485,16 @@ function drawMixedLine(
   }
 }
 
+function fillAndStrokePath(ctx: CanvasRenderingContext2D, v: ShapeView): void {
+  ctx.strokeStyle = v.stroke;
+  ctx.lineWidth = v.strokeWidth;
+  if (hasFill(v.fill)) {
+    ctx.fillStyle = v.fill;
+    ctx.fill();
+  }
+  ctx.stroke();
+}
+
 export function drawShape(
   ctx: CanvasRenderingContext2D,
   v: ShapeView,
@@ -1096,23 +1542,19 @@ export function drawShape(
     case 'diamond': {
       const cx = v.x + v.w / 2;
       const cy = v.y + v.h / 2;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.moveTo(cx, v.y);
       ctx.lineTo(v.x + v.w, cy);
       ctx.lineTo(cx, v.y + v.h);
       ctx.lineTo(v.x, cy);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawDiamondLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'frame': {
       // ponytail: frame — structural scheme container, dashed outer + solid header
-      const headerH = Math.min(28, v.h * 0.22);
+      const headerH = frameHeaderHeight(v.h);
       ctx.save();
       ctx.fillStyle = v.fill === COLORS.fill ? 'rgba(255,255,255,0.06)' : v.fill;
       ctx.strokeStyle = v.stroke;
@@ -1129,14 +1571,24 @@ export function drawShape(
       ctx.roundRect(v.x, v.y, v.w, headerH, [8, 8, 0, 0] as unknown as number);
       ctx.fill();
       ctx.restore();
-      if (v.text && !hideText) {
+      const title = frameTitleLine(v.text);
+      if (title && !hideText) {
         ctx.save();
-        ctx.fillStyle = v.textColor ?? textColor;
-        ctx.font = `${Math.max(12, (v.fontSize ?? SHAPE_FONT) - 1)}px ${BOARD_TYPEFACE}`;
+        const pad = FRAME_LABEL_PAD_X;
+        const size = v.fontSize ?? SHAPE_FONT;
+        ctx.beginPath();
+        ctx.rect(v.x + pad, v.y, Math.max(0, v.w - pad * 2), headerH);
+        ctx.clip();
+        const ink = labelInk(v, textColor, boardBg);
+        ctx.fillStyle = ink;
+        ctx.font = shapeFont(v, SHAPE_FONT);
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
-        const pad = 10;
-        ctx.fillText(v.text.split('\n')[0] ?? '', v.x + pad, v.y + headerH / 2, v.w - pad * 2);
+        const lx = v.x + pad;
+        const ly = v.y + headerH / 2;
+        ctx.fillText(title, lx, ly);
+        const lw = ctx.measureText(title).width;
+        drawTextDecorations(ctx, lx, ly - size / 2, lw, size, ink, v.underline, v.strike);
         ctx.restore();
       }
       break;
@@ -1145,40 +1597,29 @@ export function drawShape(
       const ax = v.x + v.w / 2, ay = v.y;
       const bx = v.x, by = v.y + v.h;
       const cx = v.x + v.w, cy = v.y + v.h;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.lineTo(bx, by);
       ctx.lineTo(cx, cy);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawTriangleLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'parallelogram': {
       const skew = v.w * 0.2;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.moveTo(v.x + skew, v.y);
       ctx.lineTo(v.x + v.w, v.y);
       ctx.lineTo(v.x + v.w - skew, v.y + v.h);
       ctx.lineTo(v.x, v.y + v.h);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'hexagon': {
       const cy = v.y + v.h / 2;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.moveTo(v.x + v.w * 0.25, v.y);
       ctx.lineTo(v.x + v.w * 0.75, v.y);
@@ -1187,17 +1628,13 @@ export function drawShape(
       ctx.lineTo(v.x + v.w * 0.25, v.y + v.h);
       ctx.lineTo(v.x, cy);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'cylinder': {
       const ry = Math.min(v.h * 0.15, 18);
       const rx = v.w / 2, cx = v.x + rx;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       // body
       ctx.moveTo(v.x, v.y + ry);
@@ -1206,8 +1643,7 @@ export function drawShape(
       ctx.lineTo(v.x + v.w, v.y + ry);
       ctx.ellipse(cx, v.y + ry, rx, ry, 0, Math.PI, 0);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       // top ellipse
       ctx.beginPath();
       ctx.ellipse(cx, v.y + ry, rx, ry, 0, 0, Math.PI * 2);
@@ -1216,25 +1652,17 @@ export function drawShape(
       break;
     }
     case 'terminator': {
-      const r = v.h / 2;
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
+      const r = Math.min(v.w, v.h) / 2;
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, r);
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
     case 'subroutine': {
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, 6);
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       const inset = 8;
       ctx.beginPath();
       ctx.moveTo(v.x + inset, v.y);
@@ -1246,9 +1674,6 @@ export function drawShape(
       break;
     }
     case 'display': {
-      ctx.fillStyle = v.fill;
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.moveTo(v.x, v.y);
       ctx.lineTo(v.x + v.w * 0.85, v.y);
@@ -1256,8 +1681,7 @@ export function drawShape(
       ctx.lineTo(v.x + v.w * 0.85, v.y + v.h);
       ctx.lineTo(v.x, v.y + v.h);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      fillAndStrokePath(ctx, v);
       if (v.text && !hideText) drawLabel(ctx, v, textColor, boardBg);
       break;
     }
@@ -1303,7 +1727,7 @@ export function drawShape(
             ? ORBIT_DRAW.stickyText
             : (v.textColor ?? '#3a2f00');
         const size = v.fontSize ?? STICKY_FONT;
-        const lineHeight = size * 1.25;
+        const lineHeight = size * LABEL_LINE_HEIGHT;
         const align = v.textAlign ?? 'left';
         if (v.richHtml && v.richHtml.includes('<')) {
           const spans = parseStoredRich(v.text, v.richHtml, {
@@ -1346,16 +1770,17 @@ export function drawShape(
       break;
     }
     case 'text': {
-      if (!v.text || hideText) break;
-      const ink = displayInk(v.textColor ?? textColor, boardBg);
+      if (!v.text) break;
       const size = v.fontSize ?? TEXT_FONT;
-      const lineHeight = size * 1.3;
       if (v.highlight) {
         ctx.fillStyle = TEXT_HIGHLIGHT;
         ctx.beginPath();
         ctx.roundRect(v.x - 4, v.y - 2, v.w + 8, v.h + 4, 4);
         ctx.fill();
       }
+      if (hideText) break;
+      const ink = displayInk(v.textColor ?? textColor, boardBg);
+      const lineHeight = size * TEXT_LINE_HEIGHT;
       const align = v.textAlign ?? 'left';
       if (v.richHtml && v.richHtml.includes('<')) {
         const spans = parseStoredRich(v.text, v.richHtml, {
@@ -1413,11 +1838,12 @@ export function drawShape(
     case 'image': {
       const img = getImage(v.src ?? '');
       if (img && img.complete && img.naturalWidth > 0) {
-        if (v.cropX !== undefined || v.cropY !== undefined || v.cropW !== undefined || v.cropH !== undefined) {
-          const sx = (v.cropX ?? 0) * img.naturalWidth;
-          const sy = (v.cropY ?? 0) * img.naturalHeight;
-          const sw = (v.cropW ?? 1) * img.naturalWidth;
-          const sh = (v.cropH ?? 1) * img.naturalHeight;
+        if (imageHasCrop(v)) {
+          const f = cropFractions(v);
+          const sx = f.x * img.naturalWidth;
+          const sy = f.y * img.naturalHeight;
+          const sw = f.w * img.naturalWidth;
+          const sh = f.h * img.naturalHeight;
           ctx.drawImage(img, sx, sy, sw, sh, v.x, v.y, v.w, v.h);
         } else {
           ctx.drawImage(img, v.x, v.y, v.w, v.h);
@@ -1433,7 +1859,7 @@ export function drawShape(
     }
     case 'doc': {
       const pages = v.pages ?? [];
-      const src = pages[Math.min(v.page ?? 0, pages.length - 1)] ?? '';
+      const src = pages[docPageIndex(v.page, pages.length)] ?? '';
       const img = src ? getImage(src) : null;
       if (img && img.complete && img.naturalWidth > 0) {
         ctx.drawImage(img, v.x, v.y, v.w, v.h);
@@ -1516,6 +1942,85 @@ function graphChrome(v: ShapeView): {
     // ~56px at default size; grows slowly so big frames get finer ticks without clutter.
     targetTickPx: Math.max(32, Math.min(80, 56 * Math.sqrt(scale))),
   };
+}
+
+/** Sampled curve + plot box for SVG export (same domain as canvas `drawGraph`). */
+export function graphCurvePath(
+  v: ShapeView,
+  ox = 0,
+  oy = 0
+): {
+  plot: ShapeBox;
+  radius: number;
+  exprLabel: string;
+  d: string;
+  error?: string;
+} {
+  const chrome = graphChrome(v);
+  const plot = {
+    x: v.x + chrome.pad.left,
+    y: v.y + chrome.pad.top,
+    w: Math.max(20, v.w - chrome.pad.left - chrome.pad.right),
+    h: Math.max(20, v.h - chrome.pad.top - chrome.pad.bottom),
+  };
+  const exprLabel = `y = ${(v.expr ?? '').trim() || '…'}`;
+  const compiled = compileGraph(v.expr ?? '');
+  if (compiled.error !== undefined || !v.expr?.trim()) {
+    return { plot, radius: chrome.radius, exprLabel, d: '', error: compiled.error };
+  }
+  const toT = (px: number) => ((px - plot.x) / plot.w) * 2 * GRAPH_X_RANGE - GRAPH_X_RANGE;
+  let lo = Infinity;
+  let hi = -Infinity;
+  const N = Math.max(80, Math.min(640, Math.round(plot.w * 1.25)));
+  const ts: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i <= N; i++) {
+    const t = toT(plot.x + (i / N) * plot.w);
+    const y = compiled.fn(t);
+    ts.push(t);
+    ys.push(y);
+    if (isFinite(y)) {
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+    }
+  }
+  if (!isFinite(lo) || !isFinite(hi)) {
+    lo = -5;
+    hi = 5;
+  }
+  if (hi - lo < 1e-6) {
+    lo -= 1;
+    hi += 1;
+  } else {
+    const padY = (hi - lo) * 0.1;
+    lo -= padY;
+    hi += padY;
+  }
+  if (lo > 0 && lo < (hi - lo) * 0.35) lo = 0;
+  if (hi < 0 && -hi < (hi - lo) * 0.35) hi = 0;
+  const toPxX = (t: number) => plot.x + ox + ((t + GRAPH_X_RANGE) / (2 * GRAPH_X_RANGE)) * plot.w;
+  const toPxY = (val: number) => plot.y + oy + (1 - (val - lo) / (hi - lo)) * plot.h;
+  const parts: string[] = [];
+  let started = false;
+  let prevPy = 0;
+  for (let i = 0; i <= N; i++) {
+    const y = ys[i];
+    if (!isFinite(y)) {
+      started = false;
+      continue;
+    }
+    const px = toPxX(ts[i]);
+    const py = toPxY(y);
+    if (started && Math.abs(py - prevPy) > plot.h * 2) started = false;
+    if (!started) {
+      parts.push(`M${px} ${py}`);
+      started = true;
+    } else {
+      parts.push(`L${px} ${py}`);
+    }
+    prevPy = py;
+  }
+  return { plot, radius: chrome.radius, exprLabel, d: parts.join(' ') };
 }
 
 function formatTick(n: number, step: number): string {
@@ -1821,17 +2326,19 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   ctx.stroke();
   ctx.shadowColor = 'transparent';
   const head = arrowHeadLength(v);
-  const hx1 = curve.end.x - head * Math.cos(curve.endAngle - 0.42);
-  const hy1 = curve.end.y - head * Math.sin(curve.endAngle - 0.42);
-  const hx2 = curve.end.x - head * Math.cos(curve.endAngle + 0.42);
-  const hy2 = curve.end.y - head * Math.sin(curve.endAngle + 0.42);
-  ctx.beginPath();
-  ctx.moveTo(curve.end.x, curve.end.y);
-  ctx.lineTo(hx1, hy1);
-  ctx.lineTo(hx2, hy2);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+  if (head > 0) {
+    const hx1 = curve.end.x - head * Math.cos(curve.endAngle - 0.42);
+    const hy1 = curve.end.y - head * Math.sin(curve.endAngle - 0.42);
+    const hx2 = curve.end.x - head * Math.cos(curve.endAngle + 0.42);
+    const hy2 = curve.end.y - head * Math.sin(curve.endAngle + 0.42);
+    ctx.beginPath();
+    ctx.moveTo(curve.end.x, curve.end.y);
+    ctx.lineTo(hx1, hy1);
+    ctx.lineTo(hx2, hy2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1858,20 +2365,35 @@ function drawShapeRichText(
     fontSize: size,
     color: ink,
     align,
-    lineHeight: size * 1.25,
+    lineHeight: size * LABEL_LINE_HEIGHT,
     fontFn: (s, style) => boardFont(s, { bold: style.bold ?? v.bold, italic: style.italic ?? v.italic }),
     highlightFill: TEXT_HIGHLIGHT,
     maxBottom,
   });
 }
 
-function labelInk(v: ShapeView, textColor: string, boardBg?: string): string {
+export function labelInk(
+  v: Pick<ShapeView, 'type' | 'fill' | 'textColor'>,
+  textColor: string,
+  boardBg?: string
+): string {
   const raw = v.textColor ?? textColor;
   if (!boardBg || v.type === 'sticky') return raw;
   // ponytail: labels sit inside the fill — contrast against it when opaque
   // (light theme text on a white table/rect would otherwise be invisible).
   if (hasFill(v.fill) && readPrefs().adaptInkToPaper) return readableTextOn(raw, v.fill);
   return displayInk(raw, boardBg);
+}
+
+/** Overlay paint color — same rules as canvas, without mutating stored `textColor`. */
+export function overlayDisplayColor(
+  target: { id?: string | null; type?: string | null; color: string },
+  view: Pick<ShapeView, 'type' | 'fill' | 'textColor'> | undefined,
+  paper: string
+): string {
+  if (target.type === 'sticky' || target.type === 'table') return target.color;
+  if (target.type === 'text' || !view) return displayInk(target.color, paper);
+  return labelInk({ ...view, textColor: target.color }, target.color, paper);
 }
 
 function drawTable(
@@ -1887,10 +2409,9 @@ function drawTable(
   const cumY = (i: number) => tableCum(rowF, i);
   const size = v.fontSize ?? TABLE_FONT;
   const ink = labelInk(v, textColor, boardBg);
-  const align = v.textAlign ?? 'left';
-  const padX = 10;
-  const padTop = 8;
-  const lineHeight = size * 1.3;
+  const padX = TABLE_CELL_PAD_X;
+  const padTop = TABLE_CELL_PAD_TOP;
+  const lineHeight = size * TEXT_LINE_HEIGHT;
 
   ctx.save();
   ctx.beginPath();
@@ -1926,18 +2447,18 @@ function drawTable(
         if (hideCell && hideCell.row === r && hideCell.col === c) continue;
         const text = cells[r * cols + c];
         if (!text) continue;
-        const isHeader = header && r === 0;
-        ctx.font = boardFont(size, { bold: isHeader || v.bold, italic: v.italic });
+        const style = tableCellStyle(v, r, header);
+        ctx.font = boardFont(size, style);
         const cellW = colF[c] * v.w;
         const lines = wrapText(ctx, text, Math.max(20, cellW - padX * 2)).slice(0, maxLines);
         const bx = v.x + cumX(c) * v.w + padX;
         const maxW = Math.max(20, cellW - padX * 2);
         lines.forEach((line, i) => {
           const lw = ctx.measureText(line).width;
-          const lx = lineAnchorX(bx, maxW, lw, align);
+          const lx = lineAnchorX(bx, maxW, lw, style.textAlign);
           const ly = v.y + cumY(r) * v.h + padTop + i * lineHeight;
           ctx.fillText(line, lx, ly);
-          drawTextDecorations(ctx, lx, ly, lw, size, ink, v.underline, v.strike);
+          drawTextDecorations(ctx, lx, ly, lw, size, ink, style.underline, style.strike);
         });
       }
     }
@@ -1969,9 +2490,9 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   ctx.clip();
   const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
-  const padX = 8;
-  const maxW = Math.max(20, v.w - 16);
-  const lineHeight = size * 1.25;
+  const padX = SHAPE_LABEL_PAD_X;
+  const maxW = shapeLabelInnerWidth(v.type, v.w);
+  const lineHeight = size * LABEL_LINE_HEIGHT;
 
   if (v.richHtml && v.richHtml.includes('<')) {
     const estLines = Math.max(1, text.split('\n').length);
@@ -2016,9 +2537,9 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   ctx.clip();
   const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
-  const boxW = v.w * 0.55;
+  const boxW = shapeLabelInnerWidth('diamond', v.w);
   const boxX = cx - boxW / 2;
-  const lineHeight = size * 1.25;
+  const lineHeight = size * LABEL_LINE_HEIGHT;
 
   if (v.richHtml && v.richHtml.includes('<')) {
     const estLines = Math.max(1, text.split('\n').length);
@@ -2029,7 +2550,7 @@ function drawDiamondLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor
   }
 
   ctx.font = shapeFont(v, SHAPE_FONT);
-  const lines = wrapText(ctx, text, Math.max(20, boxW));
+  const lines = wrapText(ctx, text, boxW);
   if (!lines.length) {
     ctx.restore();
     return;
@@ -2061,9 +2582,9 @@ function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColo
   const ink = labelInk(v, textColor, boardBg);
   const align = v.textAlign ?? 'center';
   const cy = v.y + v.h * 0.62;
-  const boxW = v.w * 0.6;
+  const boxW = shapeLabelInnerWidth('triangle', v.w);
   const boxX = v.x + (v.w - boxW) / 2;
-  const lineHeight = size * 1.25;
+  const lineHeight = size * LABEL_LINE_HEIGHT;
 
   if (v.richHtml && v.richHtml.includes('<')) {
     const estLines = Math.max(1, text.split('\n').length);
@@ -2074,7 +2595,7 @@ function drawTriangleLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColo
   }
 
   ctx.font = shapeFont(v, SHAPE_FONT);
-  const lines = wrapText(ctx, text, Math.max(20, boxW));
+  const lines = wrapText(ctx, text, boxW);
   if (!lines.length) {
     ctx.restore();
     return;

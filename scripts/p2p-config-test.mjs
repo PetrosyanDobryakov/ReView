@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_P2P_SIGNALING, resolveP2pEnabled } from '../src/net/p2pPolicy.ts';
+import { syncReconnectMode } from '../src/net/syncReconnect.ts';
 
 assert.deepEqual([...DEFAULT_P2P_SIGNALING], ['wss://signaling.yjs.dev']);
 assert.equal(
@@ -22,5 +23,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configSrc = readFileSync(path.join(root, 'src/net/config.ts'), 'utf8');
 assert.equal(configSrc.includes('herokuapp.com'), false, 'config.ts must not list Heroku signaling');
 assert.equal(configSrc.includes('DEFAULT_P2P_SIGNALING'), true, 'config.ts uses DEFAULT_P2P_SIGNALING');
+assert.equal(syncReconnectMode(true, true), 'bounce', 'enabled same-room reconnect bounces the live socket');
+assert.equal(syncReconnectMode(false, true), 'rebuild', 'disconnect does not bounce the live socket back on');
+assert.equal(syncReconnectMode(true, false), 'rebuild', 'URL/room change rebuilds the provider');
 
 console.log('p2p config: all checks passed');
