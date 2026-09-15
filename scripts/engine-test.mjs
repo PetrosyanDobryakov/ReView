@@ -4445,14 +4445,13 @@ engine.onPointerMove({
   altKey: false,
 });
 store.flushPendingPatches();
-assert.ok(engine.mediaProxy.has(dragImg), 'dragging an image paints through mediaProxy');
+assert.ok(!('mediaProxy' in engine), 'no placeholders — dragged bitmaps paint full');
 assert.notEqual(engine.views.get(dragImg).x, 246000, 'image has moved before the tool switch');
 assert.equal(isWriteGestureActive(), true, 'select-drag holds the write gate open');
 engine.setTool('pen');
 store.flushPendingPatches();
 assert.equal(engine.views.get(dragImg).x, 246000, 'setTool mid-drag restores the image origin');
 assert.equal(engine.views.get(dragImg).y, 246000, 'setTool mid-drag restores the image y');
-assert.equal(engine.mediaProxy.size, 0, 'setTool mid-drag clears mediaProxy placeholders');
 assert.equal(isWriteGestureActive(), false, 'setTool mid-drag closes the write gate');
 assert.equal(engine.tool.id, 'pen', 'tool switch still lands on pen');
 engine.setTool('select');

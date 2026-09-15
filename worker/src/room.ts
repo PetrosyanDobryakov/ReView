@@ -20,6 +20,14 @@ const messageSync = 0;
 const messageAwareness = 1;
 
 export const EMPTY_GC_MS = 90 * 1000;
+/**
+ * Tail persist trails mutations instead of running inside the message handler:
+ * per-message storage round-trips stall the single-threaded room under floods
+ * (drag/move storms), delaying relay for everyone. Relay stays synchronous;
+ * durability trails ~150 ms behind, plus flush-on-close/alarm. Wake-restore
+ * (sync step 1 to live sockets) heals anything the gap missed.
+ */
+export const TAIL_FLUSH_MS = 150;
 
 type SocketAttachment = { clients: number[] };
 
@@ -79,6 +87,8 @@ export class BoardRoom implements DurableObject {
   private persistGen = 0;
   /** Serialize blob writes — overlapping flushFull/flushTail can drop the newer encode. */
   private readonly persist = createAsyncGate();
+  /** Trailing tail-flush timer (debounced off the hot path). */
+  private tailTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     this.state.blockConcurrencyWhile(async () => {
@@ -136,6 +146,8 @@ export class BoardRoom implements DurableObject {
       encoding.writeVarUint(encoder, messageSync);
       syncProtocol.writeUpdate(encoder, update);
       this.broadcast(encoding.toUint8Array(encoder), origin);
+      // Durability trails the relay — never block messages on storage.
+      this.queueTailFlush();
     });
 
     awareness.on(
@@ -249,16 +261,35 @@ export class BoardRoom implements DurableObject {
   }
 
   /**
-   * Always persist a tail before the handler returns (hibernation would otherwise
-   * drop in-memory updates). Full encode at most once per second.
+   * Schedule a trailing tail flush. Fire-and-forget via waitUntil: the message
+   * handler must return without touching storage, so relay never queues behind
+   * blob writes. A flush already in flight just picks the batch up.
    */
-  private async maybePersist(): Promise<void> {
-    await this.persist(async () => {
-      await this.flushTailUnlocked();
-      if (!this.dirty) return;
-      if (!shouldFullPersist(this.lastPersist, Date.now())) return;
-      await this.flushFullUnlocked();
-    });
+  private queueTailFlush(): void {
+    if (this.tailTimer) return;
+    this.tailTimer = setTimeout(() => {
+      this.tailTimer = null;
+      this.state.waitUntil(
+        this.persist(async () => {
+          try {
+            await this.flushTailUnlocked();
+          } finally {
+            // More arrived while flushing — trail it, don't drop it.
+            if (this.pending.length) this.queueTailFlush();
+          }
+        }),
+      );
+    }, TAIL_FLUSH_MS);
+  }
+
+  /**
+   * Full encode at most once per second, off the hot path. Teardown paths
+   * (close/alarm) still await flushFull directly.
+   */
+  private persistFullSoon(): void {
+    if (!this.dirty) return;
+    if (!shouldFullPersist(this.lastPersist, Date.now())) return;
+    this.state.waitUntil(this.flushFull());
   }
 
   /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
@@ -350,10 +381,9 @@ export class BoardRoom implements DurableObject {
     const awareness = this.awareness!;
     try {
       let uint8: Uint8Array;
-      if (message instanceof ArrayBuffer) uint8 = new Uint8Array(message);
+      if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
       else if (message instanceof Uint8Array) uint8 = message;
-      else if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
-      else uint8 = new Uint8Array(message as ArrayBuffer);
+      else uint8 = new Uint8Array(message);
 
       if (uint8.byteLength > MAX_WS_MESSAGE) {
         console.error('[BoardRoom] message too large', uint8.byteLength);
@@ -373,7 +403,8 @@ export class BoardRoom implements DurableObject {
     } catch (e) {
       console.error('[BoardRoom] message error', e);
     }
-    await this.maybePersist();
+    // Relay already happened above; persist trails via waitUntil (never awaited here).
+    this.persistFullSoon();
   }
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
