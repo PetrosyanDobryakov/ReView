@@ -290,11 +290,6 @@ export class SelectTool extends Tool {
       this.mode = 'marquee';
       this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
     }
-    // ponytail: dragged bitmaps paint as placeholders (no per-frame rescale)
-    engine.mediaProxy.clear();
-    for (const [id, v] of this.originals) {
-      if ((v.type === 'image' || v.type === 'doc') && !v.locked) engine.mediaProxy.add(id);
-    }
   }
 
   onMove(engine: Engine, p: PointerInfo): void {
@@ -467,7 +462,6 @@ export class SelectTool extends Tool {
     this.tableDiv = null;
     this.originals.clear();
     this.stuck.clear();
-    engine.mediaProxy.clear();
     engine.clearSnapGuides();
     store.endGesture();
   }
@@ -523,7 +517,6 @@ export class SelectTool extends Tool {
     this.tableDiv = null;
     this.originals.clear();
     this.stuck.clear();
-    engine.mediaProxy.clear();
     engine.clearSnapGuides();
     store.endGesture();
   }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.25 — unreleased
+
+### Sync smoothness
+- Dragged photos and PDFs paint full again — the placeholder that hid them mid-drag is gone.
+- Peers see moves at pointer rate again: light fields (x/y/…) flush immediately even while heavy fields (points/…) coalesce — dragging no longer arrives as 30 Hz teleports.
+- Sync room no longer runs storage round-trips inside the message handler: relay stays synchronous, the tail persist trails ~150 ms behind via waitUntil (plus flush-on-close/alarm). Floods stop queueing behind blob writes, so strokes and moves stop arriving in bursts.
+
 ## 0.14.24 — unreleased
 
 ### Fix

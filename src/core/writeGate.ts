@@ -2,10 +2,11 @@
  * Coalesce high-frequency shape patches during gestures.
  *
  * Light patches (x/y/w/h/rotation/…) flush immediately — cheap on the wire
- * once polylines are shape-local.
+ * once polylines are shape-local. Peers must see moves at pointer rate;
+ * holding light fields back until the heavy flush turns drags into 30 Hz
+ * teleports for everyone else.
  * Heavy patches (points/pressures/src) coalesce ~30 Hz. A heavy patch keeps
- * its light fields in the same flush so a new origin is never stored against
- * stale local points.
+ * a copy of its light fields so the flush still writes a consistent row.
  */
 
 import type { ShapeView } from './shapes';
@@ -51,6 +52,29 @@ function isHeavyPatch(patch: ShapePatch): boolean {
   return patch.points !== undefined || patch.pressures !== undefined || patch.src !== undefined;
 }
 
+function splitPatch(patch: ShapePatch): { light: ShapePatch | null; heavy: ShapePatch | null } {
+  if (!isHeavyPatch(patch)) return { light: patch, heavy: null };
+  const light: ShapePatch = { ...patch };
+  const heavy: ShapePatch = {};
+  if (patch.points !== undefined) {
+    heavy.points = patch.points;
+    delete light.points;
+  }
+  if (patch.pressures !== undefined) {
+    heavy.pressures = patch.pressures;
+    delete light.pressures;
+  }
+  if (patch.src !== undefined) {
+    heavy.src = patch.src;
+    delete light.src;
+  }
+  const lightKeys = Object.keys(light).filter((k) => (light as Record<string, unknown>)[k] !== undefined);
+  return {
+    light: lightKeys.length ? light : null,
+    heavy: Object.keys(heavy).length ? heavy : null,
+  };
+}
+
 export function enqueuePatches(batch: PatchBatch): void {
   if (!batch.length) return;
 
@@ -58,12 +82,17 @@ export function enqueuePatches(batch: PatchBatch): void {
   let heavyChanged = false;
 
   for (const [id, patch] of batch) {
-    if (isHeavyPatch(patch) || pendingHeavy.has(id)) {
+    const { light, heavy } = splitPatch(patch);
+    if (light) lightBatch.push([id, light]);
+    if (heavy) {
       const prev = pendingHeavy.get(id);
-      pendingHeavy.set(id, prev ? mergeShapePatch(prev, patch) : patch);
+      // Keep latest light geometry with heavy so flush writes a consistent row.
+      const mergedLight = light ?? {};
+      pendingHeavy.set(
+        id,
+        prev ? mergeShapePatch(mergeShapePatch(prev, mergedLight), heavy) : mergeShapePatch(mergedLight, heavy)
+      );
       heavyChanged = true;
-    } else {
-      lightBatch.push([id, patch]);
     }
   }
 

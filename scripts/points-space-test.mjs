@@ -43,11 +43,12 @@ enqueuePatches([['a', { x: 1 }]]);
 assert.equal(flushes, 1, 'light patch flushes immediately');
 assert.deepEqual(lastBatch, [['a', { x: 1 }]]);
 
-// Heavy patches coalesce with their bounds so origin and local points stay paired.
+// Heavy patches coalesce, but their light half still flushes immediately.
 flushes = 0;
 enqueuePatches([['a', { x: 2, points: [0, 0, 1, 1] }]]);
 enqueuePatches([['a', { x: 3, points: [0, 0, 2, 2] }]]);
-assert.equal(flushes, 0, 'points+bounds stay pending while gesture open');
+assert.equal(flushes, 2, 'bounds ride along immediately, points stay pending');
+assert.deepEqual(lastBatch, [['a', { x: 3 }]], 'peer sees the latest origin at once');
 const heavyFlushesBefore = flushes;
 endWriteGesture();
 assert.ok(flushes > heavyFlushesBefore, 'endGesture flushes heavy');
@@ -55,6 +56,17 @@ const heavy = lastBatch.find(([id]) => id === 'a')[1];
 assert.deepEqual(heavy.points, [0, 0, 2, 2], 'later points win');
 assert.equal(heavy.x, 3, 'bounds flush with the points, not ahead of them');
 flushNow();
+resetWriteGate();
+
+// Pure-light moves keep flushing immediately even while heavy is pending
+// for the same shape — peers see drags at pointer rate, not 30 Hz teleports.
+beginWriteGesture();
+enqueuePatches([['b', { points: [0, 0, 1, 1] }]]);
+flushes = 0;
+enqueuePatches([['b', { x: 9 }]]);
+assert.equal(flushes, 1, 'light move flushes immediately despite pending heavy');
+assert.deepEqual(lastBatch, [['b', { x: 9 }]]);
+endWriteGesture();
 resetWriteGate();
 
 console.log('points-space + writeGate: ok');

@@ -1,0 +1,146 @@
+/**
+ * Worker tail-persist posture: message handlers must never await storage —
+ * relay stays synchronous while durability trails via waitUntil + debounce.
+ *
+ * room.ts is bundled with esbuild (it is worker TS, parameter properties and
+ * extensionless imports included) and driven with a fake DurableObjectState.
+ *
+ * Run: node --experimental-strip-types scripts/worker-tail-test.mjs
+ */
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as Y from 'yjs';
+import * as encoding from 'lib0/encoding';
+import * as syncProtocol from 'y-protocols/sync';
+import { readBlob } from '../worker/src/persist.ts';
+
+const require = createRequire(import.meta.url);
+const esbuild = require('esbuild');
+
+const outFile = path.join(os.tmpdir(), `boardroom-test-${Date.now()}.mjs`);
+esbuild.buildSync({
+  entryPoints: [fileURLToPath(new URL('../worker/src/room.ts', import.meta.url))],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node24',
+  outfile: outFile,
+  logLevel: 'silent',
+});
+const { BoardRoom } = await import(pathToFileURL(outFile).href);
+
+function makeStorage() {
+  const map = new Map();
+  const ops = { puts: 0, gets: 0 };
+  return {
+    ops,
+    async get(k) {
+      ops.gets += 1;
+      if (Array.isArray(k)) {
+        const m = new Map();
+        for (const key of k) if (map.has(key)) m.set(key, map.get(key));
+        return m;
+      }
+      return map.get(k);
+    },
+    async put(k, v) {
+      ops.puts += 1;
+      if (typeof k === 'string') map.set(k, v);
+      else for (const [key, val] of Object.entries(k)) map.set(key, val);
+    },
+    async delete(k) {
+      const keys = Array.isArray(k) ? k : [k];
+      let n = 0;
+      for (const key of keys) if (map.delete(key)) n += 1;
+      return n;
+    },
+    async deleteAlarm() {},
+    async setAlarm() {},
+  };
+}
+
+function makeSocket() {
+  return { sent: [], send(m) { this.sent.push(m); } };
+}
+
+/** Wrap a raw Yjs update in a y-protocols sync message (messageSync + update). */
+function syncUpdateMessage(update) {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 0);
+  syncProtocol.writeUpdate(enc, update);
+  return encoding.toUint8Array(enc);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const storage = makeStorage();
+const waited = [];
+const sockets = [makeSocket(), makeSocket()];
+const state = {
+  storage,
+  getWebSockets: () => sockets,
+  blockConcurrencyWhile: async (fn) => {
+    await fn();
+  },
+  waitUntil(p) {
+    waited.push(p);
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  },
+};
+
+const room = new BoardRoom(state, {});
+for (let i = 0; i < 50 && !room.doc; i++) await sleep(10);
+assert.ok(room.doc, 'room doc boots');
+// Boot sends sync step 1 to live sockets (hibernation restore) — clear it.
+sockets[0].sent.length = 0;
+sockets[1].sent.length = 0;
+
+// Seed one key so the room doc is non-empty.
+{
+  const seed = new Y.Doc();
+  seed.getMap('b').set('seed', 1);
+  await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(seed)));
+}
+await Promise.all(waited.splice(0));
+assert.ok(sockets[1].sent.length > 0, 'update relays to the other socket');
+assert.equal(sockets[0].sent.length, 0, 'origin socket is skipped');
+sockets[1].sent.length = 0;
+
+// Burst: 20 rapid moves. Relay must happen per message; storage must NOT
+// grow per message (debounced tail + waitUntil, never awaited in handler).
+const putsBefore = storage.ops.puts;
+for (let i = 0; i < 20; i++) {
+  const d = new Y.Doc();
+  d.getMap('b').set(`m${i}`, i);
+  await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(d)));
+}
+assert.equal(sockets[1].sent.length, 20, 'every burst update relays immediately');
+assert.ok(
+  storage.ops.puts - putsBefore <= 6,
+  `persist stays off the hot path (puts=${storage.ops.puts - putsBefore} for 20 messages)`,
+);
+
+// Durability trails: after the debounce window the tail/full blobs exist.
+await sleep(600);
+await Promise.all(waited.splice(0));
+const doc = new Y.Doc();
+const stored = await readBlob(storage, 'doc');
+assert.ok(stored && stored.length > 0, 'full doc blob persisted');
+Y.applyUpdate(doc, stored);
+const tail = await readBlob(storage, 'tail');
+if (tail && tail.length) Y.applyUpdate(doc, tail);
+assert.equal(doc.getMap('b').get('seed'), 1, 'seed survives the round-trip');
+assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip');
+
+// Awareness runs a 15s housekeeping interval — clear it so the process exits.
+try {
+  clearInterval(room.awareness._checkInterval);
+} catch {}
+try {
+  room.doc.destroy();
+} catch {}
+
+console.log('worker-tail: ok');
