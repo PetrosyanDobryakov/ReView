@@ -26,8 +26,9 @@ function shapeToPersisted(engine: Engine, id: string): CalcPersisted {
 
 /**
  * Open calculator session: interaction layer only.
- * Canvas always paints the face (shared `buildCalcFaceLayout`); this panel
- * supplies mode/stamp chrome + invisible key hit targets aligned to that layout.
+ * Canvas paints display + keypad; this panel supplies mode/stamp chrome and
+ * invisible key hit targets. While open, canvas skips header mode text so it
+ * does not ghost under the overlay tabs.
  */
 export function CalculatorPanel({
   target,

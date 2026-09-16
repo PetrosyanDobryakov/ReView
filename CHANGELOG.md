@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.6 — unreleased
+
+### Selection / calculator polish
+- **Rotate handle default off**: Customize → Rotate handle on top now defaults to **off** (legacy bottom-left corner). One-shot migrate clears the 0.15.2–0.15.5 default-on for existing installs.
+- **No ghost “Standard”**: while the keypad overlay is open, canvas skips header mode chrome the overlay owns (mode row / M) so tabs are not double-painted.
+- **Bigger key glyphs**: modest bump to shared face key/fn label sizes so symbols fill spacious wells better (Standard + Scientific; canvas paint).
+
 ## 0.15.5 — unreleased
 
 ### Selection chrome
