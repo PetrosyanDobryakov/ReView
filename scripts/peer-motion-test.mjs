@@ -13,7 +13,7 @@ import {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
-  PEER_MOTION_STALE_SEC,
+  PEER_MOTION_RESUME_GAP_SEC,
   REALTIME_LEAD_SEC,
 } from './core-bundle.mjs';
 
@@ -187,26 +187,29 @@ const REALTIME_OPTS = { leadSec: REALTIME_LEAD_SEC, maxLead: 20 };
   assert.equal(s.y, s.ty, 'past leadSec realtime sits on sample y');
 }
 
-// Idle → first move: long gap must NOT invent velocity via sampleDeltaSec's
-// 0.12s ceiling (delta/0.12 → slingshot), or realtime dead-reckon overshoots
-// then the next packet snaps back (observer stutter after a stale peer).
+// Idle → first move: long gap hard-snaps display to the wire sample and
+// clears velocity (no coast across the discontinuity). 0.14.39's 0.2s stale
+// reset is rejected — it zeroed velocity on mid-move stalls and added jaggers.
 {
   const s = initPeerMotion(0, 0, 0);
   pushPeerSample(s, 100, 0, 50); // was moving
   snapPeerMotionToSample(s);
-  // Sit idle past stale threshold (awareness sends nothing while sameCursor).
-  const idleAt = 50 + (PEER_MOTION_STALE_SEC + 2) * 1000;
+  s.x = 100;
+  s.y = 0;
+  // Sit idle past resume gap (awareness sends nothing while sameCursor).
+  const idleAt = 50 + (PEER_MOTION_RESUME_GAP_SEC + 2) * 1000;
   pushPeerSample(s, 160, 0, idleAt); // first move after idle (+60 world)
-  assert.equal(s.svx, 0, 'stale resume clears sample vx');
-  assert.equal(s.svy, 0, 'stale resume clears sample vy');
-  assert.equal(s.vx, 0, 'stale resume clears rendered vx');
-  assert.equal(s.vy, 0, 'stale resume clears rendered vy');
-  assert.equal(s.prevTx, s.tx, 'stale resume seeds prev at new sample');
-  assert.equal(s.tx, 160, 'stale resume takes new sample x');
-  // Without the fix: svx ≈ 60/0.12 = 500 → +40 lead in 80ms.
-  snapPeerMotionToSample(s);
+  assert.equal(s.svx, 0, 'idle resume clears sample vx');
+  assert.equal(s.svy, 0, 'idle resume clears sample vy');
+  assert.equal(s.vx, 0, 'idle resume clears rendered vx');
+  assert.equal(s.vy, 0, 'idle resume clears rendered vy');
+  assert.equal(s.prevTx, s.tx, 'idle resume seeds prev at new sample');
+  assert.equal(s.tx, 160, 'idle resume takes new sample x');
+  assert.equal(s.x, 160, 'idle resume hard-snaps display x to wire');
+  assert.equal(s.y, 0, 'idle resume hard-snaps display y to wire');
+  // No fabricated coast after resume (old bug: svx ≈ 60/0.12 = 500).
   applyRealtimePeerPose(s, idleAt + 40, REALTIME_OPTS);
-  assert.equal(s.x, s.tx, 'realtime does not coast on fabricated post-idle speed');
+  assert.equal(s.x, s.tx, 'realtime does not coast on post-idle resume');
   assert.equal(s.y, s.ty, 'realtime post-idle y stays on sample');
   // Contrast: same jump inside a fresh packet interval still extrapolates.
   pushPeerSample(s, 220, 0, idleAt + 50);
@@ -215,13 +218,26 @@ const REALTIME_OPTS = { leadSec: REALTIME_LEAD_SEC, maxLead: 20 };
   assert.ok(s.x > s.tx, 'steady motion still dead-reckons between packets');
 }
 
-// Gaps at/under stale threshold keep velocity continuity (brief stalls).
+// Mid-move stalls (~200–250ms) must NOT hard-reset — that was the 0.14.39 jagger.
 {
   const s = initPeerMotion(0, 0, 0);
   pushPeerSample(s, 100, 0, 50);
-  const almostStale = 50 + PEER_MOTION_STALE_SEC * 1000; // equal → not stale
-  pushPeerSample(s, 112, 0, almostStale);
-  assert.ok(Math.hypot(s.svx, s.svy) > 0, 'sub-stale gap still estimates velocity');
+  snapPeerMotionToSample(s);
+  const stallAt = 50 + 250; // 250ms — above old 0.2s stale, under resume gap
+  pushPeerSample(s, 130, 0, stallAt);
+  assert.ok(Math.hypot(s.svx, s.svy) > 0, 'mid-move stall keeps velocity estimate');
+  assert.notEqual(s.x, 130, 'mid-move stall does not hard-snap display');
+  // Velocity uses real dt (not /0.12): 30 / 0.25 = 120 world/s.
+  assert.ok(Math.abs(s.svx - 120) < 1e-6, `unclamped stall velocity (got ${s.svx})`);
+}
+
+// Gaps at/under resume threshold keep velocity continuity.
+{
+  const s = initPeerMotion(0, 0, 0);
+  pushPeerSample(s, 100, 0, 50);
+  const almostResume = 50 + PEER_MOTION_RESUME_GAP_SEC * 1000; // equal → not resume
+  pushPeerSample(s, 112, 0, almostResume);
+  assert.ok(Math.hypot(s.svx, s.svy) > 0, 'sub-resume gap still estimates velocity');
 }
 
 console.log('peer-motion: all checks passed');
