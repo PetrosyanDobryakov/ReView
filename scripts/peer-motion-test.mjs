@@ -9,6 +9,7 @@ import {
   peerMotionShouldAnimate,
   pushPeerSample,
   sampleDeltaSec,
+  snapPeerMotionToSample,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
 } from './core-bundle.mjs';
@@ -145,6 +146,21 @@ const OPTS = { leadSec: 0.04, maxLead: 20 };
     false,
     'releases hold after the window when at rest',
   );
+}
+
+// Realtime path: snap display pose to the latest sample (no spring trail).
+{
+  const s = initPeerMotion(0, 0, 0);
+  pushPeerSample(s, 100, 0, 50);
+  s.x = 10;
+  s.y = 20;
+  s.vx = 400;
+  s.vy = -50;
+  snapPeerMotionToSample(s);
+  assert.equal(s.x, s.tx, 'snap x to sample');
+  assert.equal(s.y, s.ty, 'snap y to sample');
+  assert.equal(s.vx, 0, 'snap clears vx');
+  assert.equal(s.vy, 0, 'snap clears vy');
 }
 
 console.log('peer-motion: all checks passed');

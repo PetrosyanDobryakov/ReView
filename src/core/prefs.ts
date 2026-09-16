@@ -29,6 +29,11 @@ export interface AppPrefs {
    */
   rotateSnap: boolean;
   /**
+   * When true, remote cursors use spring/lerp follow (can trail the wire).
+   * Default false = snap display pose to the latest awareness sample (realtime).
+   */
+  smoothPeerCursors: boolean;
+  /**
    * Override for the Yjs websocket URL. null = built-in
    * `VITE_SYNC_URL` or `ws(s)://<hostname>:1234`.
    */
@@ -64,6 +69,7 @@ const DEFAULTS: AppPrefs = {
   paperBg: null,
   recognizeShapes: false,
   rotateSnap: true,
+  smoothPeerCursors: false,
   syncUrl: null,
   syncEnabled: true,
   orbitUnlocked: false,
@@ -160,6 +166,8 @@ function parsePrefs(raw: unknown): AppPrefs {
     recognizeShapes:
       typeof parsed.recognizeShapes === 'boolean' ? parsed.recognizeShapes : DEFAULTS.recognizeShapes,
     rotateSnap: typeof parsed.rotateSnap === 'boolean' ? parsed.rotateSnap : DEFAULTS.rotateSnap,
+    smoothPeerCursors:
+      typeof parsed.smoothPeerCursors === 'boolean' ? parsed.smoothPeerCursors : DEFAULTS.smoothPeerCursors,
     syncUrl: Object.prototype.hasOwnProperty.call(parsed, 'syncUrl')
       ? normalizeSyncUrl(parsed.syncUrl)
       : DEFAULTS.syncUrl,
@@ -258,6 +266,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     'paperBg',
     'recognizeShapes',
     'rotateSnap',
+    'smoothPeerCursors',
     'toolbarOrder',
   ];
   if (userFields.some((k) => patch[k] !== undefined)) {

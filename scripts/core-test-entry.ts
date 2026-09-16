@@ -27,6 +27,7 @@ export {
   pushPeerSample,
   sampleDeltaSec,
   smoothDamp,
+  snapPeerMotionToSample,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
 } from '../src/core/peerMotion';
