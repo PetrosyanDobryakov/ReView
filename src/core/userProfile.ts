@@ -26,7 +26,14 @@ const STORAGE_KEY = 'review-user-profiles-v1';
 
 export type UserPrefsSlice = Pick<
   AppPrefs,
-  'adaptInkToPaper' | 'toolCursorScale' | 'uiScale' | 'toolHoverAnim' | 'paperBg' | 'recognizeShapes' | 'rotateSnap'
+  | 'adaptInkToPaper'
+  | 'toolCursorScale'
+  | 'uiScale'
+  | 'toolHoverAnim'
+  | 'paperBg'
+  | 'recognizeShapes'
+  | 'rotateSnap'
+  | 'smoothPeerCursors'
 >;
 
 export interface UserProfileData {
@@ -77,6 +84,7 @@ function collectProfile(): UserProfileData {
       paperBg: prefs.paperBg,
       recognizeShapes: prefs.recognizeShapes,
       rotateSnap: prefs.rotateSnap,
+      smoothPeerCursors: prefs.smoothPeerCursors,
     },
     toolSettings: exportSettingsSnapshot(),
     keybinds: exportKeybinds(),

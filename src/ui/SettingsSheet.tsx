@@ -1166,6 +1166,21 @@ export function SettingsSheet({
                   <p className="sheet-hint">
                     <SwapText text={t(locale, 'rotateSnapHint')} />
                   </p>
+                  <button
+                    type="button"
+                    className={`sheet-switch${prefs.smoothPeerCursors ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={prefs.smoothPeerCursors}
+                    onClick={() => patchPrefs({ smoothPeerCursors: !prefs.smoothPeerCursors })}
+                  >
+                    <span>{t(locale, 'smoothPeerCursors')}</span>
+                    <span className="switch" aria-hidden="true">
+                      <span className="switch-thumb" />
+                    </span>
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'smoothPeerCursorsHint')} />
+                  </p>
                 </section>
               )}
             </div>

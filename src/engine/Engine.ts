@@ -50,10 +50,11 @@ import {
   initPeerMotion,
   peerMotionShouldAnimate,
   pushPeerSample,
+  snapPeerMotionToSample,
   stepPeerMotion,
   type PeerMotionState,
 } from '../core/peerMotion';
-import { onPrefsChange } from '../core/prefs';
+import { onPrefsChange, readPrefs } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
 import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
 
@@ -309,6 +310,8 @@ export class Engine {
   private peerLerp = new Map<number, PeerMotionState>();
   private peersAnimating = false;
   private frameDt = 1 / 60;
+  /** Spring-follow remote cursors; default off = snap to latest awareness sample. */
+  private smoothPeerCursors = false;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -316,6 +319,7 @@ export class Engine {
     const prevById = new Map(this.remotePeers.map((p) => [p.id, p]));
     let shouldPaint = peers.length !== this.remotePeers.length;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const smooth = this.smoothPeerCursors && !this.reduceMotion;
 
     const live = new Set(peers.map((p) => p.id));
     for (const id of [...this.peerLerp.keys()]) {
@@ -353,10 +357,15 @@ export class Engine {
       }
       const cur = this.peerLerp.get(peer.id);
       if (!cur) {
-        this.peerLerp.set(peer.id, initPeerMotion(peer.x, peer.y, now));
+        const pos = initPeerMotion(peer.x, peer.y, now);
+        this.peerLerp.set(peer.id, pos);
         shouldPaint = true;
       } else if (cur.tx !== peer.x || cur.ty !== peer.y) {
         pushPeerSample(cur, peer.x, peer.y, now);
+        if (!smooth) snapPeerMotionToSample(cur);
+        shouldPaint = true;
+      } else if (!smooth && (cur.x !== cur.tx || cur.y !== cur.ty)) {
+        snapPeerMotionToSample(cur);
         shouldPaint = true;
       }
     }
@@ -473,7 +482,9 @@ export class Engine {
       this.reduceMotion = this.reduceMotionMq.matches;
       this.reduceMotionMq.addEventListener('change', this.onReduceMotionChange);
     }
-    this.offPrefs = onPrefsChange(() => {
+    this.smoothPeerCursors = readPrefs().smoothPeerCursors;
+    this.offPrefs = onPrefsChange((prefs) => {
+      this.smoothPeerCursors = prefs.smoothPeerCursors;
       clearToolCursorCache();
       this.setCursor(this.toolCursor());
       this.dirty = true;
@@ -4153,6 +4164,7 @@ export class Engine {
     const s = 1 / this.camera.zoom;
     const dt = this.frameDt;
     const reduce = this.reduceMotion;
+    const smooth = this.smoothPeerCursors && !reduce;
     // Softer catch-up so a prediction miss on a new sample does not pop.
     const smoothTime = 0.1;
     // Dead-reckon at most ~one awareness interval ahead of the last sample.
@@ -4204,19 +4216,12 @@ export class Engine {
         this.peerLerp.set(peer.id, pos);
       }
 
-      let aimX = pos.tx;
-      let aimY = pos.ty;
-      if (!reduce) {
+      if (smooth) {
         // Age-based dead-reckon (no between-packet retract) + soft spring.
         const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 14 * s });
-        aimX = aim.x;
-        aimY = aim.y;
-        stepPeerMotion(pos, aimX, aimY, now, dt, smoothTime);
+        stepPeerMotion(pos, aim.x, aim.y, now, dt, smoothTime);
       } else {
-        pos.x = pos.tx;
-        pos.y = pos.ty;
-        pos.vx = 0;
-        pos.vy = 0;
+        snapPeerMotionToSample(pos);
       }
 
       const screen = this.worldToScreen(pos.x, pos.y);
@@ -4228,10 +4233,9 @@ export class Engine {
         screen.y <= this.h - edgePad;
       if (!onScreen) continue;
 
-      // Hold frames between awareness packets — otherwise the spring settles in
-      // 1–2 frames, peersAnimating clears, and the glyph freezes until the next
-      // sample (packet-rate stutter even on a healthy socket).
-      if (peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
+      // Hold frames between awareness packets only in smooth mode — realtime
+      // paints on each sample via setPeers; holding would just burn rAF.
+      if (smooth && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
 
       const fill = peer.color || '#7c8cff';
       const icon = peerToolIcon(peer.tool);
@@ -4261,6 +4265,7 @@ export class Engine {
     const myPage = store.currentPageId();
     const pages = store.listPages();
     const reduce = this.reduceMotion;
+    const smooth = this.smoothPeerCursors && !reduce;
 
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
@@ -4277,12 +4282,11 @@ export class Engine {
         this.peerLerp.set(peer.id, pos);
       }
       if (peer.viewing === false) {
-        if (!reduce) {
+        if (smooth) {
           const aim = aimPeerMotion(pos, now, { leadSec: 0.04, maxLead: 14 / this.camera.zoom });
           stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.1);
         } else {
-          pos.x = pos.tx;
-          pos.y = pos.ty;
+          snapPeerMotionToSample(pos);
         }
       }
 

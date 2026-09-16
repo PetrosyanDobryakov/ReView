@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.36 — unreleased
+
+### Sync smoothness
+- Peer cursors default to **realtime**: display pose snaps to the latest awareness sample (no spring trail). Optional **Smooth peer cursors** toggle in Settings → Customize restores the previous spring/lerp follow. Preference persists with other customise settings. Send path unchanged (batching / quant).
+
 ## 0.14.35 — unreleased
 
 ### Deploy / version visibility

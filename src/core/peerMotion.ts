@@ -1,5 +1,6 @@
 /**
- * Peer cursor motion: critically-damped follow + age-based dead-reckoning.
+ * Peer cursor motion: critically-damped follow + age-based dead-reckoning,
+ * or optional snap-to-sample for realtime display (default in the engine).
  * Pure math (no DOM/canvas) so the motion contract is unit-testable.
  *
  * Aim must advance with sample age (classic dead-reckon), never retract
@@ -11,13 +12,15 @@
  * cannot hook more than maxLead past the final point. Kill rendered velocity
  * on direction reversal to stop zigzag slingshots on short choppy strokes.
  *
- * Callers must step once per frame. Stepping from both the on-canvas glyph
- * and the off-screen pill doubles the spring rate and looks like stutter.
+ * Callers must step once per frame when smooth mode is on. Stepping from
+ * both the on-canvas glyph and the off-screen pill doubles the spring rate
+ * and looks like stutter.
  *
- * Keep the paint loop alive between samples (`peerMotionShouldAnimate`): if
- * the spring settles and `peersAnimating` clears, rAF skips render until the
- * next awareness packet — the cursor freezes at packet rate (stutter) even
- * when the network is fine.
+ * Keep the paint loop alive between samples in smooth mode
+ * (`peerMotionShouldAnimate`): if the spring settles and `peersAnimating`
+ * clears, rAF skips render until the next awareness packet — the cursor
+ * freezes at packet rate (stutter) even when the network is fine. Realtime
+ * mode skips that hold; it paints when samples arrive.
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */
@@ -88,7 +91,8 @@ export function sampleDeltaSec(prevAt: number, now: number): number {
  * slingshot past the corner.
  *
  * Does not snap the rendered pose — spring/lerp absorbs the correction so
- * each awareness packet does not pop the glyph.
+ * each awareness packet does not pop the glyph. Callers that want realtime
+ * display should follow with `snapPeerMotionToSample`.
  */
 export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: number): void {
   const dt = sampleDeltaSec(s.sampleAt, now);
@@ -106,6 +110,14 @@ export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: nu
   s.sampleAt = now;
   s.svx = nvx;
   s.svy = nvy;
+}
+
+/** Display pose = latest sample (no spring trail). Used by realtime + reduced-motion. */
+export function snapPeerMotionToSample(s: PeerMotionState): void {
+  s.x = s.tx;
+  s.y = s.ty;
+  s.vx = 0;
+  s.vy = 0;
 }
 
 export interface PeerAimOptions {
