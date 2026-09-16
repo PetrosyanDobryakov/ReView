@@ -2385,7 +2385,8 @@ function drawCalculator(
   const gridTop = dispY + dispH + pad * 0.7;
   const gridH = Math.max(40, v.y + v.h - pad - gridTop);
   const cols = sci ? 5 : 4;
-  const rows = sci ? 8 : 6;
+  // Match CalculatorPanel: standard 8 rows; scientific 9 (memory + pad).
+  const rows = sci ? 9 : 8;
   const gap = Math.max(3, 4.5 * scale);
   const cellW = (dispW - gap * (cols - 1)) / cols;
   const cellH = (gridH - gap * (rows - 1)) / rows;

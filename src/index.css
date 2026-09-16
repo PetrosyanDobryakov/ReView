@@ -3484,7 +3484,7 @@ h3 .swap-text,
   border-style: solid;
   border-radius: calc(12px * var(--calc-zoom, 1));
   box-shadow: var(--chrome-shadow);
-  color: var(--chrome-text);
+  color: var(--calc-ink, var(--chrome-text));
   font-family: "Space Grotesk", Onest, system-ui, sans-serif;
   overflow: hidden;
   outline: none;
@@ -3520,7 +3520,7 @@ h3 .swap-text,
   appearance: none;
   border: 1px solid var(--chrome-border-soft);
   background: transparent;
-  color: var(--chrome-text-dim);
+  color: var(--calc-muted, var(--chrome-text-dim));
   border-radius: calc(8px * var(--calc-zoom, 1));
   height: calc(26px * var(--calc-zoom, 1));
   padding: 0 calc(8px * var(--calc-zoom, 1));
@@ -3546,7 +3546,7 @@ h3 .swap-text,
   min-height: calc(64px * var(--calc-zoom, 1));
   padding: calc(8px * var(--calc-zoom, 1)) calc(10px * var(--calc-zoom, 1));
   border-radius: calc(10px * var(--calc-zoom, 1));
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--calc-display, rgba(0, 0, 0, 0.22));
   border: 1px solid var(--chrome-border-soft);
 }
 .calc-expr {
@@ -3554,7 +3554,7 @@ h3 .swap-text,
   justify-content: space-between;
   gap: 8px;
   min-height: calc(14px * var(--calc-zoom, 1));
-  color: var(--chrome-text-dim);
+  color: var(--calc-muted, var(--chrome-text-dim));
   font-size: calc(11px * var(--calc-zoom, 1));
   text-align: right;
 }
@@ -3591,8 +3591,8 @@ h3 .swap-text,
   appearance: none;
   border: 1px solid var(--chrome-border-soft);
   border-radius: calc(8px * var(--calc-zoom, 1));
-  background: rgba(236, 234, 228, 0.06);
-  color: var(--chrome-text);
+  background: var(--calc-key, rgba(236, 234, 228, 0.06));
+  color: var(--calc-ink, var(--chrome-text));
   font: 500 calc(13px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
   cursor: pointer;
   min-width: 0;
@@ -3608,7 +3608,7 @@ h3 .swap-text,
 }
 .calc-key.fn,
 .calc-key.mem {
-  color: var(--chrome-text-dim);
+  color: var(--calc-muted, var(--chrome-text-dim));
   font-size: calc(11px * var(--calc-zoom, 1));
 }
 .calc-key.op {

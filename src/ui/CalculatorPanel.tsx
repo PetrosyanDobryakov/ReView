@@ -72,6 +72,13 @@ function standardKeys(second: boolean): KeyDef[][] {
 function scientificKeys(second: boolean): KeyDef[][] {
   return [
     [
+      { id: 'MC', label: 'MC', cls: 'mem' },
+      { id: 'MR', label: 'MR', cls: 'mem' },
+      { id: 'M+', label: 'M+', cls: 'mem' },
+      { id: 'M−', label: 'M−', cls: 'mem' },
+      { id: 'MS', label: 'MS', cls: 'mem' },
+    ],
+    [
       { id: '2nd', label: '2nd', cls: second ? 'active fn' : 'fn' },
       { id: 'π', label: 'π', cls: 'fn' },
       { id: 'e', label: 'e', cls: 'fn' },
@@ -251,20 +258,31 @@ export function CalculatorPanel({
   const z = engine.camera.zoom;
   const frame = calcFrameScale(target.w, target.h);
   const rot = target.rotation ?? (live ? shapeRotation(live) : 0);
+  const bodyBg = fill || (relativeLight(paper) ? '#f0eee8' : '#2a2a27');
+  const lightBody = relativeLight(bodyBg);
+  const ink = lightBody ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.92)';
+  const muted = lightBody ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)';
+  const keyFace = lightBody ? 'rgba(28, 28, 26, 0.08)' : 'rgba(236, 234, 228, 0.06)';
+  const displayWell = lightBody ? 'rgba(28, 28, 26, 0.06)' : 'rgba(0, 0, 0, 0.22)';
 
   return (
     <div
       ref={rootRef}
-      className={`calc-panel${pub.error ? ' is-error' : ''}${pub.mode === 'scientific' ? ' is-sci' : ''}`}
+      className={`calc-panel${pub.error ? ' is-error' : ''}${pub.mode === 'scientific' ? ' is-sci' : ''}${lightBody ? ' is-light' : ''}`}
       style={{
         left: screen.x,
         top: screen.y,
         width: Math.max(1, target.w * z),
         height: Math.max(1, target.h * z),
-        background: fill || (relativeLight(paper) ? '#f0eee8' : '#2a2a27'),
+        background: bodyBg,
         borderColor: stroke,
         borderWidth: Math.max(1, (live?.strokeWidth ?? target.strokeWidth) * z),
+        color: ink,
         ['--calc-zoom' as string]: String(z * frame),
+        ['--calc-ink' as string]: ink,
+        ['--calc-muted' as string]: muted,
+        ['--calc-key' as string]: keyFace,
+        ['--calc-display' as string]: displayWell,
         transform: rot ? `rotate(${rot}deg)` : undefined,
         transformOrigin: 'top left',
       }}
