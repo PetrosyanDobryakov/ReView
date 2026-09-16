@@ -1277,16 +1277,17 @@ export class CalculatorTool extends BoxTool {
     const box = this.commitDrawnBox(p);
     if (!box) return;
     const size = clampCalcSize(box.w, box.h);
-    // Keep the drag anchor: grow from top-left of the drawn box when clamping.
+    // Same creation defaults as other filled shapes — StyleBar fill/stroke tokens.
+    // Untouched fill still paints via resolveCalcBodyFill → --chrome-panel.
     const id = store.addShape({
       type: 'calculator',
       x: box.x,
       y: box.y,
       w: size.w,
       h: size.h,
-      fill: 'transparent',
+      fill: shapeFillValue(),
       stroke: settings.shape.stroke,
-      strokeWidth: 1.75,
+      strokeWidth: settings.shape.strokeWidth,
       cornerRadius: 14,
       ...fields,
     });
@@ -1297,14 +1298,16 @@ export class CalculatorTool extends BoxTool {
     const drawBox = this.previewBox();
     if (!drawBox) return;
     const s = 1 / engine.camera.zoom;
+    const fill = shapeFillValue();
     ctx.save();
     ctx.strokeStyle = settings.shape.stroke;
-    ctx.fillStyle = 'transparent';
+    ctx.fillStyle = hasFill(fill) ? (fill.length === 7 ? fill + '22' : withAlpha(fill, 0.13)) : 'transparent';
     ctx.globalAlpha = 0.9;
     ctx.lineWidth = 1.5 * s;
     ctx.setLineDash([5 * s, 4 * s]);
     ctx.beginPath();
     ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 12);
+    if (hasFill(fill)) ctx.fill();
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 0.4;

@@ -31,7 +31,7 @@ export interface AppPrefs {
   /**
    * When true (default), selection rotate control sits at the **top-middle**
    * of the selected object. When false, legacy corner grab (bottom-left).
-   * Both placements use the same curved rotate-cw arrow icon (not a swirl “C”).
+   * Both placements use the Lucide-style rotate-cw SVG (`rotateIcon.ts`).
    * Applies to board selection chrome generally (not calculator-only).
    */
   rotateHandleTop: boolean;

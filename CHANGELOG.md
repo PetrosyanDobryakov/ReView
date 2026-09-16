@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.4 — unreleased
+
+### Selection / calculator / canvas quality
+- **Rotate icon from scratch**: abandoned legacy swirl / hand-arc glyph. New Lucide-style `rotate-cw` SVG (`src/core/rotateIcon.ts`) for both top-middle and legacy corner placements.
+- **Calculator theme defaults**: creation uses StyleBar fill/stroke like other shapes; untouched body paints `--chrome-panel` + chrome/theme ink (no cream/`#2a2a27` special palette). Explicit StyleBar fills keep their color. Canvas dirty on chrome theme change.
+- **Zoom-out crunch fixed**: restore `devicePixelRatio` backing store (was forced `dpr = 1` for “perf”) so far-zoom strokes are not artificially undersampled.
+
 ## 0.15.3 — unreleased
 
 ### Board calculator — one paint path

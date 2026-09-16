@@ -632,7 +632,7 @@ const en: typeof ru = {
   rotateSnapHint: 'Soft-snaps to horizontal or vertical when close. Off = always free.',
   rotateSnapGesture: 'to horizontal / vertical',
   rotateHandleTop: 'Rotate handle on top',
-  rotateHandleTopHint: 'Puts the rotate control at the top-middle. Off = legacy bottom-left corner. Same rotate-arrow icon in both places.',
+  rotateHandleTopHint: 'Puts the rotate control at the top-middle. Off = legacy bottom-left corner. Same Lucide-style rotate-cw arrow in both places.',
   smoothPeerCursors: 'Smooth peer cursors',
   smoothPeerCursorsHint: 'Spring-follow remote cursors. Off = show the latest network position with no delay.',
   rotateFree: 'Shift + rotate',

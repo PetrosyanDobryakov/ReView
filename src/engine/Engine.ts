@@ -25,6 +25,7 @@ import {
   arrowHitPolyline,
 } from '../core/shapes';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
+import { strokeRotateCwIcon } from '../core/rotateIcon';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { shapesFromClipboardText } from '../core/clipboardShapes';
@@ -551,8 +552,14 @@ export class Engine {
       this.setCursor(this.toolCursor());
       this.dirty = true;
     });
+    // Untouched calc bodies follow --chrome-panel; repaint when Customize theme flips.
+    window.addEventListener('review-chrome-theme', this.onChromeTheme);
     this.rafId = requestAnimationFrame(this.loop);
   }
+
+  private onChromeTheme = (): void => {
+    this.dirty = true;
+  };
 
   /** Watch the live store maps (rebind after initBoard replaces the Y.Doc). */
   bindStore(): void {
@@ -878,6 +885,7 @@ export class Engine {
     this.offImageLoad();
     this.offFormulaLoad();
     this.offPrefs();
+    window.removeEventListener('review-chrome-theme', this.onChromeTheme);
     this.reduceMotionMq?.removeEventListener('change', this.onReduceMotionChange);
     this.reduceMotionMq = null;
     for (const un of this.shapeObs.values()) un.un();
@@ -3088,7 +3096,12 @@ export class Engine {
     const rect = this.canvas.getBoundingClientRect();
     this.w = rect.width;
     this.h = rect.height;
-    this.dpr = 1;
+    // Restore real device pixel ratio. `dpr = 1` (perf shortcut from 2026-08-30)
+    // undersampled the backing store and produced crunchy / “CD pixel” aliasing,
+    // especially when zoomed far out where strokes fall to sub-CSS-pixel sizes.
+    // Soft-cap at 3 so extreme DPR phones do not explode GPU memory.
+    const raw = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    this.dpr = Math.max(1, Math.min(3, raw));
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
     this.dirty = true;
@@ -4772,8 +4785,8 @@ export class Engine {
 
   /**
    * Paint selection rotate affordance at world (x,y).
-   * Same curved rotate-cw arrow for top-middle and legacy corner placements —
-   * no swirl “C” / blob glyph.
+   * Brand-new Lucide-style rotate-cw SVG for BOTH top-middle and legacy corner —
+   * legacy swirl / hand-arc paths abandoned (not morphed).
    */
   private paintRotateKnob(
     ctx: CanvasRenderingContext2D,
@@ -4794,37 +4807,11 @@ export class Engine {
     ctx.strokeStyle = withAlpha(rotStroke, 0.35);
     ctx.lineWidth = 1.35 * s;
     ctx.beginPath();
-    ctx.arc(0, 0, hr * 1.7, 0, Math.PI * 2);
+    ctx.arc(0, 0, hr * 1.75, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Standard rotate-clockwise: open arc + filled arrowhead (Lucide/Heroicons language).
-    const r = hr * 0.92;
-    const a0 = -Math.PI * 0.75;
-    const a1 = Math.PI * 0.85;
-    ctx.strokeStyle = rotStroke;
-    ctx.fillStyle = rotStroke;
-    ctx.lineWidth = Math.max(1.4 * s, hr * 0.22);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.arc(0, 0, r, a0, a1);
-    ctx.stroke();
-
-    const tipX = Math.cos(a1) * r;
-    const tipY = Math.sin(a1) * r;
-    const tang = a1 + Math.PI / 2;
-    const ah = hr * 0.62;
-    const bx = Math.cos(tang);
-    const by = Math.sin(tang);
-    const nx = Math.cos(a1);
-    const ny = Math.sin(a1);
-    ctx.beginPath();
-    ctx.moveTo(tipX + nx * ah * 0.15, tipY + ny * ah * 0.15);
-    ctx.lineTo(tipX - bx * ah * 0.55 - nx * ah * 0.35, tipY - by * ah * 0.55 - ny * ah * 0.35);
-    ctx.lineTo(tipX + bx * ah * 0.55 - nx * ah * 0.35, tipY + by * ah * 0.55 - ny * ah * 0.35);
-    ctx.closePath();
-    ctx.fill();
+    strokeRotateCwIcon(ctx, hr * 1.05, rotStroke, s);
     ctx.restore();
   }
 
