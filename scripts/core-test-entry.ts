@@ -31,6 +31,7 @@ export {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
+  REALTIME_LEAD_SEC,
 } from '../src/core/peerMotion';
 export {
   boardHadRemoteCollaborators,

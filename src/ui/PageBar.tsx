@@ -27,12 +27,19 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   );
 
   useEffect(
-    () =>
-      onPeers((peers) => {
-        const s = new Set<string>();
-        for (const p of peers) if (p.page) s.add(p.page);
-        setPeerPages(s);
-      }),
+    () => {
+      let pageKey = '';
+      return onPeers((peers) => {
+        const pages: string[] = [];
+        for (const p of peers) if (p.page) pages.push(p.page);
+        pages.sort();
+        const next = pages.join('\0');
+        // Cursor xy churn must not setState — that reconciled PageBar every packet.
+        if (next === pageKey) return;
+        pageKey = next;
+        setPeerPages(new Set(pages));
+      });
+    },
     []
   );
 

@@ -13,9 +13,11 @@ import {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
+  REALTIME_LEAD_SEC,
 } from './core-bundle.mjs';
 
 const OPTS = { leadSec: 0.04, maxLead: 20 };
+const REALTIME_OPTS = { leadSec: REALTIME_LEAD_SEC, maxLead: 20 };
 
 // At sample time, aim sits on the sample (no instant jump-ahead pop).
 {
@@ -169,14 +171,17 @@ const OPTS = { leadSec: 0.04, maxLead: 20 };
   const s = initPeerMotion(0, 0, 0);
   pushPeerSample(s, 100, 0, 50);
   snapPeerMotionToSample(s);
-  applyRealtimePeerPose(s, 70, OPTS); // 20ms later (< leadSec)
+  applyRealtimePeerPose(s, 70, REALTIME_OPTS); // 20ms later (< leadSec)
   assert.ok(s.x > s.tx, 'realtime pose advances past sample between packets');
   assert.equal(s.vx, 0, 'realtime pose clears spring velocity');
   assert.equal(s.vy, 0, 'realtime pose clears spring velocity y');
   const mid = s.x;
-  applyRealtimePeerPose(s, 80, OPTS);
+  applyRealtimePeerPose(s, 80, REALTIME_OPTS);
   assert.ok(s.x >= mid - 1e-9, 'realtime pose does not retract between packets');
-  applyRealtimePeerPose(s, 50 + OPTS.leadSec * 1000 + 5, OPTS);
+  // Occasional 50–80ms stalls must still coast (0.14.37 only bridged 40ms).
+  applyRealtimePeerPose(s, 50 + 60, REALTIME_OPTS);
+  assert.ok(s.x > s.tx, 'realtime coasts through ~60ms gaps');
+  applyRealtimePeerPose(s, 50 + REALTIME_LEAD_SEC * 1000 + 5, REALTIME_OPTS);
   assert.equal(s.x, s.tx, 'past leadSec realtime sits on sample');
   assert.equal(s.y, s.ty, 'past leadSec realtime sits on sample y');
 }

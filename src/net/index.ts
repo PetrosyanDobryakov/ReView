@@ -139,12 +139,7 @@ function mergePeers(a: PeerCursor[], b: PeerCursor[]): PeerCursor[] {
   return [...byId.values()];
 }
 
-function mergeStatus(
-  ws: SyncStatus,
-  p2p: SyncStatus,
-  _wsPeers: PeerCursor[],
-  _p2pPeers: PeerCursor[],
-): SyncStatus {
+function mergeStatus(ws: SyncStatus, p2p: SyncStatus): SyncStatus {
   const enabled = ws.enabled || p2p.enabled;
   const online = ws.online || p2p.online;
   const error = p2p.error || ws.error || null;
@@ -157,16 +152,37 @@ function mergeStatus(
 export function onSyncStatus(cb: (status: SyncStatus) => void): () => void {
   let ws: SyncStatus = syncClient.getStatus();
   let p2p: SyncStatus = p2pClient.getStatus();
-  let wsPeers: PeerCursor[] = syncClient.collectPeers();
-  let p2pPeers: PeerCursor[] = p2pClient.collectPeers();
-  const emit = () => cb(mergeStatus(ws, p2p, wsPeers, p2pPeers));
-  const offWs = syncClient.onStatus((s) => { ws = s; emit(); });
-  const offP2p = p2pClient.onStatus((s) => { p2p = s; emit(); });
-  const offWsPeers = syncClient.onPeers((peers) => { wsPeers = peers; emit(); });
-  const offP2pPeers = p2pClient.onPeers((peers) => { p2pPeers = peers; emit(); });
+  let last: SyncStatus | null = null;
+  const emit = () => {
+    const next = mergeStatus(ws, p2p);
+    // Cursor/draft awareness used to re-emit via onPeers even when status was
+    // unchanged — that setState-stormed App on every packet (random hitch).
+    if (
+      last &&
+      last.online === next.online &&
+      last.users === next.users &&
+      last.enabled === next.enabled &&
+      (last.error ?? null) === (next.error ?? null)
+    ) {
+      return;
+    }
+    last = next;
+    cb(next);
+  };
+  const offWs = syncClient.onStatus((s) => {
+    ws = s;
+    emit();
+  });
+  const offP2p = p2pClient.onStatus((s) => {
+    p2p = s;
+    emit();
+  });
   // initial emit
   emit();
-  return () => { offWs(); offP2p(); offWsPeers(); offP2pPeers(); };
+  return () => {
+    offWs();
+    offP2p();
+  };
 }
 
 export function onPeers(cb: (peers: PeerCursor[]) => void): () => void {

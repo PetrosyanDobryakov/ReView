@@ -18,6 +18,8 @@ import { downsamplePolyline } from '../core/pointsSpace';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
 import { syncReconnectMode } from './syncReconnect';
+import { noteAwarenessReceive } from './hitchDebug';
+import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { isNetLogEnabled, netLog, registerNetDebugPeek } from './log';
 import { tapWebSocketTraffic } from './wsTraffic';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
@@ -648,8 +650,18 @@ export class SyncClient {
       this.emitStatus();
       this.emitPeers();
     };
-    const onAware = () => {
+    const onAware = (
+      changes?: { added?: number[]; updated?: number[]; removed?: number[] },
+      _origin?: unknown
+    ) => {
+      noteAwarenessReceive();
       this.emitStatus();
+      // Local-only awareness (our cursor/draft) does not change the remote
+      // peer list — skip collectPeers/emit to cut GC + listener fan-out.
+      const localId = this.provider?.awareness.clientID;
+      if (localId != null && changes && awarenessChangeIsLocalOnly(changes, localId)) {
+        return;
+      }
       this.emitPeers();
     };
     const onSync = (isSynced: boolean) => {
@@ -862,12 +874,22 @@ function parseDraft(raw: unknown): PeerDraft | null {
   if (d.kind !== 'pen') return null;
   if (!Array.isArray(d.points) || d.points.length < 4) return null;
   if (typeof d.stroke !== 'string' || typeof d.strokeWidth !== 'number') return null;
-  const points: number[] = [];
-  for (const n of d.points) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
-    points.push(n);
+  const src = d.points;
+  // Reuse a validated number[] when possible — copying 96 verts every tick
+  // was GC noise on the awareness hot path.
+  let points: number[] | null = null;
+  let ok = src.length % 2 === 0;
+  if (ok) {
+    for (let i = 0; i < src.length; i++) {
+      const n = src[i];
+      if (typeof n !== 'number' || !Number.isFinite(n)) {
+        ok = false;
+        break;
+      }
+    }
   }
-  if (points.length % 2 !== 0) return null;
+  if (!ok) return null;
+  points = src as number[];
   return {
     kind: 'pen',
     points,
