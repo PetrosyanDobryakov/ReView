@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { getBoard, createBoard, deleteBoardData, type BoardMeta } from './boards';
-import { getCurrentBoardId, doc, flushPendingPatches } from './store';
+import { getCurrentBoardId, doc, flushPendingPatches, META_OWNER_ID, META_TITLE } from './store';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 
 const FILE_VERSION = 1;
@@ -156,6 +156,17 @@ export async function writeUpdateToBoard(
   } finally {
     await destroyPersist(persist);
     tmp.destroy();
+  }
+}
+
+/** Clear exporter/owner identity so a local copy or import can rename. */
+export function stripCopiedIdentity(tmp: Y.Doc): void {
+  try {
+    const copyMeta = tmp.getMap('meta');
+    if (copyMeta.has(META_TITLE)) copyMeta.delete(META_TITLE);
+    if (copyMeta.has(META_OWNER_ID)) copyMeta.delete(META_OWNER_ID);
+  } catch {
+    /* keep content even if the meta strip fails */
   }
 }
 
@@ -383,7 +394,7 @@ export async function importBoardFile(file: File): Promise<ImportResult> {
   const teamId = typeof payload.teamId === 'string' && payload.teamId ? payload.teamId : 'default';
   const created = createBoard(name, teamId, 'local');
   try {
-    await writeUpdateToBoard(created.id, update);
+    await writeUpdateToBoard(created.id, update, stripCopiedIdentity);
   } catch {
     await deleteBoardData(created.id);
     return { ok: false, error: 'write_failed' };

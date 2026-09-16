@@ -106,3 +106,91 @@ assert.ok(
 }
 
 console.log('board-title stale-doc guard: ok');
+
+// --- import must strip foreign ownerId (parity with clone) ---
+{
+  const shareSrc = readFileSync(root + '/src/core/boardShare.ts', 'utf8');
+  assert.match(shareSrc, /export function stripCopiedIdentity/, 'strip helper lives in boardShare');
+  assert.match(
+    shareSrc,
+    /writeUpdateToBoard\(created\.id, update, stripCopiedIdentity\)/,
+    'importBoardFile strips exporter identity'
+  );
+  const cloneSrc = readFileSync(root + '/src/core/boardClone.ts', 'utf8');
+  assert.match(cloneSrc, /stripCopiedIdentity/, 'cloneBoard still strips identity');
+
+  const exporter = new Y.Doc();
+  exporter.getMap('meta').set(META_OWNER_ID, 'user-exporter');
+  exporter.getMap('meta').set(META_TITLE, 'Exporter title');
+  const imported = new Y.Doc();
+  Y.applyUpdate(imported, Y.encodeStateAsUpdate(exporter));
+  assert.equal(imported.getMap('meta').get(META_OWNER_ID), 'user-exporter');
+  // Inline the same strip as boardShare.stripCopiedIdentity
+  const copyMeta = imported.getMap('meta');
+  if (copyMeta.has(META_TITLE)) copyMeta.delete(META_TITLE);
+  if (copyMeta.has(META_OWNER_ID)) copyMeta.delete(META_OWNER_ID);
+  assert.equal(imported.getMap('meta').has(META_OWNER_ID), false, 'ownerId cleared on import');
+  assert.equal(
+    boardRenameMode({ status: 'local' }, undefined, 'user-importer'),
+    'sync',
+    'importer can rename after strip'
+  );
+  assert.equal(
+    boardRenameMode({ status: 'local' }, 'user-exporter', 'user-importer'),
+    false,
+    'foreign ownerId blocks rename'
+  );
+  exporter.destroy();
+  imported.destroy();
+}
+console.log('board-title import strip: ok');
+
+// --- concurrent last-page deletes empty Y pages; heal must restore main ---
+{
+  const storeSrc = readFileSync(root + '/src/core/store.ts', 'utf8');
+  const healStart = storeSrc.indexOf('function healActivePageToList');
+  const healEnd = storeSrc.indexOf('\nexport function listPages', healStart);
+  const healBody = storeSrc.slice(healStart, healEnd === -1 ? undefined : healEnd);
+  assert.match(healBody, /ensurePages\(\)/, 'empty pages path calls ensurePages');
+
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const pagesA = docA.getArray('pages');
+  pagesA.push(['p1', 'p2']);
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+  const pagesB = docB.getArray('pages');
+
+  // Peer A deletes p1 while length>1; peer B deletes p2 while length>1.
+  docA.transact(() => {
+    const i = pagesA.toArray().indexOf('p1');
+    if (i >= 0) pagesA.delete(i, 1);
+  });
+  docB.transact(() => {
+    const i = pagesB.toArray().indexOf('p2');
+    if (i >= 0) pagesB.delete(i, 1);
+  });
+  Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+  assert.deepEqual(pagesA.toArray(), [], 'concurrent deletes can empty pages');
+
+  // Heal repair: ensurePages equivalent
+  if (pagesA.length === 0) pagesA.push(['main']);
+  assert.deepEqual(pagesA.toArray(), ['main'], 'ensurePages restores main');
+  let activePageId = 'p2';
+  const list = pagesA.toArray();
+  if (!list.includes(activePageId)) activePageId = list[0] ?? 'main';
+  assert.equal(activePageId, 'main', 'active page heals onto restored main');
+  docA.destroy();
+  docB.destroy();
+}
+console.log('board-title empty-pages heal: ok');
+
+// --- draft/erase awareness trailing flush (parity with cursors) ---
+{
+  const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
+  assert.match(clientSrc, /draftFlushTimer/, 'draft has trailing flush timer');
+  assert.match(clientSrc, /eraseFlushTimer/, 'erase preview has trailing flush timer');
+  assert.match(clientSrc, /flushDraft\(/, 'draft flush helper exists');
+  assert.match(clientSrc, /flushErasePreview\(/, 'erase flush helper exists');
+}
+console.log('board-title draft trailing flush: ok');

@@ -1253,10 +1253,16 @@ function pageHasLiveShapes(pageId: string): boolean {
 /**
  * Point activePageId at a live page without emitting. Callers follow with
  * emitPageList()/emitActivePage() (both fingerprinted no-ops when unchanged).
+ * Concurrent peer deletes can empty the Y pages array — restore `main` then
+ * heal so the engine is not stuck filtering on a deleted id.
  */
 function healActivePageToList(): void {
-  const raw = pagesArray().toArray();
-  if (raw.length === 0) return;
+  let raw = pagesArray().toArray();
+  if (raw.length === 0) {
+    ensurePages();
+    raw = pagesArray().toArray();
+    if (raw.length === 0) return;
+  }
   if (raw.includes(activePageId)) return;
   activePageId = preferredListedPageId(raw, null, pageHasLiveShapes);
   try {
