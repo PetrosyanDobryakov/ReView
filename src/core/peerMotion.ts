@@ -187,6 +187,12 @@ export function aimPeerMotion(
 export const PEER_MOTION_HOLD_SEC = 0.14;
 
 /**
+ * Realtime dead-reckon window (seconds). Longer than one rAF tick so brief
+ * main-thread / WS stalls (~50–80 ms) still coast; still far below spring trail.
+ */
+export const REALTIME_LEAD_SEC = 0.08;
+
+/**
  * True while the cursor still needs frames: either visually moving, or within
  * the hold window after the last sample (expecting the next awareness packet).
  */

@@ -9,6 +9,7 @@ import type { WebrtcProvider } from 'y-webrtc';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
+import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
 import { netLog } from './log';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
@@ -317,8 +318,18 @@ class P2pClient {
       on?(e: string, fn: () => void): void;
       off?(e: string, fn: () => void): void;
     };
-    const onAware = () => { this.emitStatus(); this.emitPeers(); };
-    p.awareness.on('update', onAware);
+    const onAware = (
+      changes?: { added?: number[]; updated?: number[]; removed?: number[] }
+    ) => {
+      this.emitStatus();
+      // Prefer change-only (matches SyncClient). update+change double-fired emitPeers.
+      const aware = p.awareness as { clientID?: number };
+      const localId = typeof aware.clientID === 'number' ? aware.clientID : null;
+      if (localId != null && changes && awarenessChangeIsLocalOnly(changes, localId)) {
+        return;
+      }
+      this.emitPeers();
+    };
     p.awareness.on('change', onAware);
     this.awarenessChangeHandler = onAware;
     if (typeof p.on === 'function') {
@@ -336,7 +347,6 @@ class P2pClient {
     this.hotAwareness.clear();
     const p = (this as unknown as { _p?: { awareness: { off(e: string, fn: () => void): void } ; off?(e: string, fn: () => void): void } })._p as { awareness: { off(e: string, fn: () => void): void }; off?(e:string, fn:()=>void):void } | undefined;
     if (p && this.awarenessChangeHandler) {
-      try { p.awareness.off('update', this.awarenessChangeHandler); } catch {}
       try { p.awareness.off('change', this.awarenessChangeHandler); } catch {}
       if (this.statusHandler && p.off) {
         try { p.off('peers', this.statusHandler); } catch {}

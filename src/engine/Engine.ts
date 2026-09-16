@@ -53,8 +53,10 @@ import {
   pushPeerSample,
   snapPeerMotionToSample,
   stepPeerMotion,
+  REALTIME_LEAD_SEC,
   type PeerMotionState,
 } from '../core/peerMotion';
+import { notePeerRenderDt } from '../net/hitchDebug';
 import { onPrefsChange, readPrefs } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
 import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
@@ -4021,7 +4023,19 @@ export class Engine {
         this.orbitAmbientDue = t + 80;
         this.dirty = true;
       }
-      if (moved || this.dirty || this.peersAnimating) this.render();
+      if (moved || this.dirty || this.peersAnimating) {
+        const paintPeers = this.peersAnimating;
+        const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+        this.render();
+        if (paintPeers && typeof performance !== 'undefined') {
+          notePeerRenderDt((performance.now() - t0) / 1000, {
+            peersAnimating: paintPeers,
+            dirty: this.dirty,
+            peerCount: this.remotePeers.length,
+            shapeCount: this.views.size,
+          });
+        }
+      }
       this.emitStats();
     } catch (err) {
       console.error('[review] render loop error:', err);
@@ -4210,8 +4224,8 @@ export class Engine {
     const smooth = this.smoothPeerCursors && !reduce;
     // Softer catch-up so a prediction miss on a new sample does not pop.
     const smoothTime = 0.1;
-    // Dead-reckon at most ~one awareness interval ahead of the last sample.
-    const leadSec = 0.04;
+    // Dead-reckon: realtime uses a longer bridge for occasional WS/main-thread stalls.
+    const leadSec = smooth ? 0.04 : REALTIME_LEAD_SEC;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
     const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
@@ -4335,7 +4349,10 @@ export class Engine {
         } else if (reduce) {
           snapPeerMotionToSample(pos);
         } else {
-          applyRealtimePeerPose(pos, now, { leadSec: 0.04, maxLead: 14 / this.camera.zoom });
+          applyRealtimePeerPose(pos, now, {
+            leadSec: REALTIME_LEAD_SEC,
+            maxLead: 14 / this.camera.zoom,
+          });
         }
       }
 
@@ -4387,7 +4404,9 @@ export class Engine {
       ctx.fillStyle = '#fff';
       ctx.fillText(label, 0, 0);
       ctx.restore();
-      this.peersAnimating = true;
+      // Only keep the loop alive while the pill still needs motion frames —
+      // static away/off-screen labels must not force full-board paints forever.
+      if (!reduce && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
     }
   }
 

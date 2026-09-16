@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.38 — unreleased
+
+### Sync smoothness
+- Cut random remote-cursor hitches from **React setState storms**: `onSyncStatus` no longer re-emits on every awareness/cursor packet (status-field dedupe only); PageBar gates `setPeerPages` on page-id fingerprint.
+- Skip `emitPeers` for local-only awareness changes; P2P listens to `change` only (no double `update`+`change`).
+- Off-screen mirror pills no longer force continuous full-board paints; realtime dead-reckon bridge `0.04` → **`0.08`** s (still no spring trail).
+- Sync DO postpones full-doc encode while awareness traffic is recent (`AWARENESS_QUIET_BEFORE_FULL_MS`), so O(board) persist CPU is less likely to stall cursor relay.
+- netDebug: awareness receive-gap histogram + longtask + slow peer-paint warns (`?netDebug=1`).
+
 ## 0.14.37 — unreleased
 
 ### Sync smoothness

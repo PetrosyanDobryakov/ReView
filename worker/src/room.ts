@@ -34,6 +34,11 @@ export const TAIL_FLUSH_MS = 150;
  * a draw flood cannot freeze relay mid-stroke.
  */
 export const FULL_PERSIST_IDLE_MS = 250;
+/**
+ * While cursors/drafts are flowing, postpone full encode so O(board) CPU does
+ * not stall awareness relay on the single-threaded isolate.
+ */
+export const AWARENESS_QUIET_BEFORE_FULL_MS = 120;
 
 type SocketAttachment = { clients: number[] };
 
@@ -97,6 +102,8 @@ export class BoardRoom implements DurableObject {
   private tailTimer: ReturnType<typeof setTimeout> | null = null;
   /** Trailing full-doc persist — only after sync idles (never from awareness). */
   private fullTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Last awareness message time — full persist waits for a quiet window. */
+  private lastAwareAt = 0;
   /**
    * True only while wipeRoomStorage runs. Upgrade fetches return 503 so they
    * cannot clear latches mid-deleteAll / resetRoom.
@@ -328,6 +335,12 @@ export class BoardRoom implements DurableObject {
     this.fullTimer = setTimeout(() => {
       this.fullTimer = null;
       if (this.suppressPersist || !this.dirty) return;
+      const sinceAware = Date.now() - this.lastAwareAt;
+      if (this.lastAwareAt > 0 && sinceAware < AWARENESS_QUIET_BEFORE_FULL_MS) {
+        // Cursors still flowing — trail again instead of freezing relay mid-stream.
+        this.queueFullPersist();
+        return;
+      }
       if (!shouldFullPersist(this.lastPersist, Date.now())) return;
       this.state.waitUntil(this.flushFull());
     }, FULL_PERSIST_IDLE_MS);
@@ -496,6 +509,7 @@ export class BoardRoom implements DurableObject {
         // Doc path only — awareness must not arm O(board) encode.
         this.queueFullPersist();
       } else if (type === messageAwareness) {
+        this.lastAwareAt = Date.now();
         awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
       }
     } catch (e) {

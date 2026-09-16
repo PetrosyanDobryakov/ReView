@@ -177,6 +177,8 @@ export function bootNetLog(): void {
   }
 
   startHeartbeat();
+  // Dynamic import avoids a log↔hitch cycle if hitch ever logs during module init.
+  void import('./hitchDebug').then((m) => m.bootHitchDebug()).catch(() => {});
 }
 
 function startHeartbeat(): void {
