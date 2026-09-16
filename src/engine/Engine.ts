@@ -25,7 +25,11 @@ import {
   arrowHitPolyline,
 } from '../core/shapes';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
-import { strokeRotateCwIcon } from '../core/rotateIcon';
+import {
+  ROTATE_CW_DISC_RADIUS_SCALE,
+  ROTATE_CW_ICON_RADIUS_SCALE,
+  strokeRotateCwIcon,
+} from '../core/rotateIcon';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { shapesFromClipboardText } from '../core/clipboardShapes';
@@ -4807,11 +4811,11 @@ export class Engine {
     ctx.strokeStyle = withAlpha(rotStroke, 0.35);
     ctx.lineWidth = 1.35 * s;
     ctx.beginPath();
-    ctx.arc(0, 0, hr * 1.75, 0, Math.PI * 2);
+    ctx.arc(0, 0, hr * ROTATE_CW_DISC_RADIUS_SCALE, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    strokeRotateCwIcon(ctx, hr * 1.05, rotStroke, s);
+    strokeRotateCwIcon(ctx, hr * ROTATE_CW_ICON_RADIUS_SCALE, rotStroke, s);
     ctx.restore();
   }
 
