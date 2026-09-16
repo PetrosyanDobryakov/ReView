@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.37 — unreleased
+
+### Sync smoothness
+- Realtime peer cursors (default) bridge brief awareness/WS gaps with short dead-reckon + frame-hold — no spring trail, smooth toggle unchanged. Stops freeze-then-jump micro-stutters when packets arrive irregularly.
+- `setPeers` no longer snap-backs display pose on unrelated awareness emits (that was killing between-packet extrapolation).
+- Live draft tip changes at a fixed vertex count dirty the canvas again; erase-preview compare drops `JSON.stringify` on the hot path.
+
 ## 0.14.36 — unreleased
 
 ### Sync smoothness

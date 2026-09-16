@@ -10,6 +10,7 @@ import {
   pushPeerSample,
   sampleDeltaSec,
   snapPeerMotionToSample,
+  applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
 } from './core-bundle.mjs';
@@ -161,6 +162,23 @@ const OPTS = { leadSec: 0.04, maxLead: 20 };
   assert.equal(s.y, s.ty, 'snap y to sample');
   assert.equal(s.vx, 0, 'snap clears vx');
   assert.equal(s.vy, 0, 'snap clears vy');
+}
+
+// Realtime between packets: dead-reckon forward without spring lag.
+{
+  const s = initPeerMotion(0, 0, 0);
+  pushPeerSample(s, 100, 0, 50);
+  snapPeerMotionToSample(s);
+  applyRealtimePeerPose(s, 70, OPTS); // 20ms later (< leadSec)
+  assert.ok(s.x > s.tx, 'realtime pose advances past sample between packets');
+  assert.equal(s.vx, 0, 'realtime pose clears spring velocity');
+  assert.equal(s.vy, 0, 'realtime pose clears spring velocity y');
+  const mid = s.x;
+  applyRealtimePeerPose(s, 80, OPTS);
+  assert.ok(s.x >= mid - 1e-9, 'realtime pose does not retract between packets');
+  applyRealtimePeerPose(s, 50 + OPTS.leadSec * 1000 + 5, OPTS);
+  assert.equal(s.x, s.tx, 'past leadSec realtime sits on sample');
+  assert.equal(s.y, s.ty, 'past leadSec realtime sits on sample y');
 }
 
 console.log('peer-motion: all checks passed');

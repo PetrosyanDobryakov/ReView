@@ -16,11 +16,12 @@
  * both the on-canvas glyph and the off-screen pill doubles the spring rate
  * and looks like stutter.
  *
- * Keep the paint loop alive between samples in smooth mode
- * (`peerMotionShouldAnimate`): if the spring settles and `peersAnimating`
- * clears, rAF skips render until the next awareness packet — the cursor
- * freezes at packet rate (stutter) even when the network is fine. Realtime
- * mode skips that hold; it paints when samples arrive.
+ * Keep the paint loop alive between samples (`peerMotionShouldAnimate`):
+ * if the spring settles and `peersAnimating` clears, rAF skips render until
+ * the next awareness packet — the cursor freezes at packet rate (stutter)
+ * even when the network is fine. Realtime mode still holds frames, but
+ * advances the glyph with short dead-reckon (`applyRealtimePeerPose`) instead
+ * of a spring trail — bridges WS gaps without smooth-delay lag.
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */
@@ -112,10 +113,32 @@ export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: nu
   s.svy = nvy;
 }
 
-/** Display pose = latest sample (no spring trail). Used by realtime + reduced-motion. */
+/** Display pose = latest sample (no spring trail). Used on new samples + reduced-motion. */
 export function snapPeerMotionToSample(s: PeerMotionState): void {
   s.x = s.tx;
   s.y = s.ty;
+  s.vx = 0;
+  s.vy = 0;
+}
+
+/**
+ * Realtime display between samples: sample + short dead-reckon, no spring.
+ * Bridges brief awareness/WS gaps without the laggy smooth-follow trail.
+ * Past leadSec, sit on the last sample so a stop does not leave a permanent lead.
+ */
+export function applyRealtimePeerPose(
+  s: PeerMotionState,
+  now: number,
+  opts: PeerAimOptions
+): void {
+  const age = Math.max(0, (now - s.sampleAt) / 1000);
+  if (age > opts.leadSec) {
+    snapPeerMotionToSample(s);
+    return;
+  }
+  const aim = aimPeerMotion(s, now, opts);
+  s.x = aim.x;
+  s.y = aim.y;
   s.vx = 0;
   s.vy = 0;
 }

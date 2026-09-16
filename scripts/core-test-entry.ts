@@ -28,6 +28,7 @@ export {
   sampleDeltaSec,
   smoothDamp,
   snapPeerMotionToSample,
+  applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
 } from '../src/core/peerMotion';
