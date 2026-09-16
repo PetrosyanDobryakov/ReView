@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.28 — unreleased
+
+### Fix
+- Concurrent peer page deletes that empty the Y `pages` array now restore `main` via `ensurePages` inside `healActivePageToList`, so the engine is not stuck filtering on a deleted active id (blank canvas).
+- `.review` import strips foreign `ownerId` / synced title the same way clone does, so the importer can rename a local board in the header.
+- Draft stroke and erase-preview awareness use a trailing flush (like cursors), so peers see the last vertices / hover instead of a truncated preview.
+
 ## 0.14.27 — unreleased
 
 ### Fix

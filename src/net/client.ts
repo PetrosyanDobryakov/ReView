@@ -4,7 +4,7 @@
  * Traffic posture:
  * - Doc updates: coalesced in store writeGate; polylines stored local-space.
  * - Cursors: ~25 Hz + trailing flush so the last pose always lands.
- * - Draft strokes: awareness-only, downsampled, ~20 Hz.
+ * - Draft strokes / erase preview: awareness-only, throttled + trailing flush.
  * - Periodic resync heals rare stuck states without constant full dumps.
  */
 
@@ -74,6 +74,8 @@ export class SyncClient {
   private lastDraftSent = 0;
   private lastEraseSent = 0;
   private cursorFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private draftFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private eraseFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private lastEmittedStatus: SyncStatus | null = null;
   private lastLoggedRosterKey = '';
@@ -438,6 +440,7 @@ export class SyncClient {
   /**
    * Publish an in-progress pen stroke to peers (awareness only).
    * Pass null to clear after commit/cancel.
+   * Throttled like cursors, with a trailing flush so the last vertices land.
    */
   publishDraft(draft: PeerDraft | null): void {
     if (!draft) {
@@ -453,14 +456,23 @@ export class SyncClient {
     };
     this.lastDraft = slim;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (now - this.lastDraftSent < DRAFT_MIN_MS) return;
-    this.lastDraftSent = now;
-    this.writeDraft(slim);
+    const wait = DRAFT_MIN_MS - (now - this.lastDraftSent);
+    if (wait > 0) {
+      if (!this.draftFlushTimer) {
+        this.draftFlushTimer = setTimeout(() => {
+          this.draftFlushTimer = null;
+          this.flushDraft();
+        }, wait);
+      }
+      return;
+    }
+    this.flushDraft(now);
   }
 
   /**
    * Publish live eraser hover targets to peers (awareness only).
    * Pass null to clear after commit/cancel/tool change.
+   * Trailing flush mirrors cursors/drafts so the last preview is not dropped.
    */
   publishErasePreview(preview: PeerErasePreview | null): void {
     if (!preview) {
@@ -486,9 +498,17 @@ export class SyncClient {
     if (sameErasePreview(slim, this.lastErase)) return;
     this.lastErase = slim;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (now - this.lastEraseSent < ERASE_MIN_MS) return;
-    this.lastEraseSent = now;
-    this.writeErasePreview(slim);
+    const wait = ERASE_MIN_MS - (now - this.lastEraseSent);
+    if (wait > 0) {
+      if (!this.eraseFlushTimer) {
+        this.eraseFlushTimer = setTimeout(() => {
+          this.eraseFlushTimer = null;
+          this.flushErasePreview();
+        }, wait);
+      }
+      return;
+    }
+    this.flushErasePreview(now);
   }
 
   onStatus(cb: StatusListener): () => void {
@@ -515,12 +535,20 @@ export class SyncClient {
   }
 
   private clearErasePreview(): void {
+    if (this.eraseFlushTimer) {
+      clearTimeout(this.eraseFlushTimer);
+      this.eraseFlushTimer = null;
+    }
     if (this.lastErase === null && !this.provider) return;
     this.lastErase = null;
     this.writeErasePreview(null);
   }
 
   private clearDraft(): void {
+    if (this.draftFlushTimer) {
+      clearTimeout(this.draftFlushTimer);
+      this.draftFlushTimer = null;
+    }
     if (this.lastDraft === null && !this.provider) return;
     this.lastDraft = null;
     this.writeDraft(null);
@@ -537,6 +565,28 @@ export class SyncClient {
     this.lastSentCursor = pos;
     this.logCursorSend(pos, now);
     this.writeCursor(pos);
+  }
+
+  private flushDraft(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
+    if (this.draftFlushTimer) {
+      clearTimeout(this.draftFlushTimer);
+      this.draftFlushTimer = null;
+    }
+    const draft = this.lastDraft;
+    if (!draft) return;
+    this.lastDraftSent = now;
+    this.writeDraft(draft);
+  }
+
+  private flushErasePreview(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
+    if (this.eraseFlushTimer) {
+      clearTimeout(this.eraseFlushTimer);
+      this.eraseFlushTimer = null;
+    }
+    const preview = this.lastErase;
+    if (!preview) return;
+    this.lastEraseSent = now;
+    this.writeErasePreview(preview);
   }
 
   private logCursorSend(pos: CursorPos | null, now: number): void {
@@ -684,6 +734,14 @@ export class SyncClient {
     if (this.cursorFlushTimer) {
       clearTimeout(this.cursorFlushTimer);
       this.cursorFlushTimer = null;
+    }
+    if (this.draftFlushTimer) {
+      clearTimeout(this.draftFlushTimer);
+      this.draftFlushTimer = null;
+    }
+    if (this.eraseFlushTimer) {
+      clearTimeout(this.eraseFlushTimer);
+      this.eraseFlushTimer = null;
     }
     this.offProviderStatus?.();
     this.offAwareness?.();
