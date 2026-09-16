@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
+import * as awarenessProtocol from 'y-protocols/awareness';
 import { readBlob } from '../worker/src/persist.ts';
 
 const require = createRequire(import.meta.url);
@@ -79,6 +80,14 @@ function syncUpdateMessage(update) {
   return encoding.toUint8Array(enc);
 }
 
+/** Awareness update framed as messageAwareness. */
+function awarenessMessage(awareness, clients) {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 1);
+  encoding.writeVarUint8Array(enc, awarenessProtocol.encodeAwarenessUpdate(awareness, clients));
+  return encoding.toUint8Array(enc);
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const storage = makeStorage();
@@ -139,6 +148,38 @@ const tail = await readBlob(storage, 'tail');
 if (tail && tail.length) Y.applyUpdate(doc, tail);
 assert.equal(doc.getMap('b').get('seed'), 1, 'seed survives the round-trip');
 assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip');
+
+// Awareness floods must not arm full-doc persist. Mid-flood encode freezes the
+// isolate and bursts every queued cursor/stroke — the residual stutter after
+// the 0.14.25 trailing-tail fix.
+{
+  const waitedBefore = waited.length;
+  const putsBeforeAware = storage.ops.puts;
+  const local = new Y.Doc();
+  const aw = new awarenessProtocol.Awareness(local);
+  aw.setLocalStateField('cursor', { x: 1, y: 2 });
+  for (let i = 0; i < 30; i++) {
+    aw.setLocalStateField('cursor', { x: i, y: i });
+    await room.webSocketMessage(
+      sockets[0],
+      awarenessMessage(aw, [local.clientID]),
+    );
+  }
+  assert.equal(
+    waited.length,
+    waitedBefore,
+    'awareness-only traffic does not schedule waitUntil persist',
+  );
+  assert.equal(
+    storage.ops.puts,
+    putsBeforeAware,
+    'awareness-only traffic does not touch storage',
+  );
+  try {
+    clearInterval(aw._checkInterval);
+  } catch {}
+  local.destroy();
+}
 
 // Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
 // would let resetRoom run under a newly accepted socket.

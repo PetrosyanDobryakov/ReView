@@ -7,6 +7,9 @@
  * whips ahead and glides back — a visible hook. Capping the lead offset
  * bounds that hook; killing velocity on direction reversal stops zigzag
  * slingshots on short choppy strokes.
+ *
+ * Callers must step once per frame. Stepping from both the on-canvas glyph
+ * and the off-screen pill doubles the spring rate and looks like stutter.
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */

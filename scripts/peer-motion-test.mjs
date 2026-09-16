@@ -54,4 +54,22 @@ for (let t = 1200; t < 2000; t += 16) {
 assert.ok(Math.hypot(s.tx - s.x, s.ty - s.y) <= 0.5, 'settles onto the final target');
 assert.ok(rest, 'reports rest when settled');
 
+// Contract: one spring step per frame. Two steps with the same dt (glyph +
+// pill) catch up ~2× as fast — that is the stutter bug drawPeerMirrors had.
+{
+  const once = initPeerMotion(0, 0, 0);
+  pushPeerSample(once, 100, 0, 40);
+  const twice = initPeerMotion(0, 0, 0);
+  pushPeerSample(twice, 100, 0, 40);
+  const aimOnce = aimPeerMotion(once, 40, OPTS);
+  const aimTwice = aimPeerMotion(twice, 40, OPTS);
+  stepPeerMotion(once, aimOnce.x, aimOnce.y, 40, 1 / 60, 0.055);
+  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.055);
+  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.055);
+  assert.ok(
+    twice.x > once.x + 0.5,
+    `double-step advances further than single-step (once=${once.x}, twice=${twice.x})`,
+  );
+}
+
 console.log('peer-motion: all checks passed');

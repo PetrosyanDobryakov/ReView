@@ -554,6 +554,17 @@ export class SyncClient {
     this.writeDraft(null);
   }
 
+  private flushDraft(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
+    if (this.draftFlushTimer) {
+      clearTimeout(this.draftFlushTimer);
+      this.draftFlushTimer = null;
+    }
+    const draft = this.lastDraft;
+    if (!draft) return;
+    this.lastDraftSent = now;
+    this.writeDraft(draft);
+  }
+
   private flushCursor(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
     if (this.cursorFlushTimer) {
       clearTimeout(this.cursorFlushTimer);

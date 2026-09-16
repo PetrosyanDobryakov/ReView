@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.29 — unreleased
+
+### Sync smoothness
+- Remote cursors no longer double-step the spring each frame (glyph + edge pill both advanced the same pose) — that 2× catch-up looked like stutter even when packets arrived on time.
+- Sync room full-doc encode is no longer armed from awareness (cursor/draft) frames, and waits for a short sync idle before running. Mid-flood `Y.encodeStateAsUpdate` on a photo board was freezing the Durable Object and bursting every queued cursor/stroke.
+
 ## 0.14.28 — unreleased
 
 ### Fix

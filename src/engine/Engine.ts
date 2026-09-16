@@ -4259,9 +4259,6 @@ export class Engine {
     const myPage = store.currentPageId();
     const pages = store.listPages();
     const reduce = this.reduceMotion;
-    const smoothTime = 0.055;
-    const leadSec = 0.045;
-    const dt = this.frameDt;
 
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
@@ -4269,19 +4266,22 @@ export class Engine {
       if (peer.page != null && peer.page !== myPage) continue;
       const samePage = peer.page == null || peer.page === myPage;
 
+      // Prefer the pose drawPeers already stepped this frame. Stepping again
+      // ran the spring at 2× and made remote cursors look choppy. Only advance
+      // here for away peers (drawPeers skips them before the spring).
       let pos = this.peerLerp.get(peer.id);
       if (!pos) {
         pos = initPeerMotion(peer.x, peer.y, now);
         this.peerLerp.set(peer.id, pos);
       }
-
-      if (!reduce) {
-        // ponytail: same capped-lead aim as the cursor glyph (no post-stop hook)
-        const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 20 / this.camera.zoom });
-        stepPeerMotion(pos, aim.x, aim.y, now, dt, smoothTime);
-      } else {
-        pos.x = pos.tx;
-        pos.y = pos.ty;
+      if (peer.viewing === false) {
+        if (!reduce) {
+          const aim = aimPeerMotion(pos, now, { leadSec: 0.045, maxLead: 20 / this.camera.zoom });
+          stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.055);
+        } else {
+          pos.x = pos.tx;
+          pos.y = pos.ty;
+        }
       }
 
       const screen = this.worldToScreen(pos.x, pos.y);
