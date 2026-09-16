@@ -27,6 +27,28 @@ assert.equal(slim.length, 16, 'downsample vertex cap');
 assert.equal(slim[0], 0, 'keeps first');
 assert.equal(slim[slim.length - 2], 199, 'keeps last x');
 
+// Tip-stable: appending a vertex must not reshuffle the live tip window.
+// The old whole-stroke reindex made remote drafts jump every frame.
+{
+  const a = [];
+  for (let i = 0; i < 120; i++) a.push(i, 0);
+  const b = a.concat([120, 0]);
+  const da = downsamplePolyline(a, 40, 16);
+  const db = downsamplePolyline(b, 40, 16);
+  assert.equal(da.length / 2, 40, 'cap A');
+  assert.equal(db.length / 2, 40, 'cap B');
+  const tip = 16;
+  const tipA = da.slice(-tip * 2);
+  const tipB = db.slice(-tip * 2);
+  assert.equal(tipB[tipB.length - 2], 120, 'new tip last is the append');
+  // Previous tip body slides by one: A's tip without its last == B's tip without its first.
+  assert.deepEqual(
+    tipA.slice(2),
+    tipB.slice(0, -2),
+    'live tip slides by append only — no whole-stroke reindex'
+  );
+}
+
 resetWriteGate();
 let flushes = 0;
 /** @type {import('./core-bundle.mjs').PatchBatch | null} */
