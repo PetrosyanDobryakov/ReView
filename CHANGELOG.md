@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.2 — unreleased
+
+### Board calculator + selection chrome
+- **Closed/unfocused silhouette** paints full labeled keys (shared keypad layout with the overlay) — no hollow gray wells.
+- **Label zoom floor**: overlay `--calc-zoom` and canvas key/display type share one readability floor so open/closed stop shrinking together when zoomed far out.
+- **Customize → Rotate handle on top** (default on): top-middle rotate control with a normal rotate arrow; off keeps legacy bottom-left swirl.
+
 ## 0.15.1 — unreleased
 
 ### Board calculator fixes

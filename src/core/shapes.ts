@@ -2276,8 +2276,14 @@ export {
   CALC_MIN_H,
   clampCalcSize,
   calcFrameScale,
+  calcCssZoom,
+  calcLabelWorldSize,
+  calcCtxZoom,
+  CALC_LABEL_MIN_SCREEN_PX,
+  CALC_CSS_ZOOM_FLOOR,
 } from './calcGeometry';
-import { calcFrameScale } from './calcGeometry';
+import { calcFrameScale, calcLabelWorldSize, calcCtxZoom } from './calcGeometry';
+import { calcKeypadRows } from './calcKeypad';
 
 function calcBodyFill(boardBg: string, shapeFill: string): string {
   if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
@@ -2318,6 +2324,7 @@ function drawCalculator(
   hideKeys = false
 ): void {
   const scale = calcFrameScale(v.w, v.h);
+  const zoom = calcCtxZoom(ctx);
   const pad = Math.max(8, 12 * scale);
   const radius = Math.max(8, Math.min(18, 12 * scale));
   const body = calcBodyFill(boardBg, v.fill);
@@ -2327,6 +2334,12 @@ function drawCalculator(
   const expr = (v.calcExpr ?? '').trim();
   const mode = v.calcMode === 'scientific' ? 'Scientific' : 'Standard';
   const sci = v.calcMode === 'scientific';
+  const second = Boolean(v.calcSecond);
+  const headerPx = Math.round(calcLabelWorldSize(11, scale, zoom));
+  const exprPx = Math.round(calcLabelWorldSize(11, scale, zoom));
+  const keyPx = Math.round(calcLabelWorldSize(13, scale, zoom));
+  const keyFnPx = Math.round(calcLabelWorldSize(11, scale, zoom));
+  const dispSize = Math.round(Math.min(36, calcLabelWorldSize(22, scale, zoom)));
 
   ctx.save();
   ctx.beginPath();
@@ -2339,7 +2352,7 @@ function drawCalculator(
 
   // Header
   ctx.fillStyle = ink.muted;
-  ctx.font = `600 ${Math.round(Math.max(9, 11 * scale))}px ${BOARD_TYPEFACE}`;
+  ctx.font = `600 ${headerPx}px ${BOARD_TYPEFACE}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(mode, v.x + pad, v.y + pad * 0.85, v.w - pad * 2);
@@ -2364,13 +2377,12 @@ function drawCalculator(
 
   if (expr) {
     ctx.fillStyle = ink.muted;
-    ctx.font = `${Math.round(Math.max(9, 11 * scale))}px ${BOARD_TYPEFACE}`;
+    ctx.font = `${exprPx}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillText(expr, dispX + dispW - pad * 0.6, dispY + pad * 0.45, dispW - pad);
   }
   ctx.fillStyle = ink.displayInk;
-  const dispSize = Math.round(Math.min(36, Math.max(14, 22 * scale)));
   ctx.font = `600 ${dispSize}px ${BOARD_TYPEFACE}`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
@@ -2381,24 +2393,36 @@ function drawCalculator(
     return;
   }
 
-  // Keypad silhouette
+  // Keypad silhouette — labeled wells matching the overlay (not hollow stubs).
+  const padRows = calcKeypadRows(sci ? 'scientific' : 'standard', second);
   const gridTop = dispY + dispH + pad * 0.7;
   const gridH = Math.max(40, v.y + v.h - pad - gridTop);
   const cols = sci ? 5 : 4;
-  // Match CalculatorPanel: standard 8 rows; scientific 9 (memory + pad).
-  const rows = sci ? 9 : 8;
+  const rows = padRows.length;
   const gap = Math.max(3, 4.5 * scale);
   const cellW = (dispW - gap * (cols - 1)) / cols;
   const cellH = (gridH - gap * (rows - 1)) / rows;
   const rr = Math.max(4, Math.min(cellW, cellH) * 0.22);
-  ctx.fillStyle = ink.key;
+
   for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+    const row = padRows[r] ?? [];
+    let c = 0;
+    for (const key of row) {
+      const span = Math.max(1, key.span ?? 1);
       const x = dispX + c * (cellW + gap);
       const y = gridTop + r * (cellH + gap);
+      const kw = cellW * span + gap * (span - 1);
       ctx.beginPath();
-      ctx.roundRect(x, y, cellW, cellH, rr);
+      ctx.roundRect(x, y, kw, cellH, rr);
+      ctx.fillStyle = ink.key;
       ctx.fill();
+      const fn = key.cls?.includes('fn') || key.cls?.includes('mem');
+      ctx.fillStyle = fn ? ink.muted : ink.keyInk;
+      ctx.font = `${fn ? '500' : '500'} ${fn ? keyFnPx : keyPx}px ${BOARD_TYPEFACE}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(key.label, x + kw / 2, y + cellH / 2, kw - 2);
+      c += span;
     }
   }
   ctx.restore();

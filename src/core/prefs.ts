@@ -29,6 +29,13 @@ export interface AppPrefs {
    */
   rotateSnap: boolean;
   /**
+   * When true (default), selection rotate control sits at the **top-middle**
+   * of the selected object with a normal rotate-arrow icon.
+   * When false, legacy corner grab (bottom-left) with the swirl “C” glyph.
+   * Applies to board selection chrome generally (not calculator-only).
+   */
+  rotateHandleTop: boolean;
+  /**
    * When true, remote cursors use spring/lerp follow (can trail the wire).
    * Default false = snap display pose to the latest awareness sample (realtime).
    */
@@ -69,6 +76,7 @@ const DEFAULTS: AppPrefs = {
   paperBg: null,
   recognizeShapes: false,
   rotateSnap: true,
+  rotateHandleTop: true,
   smoothPeerCursors: false,
   syncUrl: null,
   syncEnabled: true,
@@ -166,6 +174,8 @@ function parsePrefs(raw: unknown): AppPrefs {
     recognizeShapes:
       typeof parsed.recognizeShapes === 'boolean' ? parsed.recognizeShapes : DEFAULTS.recognizeShapes,
     rotateSnap: typeof parsed.rotateSnap === 'boolean' ? parsed.rotateSnap : DEFAULTS.rotateSnap,
+    rotateHandleTop:
+      typeof parsed.rotateHandleTop === 'boolean' ? parsed.rotateHandleTop : DEFAULTS.rotateHandleTop,
     smoothPeerCursors:
       typeof parsed.smoothPeerCursors === 'boolean' ? parsed.smoothPeerCursors : DEFAULTS.smoothPeerCursors,
     syncUrl: Object.prototype.hasOwnProperty.call(parsed, 'syncUrl')
@@ -266,6 +276,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     'paperBg',
     'recognizeShapes',
     'rotateSnap',
+    'rotateHandleTop',
     'smoothPeerCursors',
     'toolbarOrder',
   ];

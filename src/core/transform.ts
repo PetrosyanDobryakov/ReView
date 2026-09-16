@@ -9,8 +9,34 @@ export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-/** Screen-space stem length from the top edge to the rotate knob. */
+/** Screen-space offset from the selection edge to the rotate knob center. */
 export const ROTATE_HANDLE_OFFSET_PX = 44;
+
+/**
+ * Local (unrotated shape) position of the rotate knob relative to the shape box.
+ * `topMiddle` = Figma-style top center; otherwise legacy bottom-left corner.
+ */
+export function rotateHandleLocal(
+  w: number,
+  h: number,
+  offsetWorld: number,
+  topMiddle: boolean
+): { x: number; y: number } {
+  if (topMiddle) return { x: w / 2, y: -offsetWorld };
+  return { x: -offsetWorld, y: h + offsetWorld };
+}
+
+/**
+ * Axis-aligned group bbox position for the rotate knob (world).
+ */
+export function rotateHandleOnBox(
+  box: { x: number; y: number; w: number; h: number },
+  offsetWorld: number,
+  topMiddle: boolean
+): { x: number; y: number } {
+  if (topMiddle) return { x: box.x + box.w / 2, y: box.y - offsetWorld };
+  return { x: box.x - offsetWorld, y: box.y + box.h + offsetWorld };
+}
 
 /** Degrees from a board axis (0/90/180/270) before the magnet pulls in. */
 export const ROTATE_MAGNET_DEG = 7;
