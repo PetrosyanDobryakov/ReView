@@ -3856,6 +3856,16 @@ h3 .swap-text,
   flex: 0 0 auto;
   min-width: 40px;
 }
+/* Source labels are long in RU — stack full-width so they never orphan a chip. */
+.export-chips-source {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.export-chips-source > .style-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
 .export-check {
   display: inline-flex;
   align-items: center;

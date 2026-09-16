@@ -171,7 +171,7 @@ export function ExportDialog({
           <div className="export-controls">
             <div className="export-group">
               <span className="export-label">{t(locale, 'exportSource')}</span>
-              <div className="export-chips" role="group" aria-label={t(locale, 'exportSource')}>
+              <div className="export-chips export-chips-source" role="group" aria-label={t(locale, 'exportSource')}>
                 {sources.map((s) => (
                   <button
                     key={s.id}
