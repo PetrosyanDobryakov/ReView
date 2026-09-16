@@ -3461,7 +3461,8 @@ button.brand {
 
 /* Tablet band + coarse: collapse zoom when file/meta are contested.
    Wide coarse desktop (>1024) keeps zoom. */
-@media (max-width: 1024px) and ((pointer: coarse), (hover: none)) {
+@media (max-width: 1024px) and (pointer: coarse),
+  (max-width: 1024px) and (hover: none) {
   .file-zoom-cluster {
     display: none;
   }
