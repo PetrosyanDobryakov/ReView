@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.30 — unreleased
+
+### Sync smoothness
+- Remote cursors keep the paint loop alive between awareness samples (`peerMotionShouldAnimate`): the spring used to settle in 1–2 frames, clear `peersAnimating`, and freeze the glyph until the next packet — packet-rate stutter even when the socket was fine. Drawings were unaffected (doc updates paint immediately).
+- Cursor send rate ~50 Hz (20 ms), softer smooth-damp, clamped sample dt (burst arrivals no longer explode aim velocity), and settle only after the hold window.
+
 ## 0.14.29 — unreleased
 
 ### Sync smoothness

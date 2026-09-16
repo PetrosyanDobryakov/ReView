@@ -1,19 +1,23 @@
 /**
- * Peer cursor motion: bounded lead (no post-stop hook) + reversal damping.
+ * Peer cursor motion: bounded lead (no post-stop hook) + reversal damping +
+ * frame-hold between awareness samples.
  */
 import assert from 'node:assert/strict';
 import {
   aimPeerMotion,
   initPeerMotion,
+  peerMotionShouldAnimate,
   pushPeerSample,
+  sampleDeltaSec,
   stepPeerMotion,
+  PEER_MOTION_HOLD_SEC,
 } from './core-bundle.mjs';
 
-const OPTS = { leadSec: 0.045, maxLead: 20 };
+const OPTS = { leadSec: 0.035, maxLead: 20 };
 
 // fast flick, then samples stop: the aim must never hook past maxLead
 let s = initPeerMotion(0, 0, 0);
-pushPeerSample(s, 40, 0, 40); // 1000 px/s
+pushPeerSample(s, 40, 0, 40); // ~1000 px/s with clamped dt
 const aim = aimPeerMotion(s, 40, OPTS);
 const hook = Math.hypot(aim.x - s.tx, aim.y - s.ty);
 assert.ok(hook <= 20 + 1e-9, `lead capped at maxLead (got ${hook})`);
@@ -49,7 +53,7 @@ s.y = 0;
 s.vx = 800;
 let rest = false;
 for (let t = 1200; t < 2000; t += 16) {
-  rest = stepPeerMotion(s, s.tx, s.ty, t, 1 / 60, 0.055);
+  rest = stepPeerMotion(s, s.tx, s.ty, t, 1 / 60, 0.07);
 }
 assert.ok(Math.hypot(s.tx - s.x, s.ty - s.y) <= 0.5, 'settles onto the final target');
 assert.ok(rest, 'reports rest when settled');
@@ -63,12 +67,41 @@ assert.ok(rest, 'reports rest when settled');
   pushPeerSample(twice, 100, 0, 40);
   const aimOnce = aimPeerMotion(once, 40, OPTS);
   const aimTwice = aimPeerMotion(twice, 40, OPTS);
-  stepPeerMotion(once, aimOnce.x, aimOnce.y, 40, 1 / 60, 0.055);
-  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.055);
-  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.055);
+  stepPeerMotion(once, aimOnce.x, aimOnce.y, 40, 1 / 60, 0.07);
+  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.07);
+  stepPeerMotion(twice, aimTwice.x, aimTwice.y, 40, 1 / 60, 0.07);
   assert.ok(
     twice.x > once.x + 0.5,
     `double-step advances further than single-step (once=${once.x}, twice=${twice.x})`,
+  );
+}
+
+// Burst arrivals must not explode velocity (dt clamped to >= 1/60).
+{
+  const burst = initPeerMotion(0, 0, 0);
+  pushPeerSample(burst, 10, 0, 1); // 1 ms later
+  assert.ok(sampleDeltaSec(0, 1) >= 1 / 60 - 1e-9, 'sampleDeltaSec floors short gaps');
+  assert.ok(Math.hypot(burst.svx, burst.svy) < 10 / (1 / 60) + 1, 'burst velocity stays bounded');
+}
+
+// Hold window: after a sample, keep animating even if visually at rest —
+// otherwise the engine sleeps until the next awareness packet (stutter).
+{
+  const hold = initPeerMotion(0, 0, 1000);
+  pushPeerSample(hold, 50, 0, 1040);
+  hold.x = hold.tx;
+  hold.y = hold.ty;
+  hold.vx = 0;
+  hold.vy = 0;
+  assert.equal(
+    peerMotionShouldAnimate(hold, 1040 + (PEER_MOTION_HOLD_SEC * 1000) / 2),
+    true,
+    'holds frames between expected packets',
+  );
+  assert.equal(
+    peerMotionShouldAnimate(hold, 1040 + PEER_MOTION_HOLD_SEC * 1000 + 50),
+    false,
+    'releases hold after the window when at rest',
   );
 }
 

@@ -10,6 +10,11 @@
  *
  * Callers must step once per frame. Stepping from both the on-canvas glyph
  * and the off-screen pill doubles the spring rate and looks like stutter.
+ *
+ * Keep the paint loop alive between samples (`peerMotionShouldAnimate`): if
+ * the spring settles and `peersAnimating` clears, rAF skips render until the
+ * next awareness packet — the cursor freezes at packet rate (stutter) even
+ * when the network is fine.
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */
@@ -67,12 +72,20 @@ export function initPeerMotion(x: number, y: number, now: number): PeerMotionSta
 }
 
 /**
+ * Clamp inter-sample dt used for velocity. Burst arrivals (same-tick or 1 ms
+ * apart) would otherwise explode speed and slingshot the aim.
+ */
+export function sampleDeltaSec(prevAt: number, now: number): number {
+  return Math.min(0.12, Math.max(1 / 60, (now - prevAt) / 1000));
+}
+
+/**
  * Fold a fresh sample in. When the new sample velocity opposes the previous
  * one (zigzag corner), drop the rendered velocity so the spring doesn't
  * slingshot past the corner.
  */
 export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: number): void {
-  const dt = Math.max(0.001, (now - s.sampleAt) / 1000);
+  const dt = sampleDeltaSec(s.sampleAt, now);
   const nvx = (x - s.tx) / dt;
   const nvy = (y - s.ty) / dt;
   if (nvx * s.svx + nvy * s.svy < 0 && Math.hypot(s.svx, s.svy) > 8) {
@@ -90,7 +103,7 @@ export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: nu
 }
 
 export interface PeerAimOptions {
-  /** Dead-reckoning horizon, seconds (matches the ~25 Hz sample rate). */
+  /** Dead-reckoning horizon, seconds (matches the ~50 Hz sample rate). */
   leadSec: number;
   /** Hard cap on the lead offset, world units (pass screen-bound × 1/zoom). */
   maxLead: number;
@@ -109,7 +122,7 @@ export function aimPeerMotion(
   opts: PeerAimOptions
 ): { x: number; y: number } {
   const minSpeed = opts.minSpeed ?? 8;
-  const sampleDt = Math.max(0.001, (s.sampleAt - s.prevSampleAt) / 1000);
+  const sampleDt = sampleDeltaSec(s.prevSampleAt, s.sampleAt);
   const svx = (s.tx - s.prevTx) / sampleDt;
   const svy = (s.ty - s.prevTy) / sampleDt;
   const age = Math.max(0, (now - s.sampleAt) / 1000);
@@ -126,6 +139,25 @@ export function aimPeerMotion(
   return { x: s.tx + ox, y: s.ty + oy };
 }
 
+/** How long after a sample we keep painting so dead-reckon can bridge the gap. */
+export const PEER_MOTION_HOLD_SEC = 0.14;
+
+/**
+ * True while the cursor still needs frames: either visually moving, or within
+ * the hold window after the last sample (expecting the next awareness packet).
+ */
+export function peerMotionShouldAnimate(
+  s: PeerMotionState,
+  now: number,
+  holdSec = PEER_MOTION_HOLD_SEC
+): boolean {
+  const age = Math.max(0, (now - s.sampleAt) / 1000);
+  if (age < holdSec) return true;
+  if (Math.hypot(s.tx - s.x, s.ty - s.y) > 0.5) return true;
+  if (Math.hypot(s.vx, s.vy) > 2) return true;
+  return false;
+}
+
 /**
  * One spring step toward the aim. When samples stop arriving (pen-up), pull
  * straight at the final target so the cursor settles instead of drifting.
@@ -140,7 +172,9 @@ export function stepPeerMotion(
   smoothTime: number
 ): boolean {
   const age = Math.max(0, (now - s.sampleAt) / 1000);
-  if (age > 0.15) {
+  // Settle only after the hold window — brief network gaps must stay in spring
+  // mode so dead-reckon can keep the glyph moving between packets.
+  if (age > PEER_MOTION_HOLD_SEC + 0.08) {
     const k = Math.min(1, dt * 16);
     s.x += (s.tx - s.x) * k;
     s.y += (s.ty - s.y) * k;
