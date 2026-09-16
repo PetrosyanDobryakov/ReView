@@ -11,7 +11,7 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
 
 /** Container-like shapes the eraser never touches (either mode) — ink on top of them still erases. */
 export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
@@ -19,6 +19,7 @@ export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
   'doc',
   'table',
   'graph',
+  'calculator',
   'frame',
   'diamond',
   'triangle',
@@ -72,6 +73,15 @@ export interface ShapeView {
   cropW?: number;
   cropH?: number;
   expr?: string;
+  /** Calculator: standard | scientific. */
+  calcMode?: 'standard' | 'scientific';
+  calcAngle?: 'deg' | 'rad';
+  calcDisplay?: string;
+  calcExpr?: string;
+  calcMemory?: number | null;
+  calcSecond?: boolean;
+  /** Opaque JSON machine blob for mid-entry sync. */
+  calcState?: string;
   fromId?: string;
   fromPort?: string;
   toId?: string;
@@ -1875,6 +1885,9 @@ export function drawShape(
     case 'graph':
       drawGraph(ctx, v, boardBg);
       break;
+    case 'calculator':
+      drawCalculator(ctx, v, boardBg, hideText);
+      break;
   }
 }
 
@@ -2252,6 +2265,133 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
   ctx.textBaseline = 'top';
   ctx.fillText('y', plot.x + Math.max(4, titlePad * 0.5), plot.y + Math.max(2, titlePad * 0.3));
 
+  ctx.restore();
+}
+
+const CALC_REF_W = 340;
+const CALC_REF_H = 520;
+
+function calcBodyFill(boardBg: string, shapeFill: string): string {
+  if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
+  const lum = relativeLuminance(boardBg);
+  if (lum == null) return '#2e2e2b';
+  return lum > 0.5 ? '#f0eee8' : '#2a2a27';
+}
+
+function calcInkOn(fill: string, boardBg: string): { text: string; muted: string; key: string; keyInk: string; display: string; displayInk: string; bezel: string } {
+  const lum = relativeLuminance(fill) ?? relativeLuminance(boardBg) ?? 0.1;
+  if (lum > 0.55) {
+    return {
+      text: 'rgba(28, 28, 26, 0.92)',
+      muted: 'rgba(28, 28, 26, 0.5)',
+      key: 'rgba(28, 28, 26, 0.08)',
+      keyInk: 'rgba(28, 28, 26, 0.78)',
+      display: 'rgba(28, 28, 26, 0.06)',
+      displayInk: 'rgba(28, 28, 26, 0.92)',
+      bezel: 'rgba(28, 28, 26, 0.22)',
+    };
+  }
+  return {
+    text: 'rgba(236, 234, 228, 0.92)',
+    muted: 'rgba(236, 234, 228, 0.5)',
+    key: 'rgba(236, 234, 228, 0.1)',
+    keyInk: 'rgba(236, 234, 228, 0.82)',
+    display: 'rgba(0, 0, 0, 0.28)',
+    displayInk: 'rgba(236, 234, 228, 0.95)',
+    bezel: 'rgba(236, 234, 228, 0.2)',
+  };
+}
+
+/** Canvas silhouette — peers/export always see a real calc, not an empty frame. */
+function drawCalculator(
+  ctx: CanvasRenderingContext2D,
+  v: ShapeView,
+  boardBg: string,
+  hideKeys = false
+): void {
+  const scale = Math.min(2.2, Math.max(0.45, Math.sqrt((Math.max(80, v.w) * Math.max(60, v.h)) / (CALC_REF_W * CALC_REF_H))));
+  const pad = Math.max(8, 12 * scale);
+  const radius = Math.max(8, Math.min(18, 12 * scale));
+  const body = calcBodyFill(boardBg, v.fill);
+  const ink = calcInkOn(body, boardBg);
+  const stroke = displayInk(v.stroke || COLORS.stroke, boardBg);
+  const display = v.calcDisplay ?? '0';
+  const expr = (v.calcExpr ?? '').trim();
+  const mode = v.calcMode === 'scientific' ? 'Scientific' : 'Standard';
+  const sci = v.calcMode === 'scientific';
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(v.x, v.y, v.w, v.h, radius);
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = Math.max(1, v.strokeWidth || 1.5);
+  ctx.stroke();
+
+  // Header
+  ctx.fillStyle = ink.muted;
+  ctx.font = `600 ${Math.round(Math.max(9, 11 * scale))}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(mode, v.x + pad, v.y + pad * 0.85, v.w - pad * 2);
+  if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
+    ctx.textAlign = 'right';
+    ctx.fillText('M', v.x + v.w - pad, v.y + pad * 0.85);
+  }
+
+  // Display well
+  const headerH = Math.max(18, 22 * scale);
+  const dispH = Math.max(52, 64 * scale);
+  const dispY = v.y + headerH + pad * 0.4;
+  const dispX = v.x + pad;
+  const dispW = Math.max(20, v.w - pad * 2);
+  ctx.beginPath();
+  ctx.roundRect(dispX, dispY, dispW, dispH, Math.max(6, 8 * scale));
+  ctx.fillStyle = ink.display;
+  ctx.fill();
+  ctx.strokeStyle = ink.bezel;
+  ctx.lineWidth = Math.max(0.75, scale);
+  ctx.stroke();
+
+  if (expr) {
+    ctx.fillStyle = ink.muted;
+    ctx.font = `${Math.round(Math.max(9, 11 * scale))}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText(expr, dispX + dispW - pad * 0.6, dispY + pad * 0.45, dispW - pad);
+  }
+  ctx.fillStyle = ink.displayInk;
+  const dispSize = Math.round(Math.min(36, Math.max(14, 22 * scale)));
+  ctx.font = `600 ${dispSize}px ${BOARD_TYPEFACE}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(display, dispX + dispW - pad * 0.6, dispY + dispH - pad * 0.55, dispW - pad);
+
+  if (hideKeys) {
+    ctx.restore();
+    return;
+  }
+
+  // Keypad silhouette
+  const gridTop = dispY + dispH + pad * 0.7;
+  const gridH = Math.max(40, v.y + v.h - pad - gridTop);
+  const cols = sci ? 5 : 4;
+  const rows = sci ? 8 : 6;
+  const gap = Math.max(3, 4.5 * scale);
+  const cellW = (dispW - gap * (cols - 1)) / cols;
+  const cellH = (gridH - gap * (rows - 1)) / rows;
+  const rr = Math.max(4, Math.min(cellW, cellH) * 0.22);
+  ctx.fillStyle = ink.key;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = dispX + c * (cellW + gap);
+      const y = gridTop + r * (cellH + gap);
+      ctx.beginPath();
+      ctx.roundRect(x, y, cellW, cellH, rr);
+      ctx.fill();
+    }
+  }
   ctx.restore();
 }
 

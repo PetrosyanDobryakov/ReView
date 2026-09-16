@@ -53,6 +53,8 @@ export type PeerCursor = {
   draft: PeerDraft | null;
   /** Shapes highlighted while erasing (awareness only). */
   erasePreview: PeerErasePreview | null;
+  /** Shape id currently focused for on-object edit (e.g. calculator keypad). */
+  focus: string | null;
 };
 
 export type CursorPos = { x: number; y: number };

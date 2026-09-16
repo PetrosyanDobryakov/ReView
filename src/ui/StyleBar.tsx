@@ -29,9 +29,9 @@ import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
 import { hasFill, defaultFontSizeFor } from '../core/shapes';
 
-const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
+const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table'];
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
@@ -293,7 +293,7 @@ export function StyleBar({
   const showText = showTextDraw || textTargets.length > 0;
   const showPenStyle = showPen || (penTargets.length > 0 && fillTargets.length === 0 && textTargets.length === 0);
   const showOutlineWidth =
-    (showShapeDraw && tool !== 'sticky' && tool !== 'graph') || outlineTargets.length > 0;
+    (showShapeDraw && tool !== 'sticky' && tool !== 'graph' && tool !== 'calculator') || outlineTargets.length > 0;
   const showCorners = tool === 'rect' || rectTargets.length > 0;
   const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
 

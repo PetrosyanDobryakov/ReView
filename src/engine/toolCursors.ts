@@ -82,6 +82,7 @@ const SPECS: Partial<Record<ToolId, CursorSpec>> = {
   text: { icon: 'text', hx: 12, hy: 12 },
   arrow: { icon: 'arrow', hx: 12, hy: 12 },
   graph: { icon: 'graph', hx: 12, hy: 12 },
+  calculator: { icon: 'calculator', hx: 12, hy: 12 },
   diamond: { icon: 'diamond', hx: 12, hy: 12 },
   frame: { icon: 'frame', hx: 12, hy: 12 },
   triangle: { icon: 'triangle', hx: 12, hy: 12 },

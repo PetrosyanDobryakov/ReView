@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.41 — unreleased
+
+### Board calculator
+- First-class **calculator** board object (More shelf): Standard + Scientific modes with Windows-parity engine (precedence, memory, CE/C/⌫, error states, deg/rad, 2nd functions).
+- On-object keypad overlay (shape-aligned, StyleBar fill/stroke) — not a floating OS dialog. Canvas silhouette for peers/export.
+- Board actions: stamp result as sticky, stamp expression as text, copy display. Live Yjs sync of calc state; peer focus ring while in use.
+
 ## 0.14.40 — unreleased
 
 ### Sync smoothness

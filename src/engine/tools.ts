@@ -14,6 +14,7 @@ import { recognizeStroke } from '../core/recognize';
 import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld } from '../core/transform';
 import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
+import { defaultCalcPersisted, shapeFieldsFromPersisted } from '../core/calcEngine';
 
 /** Rebake free-arrow AABB from the painted curve whenever points change. */
 function bakedArrowGeom<T extends { points?: number[] }>(
@@ -49,6 +50,7 @@ export type ToolId =
   | 'arrow'
   | 'eraser'
   | 'graph'
+  | 'calculator'
   | 'diamond'
   | 'frame'
   | 'triangle'
@@ -1011,7 +1013,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -1045,6 +1047,7 @@ abstract class BoxTool extends Tool {
     if (!id) return;
     if (this.shapeType === 'sticky') engine.openTextEditor(id);
     if (this.shapeType === 'graph') engine.openGraphEditor(id);
+    if (this.shapeType === 'calculator') engine.openCalculator(id);
   }
 
   cancel(_engine: Engine): void {
@@ -1231,6 +1234,52 @@ export class GraphTool extends BoxTool {
     ctx.lineTo(drawBox.x + drawBox.w - 12 * s, drawBox.y + drawBox.h - 16 * s);
     ctx.moveTo(drawBox.x + 16 * s, drawBox.y + drawBox.h - 16 * s);
     ctx.lineTo(drawBox.x + 16 * s, drawBox.y + 12 * s);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class CalculatorTool extends BoxTool {
+  readonly id = 'calculator';
+  readonly shapeType = 'calculator';
+  readonly defaultW = 340;
+  readonly defaultH = 520;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    const fields = shapeFieldsFromPersisted(defaultCalcPersisted('standard'));
+    const id = this.finishShape(p, {
+      fill: 'transparent',
+      strokeWidth: 1.75,
+      cornerRadius: 14,
+      ...fields,
+    });
+    if (id) engine.openCalculator(id);
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const drawBox = this.previewBox();
+    if (!drawBox) return;
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = settings.shape.stroke;
+    ctx.fillStyle = 'transparent';
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([5 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 12);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.4;
+    const pad = 14 * s;
+    ctx.beginPath();
+    ctx.roundRect(
+      drawBox.x + pad,
+      drawBox.y + pad * 1.6,
+      Math.max(8, drawBox.w - pad * 2),
+      Math.min(56 * s, drawBox.h * 0.18),
+      6
+    );
     ctx.stroke();
     ctx.restore();
   }
@@ -1924,6 +1973,7 @@ export class Tools {
   readonly ellipse = new EllipseTool();
   readonly sticky = new StickyTool();
   readonly graph = new GraphTool();
+  readonly calculator = new CalculatorTool();
   readonly diamond = new DiamondTool();
   readonly frame = new FrameTool();
   readonly triangle = new TriangleTool();

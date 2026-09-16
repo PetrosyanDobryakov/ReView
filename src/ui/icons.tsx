@@ -7,6 +7,7 @@ export const ICON_PATHS = {
   sticky: 'M5 4h10l5 5v11H5zM15 4v5h5M8 13h8M8 17h5',
   text: 'M5 6h14M12 6v13',
   graph: 'M4 19V5M4 19h16M7 14c2-4 3-1 5-5s3 2 5-3',
+  calculator: 'M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 7h8M8 11h2M12 11h2M16 11h0M8 15h2M12 15h2M16 15h0',
   table: 'M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16',
   arrow: 'M5 12h14M13 6l6 6-6 6',
   eraser: 'M3 16.5l5.5 5.5 13-13-5.5-5.5zM10 22h11',
@@ -105,6 +106,7 @@ export const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = 
   terminator: [0, -2],
   display: [1, 0],
   graph: [0, -0.5],
+  calculator: [0, 0],
   trash: [0, -1],
   paste: [0, -0.5],
 };
