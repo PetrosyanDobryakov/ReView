@@ -29,9 +29,11 @@ import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
 import { hasFill, defaultFontSizeFor } from '../core/shapes';
 
-const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table'];
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table']);
+const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table'];
+/** Calculator keeps its own face theme — no StyleBar fill/stroke. */
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
@@ -288,8 +290,13 @@ export function StyleBar({
   const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
   const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
 
-  const showFill = (showShapeDraw && tool !== 'arrow') || fillTargets.length > 0;
-  const showStroke = showShapeDraw || showPen || strokeTargets.length > 0 || penTargets.length > 0;
+  const showFill =
+    (showShapeDraw && tool !== 'arrow' && tool !== 'calculator') || fillTargets.length > 0;
+  const showStroke =
+    (showShapeDraw && tool !== 'calculator') ||
+    showPen ||
+    strokeTargets.length > 0 ||
+    penTargets.length > 0;
   const showText = showTextDraw || textTargets.length > 0;
   const showPenStyle = showPen || (penTargets.length > 0 && fillTargets.length === 0 && textTargets.length === 0);
   const showOutlineWidth =

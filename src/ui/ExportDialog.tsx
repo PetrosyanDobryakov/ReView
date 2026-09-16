@@ -169,47 +169,53 @@ export function ExportDialog({
         </header>
         <div className="export-body">
           <div className="export-controls">
-            <div className="export-row">
+            <div className="export-group">
               <span className="export-label">{t(locale, 'exportSource')}</span>
-              {sources.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`style-btn${source === s.id ? ' active' : ''}`}
-                  disabled={s.disabled}
-                  onClick={() => setSource(s.id)}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            {showScale && (
-              <div className="export-row">
-                <span className="export-label">{t(locale, 'exportScale')}</span>
-                {[1, 2, 3].map((s) => (
+              <div className="export-chips" role="group" aria-label={t(locale, 'exportSource')}>
+                {sources.map((s) => (
                   <button
-                    key={s}
+                    key={s.id}
                     type="button"
-                    className={`style-btn${scale === s ? ' active' : ''}`}
-                    onClick={() => setScale(s)}
+                    className={`style-btn${source === s.id ? ' active' : ''}`}
+                    disabled={s.disabled}
+                    onClick={() => setSource(s.id)}
                   >
-                    ×{s}
+                    {s.label}
                   </button>
                 ))}
               </div>
+            </div>
+            {showScale && (
+              <div className="export-group">
+                <span className="export-label">{t(locale, 'exportScale')}</span>
+                <div className="export-chips" role="group" aria-label={t(locale, 'exportScale')}>
+                  {[1, 2, 3].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`style-btn${scale === s ? ' active' : ''}`}
+                      onClick={() => setScale(s)}
+                    >
+                      ×{s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            <div className="export-row">
+            <div className="export-group">
               <span className="export-label">{t(locale, 'exportFormat')}</span>
-              {formats.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  className={`style-btn${format === f.id ? ' active' : ''}`}
-                  onClick={() => setFormat(f.id)}
-                >
-                  {f.label}
-                </button>
-              ))}
+              <div className="export-chips" role="group" aria-label={t(locale, 'exportFormat')}>
+                {formats.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`style-btn${format === f.id ? ' active' : ''}`}
+                    onClick={() => setFormat(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
               {(format === 'png' || format === 'svg') && (
                 <label className="export-check">
                   <input
@@ -222,20 +228,22 @@ export function ExportDialog({
               )}
             </div>
             {(format === 'jpeg' || format === 'pdf') && (
-              <div className="export-row">
+              <div className="export-group export-group-quality">
                 <span className="export-label">{t(locale, 'exportQuality')}</span>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={0.95}
-                  step={0.05}
-                  value={quality}
-                  onChange={(e) => setQuality(Number(e.target.value))}
-                />
-                <span>{Math.round(quality * 100)}</span>
+                <div className="export-quality">
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={0.95}
+                    step={0.05}
+                    value={quality}
+                    onChange={(e) => setQuality(Number(e.target.value))}
+                  />
+                  <span className="export-quality-value">{Math.round(quality * 100)}</span>
+                </div>
               </div>
             )}
-            <button type="button" className="style-btn" onClick={onPickAgain}>
+            <button type="button" className="style-btn export-pick-again" onClick={onPickAgain}>
               {t(locale, 'exportPickAgain')}
             </button>
           </div>
