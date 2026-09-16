@@ -1168,6 +1168,21 @@ export function SettingsSheet({
                   </p>
                   <button
                     type="button"
+                    className={`sheet-switch${prefs.rotateHandleTop ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={prefs.rotateHandleTop}
+                    onClick={() => patchPrefs({ rotateHandleTop: !prefs.rotateHandleTop })}
+                  >
+                    <span>{t(locale, 'rotateHandleTop')}</span>
+                    <span className="switch" aria-hidden="true">
+                      <span className="switch-thumb" />
+                    </span>
+                  </button>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'rotateHandleTopHint')} />
+                  </p>
+                  <button
+                    type="button"
                     className={`sheet-switch${prefs.smoothPeerCursors ? ' on' : ''}`}
                     role="switch"
                     aria-checked={prefs.smoothPeerCursors}

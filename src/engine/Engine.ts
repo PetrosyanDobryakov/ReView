@@ -24,7 +24,7 @@ import {
   measureMixedLine,
   arrowHitPolyline,
 } from '../core/shapes';
-import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
+import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import { jpegToPdf, shapesToSvg } from '../core/exportVector';
 import { onFormulaLoad } from '../core/formula';
 import { shapesFromClipboardText } from '../core/clipboardShapes';
@@ -1044,9 +1044,10 @@ export class Engine {
     return null;
   }
 
-  /** Screen hit-test for the rotation knob (single or group) at left-bottom. */
+  /** Screen hit-test for the rotation knob (single or group). */
   hitRotateHandle(sx: number, sy: number): string | null {
     const s = ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
+    const top = readPrefs().rotateHandleTop;
     if (this.selection.size > 1) {
       const box = this.selectionBounds();
       if (!box) return null;
@@ -1055,10 +1056,9 @@ export class Engine {
       const z = this.camera.zoom;
       const ox = this.w / 2 - this.camera.x * z;
       const oy = this.h / 2 - this.camera.y * z;
-      const wx = box.x - s;
-      const wy = box.y + box.h + s;
-      const hx = wx * z + ox;
-      const hy = wy * z + oy;
+      const rp = rotateHandleOnBox(box, s, top);
+      const hx = rp.x * z + ox;
+      const hy = rp.y * z + oy;
       if (Math.hypot(hx - sx, hy - sy) <= 14) return '__group__';
       return null;
     }
@@ -1069,7 +1069,8 @@ export class Engine {
     const z = this.camera.zoom;
     const ox = this.w / 2 - this.camera.x * z;
     const oy = this.h / 2 - this.camera.y * z;
-    const w = localToWorld(v, -s, v.h + s);
+    const local = rotateHandleLocal(v.w, v.h, s, top);
+    const w = localToWorld(v, local.x, local.y);
     const hx = w.x * z + ox;
     const hy = w.y * z + oy;
     if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
@@ -4690,35 +4691,10 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // group rotation handle — left-bottom, beautiful adaptive indicator
-          const rx = box.x - ROTATE_HANDLE_OFFSET_PX * s;
-          const ry = box.y + box.h + ROTATE_HANDLE_OFFSET_PX * s;
-          const bg = store.viewPaperBg();
-          const rotTheme = themeFor(bg);
-          const rotStroke = rotTheme.text;
-          const rotFill = withAlpha(bg, 0.92);
-          ctx.save();
-          ctx.translate(rx, ry);
-          ctx.fillStyle = rotFill;
-          ctx.strokeStyle = rotStroke;
-          ctx.lineWidth = 1.55 * s;
-          ctx.beginPath();
-          ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          // swirl arrow — like loading indicator, bigger
-          ctx.strokeStyle = rotStroke;
-          ctx.lineWidth = 1.75 * s;
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(hr * 0.42, -hr * 0.45);
-          ctx.lineTo(hr * 0.68, -hr * 0.12);
-          ctx.lineTo(hr * 0.28, -hr * 0.12);
-          ctx.stroke();
-          ctx.restore();
+          // group rotation handle
+          const topMid = readPrefs().rotateHandleTop;
+          const rp = rotateHandleOnBox(box, ROTATE_HANDLE_OFFSET_PX * s, topMid);
+          this.paintRotateKnob(ctx, rp.x, rp.y, hr, s, topMid);
         }
       }
       ctx.restore();
@@ -4751,34 +4727,10 @@ export class Engine {
             ctx.lineWidth = 1.5 * s;
             ctx.stroke();
           }
-          // Rotation handle — left-bottom, beautiful adaptive indicator
-          const rx = v.x - ROTATE_HANDLE_OFFSET_PX * s;
-          const ry = v.y + v.h + ROTATE_HANDLE_OFFSET_PX * s;
-          const bg2 = store.viewPaperBg();
-          const rotTheme2 = themeFor(bg2);
-          const rotStroke2 = rotTheme2.text;
-          const rotFill2 = withAlpha(bg2, 0.92);
-          ctx.save();
-          ctx.translate(rx, ry);
-          ctx.fillStyle = rotFill2;
-          ctx.strokeStyle = rotStroke2;
-          ctx.lineWidth = 1.55 * s;
-          ctx.beginPath();
-          ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
-          ctx.strokeStyle = rotStroke2;
-          ctx.lineWidth = 1.75 * s;
-          ctx.lineCap = 'round';
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(hr * 0.42, -hr * 0.45);
-          ctx.lineTo(hr * 0.68, -hr * 0.12);
-          ctx.lineTo(hr * 0.28, -hr * 0.12);
-          ctx.stroke();
-          ctx.restore();
+          // Rotation handle — top-middle (default) or legacy corner
+          const topMid = readPrefs().rotateHandleTop;
+          const local = rotateHandleLocal(v.w, v.h, ROTATE_HANDLE_OFFSET_PX * s, topMid);
+          this.paintRotateKnob(ctx, v.x + local.x, v.y + local.y, hr, s, topMid);
           // ponytail: tables get FigJam-style [+]/[−] pills (push/pop row / column) + active-cell frame
           if (v.type === 'table') {
             for (const p of this.tablePlusPills(v)) {
@@ -4814,6 +4766,63 @@ export class Engine {
           }
         }
       });
+    }
+    ctx.restore();
+  }
+
+  /** Paint selection rotate affordance at world (x,y). */
+  private paintRotateKnob(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    hr: number,
+    s: number,
+    topMiddle: boolean
+  ): void {
+    const bg = store.viewPaperBg();
+    const rotTheme = themeFor(bg);
+    const rotStroke = rotTheme.text;
+    const rotFill = withAlpha(bg, 0.92);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = rotFill;
+    ctx.strokeStyle = rotStroke;
+    ctx.lineWidth = 1.55 * s;
+    ctx.beginPath();
+    ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = rotStroke;
+    ctx.fillStyle = rotStroke;
+    ctx.lineWidth = 1.75 * s;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (topMiddle) {
+      // Clean rotate-cw glyph (standard affordance).
+      const r = hr * 0.95;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, -Math.PI * 0.85, Math.PI * 0.7);
+      ctx.stroke();
+      const tipA = Math.PI * 0.7;
+      const tx = Math.cos(tipA) * r;
+      const ty = Math.sin(tipA) * r;
+      const ah = hr * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - ah * 0.85, ty - ah * 0.15);
+      ctx.lineTo(tx - ah * 0.15, ty + ah * 0.75);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Legacy swirl “C” corner glyph.
+      ctx.beginPath();
+      ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(hr * 0.42, -hr * 0.45);
+      ctx.lineTo(hr * 0.68, -hr * 0.12);
+      ctx.lineTo(hr * 0.28, -hr * 0.12);
+      ctx.stroke();
     }
     ctx.restore();
   }

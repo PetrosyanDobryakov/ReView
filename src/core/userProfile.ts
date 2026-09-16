@@ -33,6 +33,7 @@ export type UserPrefsSlice = Pick<
   | 'paperBg'
   | 'recognizeShapes'
   | 'rotateSnap'
+  | 'rotateHandleTop'
   | 'smoothPeerCursors'
 >;
 

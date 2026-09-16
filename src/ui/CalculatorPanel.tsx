@@ -9,133 +9,13 @@ import {
   type CalcKey,
   type CalcPersisted,
 } from '../core/calcEngine';
-import { calcFrameScale } from '../core/calcGeometry';
+import { calcCssZoom, calcFrameScale } from '../core/calcGeometry';
+import { calcKeypadRows } from '../core/calcKeypad';
 import { shapeRotation } from '../core/transform';
 import { graphChromeKind } from '../core/editChrome';
 import { viewPaperBg } from '../core/store';
 import { readLocale } from '../core/locale';
 import { t } from './i18n';
-
-type KeyDef = { id: CalcKey; label: string; cls?: string; span?: number };
-
-function standardKeys(second: boolean): KeyDef[][] {
-  void second;
-  return [
-    [
-      { id: 'MC', label: 'MC', cls: 'mem' },
-      { id: 'MR', label: 'MR', cls: 'mem' },
-      { id: 'M+', label: 'M+', cls: 'mem' },
-      { id: 'M−', label: 'M−', cls: 'mem' },
-    ],
-    [
-      { id: 'MS', label: 'MS', cls: 'mem' },
-      { id: '%', label: '%', cls: 'fn' },
-      { id: 'CE', label: 'CE', cls: 'fn' },
-      { id: 'C', label: 'C', cls: 'fn' },
-    ],
-    [
-      { id: '⌫', label: '⌫', cls: 'fn' },
-      { id: '1/x', label: '1/x', cls: 'fn' },
-      { id: 'x²', label: 'x²', cls: 'fn' },
-      { id: '√', label: '√', cls: 'fn' },
-    ],
-    [
-      { id: '7', label: '7' },
-      { id: '8', label: '8' },
-      { id: '9', label: '9' },
-      { id: '÷', label: '÷', cls: 'op' },
-    ],
-    [
-      { id: '4', label: '4' },
-      { id: '5', label: '5' },
-      { id: '6', label: '6' },
-      { id: '×', label: '×', cls: 'op' },
-    ],
-    [
-      { id: '1', label: '1' },
-      { id: '2', label: '2' },
-      { id: '3', label: '3' },
-      { id: '−', label: '−', cls: 'op' },
-    ],
-    [
-      { id: '±', label: '±' },
-      { id: '0', label: '0' },
-      { id: '.', label: '.' },
-      { id: '+', label: '+', cls: 'op' },
-    ],
-    [
-      { id: '=', label: '=', cls: 'eq', span: 4 },
-    ],
-  ];
-}
-
-function scientificKeys(second: boolean): KeyDef[][] {
-  return [
-    [
-      { id: 'MC', label: 'MC', cls: 'mem' },
-      { id: 'MR', label: 'MR', cls: 'mem' },
-      { id: 'M+', label: 'M+', cls: 'mem' },
-      { id: 'M−', label: 'M−', cls: 'mem' },
-      { id: 'MS', label: 'MS', cls: 'mem' },
-    ],
-    [
-      { id: '2nd', label: '2nd', cls: second ? 'active fn' : 'fn' },
-      { id: 'π', label: 'π', cls: 'fn' },
-      { id: 'e', label: 'e', cls: 'fn' },
-      { id: 'C', label: 'C', cls: 'fn' },
-      { id: '⌫', label: '⌫', cls: 'fn' },
-    ],
-    [
-      { id: 'x²', label: 'x²', cls: 'fn' },
-      { id: '1/x', label: '1/x', cls: 'fn' },
-      { id: '|x|', label: '|x|', cls: 'fn' },
-      { id: 'Exp', label: 'exp', cls: 'fn' },
-      { id: '%', label: '%', cls: 'fn' },
-    ],
-    [
-      { id: '√', label: '√', cls: 'fn' },
-      { id: '(', label: '(', cls: 'fn' },
-      { id: ')', label: ')', cls: 'fn' },
-      { id: 'n!', label: 'n!', cls: 'fn' },
-      { id: '÷', label: '÷', cls: 'op' },
-    ],
-    [
-      { id: second ? 'asin' : 'sin', label: second ? 'sin⁻¹' : 'sin', cls: 'fn' },
-      { id: '7', label: '7' },
-      { id: '8', label: '8' },
-      { id: '9', label: '9' },
-      { id: '×', label: '×', cls: 'op' },
-    ],
-    [
-      { id: second ? 'acos' : 'cos', label: second ? 'cos⁻¹' : 'cos', cls: 'fn' },
-      { id: '4', label: '4' },
-      { id: '5', label: '5' },
-      { id: '6', label: '6' },
-      { id: '−', label: '−', cls: 'op' },
-    ],
-    [
-      { id: second ? 'atan' : 'tan', label: second ? 'tan⁻¹' : 'tan', cls: 'fn' },
-      { id: '1', label: '1' },
-      { id: '2', label: '2' },
-      { id: '3', label: '3' },
-      { id: '+', label: '+', cls: 'op' },
-    ],
-    [
-      { id: second ? 'sinh' : 'log', label: second ? 'sinh' : 'log', cls: 'fn' },
-      { id: '±', label: '±' },
-      { id: '0', label: '0' },
-      { id: '.', label: '.' },
-      { id: '=', label: '=', cls: 'eq' },
-    ],
-    [
-      { id: second ? 'cosh' : 'ln', label: second ? 'cosh' : 'ln', cls: 'fn' },
-      { id: second ? 'tanh' : '10ˣ', label: second ? 'tanh' : '10ˣ', cls: 'fn' },
-      { id: 'eˣ', label: 'eˣ', cls: 'fn' },
-      { id: 'xʸ', label: 'xʸ', cls: 'fn' },
-      { id: 'CE', label: 'CE', cls: 'fn' },
-    ],
-  ];
-}
 
 function shapeToPersisted(engine: Engine, id: string): CalcPersisted {
   const v = engine.views.get(id);
@@ -222,7 +102,8 @@ export function CalculatorPanel({
       el.style.top = `${p.y}px`;
       el.style.width = `${Math.max(1, v.w * z)}px`;
       el.style.height = `${Math.max(1, v.h * z)}px`;
-      el.style.setProperty('--calc-zoom', String(z * frame));
+      // Shared floor with silhouette — all overlay type scales stop together.
+      el.style.setProperty('--calc-zoom', String(calcCssZoom(z, frame)));
       const rot = shapeRotation(v);
       el.style.transform = rot ? `rotate(${rot}deg)` : '';
       raf = requestAnimationFrame(loop);
@@ -251,7 +132,7 @@ export function CalculatorPanel({
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
-  const rows = pub.mode === 'scientific' ? scientificKeys(pub.second) : standardKeys(pub.second);
+  const rows = calcKeypadRows(pub.mode, pub.second);
   const fill = live?.fill && live.fill !== 'transparent' ? live.fill : undefined;
   const stroke = live?.stroke || target.stroke;
   const screen = engine.worldToScreen(target.x, target.y);
@@ -278,7 +159,7 @@ export function CalculatorPanel({
         borderColor: stroke,
         borderWidth: Math.max(1, (live?.strokeWidth ?? target.strokeWidth) * z),
         color: ink,
-        ['--calc-zoom' as string]: String(z * frame),
+        ['--calc-zoom' as string]: String(calcCssZoom(z, frame)),
         ['--calc-ink' as string]: ink,
         ['--calc-muted' as string]: muted,
         ['--calc-key' as string]: keyFace,
