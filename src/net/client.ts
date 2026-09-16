@@ -21,6 +21,7 @@ import { syncReconnectMode } from './syncReconnect';
 import { noteAwarenessReceive } from './hitchDebug';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { isNetLogEnabled, netLog, registerNetDebugPeek } from './log';
+import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import { tapWebSocketTraffic } from './wsTraffic';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 
@@ -80,6 +81,7 @@ export class SyncClient {
   private lastViewing = true;
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
+  private lastSelection: string[] | null = null;
   /** High-freq awareness (cursor/draft/erase) — one WS frame per rAF. */
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
@@ -196,6 +198,7 @@ export class SyncClient {
     }));
     this.clearDraft();
     this.clearErasePreview();
+    this.clearSelection();
     this.teardownProvider();
     this.doc = null;
     this.boardId = null;
@@ -206,6 +209,7 @@ export class SyncClient {
     this.lastViewing = true;
     this.lastDraft = null;
     this.lastErase = null;
+    this.lastSelection = null;
     this.lastEmittedStatus = null;
     this.lastLoggedRosterKey = '';
     this.lastCursorLogState = null;
@@ -359,6 +363,7 @@ export class SyncClient {
       const erasePreview = parseErasePreview(state.erasePreview);
       const focusRaw = state.focus;
       const focus = typeof focusRaw === 'string' && focusRaw.trim() ? focusRaw.trim() : null;
+      const selection = parsePeerSelection(state.selection);
       byUser.set(key, {
         id,
         userId: userId || `client:${id}`,
@@ -375,6 +380,7 @@ export class SyncClient {
         draft,
         erasePreview,
         focus,
+        selection,
       });
     }
     return [...byUser.values()];
@@ -427,6 +433,23 @@ export class SyncClient {
     }
   }
 
+  /**
+   * Publish Select-tool shape ids to peers (awareness only).
+   * Pass null/[] to clear remote selection chrome.
+   * Batched with cursor/draft/erase on the next animation frame.
+   */
+  publishSelection(ids: string[] | null): void {
+    if (!ids || !ids.length) {
+      this.clearSelection();
+      return;
+    }
+    const slim = slimPeerSelection(ids);
+    if (samePeerSelection(slim, this.lastSelection)) return;
+    this.lastSelection = slim;
+    this.hotAwareness.queue({ selection: slim });
+    if (!slim) this.hotAwareness.flushNow();
+  }
+
   publishPage(page: string): void {
     if (this.lastPage === page) return;
     this.lastPage = page;
@@ -441,6 +464,7 @@ export class SyncClient {
     if (!viewing) {
       this.clearDraft();
       this.clearErasePreview();
+      this.clearSelection();
     }
     netLog.info('publishBoardView', () => ({ viewing }));
     this.writeViewing(viewing);
@@ -543,6 +567,13 @@ export class SyncClient {
     this.hotAwareness.flushNow();
   }
 
+  private clearSelection(): void {
+    if (this.lastSelection === null && !this.provider) return;
+    this.lastSelection = null;
+    this.hotAwareness.queue({ selection: null });
+    this.hotAwareness.flushNow();
+  }
+
   /** Merge hot fields into one awareness setLocalState (one WS frame). */
   private applyHotAwareness(patch: AwarenessPatch): void {
     const awareness = this.provider?.awareness;
@@ -610,6 +641,7 @@ export class SyncClient {
       cursor: this.lastCursor,
       draft: this.lastDraft,
       erasePreview: this.lastErase,
+      selection: this.lastSelection,
     };
     this.applyHotAwareness(hot);
   }
@@ -845,7 +877,7 @@ export class SyncClient {
     return peers
       .map(
         (p) =>
-          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.viewing ? 1 : 0}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}\0${p.focus ?? ''}`
+          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.viewing ? 1 : 0}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}\0${p.focus ?? ''}\0${(p.selection ?? []).join(',')}`
       )
       .join('\n');
   }

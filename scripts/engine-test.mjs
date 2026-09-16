@@ -1075,6 +1075,8 @@ const peerBase = (id, userId, name, x, viewing) => ({
   viewing,
   draft: null,
   erasePreview: null,
+  focus: null,
+  selection: null,
 });
 engine.setPeers([
   peerBase(101, 'u-view', 'Viewer', 200, true),

@@ -55,6 +55,8 @@ export type PeerCursor = {
   erasePreview: PeerErasePreview | null;
   /** Shape id currently focused for on-object edit (e.g. calculator keypad). */
   focus: string | null;
+  /** Shape ids currently selected with the Select tool (awareness only). */
+  selection: string[] | null;
 };
 
 export type CursorPos = { x: number; y: number };

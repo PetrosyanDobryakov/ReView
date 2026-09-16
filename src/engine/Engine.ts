@@ -40,7 +40,8 @@ import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon, polylineHitsPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
-import { sendCursor, publishTool, publishFocus } from '../net';
+import { sendCursor, publishTool, publishFocus, publishSelection } from '../net';
+import { samePeerSelection } from '../net/peerSelection';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, visualBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
@@ -406,7 +407,8 @@ export class Engine {
         old.viewing !== peer.viewing ||
         peerDraftPaintDirty(old.draft, peer.draft) ||
         !samePeerErasePreview(old.erasePreview, peer.erasePreview) ||
-        old.focus !== peer.focus
+        old.focus !== peer.focus ||
+        !samePeerSelection(old.selection, peer.selection)
       ) {
         shouldPaint = true;
       }
@@ -963,6 +965,8 @@ export class Engine {
     }
     this.dirty = true;
     this.events.onSelection?.([...this.selection]);
+    // Awareness only — peers see soft selection chrome; empty clears.
+    publishSelection(this.selection.size ? [...this.selection] : null);
   }
 
   selectedViews(): ShapeView[] {
@@ -4487,6 +4491,36 @@ export class Engine {
           ctx.beginPath();
           ctx.roundRect(fv.x - pad, fv.y - pad, fv.w + pad * 2, fv.h + pad * 2, 14);
           ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      if (peer.selection?.length) {
+        const color = peer.color || '#7c8cff';
+        const focusId = peer.focus;
+        for (const sid of peer.selection) {
+          // Calc focus already draws a soft ring — skip duplicate on that id.
+          if (focusId && sid === focusId) {
+            const fv = this.views.get(sid);
+            if (fv?.type === 'calculator') continue;
+          }
+          const v = this.views.get(sid);
+          if (!v) continue;
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.lineWidth = 2.25 * s;
+          ctx.setLineDash([]);
+          const pad = 3 * s;
+          if (v.type === 'pen' || v.type === 'arrow') {
+            ctx.strokeRect(v.x - pad, v.y - pad, v.w + pad * 2, v.h + pad * 2);
+          } else {
+            withShapeRotation(ctx, v, () => {
+              ctx.beginPath();
+              ctx.roundRect(v.x - pad, v.y - pad, v.w + pad * 2, v.h + pad * 2, 8 * s);
+              ctx.stroke();
+            });
+          }
           ctx.restore();
         }
       }

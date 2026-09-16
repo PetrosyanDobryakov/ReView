@@ -12,6 +12,7 @@ import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
 import { netLog } from './log';
+import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
 
@@ -37,6 +38,7 @@ class P2pClient {
   private lastViewing = true;
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
+  private lastSelection: string[] | null = null;
 
   private lastError: string | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,6 +142,7 @@ class P2pClient {
         cursor: this.lastCursor,
         draft: this.lastDraft,
         erasePreview: this.lastErase,
+        selection: this.lastSelection,
       });
       this.lastError = null;
       this.retryAttempt = 0;
@@ -231,6 +234,7 @@ class P2pClient {
         draft: parseDraft(st.draft),
         erasePreview: parseErasePreview(st.erasePreview),
         focus: typeof st.focus === 'string' && (st.focus as string).trim() ? (st.focus as string).trim() : null,
+        selection: parsePeerSelection(st.selection),
       });
     }
     return [...byUser.values()];
@@ -260,6 +264,20 @@ class P2pClient {
   publishFocus(shapeId: string | null): void {
     this.write('focus', shapeId);
   }
+  publishSelection(ids: string[] | null): void {
+    if (!ids || !ids.length) {
+      if (this.lastSelection === null && !this.provider) return;
+      this.lastSelection = null;
+      this.hotAwareness.queue({ selection: null });
+      this.hotAwareness.flushNow();
+      return;
+    }
+    const slim = slimPeerSelection(ids);
+    if (samePeerSelection(slim, this.lastSelection)) return;
+    this.lastSelection = slim;
+    this.hotAwareness.queue({ selection: slim });
+    if (!slim) this.hotAwareness.flushNow();
+  }
   publishPage(page: string): void { if (this.lastPage === page) return; this.lastPage = page; this.write('page', page); }
   publishBoardView(viewing: boolean): void {
     if (this.lastViewing === viewing) return;
@@ -267,7 +285,8 @@ class P2pClient {
     if (!viewing) {
       this.lastDraft = null;
       this.lastErase = null;
-      this.hotAwareness.queue({ draft: null, erasePreview: null });
+      this.lastSelection = null;
+      this.hotAwareness.queue({ draft: null, erasePreview: null, selection: null });
       this.hotAwareness.flushNow();
     }
     this.write('viewing', viewing);
@@ -293,7 +312,7 @@ class P2pClient {
   onLifecycle(cb: LifecycleListener): () => void { this.lifecycleListeners.add(cb); return () => { this.lifecycleListeners.delete(cb); }; }
 
   rosterKey(peers: PeerCursor[] = this.collectPeers()): string {
-    return peers.map(p => `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.tool ?? ''}\0${p.page ?? ''}`).join('\n');
+    return peers.map(p => `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.focus ?? ''}\0${(p.selection ?? []).join(',')}`).join('\n');
   }
 
   private applyHotAwareness(patch: AwarenessPatch): void {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.7 — unreleased
+
+### Multiplayer
+- **Peer-visible selection**: Select-tool shape ids publish via awareness (`selection: string[]`); remotes draw a soft peer-colored outline/ring (no handles). Clears on empty selection, tool switch, board leave, and disconnect. Same batching path as cursor/draft/erase — not written to the Yjs doc. Calc keypad `focus` ring kept; duplicate ring skipped when both apply to the same calculator.
+
 ## 0.15.6 — unreleased
 
 ### Selection / calculator polish
