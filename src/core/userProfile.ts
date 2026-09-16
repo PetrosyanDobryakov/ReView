@@ -85,6 +85,7 @@ function collectProfile(): UserProfileData {
       paperBg: prefs.paperBg,
       recognizeShapes: prefs.recognizeShapes,
       rotateSnap: prefs.rotateSnap,
+      rotateHandleTop: prefs.rotateHandleTop,
       smoothPeerCursors: prefs.smoothPeerCursors,
     },
     toolSettings: exportSettingsSnapshot(),
