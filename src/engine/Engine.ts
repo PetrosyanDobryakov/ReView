@@ -4153,10 +4153,10 @@ export class Engine {
     const s = 1 / this.camera.zoom;
     const dt = this.frameDt;
     const reduce = this.reduceMotion;
-    // Smooth-damp time constant (~follows ~50 Hz samples without rubber-banding).
-    const smoothTime = 0.07;
-    // Dead-reckon slightly past the last sample to bridge the next packet.
-    const leadSec = 0.035;
+    // Softer catch-up so a prediction miss on a new sample does not pop.
+    const smoothTime = 0.1;
+    // Dead-reckon at most ~one awareness interval ahead of the last sample.
+    const leadSec = 0.04;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
     const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
@@ -4207,8 +4207,8 @@ export class Engine {
       let aimX = pos.tx;
       let aimY = pos.ty;
       if (!reduce) {
-        // ponytail: capped lead (no post-stop hook) + straight settle when samples stop
-        const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 20 * s });
+        // Age-based dead-reckon (no between-packet retract) + soft spring.
+        const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 14 * s });
         aimX = aim.x;
         aimY = aim.y;
         stepPeerMotion(pos, aimX, aimY, now, dt, smoothTime);
@@ -4278,8 +4278,8 @@ export class Engine {
       }
       if (peer.viewing === false) {
         if (!reduce) {
-          const aim = aimPeerMotion(pos, now, { leadSec: 0.035, maxLead: 20 / this.camera.zoom });
-          stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.07);
+          const aim = aimPeerMotion(pos, now, { leadSec: 0.04, maxLead: 14 / this.camera.zoom });
+          stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.1);
         } else {
           pos.x = pos.tx;
           pos.y = pos.ty;
