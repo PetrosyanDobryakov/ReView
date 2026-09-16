@@ -140,10 +140,82 @@ if (tail && tail.length) Y.applyUpdate(doc, tail);
 assert.equal(doc.getMap('b').get('seed'), 1, 'seed survives the round-trip');
 assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip');
 
+// Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
+// would let resetRoom run under a newly accepted socket.
+{
+  let releaseDelete;
+  const held = new Promise((r) => {
+    releaseDelete = r;
+  });
+  const origDeleteAll = storage.deleteAll.bind(storage);
+  storage.deleteAll = async () => {
+    storage.ops.deleteAlls += 1;
+    await held;
+    storage.map.clear();
+  };
+  const wipeP = room.fetch(
+    new Request('https://review-sync.test/room/wipe-accept', {
+      method: 'DELETE',
+      headers: { 'X-Review-Compact-Token': 'test-token' },
+    }),
+  );
+  for (let i = 0; i < 50 && !room.wipeInFlight; i++) await sleep(10);
+  assert.equal(room.wipeInFlight, true, 'wipe is in flight while deleteAll is held');
+  const up = await room.fetch(
+    new Request('https://review-sync.test/room/wipe-accept', {
+      headers: { Upgrade: 'websocket' },
+    }),
+  );
+  assert.equal(up.status, 503, 'Upgrade during wipe returns 503');
+  assert.equal(room.wipeInFlight, true, 'wipe still in flight after rejected Upgrade');
+  releaseDelete();
+  const wiped = await wipeP;
+  assert.equal(wiped.status, 200, 'held DELETE still clears the room');
+  assert.equal(room.wipeInFlight, false, 'wipeInFlight clears after wipe');
+  assert.equal(room.suppressPersist, true, 'post-wipe latch stays until accept');
+  storage.deleteAll = origDeleteAll;
+}
+
 // DELETE must cancel the debounced tail and ignore late close handlers —
 // otherwise waitUntil / webSocketClose rewrite blobs after deleteAll and
 // compact/GC resurrect the room.
 {
+  // Seed again on the post-wipe empty room (accept clears the latch).
+  const seed2 = new Y.Doc();
+  seed2.getMap('b').set('reseed', 1);
+  // Accept path needs a WebSocketPair — polyfill for the Node test harness.
+  if (typeof globalThis.WebSocketPair !== 'function') {
+    globalThis.WebSocketPair = class WebSocketPair {
+      constructor() {
+        this[0] = makeSocket();
+        this[1] = makeSocket();
+      }
+    };
+  }
+  // undici Response rejects status 101; Cloudflare Upgrade responses use it.
+  const OrigResponse = globalThis.Response;
+  globalThis.Response = function Response(body, init) {
+    if (init && init.status === 101) {
+      return { status: 101, ok: true, webSocket: init.webSocket ?? null };
+    }
+    return new OrigResponse(body, init);
+  };
+  Object.setPrototypeOf(globalThis.Response, OrigResponse);
+  globalThis.Response.prototype = OrigResponse.prototype;
+
+  const live = [];
+  state.acceptWebSocket = (ws) => {
+    live.push(ws);
+  };
+  state.getWebSockets = () => (live.length ? live : sockets);
+  const join = await room.fetch(
+    new Request('https://review-sync.test/room/wipe-accept', {
+      headers: { Upgrade: 'websocket' },
+    }),
+  );
+  assert.equal(join.status, 101, 'Upgrade after wipe accepts');
+  assert.equal(room.suppressPersist, false, 'accept clears post-wipe latch');
+  globalThis.Response = OrigResponse;
   const d = new Y.Doc();
   d.getMap('b').set('after', 1);
   await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(d)));

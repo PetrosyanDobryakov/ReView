@@ -1033,6 +1033,10 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
   const boardId = currentBoardId;
   let before = 0;
   try {
+    // Flush pending heavy gesture patches (points/…) into the live doc before
+    // we snapshot — otherwise compact copies stale polylines and the delayed
+    // writeGate flush lands on the discarded doc.
+    closeWriteGate();
     try {
       before = Y.encodeStateAsUpdate(doc).length;
     } catch {

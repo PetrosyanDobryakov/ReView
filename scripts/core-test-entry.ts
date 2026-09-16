@@ -14,6 +14,7 @@ export { downsamplePolyline, toLocalPoints, toWorldPoints } from '../src/core/po
 export {
   beginWriteGesture,
   configureWriteGate,
+  closeWriteGate,
   endWriteGesture,
   enqueuePatches,
   flushNow,

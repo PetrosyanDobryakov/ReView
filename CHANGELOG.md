@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.27 — unreleased
+
+### Fix
+- Worker wipe rejects websocket Upgrade with 503 while `wipeInFlight`, runs deleteAll/resetRoom under `blockConcurrencyWhile`, and keeps a separate post-wipe persist latch until the next accept — an Upgrade can no longer clear the latch mid-wipe and land on a reset doc.
+- `compactBoard` calls `closeWriteGate()` before snapshotting so pending heavy gesture fields (points/pressures/src) land in the live doc instead of flushing into the discarded one.
+
 ## 0.14.26 — unreleased
 
 ### Fix
