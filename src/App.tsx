@@ -997,19 +997,21 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <Icon name="redo" />
           </button>
           <div className="island-sep" />
-          <button type="button" className="icon-btn" title={t(locale, 'zoomOut')} aria-label={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
-            <Icon name="minus" />
-          </button>
-          <button type="button" className="zoom-value" title={t(locale, 'zoomReset')} aria-label={t(locale, 'zoomReset')} onClick={() => engine?.resetZoom()}>
-            {zoom}%
-          </button>
-          <button type="button" className="icon-btn" title={t(locale, 'zoomIn')} aria-label={t(locale, 'zoomIn')} onClick={() => engine?.zoomBy(1.2)}>
-            <Icon name="plus" />
-          </button>
-          <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
-            <Icon name="fit" />
-          </button>
-          <div className="island-sep" />
+          <span className="file-zoom-cluster">
+            <button type="button" className="icon-btn" title={t(locale, 'zoomOut')} aria-label={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
+              <Icon name="minus" />
+            </button>
+            <button type="button" className="zoom-value" title={t(locale, 'zoomReset')} aria-label={t(locale, 'zoomReset')} onClick={() => engine?.resetZoom()}>
+              {zoom}%
+            </button>
+            <button type="button" className="icon-btn" title={t(locale, 'zoomIn')} aria-label={t(locale, 'zoomIn')} onClick={() => engine?.zoomBy(1.2)}>
+              <Icon name="plus" />
+            </button>
+            <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
+              <Icon name="fit" />
+            </button>
+            <div className="island-sep" />
+          </span>
           <button
             type="button"
             className="icon-btn"

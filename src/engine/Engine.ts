@@ -44,6 +44,13 @@ import { sendCursor, publishTool, publishFocus, publishSelection } from '../net'
 import { samePeerSelection } from '../net/peerSelection';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
+import {
+  handleDrawRadiusScale,
+  handleHitRadius,
+  isCoarsePointer,
+  portHitRadius,
+  rotateHitRadius,
+} from '../core/pointerEnv';
 import { computeSnap, groupBox, visualBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
 import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 void PORTS;
@@ -473,6 +480,13 @@ export class Engine {
   private gesture: { dist: number; mid: { x: number; y: number } } | null = null;
   /** Stylus eraser tip (button 5) temporarily overrides the active tool via `override`. */
   private stylusEraserOverride = false;
+  /** Touch long-press → context menu (desktop uses RMB). */
+  private longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  private longPressOrigin: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private longPressFired = false;
+  /** Touch double-tap → same as dblclick edit entry. */
+  private lastTap: { t: number; x: number; y: number } | null = null;
+  private suppressToolUp = false;
   private crop: {
     id: string;
     box: ShapeBox;
@@ -1036,7 +1050,7 @@ export class Engine {
           const [fx, fy] = HANDLE_POS[handle];
           const hx = (box.x + fx * box.w) * z + ox;
           const hy = (box.y + fy * box.h) * z + oy;
-          if (Math.hypot(hx - sx, hy - sy) <= 9) {
+          if (Math.hypot(hx - sx, hy - sy) <= handleHitRadius()) {
             return { shapeId: '__group__', handle };
           }
         }
@@ -1054,7 +1068,7 @@ export class Engine {
         const world = localToWorld(v, fx * v.w, fy * v.h);
         const hx = world.x * z + ox;
         const hy = world.y * z + oy;
-        if (Math.hypot(hx - sx, hy - sy) <= 9) {
+        if (Math.hypot(hx - sx, hy - sy) <= handleHitRadius()) {
           return { shapeId: id, handle };
         }
       }
@@ -1077,7 +1091,7 @@ export class Engine {
       const rp = rotateHandleOnBox(box, s, top);
       const hx = rp.x * z + ox;
       const hy = rp.y * z + oy;
-      if (Math.hypot(hx - sx, hy - sy) <= 14) return '__group__';
+      if (Math.hypot(hx - sx, hy - sy) <= rotateHitRadius()) return '__group__';
       return null;
     }
     if (this.selection.size !== 1) return null;
@@ -1091,7 +1105,7 @@ export class Engine {
     const w = localToWorld(v, local.x, local.y);
     const hx = w.x * z + ox;
     const hy = w.y * z + oy;
-    if (Math.hypot(hx - sx, hy - sy) <= 14) return id;
+    if (Math.hypot(hx - sx, hy - sy) <= rotateHitRadius()) return id;
     return null;
   }
 
@@ -1112,7 +1126,7 @@ export class Engine {
         const hx = p.x * z + ox;
         const hy = p.y * z + oy;
         const d = Math.hypot(hx - sx, hy - sy);
-        if (d <= 16 && (!best || d < best.dist)) best = { shapeId: id, port: port as PortId, dist: d };
+        if (d <= portHitRadius() && (!best || d < best.dist)) best = { shapeId: id, port: port as PortId, dist: d };
       }
     }
     return best ? { shapeId: best.shapeId, port: best.port } : null;
@@ -3143,6 +3157,37 @@ export class Engine {
     this.setCursor(this.toolCursor());
   }
 
+  private clearLongPress(): void {
+    if (this.longPressTimer !== null) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+    this.longPressOrigin = null;
+  }
+
+  private armLongPress(e: PointerEvent): void {
+    this.clearLongPress();
+    if (e.pointerType !== 'touch' || e.button !== 0) return;
+    this.longPressFired = false;
+    this.longPressOrigin = { x: e.clientX, y: e.clientY, clientX: e.clientX, clientY: e.clientY };
+    this.longPressTimer = setTimeout(() => {
+      this.longPressTimer = null;
+      if (!this.longPressOrigin || this.pointers.size !== 1 || this.editing) return;
+      this.longPressFired = true;
+      this.suppressToolUp = true;
+      this.abortConnecting();
+      if (this.pointerDown) {
+        this.cancelToolDrag();
+        this.pointerDown = false;
+        this.toolArmed = false;
+      }
+      this.openContextMenuAt(this.longPressOrigin.clientX, this.longPressOrigin.clientY);
+      this.longPressOrigin = null;
+      this.lastTap = null;
+      this.dirty = true;
+    }, 500);
+  }
+
   private onPointerDown = (e: PointerEvent): void => {
     this.ensureStoreBound();
     const pType = e.pointerType || 'mouse';
@@ -3154,6 +3199,8 @@ export class Engine {
     // Stylus arrives while a non-pen contact is down — drop palm/finger contacts
     // so we do not cancel into pinch-zoom; abort the non-pen tool drag first.
     if (pType === 'pen' && this.pointers.size >= 1 && !this.hasPenPointer()) {
+      this.clearLongPress();
+      this.lastTap = null;
       this.abortConnecting();
       this.cancelToolDrag();
       this.pointerDown = false;
@@ -3164,6 +3211,8 @@ export class Engine {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: pType });
     if (this.pointers.size >= 2) {
+      this.clearLongPress();
+      this.lastTap = null;
       // Never pinch-cancel an active stylus stroke (belt-and-suspenders vs palm filter).
       if (this.hasPenPointer()) {
         for (const [id, p] of [...this.pointers.entries()]) {
@@ -3189,6 +3238,24 @@ export class Engine {
     }
     this.pointerDown = true;
     this.toolArmed = false;
+    this.suppressToolUp = false;
+    this.longPressFired = false;
+
+    // Touch double-tap → edit (same as dblclick). Detect before arming tools.
+    if (pType === 'touch' && e.button === 0 && this.lastTap && !this.editing) {
+      const dt = performance.now() - this.lastTap.t;
+      const dist = Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y);
+      if (dt < 350 && dist < 28) {
+        this.lastTap = null;
+        this.clearLongPress();
+        this.pointerDown = false;
+        this.suppressToolUp = true;
+        this.activateAtPoint(this.pointerInfo(e));
+        this.dirty = true;
+        return;
+      }
+    }
+
     if (this.exportPick) {
       if (e.button === 0) {
         const p = this.pointerInfo(e);
@@ -3228,11 +3295,13 @@ export class Engine {
       this.stylusEraserOverride = true;
       this.setCursor(this.toolCursor());
     }
+    this.armLongPress(e);
     try {
       const info = this.pointerInfo(e);
       if (e.button === 0) {
         const plus = this.hitTablePlus(info.world.x, info.world.y);
         if (plus) {
+          this.clearLongPress();
           if (this.editing) this.events.onRequestCommitText?.();
           const gv = this.views.get(plus.id);
           const grid = gv && gv.type === 'table' ? tableGrid(gv) : null;
@@ -3249,12 +3318,16 @@ export class Engine {
         // On-object calculator: allow select handles / rotate / move so the
         // frame can resize like other board shapes while the keypad is open.
         // Text/graph editors keep the hard lock (overlay is not the body).
-        if (!this.calcGeometryInteractive()) return;
+        if (!this.calcGeometryInteractive()) {
+          this.clearLongPress();
+          return;
+        }
         const onRotate = this.hitRotateHandle(info.screen.x, info.screen.y);
         const onHandle = onRotate ? null : this.hitHandle(info.screen.x, info.screen.y);
         const hit = this.hitTest(info.world.x, info.world.y);
         const onCalcBody = Boolean(hit && hit === this.calcEditId);
         if (onRotate || onHandle || onCalcBody) {
+          this.clearLongPress();
           const target = this.tools.select;
           this.dragTool = target;
           this.toolArmed = true;
@@ -3265,6 +3338,7 @@ export class Engine {
         this.closeCalculator();
       }
       if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) {
+        this.clearLongPress();
         this.pointerDown = false;
         return;
       }
@@ -3274,6 +3348,7 @@ export class Engine {
       if (!onRotate && !onHandle) {
         const portHit = this.hitPort(info.screen.x, info.screen.y);
         if (portHit && this.selection.has(portHit.shapeId) && e.button === 0) {
+          this.clearLongPress();
           this.connecting = { fromId: portHit.shapeId, fromPort: portHit.port, cur: info.world };
           this.hoverPort = null;
           this.setCursor('crosshair');
@@ -3305,7 +3380,15 @@ export class Engine {
       // Untracked palm contact while inking — ignore.
       return;
     }
+    if (this.longPressOrigin) {
+      const moveSlop = isCoarsePointer() ? 12 : 10;
+      if (Math.hypot(e.clientX - this.longPressOrigin.x, e.clientY - this.longPressOrigin.y) > moveSlop) {
+        this.clearLongPress();
+        this.lastTap = null;
+      }
+    }
     if (this.pointers.size >= 2 && this.gesture) {
+      this.clearLongPress();
       this.updateGesture();
       return;
     }
@@ -3424,7 +3507,21 @@ export class Engine {
       this.gesture = null;
       if (!this.panDrag) this.camera.instant = false;
     }
+    const suppress = this.suppressToolUp || this.longPressFired;
+    const tapOrigin = this.longPressOrigin;
+    this.clearLongPress();
     this.pointerDown = false;
+    this.suppressToolUp = false;
+
+    if (suppress) {
+      this.toolArmed = false;
+      this.longPressFired = false;
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
+      this.dirty = true;
+      return;
+    }
+
     if (this.connecting) {
       const info = this.pointerInfo(e);
       const target = this.hoverPort || this.hitPort(info.screen.x, info.screen.y);
@@ -3500,6 +3597,8 @@ export class Engine {
       this.connecting = null;
       this.hoverPort = null;
       this.setCursor(this.toolCursor());
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
       this.dirty = true;
       return;
     }
@@ -3513,12 +3612,16 @@ export class Engine {
       }
       this.exportPick = false;
       this.setCursor(this.toolCursor());
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
       this.dirty = true;
       this.events.onExportRegion?.(rect);
       return;
     }
     if (this.crop) {
       this.cropPointerUp();
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
       return;
     }
     if (this.panDrag) {
@@ -3534,13 +3637,18 @@ export class Engine {
       ) {
         this.openContextMenu(e);
       }
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
       return;
     }
     if (this.editing) {
       this.toolArmed = false;
+      this.lastTap = null;
+      this.clearStylusEraserOverride();
       return;
     }
     if (!this.toolArmed) {
+      this.lastTap = null;
       this.clearStylusEraserOverride();
       return;
     }
@@ -3552,6 +3660,17 @@ export class Engine {
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
     this.clearStylusEraserOverride();
+    // Short touch tap → candidate for double-tap edit.
+    if (
+      e.pointerType === 'touch' &&
+      e.button === 0 &&
+      tapOrigin &&
+      Math.hypot(e.clientX - tapOrigin.x, e.clientY - tapOrigin.y) < (isCoarsePointer() ? 12 : 10)
+    ) {
+      this.lastTap = { t: performance.now(), x: e.clientX, y: e.clientY };
+    } else if (e.pointerType === 'touch') {
+      this.lastTap = null;
+    }
     this.dirty = true;
   };
 
@@ -3569,7 +3688,11 @@ export class Engine {
 
   private onDblClick = (e: MouseEvent): void => {
     if (this.editing) return;
-    const p = this.pointerInfo(e);
+    this.activateAtPoint(this.pointerInfo(e));
+  };
+
+  /** Shared edit entry for dblclick (mouse) and double-tap (touch). */
+  private activateAtPoint(p: PointerInfo): void {
     const id = this.hitTest(p.world.x, p.world.y);
     // Empty board: no free-text spawn. Place text with the Text tool only.
     if (!id) return;
@@ -3640,6 +3763,10 @@ export class Engine {
   /** Palm reject / capture loss must not commit a connector or export region. */
   private onPointerCancel = (e: PointerEvent): void => {
     this.pointers.delete(e.pointerId);
+    this.clearLongPress();
+    this.lastTap = null;
+    this.suppressToolUp = false;
+    this.longPressFired = false;
     if (this.pointers.size < 2) {
       this.gesture = null;
       if (!this.panDrag) this.camera.instant = false;
@@ -4051,11 +4178,18 @@ export class Engine {
   };
 
   private openContextMenu(e: PointerEvent): void {
-    const p = this.pointerInfo(e);
-    this.pasteAt = p.world;
-    let id = this.hitTest(p.world.x, p.world.y);
-    if (!id) id = this.hitSelectedBounds(p.world.x, p.world.y);
-    const sp = this.worldToScreen(p.world.x, p.world.y);
+    this.openContextMenuAt(e.clientX, e.clientY);
+  }
+
+  private openContextMenuAt(clientX: number, clientY: number): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const world = this.camera.screenToWorld(sx, sy, this.w / 2, this.h / 2);
+    this.pasteAt = world;
+    let id = this.hitTest(world.x, world.y);
+    if (!id) id = this.hitSelectedBounds(world.x, world.y);
+    const sp = this.worldToScreen(world.x, world.y);
     if (id) {
       if (!this.selection.has(id)) this.setSelection([id]);
       const v = this.views.get(id);
@@ -4070,7 +4204,6 @@ export class Engine {
       this.events.onContextMenu?.({ x: sp.x, y: sp.y, shapeId: null, type: null, locked: false });
     }
   }
-
   private onKeyDown = (e: KeyboardEvent): void => {
     const target = e.target;
     if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement) {
@@ -4767,7 +4900,7 @@ export class Engine {
     const s = 1 / this.camera.zoom;
     const pad = 2 * s;
     const line = 1.5 * s;
-    const hr = 4.25 * s;
+    const hr = handleDrawRadiusScale() * s;
     const orbit = orbitPaperActive(this.paperTo || store.viewPaperBg(), this.paperFill || store.viewPaperBg());
     const handleFill = orbit ? '#04052E' : '#ffffff';
     ctx.save();

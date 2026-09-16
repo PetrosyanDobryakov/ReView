@@ -76,7 +76,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       close();
@@ -88,10 +88,10 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         triggerRef.current?.focus();
       }
     };
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, close]);

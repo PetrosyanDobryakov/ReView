@@ -521,6 +521,15 @@ export function SettingsSheet({
                     {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
                   </li>
                   <li>
+                    {t(locale, 'pinchTouch')} <span>{t(locale, 'pinchTouchHint')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'longPressTouch')} <span>{t(locale, 'longPressTouchHint')}</span>
+                  </li>
+                  <li>
+                    {t(locale, 'doubleTapTouch')} <span>{t(locale, 'doubleTapTouchHint')}</span>
+                  </li>
+                  <li>
                     {t(locale, 'rotateSnap')} <span>{t(locale, 'rotateSnapGesture')}</span>
                   </li>
                   <li>

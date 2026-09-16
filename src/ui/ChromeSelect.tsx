@@ -74,7 +74,7 @@ export function ChromeSelect<T extends string>({
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       close();
@@ -104,10 +104,10 @@ export function ChromeSelect<T extends string>({
         }
       }
     };
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, activeIndex, close, onChange, options, preserveFocus]);
