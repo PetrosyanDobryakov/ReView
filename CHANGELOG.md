@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.39 — unreleased
+
+### Sync smoothness
+- Idle → first-move observer snap: after a long awareness gap (`PEER_MOTION_STALE_SEC`), `pushPeerSample` resets velocity instead of inventing speed via `sampleDeltaSec`'s 0.12s ceiling. Realtime dead-reckon no longer slingshots on cold start after a stale peer, then snaps back on the next packet. Smooth toggle unchanged.
+
 ## 0.14.38 — unreleased
 
 ### Sync smoothness
