@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.5 — unreleased
+
+### Selection chrome
+- **Rotate icon a bit bigger**: same Lucide-style `rotate-cw` SVG; modest size bump for top-middle and corner placements (`ROTATE_CW_ICON_RADIUS_SCALE` / disc scale in `rotateIcon.ts`).
+
 ## 0.15.4 — unreleased
 
 ### Selection / calculator / canvas quality

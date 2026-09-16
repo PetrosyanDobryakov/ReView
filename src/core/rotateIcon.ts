@@ -13,6 +13,15 @@ export const ROTATE_CW_HEAD = 'M21 3v5h-5';
 
 export const ROTATE_CW_VIEW = 24;
 
+/**
+ * Paint radius as a multiple of selection handle radius (`hr`).
+ * Shared by top-middle and corner placements via `paintRotateKnob`.
+ */
+export const ROTATE_CW_ICON_RADIUS_SCALE = 1.28;
+
+/** Soft disc radius multiple of `hr` (frames the glyph). */
+export const ROTATE_CW_DISC_RADIUS_SCALE = 2.0;
+
 /** Inline SVG source (asset / docs). Paint uses Path2D of the same paths. */
 export const ROTATE_CW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ROTATE_CW_VIEW} ${ROTATE_CW_VIEW}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ROTATE_CW_ARC}"/><path d="${ROTATE_CW_HEAD}"/></svg>`;
 
