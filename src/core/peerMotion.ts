@@ -24,9 +24,11 @@
  * of a spring trail — bridges WS gaps without smooth-delay lag.
  *
  * Idle → first move: awareness stops while the cursor is still (sameCursor
- * dedupe). The next sample after a long gap must not invent velocity via
- * sampleDeltaSec's 0.12s ceiling — that slingshot + next-packet snap is the
- * observer stutter after a stale peer starts moving again.
+ * dedupe). The next sample after a long gap hard-snaps display pose to the
+ * wire sample and clears velocity — no coast across the discontinuity.
+ * Brief stalls during continuous motion stay under the resume gap so
+ * dead-reckon continuity is preserved (0.14.39's 0.2s stale reset caused
+ * mid-move jaggers and is rejected).
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */
@@ -84,15 +86,12 @@ export function initPeerMotion(x: number, y: number, now: number): PeerMotionSta
 }
 
 /**
- * Clamp inter-sample dt used for velocity. Burst arrivals (same-tick or 1 ms
- * apart) would otherwise explode speed and slingshot the aim.
- *
- * Do NOT use this alone across idle gaps: the 0.12s ceiling shortens a multi-
- * second pause and invents huge (delta / 0.12) speeds. Callers must reset
- * continuity when `peerSampleGapSec` exceeds `PEER_MOTION_STALE_SEC`.
+ * Inter-sample dt for velocity. Floor burst arrivals (same-tick / 1 ms) so
+ * speed cannot explode. Do NOT ceiling long gaps: a 0.12s cap was inventing
+ * huge (delta / 0.12) speeds across idle and mid-move stalls.
  */
 export function sampleDeltaSec(prevAt: number, now: number): number {
-  return Math.min(0.12, Math.max(1 / 60, (now - prevAt) / 1000));
+  return Math.max(1 / 60, (now - prevAt) / 1000);
 }
 
 /** Raw seconds since `prevAt` (no clamp) — used to detect idle gaps. */
@@ -101,30 +100,36 @@ export function peerSampleGapSec(prevAt: number, now: number): number {
 }
 
 /**
- * Inter-sample gap above this = peer was idle / stale. Next sample restarts
- * velocity instead of dividing the jump by sampleDeltaSec's 0.12s ceiling.
- * Past hold + a little slack so normal packet jitter still carries velocity.
+ * Gap above this = peer was idle / awareness stopped (sameCursor dedupe).
+ * Must sit well above hold + typical WS/main-thread stalls (~50–200 ms) so
+ * continuous motion keeps velocity; 0.14.39 used 0.2s and caused mid-move
+ * jaggers. Idle parks are multi-second.
  */
-export const PEER_MOTION_STALE_SEC = 0.2;
+export const PEER_MOTION_RESUME_GAP_SEC = 1;
+
+/**
+ * @deprecated 0.14.39 name — alias of `PEER_MOTION_RESUME_GAP_SEC`. Do not use
+ * the old 0.2s stale reset; that regression is user-rejected.
+ */
+export const PEER_MOTION_STALE_SEC = PEER_MOTION_RESUME_GAP_SEC;
 
 /**
  * Fold a fresh sample in. When the new sample velocity opposes the previous
  * one (zigzag corner), drop the rendered velocity so the spring doesn't
  * slingshot past the corner.
  *
- * After a long idle gap, reset sample continuity instead of inventing velocity
- * from (jump / 0.12s). That fake speed made realtime dead-reckon overshoot on
- * the first move after the peer was stale, then the next packet snapped back.
+ * After a long idle gap, hard-snap the display pose to the wire sample and
+ * clear dead-reckon / spring velocity so nothing coasts across the gap.
+ * Frequent samples (continuous motion) keep normal velocity continuity.
  *
- * Does not snap the rendered pose — spring/lerp absorbs the correction so
- * each awareness packet does not pop the glyph. Callers that want realtime
- * display should follow with `snapPeerMotionToSample`.
+ * Non-resume samples do not snap the rendered pose — spring/lerp absorbs the
+ * correction so each awareness packet does not pop the glyph. Callers that
+ * want realtime display should follow with `snapPeerMotionToSample`.
  */
 export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: number): void {
   const gap = peerSampleGapSec(s.sampleAt, now);
-  if (gap > PEER_MOTION_STALE_SEC) {
-    // Idle → first move: seed at the new sample with zero velocity so
-    // aim/dead-reckon does not coast on a fabricated post-idle speed.
+  if (gap > PEER_MOTION_RESUME_GAP_SEC) {
+    // Idle → first move: discontinuity — hard-snap to wire, no coast.
     s.prevTx = x;
     s.prevTy = y;
     s.prevSampleAt = now;
@@ -133,8 +138,7 @@ export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: nu
     s.sampleAt = now;
     s.svx = 0;
     s.svy = 0;
-    s.vx = 0;
-    s.vy = 0;
+    snapPeerMotionToSample(s);
     return;
   }
   const dt = sampleDeltaSec(s.sampleAt, now);

@@ -1,9 +1,17 @@
 # Changelog
 
-## 0.14.39 — unreleased
+## 0.14.40 — unreleased
 
 ### Sync smoothness
-- Idle → first-move observer snap: after a long awareness gap (`PEER_MOTION_STALE_SEC`), `pushPeerSample` resets velocity instead of inventing speed via `sampleDeltaSec`'s 0.12s ceiling. Realtime dead-reckon no longer slingshots on cold start after a stale peer, then snaps back on the next packet. Smooth toggle unchanged.
+- **User-rejected 0.14.39** (`PEER_MOTION_STALE_SEC = 0.2` zero-velocity reset): mid-move stalls looked like new jaggers and the idle→move slingshot remained incomplete.
+- Idle → first move: after `PEER_MOTION_RESUME_GAP_SEC` (1s), hard-snap display pose to the wire sample and clear dead-reckon/spring velocity — no coast across the gap.
+- `sampleDeltaSec` no longer ceilings at 0.12s (floor-only for bursts), so brief stalls do not invent `(delta / 0.12)` speeds.
+- Continuous realtime motion keeps velocity under the resume gap; smooth toggle still optional (default realtime).
+
+## 0.14.39 — unreleased (user-rejected)
+
+### Sync smoothness
+- Idle → first-move observer snap: after a long awareness gap (`PEER_MOTION_STALE_SEC`), `pushPeerSample` resets velocity instead of inventing speed via `sampleDeltaSec`'s 0.12s ceiling. Realtime dead-reckon no longer slingshots on cold start after a stale peer, then snaps back on the next packet. Smooth toggle unchanged. **Live: worse — new mid-move jaggers + old snap; superseded by 0.14.40.**
 
 ## 0.14.38 — unreleased
 
