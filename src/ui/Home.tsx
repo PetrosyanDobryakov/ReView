@@ -35,7 +35,7 @@ import { SettingsSheet } from './SettingsSheet';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
-import { APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
+import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
@@ -288,16 +288,17 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               href={RELEASES_URL}
               target="_blank"
               rel="noreferrer"
-              title={t(locale, 'updateAvailable')}
+              title={`${t(locale, 'updateAvailable')} (${APP_BUILD})`}
             >
               {t(locale, 'updateAvailable')} — v{verStatus.latest}
             </a>
-          ) : verStatus?.kind === 'dev' ? (
-            <span className="home-version dev" title={t(locale, 'devVersion')}>
-              {t(locale, 'devVersion')}
-            </span>
           ) : (
-            <span className="home-version">v{APP_VERSION}</span>
+            <span
+              className={`home-version${verStatus?.kind === 'dev' ? ' dev' : ''}`}
+              title={verStatus?.kind === 'dev' ? t(locale, 'devVersion') : APP_BUILD}
+            >
+              v{APP_BUILD}
+            </span>
           )}
         </div>
         <div className="island meta-island">

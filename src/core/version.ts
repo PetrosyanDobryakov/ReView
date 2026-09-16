@@ -1,6 +1,19 @@
 import pkg from '../../package.json';
 
+declare const __REVIEW_COMMIT__: string | undefined;
+declare const __REVIEW_BUILD__: string | undefined;
+
 export const APP_VERSION: string = pkg.version;
+
+/** Short git SHA baked at build time (Workers CI / local git). */
+export const APP_COMMIT: string =
+  typeof __REVIEW_COMMIT__ !== 'undefined' && __REVIEW_COMMIT__ ? __REVIEW_COMMIT__ : 'dev';
+
+/** `0.14.35+abc1234` — also in `<meta name="review-build">` for curl checks. */
+export const APP_BUILD: string =
+  typeof __REVIEW_BUILD__ !== 'undefined' && __REVIEW_BUILD__
+    ? __REVIEW_BUILD__
+    : `${APP_VERSION}+dev`;
 
 export const RELEASES_URL = 'https://github.com/PetrosyanDobryakov/ReView/releases/latest';
 
@@ -43,10 +56,14 @@ export async function checkAppVersion(): Promise<VersionStatus> {
     const list = (await res.json()) as Array<{ tag_name?: string }>;
     const versions = list.map((r) => r.tag_name ?? '').filter(Boolean);
     if (!versions.length) return { kind: 'unknown' };
-    let latest = versions[0];
+    let latest = versions[0]!;
     for (const v of versions) if (compareVersions(v, latest) > 0) latest = v;
-    if (compareVersions(APP_VERSION, latest) < 0) return { kind: 'outdated', latest };
-    if (versions.some((v) => compareVersions(v, APP_VERSION) === 0)) return { kind: 'latest' };
+    if (compareVersions(APP_VERSION, latest) < 0) {
+      return { kind: 'outdated', latest };
+    }
+    if (versions.some((v) => compareVersions(v, APP_VERSION) === 0)) {
+      return { kind: 'latest' };
+    }
     return { kind: 'dev' };
   } catch {
     return { kind: 'unknown' };
