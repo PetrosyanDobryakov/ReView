@@ -5,7 +5,7 @@ import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync, ensureP2pAttached, hasDistinctRemoteCollaborators, hasRemoteCollaborators, publishBoardView, publishDraft, publishErasePreview } from '../net';
+import { attachSync, detachSync, ensureP2pAttached, hasDistinctRemoteCollaborators, hasRemoteCollaborators, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 import {
   boardHadRemoteCollaborators,
@@ -350,6 +350,7 @@ export function pauseBoardView(): void {
   publishBoardView(false);
   publishDraft(null);
   publishErasePreview(null);
+  publishSelection(null);
 }
 
 export function ensureOrder(): void {

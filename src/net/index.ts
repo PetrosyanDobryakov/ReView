@@ -135,6 +135,11 @@ export function publishFocus(shapeId: string | null): void {
   p2pClient.publishFocus(shapeId);
 }
 
+export function publishSelection(ids: string[] | null): void {
+  syncClient.publishSelection(ids);
+  p2pClient.publishSelection(ids);
+}
+
 function mergePeers(a: PeerCursor[], b: PeerCursor[]): PeerCursor[] {
   const byId = new Map<string, PeerCursor>();
   for (const p of [...a, ...b]) {
