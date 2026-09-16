@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.33 — unreleased
+
+### Net debug visibility
+- Boot prints a hard-to-miss Console line: **`[review:net] review net debug ON`** (warn-level so Chrome Default filters show it). Heartbeat every 5s with live WS readyState. `window.reviewNetDebug(true|false)`.
+- Flag detection reads `?netDebug=1` / `?netLog=1` from **search and hash** (SPA/workers.dev safe) and persists to `localStorage` (`review-net-log` + `REVIEW_NET_DEBUG`).
+- Connect path logs `opening websocket` / `websocket open` / errors. Traffic still summarized as `ws traffic 1s` while drawing.
+- SPA `_headers`: HTML routes `Cache-Control: no-cache` so a stale index.html cannot hide the new logger.
+
 ## 0.14.32 — unreleased
 
 ### Sync smoothness

@@ -14,7 +14,16 @@ export {
 export { SyncClient, syncClient } from './client';
 export { p2pClient, attachP2p, detachP2p, reconnectP2p } from './p2p';
 export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser } from './types';
-export { isNetLogEnabled, setNetLogEnabled, netLog, syncHttpBase } from './log';
+export {
+  isNetLogEnabled,
+  setNetLogEnabled,
+  netLog,
+  syncHttpBase,
+  bootNetLog,
+  registerNetDebugPeek,
+  parseNetFlag,
+  mergeLocationSearch,
+} from './log';
 export { classifyWsPayload, tapWebSocketTraffic } from './wsTraffic';
 export type { NetLogLevel } from './log';
 export {
