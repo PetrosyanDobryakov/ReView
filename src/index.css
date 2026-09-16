@@ -3359,6 +3359,129 @@ button.brand {
   }
 }
 
+/* Visual chrome (docs/phone-tablet-visual.md) on top of ship 0.15.10.
+   Width → visibility; coarse → hit/density. Do NOT hide zoom on all coarse
+   (coarse desktop must keep cluster). Clearance uses tool size + pad/air +
+   max(16px, safe) — design's tool+28+safe alone still overlaps at safe=0. */
+@media (pointer: coarse), (hover: none) {
+  .icon-btn,
+  .tool-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .file-island,
+  .meta-island {
+    padding: 8px 10px;
+  }
+
+  /* Shared so .style-island clearance can see the same hit size as the belt. */
+  .app {
+    --tool-btn-size: 44px;
+  }
+
+  .toolbelt {
+    --tool-btn-size: 44px;
+    padding: 8px 10px;
+  }
+
+  .tool-group {
+    gap: 6px;
+  }
+
+  .tool-btn {
+    width: var(--tool-btn-size);
+    height: var(--tool-btn-size);
+  }
+
+  .tool-btn svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* tool + ~16 pad + ~12 air + belt bottom inset (max 16, safe). */
+  .style-island {
+    bottom: calc(
+      var(--tool-btn-size, 36px) + 28px + max(16px, env(safe-area-inset-bottom, 0px))
+    );
+  }
+
+  .style-btn {
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .style-btn-icon {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  .swatch,
+  .pen-slot {
+    width: 28px;
+    height: 28px;
+  }
+
+  .file-island .brand {
+    height: 44px;
+  }
+
+  .zoom-value {
+    min-height: 44px;
+    padding: 0 10px;
+  }
+
+  .host-offline-banner {
+    height: 44px;
+  }
+
+  .more-row {
+    min-height: 44px;
+  }
+}
+
+/* Phone width: type + sep + host-offline compact (visual.md). */
+@media (max-width: 720px) {
+  .file-island .brand {
+    font-size: 15px;
+    max-width: 28vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .file-island .island-sep,
+  .meta-island .island-sep {
+    margin: 8px 6px;
+  }
+
+  .host-offline-banner {
+    max-width: min(220px, 48vw);
+  }
+}
+
+/* Tablet band + coarse: collapse zoom when file/meta are contested.
+   Wide coarse desktop (>1024) keeps zoom. */
+@media (max-width: 1024px) and ((pointer: coarse), (hover: none)) {
+  .file-zoom-cluster {
+    display: none;
+  }
+
+  /* 96px reserve undershoots ~125px coarse meta — use 140. */
+  .file-island {
+    max-width: min(
+      100%,
+      calc(100vw - 140px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+    );
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .file-island::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 .swap-text {
   display: inline-grid;
   position: relative;

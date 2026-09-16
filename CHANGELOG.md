@@ -6,7 +6,8 @@
 - **Touch context menu**: long-press (~500ms, small move) opens the board context menu (desktop still uses right-click).
 - **Touch edit**: double-tap opens sticky/text/graph/calc/table/crop the same way as desktop double-click.
 - **Finger hit targets**: coarse/no-hover pointers use larger resize (24px), rotate (28px), and port (24px) screen hit radii; drawn knobs slightly larger; select/draw tap thresholds raised to ~10px.
-- **Narrow chrome (functional)**: ≤720 hides the zoom cluster; file island scrolls horizontally; safe-area insets on file/toolbelt/style; `viewport-fit=cover` + `100dvh` shell; export modal uses `dvh`. Chrome look/spacing left to the separate visual UI pass.
+- **Narrow chrome (functional)**: ≤720 hides the zoom cluster; file island scrolls horizontally; safe-area insets on file/toolbelt/style; `viewport-fit=cover` + `100dvh` shell; export modal uses `dvh`.
+- **Visual chrome**: coarse density (44 tool / 40 style / 28 swatch, island pad 8×10, tool gap 6, glyph 24); style clearance `tool+28+max(16,safe)`; ≤1024 coarse hides zoom + file reserve 140px (wide coarse keeps zoom); ≤720 brand 15px/ellipsis, sep 6px, compact host-offline. Deferred to 0.15.11: zoom ⋯ overflow menu, edge-fade masks.
 - **Overlays**: GraphEditor and TextOverlay clamp into `visualViewport` (soft keyboard / URL bar).
 - **Polish**: outside-dismiss uses `pointerdown`; invite prefers Web Share then clipboard; tool reorder disabled on coarse pointers; Settings Gestures documents pinch / long-press / double-tap.
 
