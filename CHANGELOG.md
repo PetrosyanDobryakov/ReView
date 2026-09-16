@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.8 — unreleased
+
+### UI polish
+- **Export dialog**: vertical option groups (source / scale / format) with chip rows so labels and chips no longer wrap unevenly; preview + Download unchanged.
+- **Home storage notice**: restyled to ReView chrome panel/border/warn tokens; desktop CTA uses accent underline (no warm alert chrome or glowing blue).
+- **Home sidebar**: modest spacing/grouping tighten only (no IA change).
+- **StyleBar**: hide Fill/Stroke (and outline width) for calculator tool and calculator-only selections — calc keeps its own face theme.
+- **More shelf**: subtle hover slide + icon scale on Calculator / Table / Graph rows (and other more-rows); respects reduced motion.
+
 ## 0.15.7 — unreleased
 
 ### Multiplayer
