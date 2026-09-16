@@ -13,6 +13,7 @@ import {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
+  PEER_MOTION_STALE_SEC,
   REALTIME_LEAD_SEC,
 } from './core-bundle.mjs';
 
@@ -184,6 +185,43 @@ const REALTIME_OPTS = { leadSec: REALTIME_LEAD_SEC, maxLead: 20 };
   applyRealtimePeerPose(s, 50 + REALTIME_LEAD_SEC * 1000 + 5, REALTIME_OPTS);
   assert.equal(s.x, s.tx, 'past leadSec realtime sits on sample');
   assert.equal(s.y, s.ty, 'past leadSec realtime sits on sample y');
+}
+
+// Idle → first move: long gap must NOT invent velocity via sampleDeltaSec's
+// 0.12s ceiling (delta/0.12 → slingshot), or realtime dead-reckon overshoots
+// then the next packet snaps back (observer stutter after a stale peer).
+{
+  const s = initPeerMotion(0, 0, 0);
+  pushPeerSample(s, 100, 0, 50); // was moving
+  snapPeerMotionToSample(s);
+  // Sit idle past stale threshold (awareness sends nothing while sameCursor).
+  const idleAt = 50 + (PEER_MOTION_STALE_SEC + 2) * 1000;
+  pushPeerSample(s, 160, 0, idleAt); // first move after idle (+60 world)
+  assert.equal(s.svx, 0, 'stale resume clears sample vx');
+  assert.equal(s.svy, 0, 'stale resume clears sample vy');
+  assert.equal(s.vx, 0, 'stale resume clears rendered vx');
+  assert.equal(s.vy, 0, 'stale resume clears rendered vy');
+  assert.equal(s.prevTx, s.tx, 'stale resume seeds prev at new sample');
+  assert.equal(s.tx, 160, 'stale resume takes new sample x');
+  // Without the fix: svx ≈ 60/0.12 = 500 → +40 lead in 80ms.
+  snapPeerMotionToSample(s);
+  applyRealtimePeerPose(s, idleAt + 40, REALTIME_OPTS);
+  assert.equal(s.x, s.tx, 'realtime does not coast on fabricated post-idle speed');
+  assert.equal(s.y, s.ty, 'realtime post-idle y stays on sample');
+  // Contrast: same jump inside a fresh packet interval still extrapolates.
+  pushPeerSample(s, 220, 0, idleAt + 50);
+  snapPeerMotionToSample(s);
+  applyRealtimePeerPose(s, idleAt + 70, REALTIME_OPTS);
+  assert.ok(s.x > s.tx, 'steady motion still dead-reckons between packets');
+}
+
+// Gaps at/under stale threshold keep velocity continuity (brief stalls).
+{
+  const s = initPeerMotion(0, 0, 0);
+  pushPeerSample(s, 100, 0, 50);
+  const almostStale = 50 + PEER_MOTION_STALE_SEC * 1000; // equal → not stale
+  pushPeerSample(s, 112, 0, almostStale);
+  assert.ok(Math.hypot(s.svx, s.svy) > 0, 'sub-stale gap still estimates velocity');
 }
 
 console.log('peer-motion: all checks passed');

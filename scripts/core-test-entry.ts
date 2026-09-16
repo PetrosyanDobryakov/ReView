@@ -24,6 +24,7 @@ export {
   aimPeerMotion,
   initPeerMotion,
   peerMotionShouldAnimate,
+  peerSampleGapSec,
   pushPeerSample,
   sampleDeltaSec,
   smoothDamp,
@@ -31,6 +32,7 @@ export {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
+  PEER_MOTION_STALE_SEC,
   REALTIME_LEAD_SEC,
 } from '../src/core/peerMotion';
 export {

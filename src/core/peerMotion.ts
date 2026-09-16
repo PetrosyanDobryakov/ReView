@@ -22,6 +22,11 @@
  * even when the network is fine. Realtime mode still holds frames, but
  * advances the glyph with short dead-reckon (`applyRealtimePeerPose`) instead
  * of a spring trail — bridges WS gaps without smooth-delay lag.
+ *
+ * Idle → first move: awareness stops while the cursor is still (sameCursor
+ * dedupe). The next sample after a long gap must not invent velocity via
+ * sampleDeltaSec's 0.12s ceiling — that slingshot + next-packet snap is the
+ * observer stutter after a stale peer starts moving again.
  */
 
 /** Game-style SmoothDamp — frame-rate independent, no overshoot. */
@@ -81,21 +86,57 @@ export function initPeerMotion(x: number, y: number, now: number): PeerMotionSta
 /**
  * Clamp inter-sample dt used for velocity. Burst arrivals (same-tick or 1 ms
  * apart) would otherwise explode speed and slingshot the aim.
+ *
+ * Do NOT use this alone across idle gaps: the 0.12s ceiling shortens a multi-
+ * second pause and invents huge (delta / 0.12) speeds. Callers must reset
+ * continuity when `peerSampleGapSec` exceeds `PEER_MOTION_STALE_SEC`.
  */
 export function sampleDeltaSec(prevAt: number, now: number): number {
   return Math.min(0.12, Math.max(1 / 60, (now - prevAt) / 1000));
 }
+
+/** Raw seconds since `prevAt` (no clamp) — used to detect idle gaps. */
+export function peerSampleGapSec(prevAt: number, now: number): number {
+  return Math.max(0, (now - prevAt) / 1000);
+}
+
+/**
+ * Inter-sample gap above this = peer was idle / stale. Next sample restarts
+ * velocity instead of dividing the jump by sampleDeltaSec's 0.12s ceiling.
+ * Past hold + a little slack so normal packet jitter still carries velocity.
+ */
+export const PEER_MOTION_STALE_SEC = 0.2;
 
 /**
  * Fold a fresh sample in. When the new sample velocity opposes the previous
  * one (zigzag corner), drop the rendered velocity so the spring doesn't
  * slingshot past the corner.
  *
+ * After a long idle gap, reset sample continuity instead of inventing velocity
+ * from (jump / 0.12s). That fake speed made realtime dead-reckon overshoot on
+ * the first move after the peer was stale, then the next packet snapped back.
+ *
  * Does not snap the rendered pose — spring/lerp absorbs the correction so
  * each awareness packet does not pop the glyph. Callers that want realtime
  * display should follow with `snapPeerMotionToSample`.
  */
 export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: number): void {
+  const gap = peerSampleGapSec(s.sampleAt, now);
+  if (gap > PEER_MOTION_STALE_SEC) {
+    // Idle → first move: seed at the new sample with zero velocity so
+    // aim/dead-reckon does not coast on a fabricated post-idle speed.
+    s.prevTx = x;
+    s.prevTy = y;
+    s.prevSampleAt = now;
+    s.tx = x;
+    s.ty = y;
+    s.sampleAt = now;
+    s.svx = 0;
+    s.svy = 0;
+    s.vx = 0;
+    s.vy = 0;
+    return;
+  }
   const dt = sampleDeltaSec(s.sampleAt, now);
   const nvx = (x - s.tx) / dt;
   const nvy = (y - s.ty) / dt;
