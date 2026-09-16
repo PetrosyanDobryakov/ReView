@@ -6,6 +6,7 @@
 - **Resize/scale** works while the keypad is open (selection chrome + handle hit-through; min size 240×360).
 - Esc **closes** the keypad session (CE stays on-pad); stamp closes calc before sticky/text edit so undo/tool paths stay clean.
 - Overlay chrome scales with **frame size × zoom** and follows rotation; matches silhouette better.
+- Overlay ink adapts to StyleBar fill (no light-on-light); silhouette row counts match pad; scientific includes memory keys.
 
 ## 0.15.0 — unreleased
 

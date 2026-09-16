@@ -646,7 +646,8 @@ export function calcKeyFromKeyboard(e: KeyboardEvent, mode: CalcMode, second: bo
   if (k === '/') return '÷';
   if (k === 'Enter' || k === '=') return '=';
   if (k === 'Backspace') return '⌫';
-  if (k === 'Escape') return 'CE';
+  // Escape closes the keypad in the UI — not CE.
+  if (k === 'Escape') return null;
   if (k === '%') return '%';
   if (k === '(') return '(';
   if (k === ')') return ')';
