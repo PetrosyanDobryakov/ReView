@@ -14,6 +14,7 @@ import { recognizeStroke } from '../core/recognize';
 import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld } from '../core/transform';
 import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
+import { clampCalcSize, CALC_REF_W, CALC_REF_H } from '../core/calcGeometry';
 import { defaultCalcPersisted, shapeFieldsFromPersisted } from '../core/calcEngine';
 
 /** Rebake free-arrow AABB from the painted curve whenever points change. */
@@ -590,6 +591,32 @@ export class SelectTool extends Tool {
     if (h < MIN) {
       h = MIN;
       y = (top + bottom) / 2 - h / 2;
+    }
+
+    if (orig.type === 'calculator') {
+      const clamped = clampCalcSize(w, h);
+      if (clamped.w !== w || clamped.h !== h) {
+        if (r.handle.includes('w')) x = Math.max(left, right) - clamped.w;
+        else x = Math.min(left, right);
+        if (r.handle.includes('n')) y = Math.max(top, bottom) - clamped.h;
+        else y = Math.min(top, bottom);
+        w = clamped.w;
+        h = clamped.h;
+        if (right >= left) {
+          left = x;
+          right = x + w;
+        } else {
+          right = x;
+          left = x + w;
+        }
+        if (bottom >= top) {
+          top = y;
+          bottom = y + h;
+        } else {
+          bottom = y;
+          top = y + h;
+        }
+      }
     }
 
     if (orig.type === 'image') {
@@ -1242,18 +1269,28 @@ export class GraphTool extends BoxTool {
 export class CalculatorTool extends BoxTool {
   readonly id = 'calculator';
   readonly shapeType = 'calculator';
-  readonly defaultW = 340;
-  readonly defaultH = 520;
+  readonly defaultW = CALC_REF_W;
+  readonly defaultH = CALC_REF_H;
 
   onUp(engine: Engine, p: PointerInfo): void {
     const fields = shapeFieldsFromPersisted(defaultCalcPersisted('standard'));
-    const id = this.finishShape(p, {
+    const box = this.commitDrawnBox(p);
+    if (!box) return;
+    const size = clampCalcSize(box.w, box.h);
+    // Keep the drag anchor: grow from top-left of the drawn box when clamping.
+    const id = store.addShape({
+      type: 'calculator',
+      x: box.x,
+      y: box.y,
+      w: size.w,
+      h: size.h,
       fill: 'transparent',
+      stroke: settings.shape.stroke,
       strokeWidth: 1.75,
       cornerRadius: 14,
       ...fields,
     });
-    if (id) engine.openCalculator(id);
+    engine.openCalculator(id);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {

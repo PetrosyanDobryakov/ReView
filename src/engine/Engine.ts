@@ -279,6 +279,7 @@ export interface CalculatorEditTarget {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  rotation?: number;
 }
 
 export interface EngineEvents {
@@ -431,7 +432,8 @@ export class Engine {
 
   private active: ToolId = 'select';
   private override: ToolId | null = null;
-  private canvas: HTMLCanvasElement;
+  /** Board drawing surface — overlays use this to distinguish canvas vs chrome hits. */
+  readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private resizer: ResizeObserver;
   private w = 0;
@@ -2692,9 +2694,16 @@ export class Engine {
     const v = this.views.get(id);
     if (!v || v.type !== 'calculator' || v.locked) return;
     if (this.graphEditId) this.cancelGraphEditor();
+    if (this.editId) this.events.onRequestCommitText?.();
     if (this.calcEditId && this.calcEditId !== id) this.closeCalculator();
     this.editing = true;
     this.calcEditId = id;
+    // Select + select-tool so resize/rotate handles are available under the
+    // on-object keypad (matches “board object” geometry, not a modal dialog).
+    this.setSelection([id]);
+    if (this.active !== 'select' && this.active !== 'pan' && this.active !== 'lasso') {
+      this.setTool('select');
+    }
     store.beginGesture();
     publishFocus(id);
     this.emitCalculatorTarget(v);
@@ -2711,7 +2720,13 @@ export class Engine {
       fill: v.fill,
       stroke: v.stroke,
       strokeWidth: v.strokeWidth,
+      rotation: shapeRotation(v) || undefined,
     });
+  }
+
+  /** True when the only open editor is the on-object calculator keypad. */
+  private calcGeometryInteractive(): boolean {
+    return Boolean(this.calcEditId && !this.editId && !this.graphEditId);
   }
 
   /** Keep overlay geometry in sync when the shape is moved/resized while open. */
@@ -2751,6 +2766,9 @@ export class Engine {
     const text =
       as === 'expression' && expr ? `${expr} = ${display}` : display;
     const gap = 24 / this.camera.zoom;
+    // End the keypad session first so stamp is its own undo item and text
+    // edit does not stack under a live calcEditId / dual overlay.
+    if (this.calcEditId === id) this.closeCalculator();
     if (as === 'result') {
       const w = 160;
       const h = 100;
@@ -3153,7 +3171,25 @@ export class Engine {
           return;
         }
       }
-      if (this.editing) return;
+      if (this.editing) {
+        // On-object calculator: allow select handles / rotate / move so the
+        // frame can resize like other board shapes while the keypad is open.
+        // Text/graph editors keep the hard lock (overlay is not the body).
+        if (!this.calcGeometryInteractive()) return;
+        const onRotate = this.hitRotateHandle(info.screen.x, info.screen.y);
+        const onHandle = onRotate ? null : this.hitHandle(info.screen.x, info.screen.y);
+        const hit = this.hitTest(info.world.x, info.world.y);
+        const onCalcBody = Boolean(hit && hit === this.calcEditId);
+        if (onRotate || onHandle || onCalcBody) {
+          const target = this.tools.select;
+          this.dragTool = target;
+          this.toolArmed = true;
+          target.onDown(this, info);
+          return;
+        }
+        // Clicked empty board / another shape — end keypad, then handle normally.
+        this.closeCalculator();
+      }
       if (e.button === 0 && this.tryDocArrow(info.screen.x, info.screen.y)) {
         this.pointerDown = false;
         return;
@@ -3283,7 +3319,11 @@ export class Engine {
         }
       }
     }
-    if (this.editing) return;
+    if (this.editing) {
+      // Keep pointer routing alive for an open calculator resize/move gesture.
+      if (!this.calcGeometryInteractive() && !this.pointerDown) return;
+      if (!this.calcGeometryInteractive() && this.pointerDown && this.dragTool !== this.tools.select) return;
+    }
     try {
       const p = this.pointerInfo(e);
       if (this.pointerDown) this.dragTool.onMove(this, p);
@@ -4273,7 +4313,7 @@ export class Engine {
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it
       const hideText =
-        this.editing && (this.editId === v.id || this.calcEditId === v.id);
+        (this.editing && this.editId === v.id) || this.calcEditId === v.id;
       // tables hide only the edited cell so the rest stays visible while typing
       const active = hideText && v.type === 'table' ? this.tableActive.get(v.id) : undefined;
       const hideCell = active ? { row: active.r, col: active.c } : undefined;
@@ -4598,7 +4638,9 @@ export class Engine {
   }
 
   private drawSelection(ctx: CanvasRenderingContext2D): void {
-    if (this.editing) return;
+    // Text/graph editors hide selection chrome; calculator keeps it so the
+    // on-object keypad can still be resized/rotated like other board shapes.
+    if (this.editing && !this.calcGeometryInteractive()) return;
     if (this.active !== 'select' && this.override !== 'select') return;
     const s = 1 / this.camera.zoom;
     const pad = 2 * s;

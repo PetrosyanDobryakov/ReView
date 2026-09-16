@@ -4,6 +4,14 @@ import {
   calcPublicFromPersisted,
   defaultCalcPersisted,
 } from '../src/core/calcEngine.ts';
+import {
+  CALC_MIN_H,
+  CALC_MIN_W,
+  CALC_REF_H,
+  CALC_REF_W,
+  calcFrameScale,
+  clampCalcSize,
+} from '../src/core/calcGeometry.ts';
 
 function run(keys) {
   let p = defaultCalcPersisted();
@@ -32,5 +40,13 @@ const pub = calcPublicFromPersisted(p);
 assert.equal(pub.mode, 'scientific');
 assert.equal(pub.display, '2');
 assert.equal(pub.expr, '');
+
+// Board geometry invariants (resize / layout scale)
+assert.deepEqual(clampCalcSize(10, 10), { w: CALC_MIN_W, h: CALC_MIN_H });
+assert.deepEqual(clampCalcSize(CALC_REF_W, CALC_REF_H), { w: CALC_REF_W, h: CALC_REF_H });
+assert.deepEqual(clampCalcSize(800, 900), { w: 800, h: 900 });
+assert.equal(calcFrameScale(CALC_REF_W, CALC_REF_H), 1);
+assert.ok(calcFrameScale(CALC_REF_W * 4, CALC_REF_H * 4) > 1);
+assert.ok(calcFrameScale(80, 60) >= 0.45);
 
 console.log('calc-engine-test: ok');

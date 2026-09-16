@@ -2268,8 +2268,16 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
   ctx.restore();
 }
 
-const CALC_REF_W = 340;
-const CALC_REF_H = 520;
+/** Re-export calc frame helpers (canonical: calcGeometry.ts). */
+export {
+  CALC_REF_W,
+  CALC_REF_H,
+  CALC_MIN_W,
+  CALC_MIN_H,
+  clampCalcSize,
+  calcFrameScale,
+} from './calcGeometry';
+import { calcFrameScale } from './calcGeometry';
 
 function calcBodyFill(boardBg: string, shapeFill: string): string {
   if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
@@ -2309,7 +2317,7 @@ function drawCalculator(
   boardBg: string,
   hideKeys = false
 ): void {
-  const scale = Math.min(2.2, Math.max(0.45, Math.sqrt((Math.max(80, v.w) * Math.max(60, v.h)) / (CALC_REF_W * CALC_REF_H))));
+  const scale = calcFrameScale(v.w, v.h);
   const pad = Math.max(8, 12 * scale);
   const radius = Math.max(8, Math.min(18, 12 * scale));
   const body = calcBodyFill(boardBg, v.fill);
