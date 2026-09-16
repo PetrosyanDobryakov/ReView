@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.32 — unreleased
+
+### Sync smoothness
+- Live draft downsampling is tip-stable: over-budget strokes keep a fixed live tip and only re-sample the older prefix. Re-picking indices across the *whole* polyline on every append made midpoints jump every frame — remote ink (and the shared paint/WS load) looked jagged even after rAF awareness batching.
+
+### Net debug
+- `[review:net]` console logs include **WS traffic 1s** summaries (in/out bytes, sync vs awareness frame counts, max frame). Enable: `?netLog=1`, `?netDebug=1`, `localStorage.REVIEW_NET_DEBUG=1`, or Settings → Net debug log. Default off.
+
 ## 0.14.31 — unreleased
 
 ### Sync smoothness

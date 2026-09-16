@@ -6,7 +6,10 @@ export type NetLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const PREFIX = '[review:net]';
 const STORAGE_KEY = 'review-net-log';
-/** Default OFF — enable via Settings / ?netLog=1 / `npm run dev:log` (VITE_NET_LOG). */
+/** Also accepted so Chrome users find the flag without Settings. */
+const STORAGE_ALIASES = ['REVIEW_NET_DEBUG', 'review-net-debug'] as const;
+const QUERY_KEYS = ['netLog', 'netDebug'] as const;
+/** Default OFF — enable via Settings / ?netLog=1 / ?netDebug=1 / localStorage / `npm run dev:log`. */
 const DEFAULT_ENABLED =
   typeof import.meta !== 'undefined' &&
   (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_NET_LOG === '1';
@@ -29,25 +32,40 @@ let clientTag: string | null = null;
 let sessionHintLogged = false;
 let flushInFlight = false;
 let serverNetLogDisabled = false;
+let enableHintLogged = false;
 
 function readQueryFlag(): boolean | null {
   if (typeof location === 'undefined') return null;
   try {
-    const q = new URLSearchParams(location.search).get('netLog');
-    if (q === '1' || q === 'true') return true;
-    if (q === '0' || q === 'false') return false;
+    const params = new URLSearchParams(location.search);
+    for (const key of QUERY_KEYS) {
+      const q = params.get(key);
+      if (q === '1' || q === 'true') return true;
+      if (q === '0' || q === 'false') return false;
+    }
   } catch {
     /* ignore */
   }
   return null;
 }
 
+function parseFlag(raw: string | null): boolean | null {
+  if (raw === null) return null;
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  return null;
+}
+
 function readStorageFlag(): boolean {
   if (typeof localStorage === 'undefined') return DEFAULT_ENABLED;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return DEFAULT_ENABLED;
-    return raw === '1' || raw === 'true';
+    const primary = parseFlag(localStorage.getItem(STORAGE_KEY));
+    if (primary !== null) return primary;
+    for (const key of STORAGE_ALIASES) {
+      const v = parseFlag(localStorage.getItem(key));
+      if (v !== null) return v;
+    }
+    return DEFAULT_ENABLED;
   } catch {
     return DEFAULT_ENABLED;
   }
@@ -57,6 +75,7 @@ function writeStorageFlag(on: boolean): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, on ? '1' : '0');
+    localStorage.setItem('REVIEW_NET_DEBUG', on ? '1' : '0');
   } catch {
     /* ignore */
   }
@@ -69,6 +88,7 @@ export function isNetLogEnabled(): boolean {
   if (q === true) {
     writeStorageFlag(true);
     cachedEnabled = true;
+    logEnableHint();
     return true;
   }
   if (q === false) {
@@ -77,14 +97,28 @@ export function isNetLogEnabled(): boolean {
     return false;
   }
   cachedEnabled = readStorageFlag();
+  if (cachedEnabled) logEnableHint();
   return cachedEnabled;
+}
+
+function logEnableHint(): void {
+  if (enableHintLogged || typeof console === 'undefined') return;
+  enableHintLogged = true;
+  console.info(
+    PREFIX,
+    'enabled — WS traffic summaries every 1s (sync vs awareness). Off: ?netLog=0 or localStorage.REVIEW_NET_DEBUG=0'
+  );
 }
 
 /** Toggle net logging (Settings / console). Persists to localStorage. */
 export function setNetLogEnabled(on: boolean): void {
   cachedEnabled = on;
   writeStorageFlag(on);
-  if (on) scheduleFlush(0);
+  if (on) {
+    enableHintLogged = false;
+    logEnableHint();
+    scheduleFlush(0);
+  }
 }
 
 function resolveData(data: LogData | undefined): unknown {

@@ -19,6 +19,7 @@ import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
 import { syncReconnectMode } from './syncReconnect';
 import { isNetLogEnabled, netLog } from './log';
+import { tapWebSocketTraffic } from './wsTraffic';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 
 type StatusListener = (status: SyncStatus) => void;
@@ -86,6 +87,7 @@ export class SyncClient {
   private offAwareness: (() => void) | null = null;
   private offPeerDisplay: (() => void) | null = null;
   private awarenessHeartbeat: ReturnType<typeof setInterval> | null = null;
+  private offWsTraffic: (() => void) | null = null;
 
   constructor() {
     // ponytail: hidden tabs suspend the socket but KEEP the provider — destroying
@@ -522,6 +524,16 @@ export class SyncClient {
       this.lastSentCursor = pos;
       this.logCursorSend(pos, now);
     }
+    if (isNetLogEnabled() && 'draft' in patch) {
+      const d = patch.draft as PeerDraft | null | undefined;
+      const verts = d?.points ? d.points.length / 2 : 0;
+      netLog.debug('awareness hot flush', () => ({
+        keys: Object.keys(patch),
+        draftVerts: verts,
+        hasCursor: 'cursor' in patch,
+        hasErase: 'erasePreview' in patch,
+      }));
+    }
   }
 
   private logCursorSend(pos: CursorPos | null, now: number): void {
@@ -607,6 +619,7 @@ export class SyncClient {
         boardId: this.boardId,
       }));
       if (e.status === 'connected') {
+        this.hookWsTraffic(provider);
         this.republishAwareness();
       }
       this.emitStatus();
@@ -624,7 +637,10 @@ export class SyncClient {
         // ponytail: don't encode full doc here — freezes on large boards
         docSize: -1,
       }));
-      if (isSynced) this.republishAwareness();
+      if (isSynced) {
+        this.hookWsTraffic(provider);
+        this.republishAwareness();
+      }
     };
     provider.on('status', onStatus);
     provider.on('sync', onSync);
@@ -645,10 +661,22 @@ export class SyncClient {
     if (!this.offPeerDisplay) {
       this.offPeerDisplay = onPeerDisplayChange(() => this.emitPeers());
     }
+    // Socket may already be open when bind runs.
+    this.hookWsTraffic(provider);
+  }
+
+  private hookWsTraffic(provider: WebsocketProvider): void {
+    this.offWsTraffic?.();
+    this.offWsTraffic = null;
+    const ws = provider.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    this.offWsTraffic = tapWebSocketTraffic(ws);
   }
 
   private teardownProvider(): void {
     this.hotAwareness.clear();
+    this.offWsTraffic?.();
+    this.offWsTraffic = null;
     this.offProviderStatus?.();
     this.offAwareness?.();
     this.offProviderStatus = null;
