@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.0 — unreleased
+
+### Release
+- Version bump to **0.15.0** (minor after board calculator and 0.14.x sync/cursor work).
+
 ## 0.14.41 — unreleased
 
 ### Board calculator
