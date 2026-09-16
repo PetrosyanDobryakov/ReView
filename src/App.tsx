@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Engine } from './engine/Engine';
-import type { EditTarget, GraphEditTarget } from './engine/Engine';
+import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
@@ -10,6 +10,7 @@ import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { GraphEditor } from './ui/GraphEditor';
+import { CalculatorPanel } from './ui/CalculatorPanel';
 import { PageBar } from './ui/PageBar';
 import { ExportDialog } from './ui/ExportDialog';
 import type { ExportSource } from './ui/ExportDialog';
@@ -152,6 +153,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     editTargetRef.current = editTarget;
   }, [editTarget]);
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
+  const [editCalc, setEditCalc] = useState<CalculatorEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [pageEpoch, setPageEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -487,6 +489,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       textEditorRef.current = null;
     };
     engine.events.onEditGraph = (target) => setEditGraph(target);
+    engine.events.onEditCalculator = (target) => setEditCalc(target);
     engine.events.onExportRegion = (rect) => {
       if (!rect) return;
       setExportState({ source: 'region', rect });
@@ -628,11 +631,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       persistCamera();
       flushOpenTextEditor(engine, editTargetRef.current, textEditorRef.current);
       engine.cancelGraphEditor();
+      engine.closeCalculator();
       editTargetRef.current = null;
       setEditTarget(null);
       setEditLiveFormat(null);
       textEditorRef.current = null;
       setEditGraph(null);
+      setEditCalc(null);
       setExportState(null);
       setCropActive(false);
       setCanCrop(false);
@@ -668,6 +673,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       engine?.cancelGraphEditor();
       setEditGraph(null);
     }
+    if (editCalc) {
+      engine?.closeCalculator();
+      setEditCalc(null);
+    }
     setTool(id);
   };
 
@@ -682,6 +691,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       textEditorRef.current = null;
     }
     if (graph) setEditGraph(null);
+    if (editCalc) {
+      engine?.closeCalculator();
+      setEditCalc(null);
+    }
   };
 
   useEffect(() => {
@@ -872,6 +885,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             onDone={() => setEditGraph(null)}
           />
         )}
+        {editCalc && engine && (
+          <CalculatorPanel
+            target={editCalc}
+            engine={engine}
+            onDone={() => setEditCalc(null)}
+          />
+        )}
         {exportState && engine && (
           <ExportDialog
             locale={locale}
@@ -952,7 +972,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             data-keep-edit
             title={t(locale, 'undo')}
             aria-label={t(locale, 'undo')}
-            disabled={!canUndo || Boolean(editTarget || editGraph)}
+            disabled={!canUndo || Boolean(editTarget || editGraph || editCalc)}
             onClick={() => {
               if (engineRef.current?.editing) return;
               undoManager.undo();
@@ -967,7 +987,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             data-keep-edit
             title={t(locale, 'redo')}
             aria-label={t(locale, 'redo')}
-            disabled={!canRedo || Boolean(editTarget || editGraph)}
+            disabled={!canRedo || Boolean(editTarget || editGraph || editCalc)}
             onClick={() => {
               if (engineRef.current?.editing) return;
               undoManager.redo();

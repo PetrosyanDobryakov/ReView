@@ -694,6 +694,13 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     cropW: m.get('cropW') as number | undefined,
     cropH: m.get('cropH') as number | undefined,
     expr: m.get('expr') as string | undefined,
+    calcMode: m.get('calcMode') === 'scientific' ? 'scientific' : m.get('calcMode') === 'standard' ? 'standard' : undefined,
+    calcAngle: m.get('calcAngle') === 'rad' ? 'rad' : m.get('calcAngle') === 'deg' ? 'deg' : undefined,
+    calcDisplay: typeof m.get('calcDisplay') === 'string' ? (m.get('calcDisplay') as string) : undefined,
+    calcExpr: typeof m.get('calcExpr') === 'string' ? (m.get('calcExpr') as string) : undefined,
+    calcMemory: typeof m.get('calcMemory') === 'number' ? (m.get('calcMemory') as number) : undefined,
+    calcSecond: m.get('calcSecond') === true ? true : undefined,
+    calcState: typeof m.get('calcState') === 'string' ? (m.get('calcState') as string) : undefined,
     points: worldPts,
     pressures: (() => {
       const p = m.get('pressures');
@@ -783,6 +790,15 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('cropH', v.cropH ?? 1);
   }
   if (v.type === 'graph') m.set('expr', v.expr ?? 'sin(x)');
+  if (v.type === 'calculator') {
+    m.set('calcMode', v.calcMode === 'scientific' ? 'scientific' : 'standard');
+    m.set('calcAngle', v.calcAngle === 'rad' ? 'rad' : 'deg');
+    m.set('calcDisplay', v.calcDisplay ?? '0');
+    m.set('calcExpr', v.calcExpr ?? '');
+    if (typeof v.calcMemory === 'number' && Number.isFinite(v.calcMemory)) m.set('calcMemory', v.calcMemory);
+    if (v.calcSecond) m.set('calcSecond', true);
+    if (v.calcState) m.set('calcState', v.calcState);
+  }
   if (v.type === 'table') {
     const grid = tableGrid(v);
     m.set('cols', grid.cols);
@@ -864,6 +880,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       m.set(key, arr);
     } else if (key === 'rotation' && value === 0) {
       m.delete('rotation');
+    } else if (key === 'calcMemory' && (value === null || typeof value !== 'number')) {
+      m.delete('calcMemory');
+    } else if (key === 'calcSecond' && value !== true) {
+      m.delete('calcSecond');
     } else if (key === 'richHtml' && value === '') {
       m.delete('richHtml');
     } else if (key === 'richHtml' && typeof value === 'string') {

@@ -35,7 +35,7 @@ import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon, polylineHitsPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
-import { sendCursor, publishTool } from '../net';
+import { sendCursor, publishTool, publishFocus } from '../net';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import { computeSnap, groupBox, visualBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
@@ -134,6 +134,7 @@ const PEER_TOOL_ICON: Record<string, IconName> = {
   text: 'text',
   arrow: 'arrow',
   graph: 'graph',
+  calculator: 'calculator',
   diamond: 'diamond',
   frame: 'frame',
   triangle: 'triangle',
@@ -269,11 +270,23 @@ export interface GraphEditTarget {
   expr: string;
 }
 
+export interface CalculatorEditTarget {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+}
+
 export interface EngineEvents {
   onSelection?: (ids: string[]) => void;
   onStats?: (stats: { zoom: number; shapes: number }) => void;
   onEditText?: (target: EditTarget | null) => void;
   onEditGraph?: (target: GraphEditTarget | null) => void;
+  onEditCalculator?: (target: CalculatorEditTarget | null) => void;
   /** Ask the host to commit the currently open text editor (editor is being replaced). */
   onRequestCommitText?: () => void;
   /** Ask the host to toggle the UI chrome (KeyH) — session-only, never persisted. */
@@ -348,6 +361,7 @@ export class Engine {
   private editPageId: string | null = null;
   private graphEditId: string | null = null;
   private graphEditOrig = '';
+  private calcEditId: string | null = null;
   remotePeers: PeerCursor[] = [];
   /**
    * Critically-damped peer cursor state (display pose + velocity + samples).
@@ -385,7 +399,8 @@ export class Engine {
         old.page !== peer.page ||
         old.viewing !== peer.viewing ||
         peerDraftPaintDirty(old.draft, peer.draft) ||
-        !samePeerErasePreview(old.erasePreview, peer.erasePreview)
+        !samePeerErasePreview(old.erasePreview, peer.erasePreview) ||
+        old.focus !== peer.focus
       ) {
         shouldPaint = true;
       }
@@ -600,12 +615,14 @@ export class Engine {
   resetToPage(): void {
     this.cancelTransientUi();
     if (this.graphEditId) this.cancelGraphEditor();
+    if (this.calcEditId) this.closeCalculator();
     else if (this.editing) this.events.onRequestCommitText?.();
     this.editing = false;
     this.editId = null;
     this.editPageId = null;
     this.events.onEditText?.(null);
     this.events.onEditGraph?.(null);
+    this.events.onEditCalculator?.(null);
     this.boundPageId = store.currentPageId();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
@@ -1750,6 +1767,7 @@ export class Engine {
         arrow: 'infoArrow',
         image: 'infoImage',
         graph: 'infoGraph',
+        calculator: 'infoCalculator',
         table: 'infoTable',
         diamond: 'infoDiamond',
         frame: 'infoFrame',
@@ -2250,7 +2268,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'doc' || v.type === 'graph') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -2668,6 +2686,130 @@ export class Engine {
     this.editing = false;
     store.endGesture();
     this.dirty = true;
+  }
+
+  openCalculator(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'calculator' || v.locked) return;
+    if (this.graphEditId) this.cancelGraphEditor();
+    if (this.calcEditId && this.calcEditId !== id) this.closeCalculator();
+    this.editing = true;
+    this.calcEditId = id;
+    store.beginGesture();
+    publishFocus(id);
+    this.emitCalculatorTarget(v);
+    this.dirty = true;
+  }
+
+  private emitCalculatorTarget(v: ShapeView): void {
+    this.events.onEditCalculator?.({
+      id: v.id,
+      x: v.x,
+      y: v.y,
+      w: v.w,
+      h: v.h,
+      fill: v.fill,
+      stroke: v.stroke,
+      strokeWidth: v.strokeWidth,
+    });
+  }
+
+  /** Keep overlay geometry in sync when the shape is moved/resized while open. */
+  refreshCalculatorTarget(): void {
+    if (!this.calcEditId) return;
+    const v = this.views.get(this.calcEditId);
+    if (!v || v.type !== 'calculator') {
+      this.closeCalculator();
+      return;
+    }
+    this.emitCalculatorTarget(v);
+  }
+
+  patchCalculator(id: string, patch: Partial<ShapeView>): void {
+    if (this.calcEditId !== id) return;
+    const live = this.views.get(id);
+    if (!live || live.locked) return;
+    store.patchShape(id, patch);
+    this.dirty = true;
+  }
+
+  closeCalculator(): void {
+    if (!this.calcEditId) return;
+    this.calcEditId = null;
+    this.editing = false;
+    store.endGesture();
+    publishFocus(null);
+    this.events.onEditCalculator?.(null);
+    this.dirty = true;
+  }
+
+  stampCalculatorResult(id: string, as: 'result' | 'expression'): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'calculator' || v.locked) return;
+    const display = (v.calcDisplay ?? '0').trim() || '0';
+    const expr = (v.calcExpr ?? '').trim();
+    const text =
+      as === 'expression' && expr ? `${expr} = ${display}` : display;
+    const gap = 24 / this.camera.zoom;
+    if (as === 'result') {
+      const w = 160;
+      const h = 100;
+      const sid = store.addShape({
+        type: 'sticky',
+        x: v.x + v.w + gap,
+        y: v.y,
+        w,
+        h,
+        fill: COLORS.sticky,
+        stroke: COLORS.stickyStroke,
+        strokeWidth: 2,
+        text,
+        textColor: '#3a2f00',
+        fontSize: defaultFontSizeFor('sticky'),
+      });
+      this.setSelection([sid]);
+      this.setTool('select');
+      this.openTextEditor(sid);
+      this.events.onToast?.(t(readLocale(), 'calcStampResult'));
+      return;
+    }
+    const fontSize = settings.text.size;
+    const measured = this.measureTextWrapped(text, fontSize, TEXT_TOOL_WRAP_W, {
+      bold: settings.text.bold,
+      italic: settings.text.italic,
+    });
+    const tid = store.addShape({
+      type: 'text',
+      x: v.x,
+      y: v.y + v.h + gap,
+      w: measured.w,
+      h: measured.h,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      text,
+      fontSize,
+      textColor: settings.text.color,
+      bold: settings.text.bold,
+      italic: settings.text.italic,
+      underline: settings.text.underline,
+      strike: settings.text.strike,
+      textAlign: settings.text.align,
+      highlight: settings.text.highlight,
+    });
+    this.setSelection([tid]);
+    this.setTool('select');
+    this.events.onToast?.(t(readLocale(), 'calcStampExpr'));
+  }
+
+  copyCalculatorDisplay(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'calculator') return;
+    const text = (v.calcDisplay ?? '0').trim() || '0';
+    void navigator.clipboard?.writeText(text).then(
+      () => this.events.onToast?.(t(readLocale(), 'calcCopied')),
+      () => this.events.onToast?.(t(readLocale(), 'calcCopyFailed'))
+    );
   }
 
   commitText(id: string | null, text: string, target: EditTarget, richHtml?: string): void {
@@ -3314,6 +3456,10 @@ export class Engine {
       this.openGraphEditor(id);
       return;
     }
+    if (type === 'calculator') {
+      this.openCalculator(id);
+      return;
+    }
     if (type === 'table' && id) {
       const tv = this.views.get(id);
       if (tv) {
@@ -3915,6 +4061,7 @@ export class Engine {
       const id = [...this.selection][0];
       const type = this.views.get(id)?.type;
       if (type === 'graph') this.openGraphEditor(id);
+      else if (type === 'calculator') this.openCalculator(id);
       else if (type === 'image') this.startCropSelected();
       else this.openTextEditor(id);
       return;
@@ -4125,7 +4272,8 @@ export class Engine {
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it
-      const hideText = this.editing && this.editId === v.id;
+      const hideText =
+        this.editing && (this.editId === v.id || this.calcEditId === v.id);
       // tables hide only the edited cell so the rest stays visible while typing
       const active = hideText && v.type === 'table' ? this.tableActive.get(v.id) : undefined;
       const hideCell = active ? { row: active.r, col: active.c } : undefined;
@@ -4264,6 +4412,22 @@ export class Engine {
         ctx.stroke();
         ctx.restore();
         this.peersAnimating = true;
+      }
+
+      if (peer.focus) {
+        const fv = this.views.get(peer.focus);
+        if (fv && fv.type === 'calculator') {
+          ctx.save();
+          ctx.strokeStyle = peer.color || '#7c8cff';
+          ctx.globalAlpha = 0.55;
+          ctx.lineWidth = 2.5 * s;
+          ctx.setLineDash([]);
+          const pad = 4 * s;
+          ctx.beginPath();
+          ctx.roundRect(fv.x - pad, fv.y - pad, fv.w + pad * 2, fv.h + pad * 2, 14);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
 
       if (peer.x === null || peer.y === null) continue;

@@ -357,6 +357,8 @@ export class SyncClient {
       const viewing = viewingRaw !== false;
       const draft = parseDraft(state.draft);
       const erasePreview = parseErasePreview(state.erasePreview);
+      const focusRaw = state.focus;
+      const focus = typeof focusRaw === 'string' && focusRaw.trim() ? focusRaw.trim() : null;
       byUser.set(key, {
         id,
         userId: userId || `client:${id}`,
@@ -372,6 +374,7 @@ export class SyncClient {
         viewing,
         draft,
         erasePreview,
+        focus,
       });
     }
     return [...byUser.values()];
@@ -414,6 +417,14 @@ export class SyncClient {
     if (tool !== 'eraser') this.clearErasePreview();
     netLog.info('publishTool', () => ({ tool }));
     this.writeTool(tool);
+  }
+
+  publishFocus(shapeId: string | null): void {
+    try {
+      this.provider?.awareness.setLocalStateField('focus', shapeId);
+    } catch {
+      /* offline */
+    }
   }
 
   publishPage(page: string): void {
@@ -834,7 +845,7 @@ export class SyncClient {
     return peers
       .map(
         (p) =>
-          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.viewing ? 1 : 0}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}`
+          `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.overridden ? 1 : 0}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.viewing ? 1 : 0}\0${p.draft ? 1 : 0}\0${p.erasePreview ? 1 : 0}\0${p.focus ?? ''}`
       )
       .join('\n');
   }

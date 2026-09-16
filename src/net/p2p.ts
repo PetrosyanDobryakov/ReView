@@ -230,6 +230,7 @@ class P2pClient {
         viewing,
         draft: parseDraft(st.draft),
         erasePreview: parseErasePreview(st.erasePreview),
+        focus: typeof st.focus === 'string' && (st.focus as string).trim() ? (st.focus as string).trim() : null,
       });
     }
     return [...byUser.values()];
@@ -255,6 +256,9 @@ class P2pClient {
       this.hotAwareness.flushNow();
     }
     this.write('tool', tool);
+  }
+  publishFocus(shapeId: string | null): void {
+    this.write('focus', shapeId);
   }
   publishPage(page: string): void { if (this.lastPage === page) return; this.lastPage = page; this.write('page', page); }
   publishBoardView(viewing: boolean): void {

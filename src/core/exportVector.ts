@@ -672,6 +672,20 @@ export function shapesToSvg(
       }
       continue;
     }
+    if (v.type === 'calculator') {
+      const label = (v.calcDisplay ?? '0').trim() || '0';
+      const mode = v.calcMode === 'scientific' ? 'Scientific' : 'Standard';
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="12" ${paint(v, `${opacity}${xf}`)}/>`
+      );
+      parts.push(
+        `<text x="${x + 10}" y="${y + 18}" font-size="11" fill="${esc(exportTextInk(v, inkPaper, SHAPE_INK))}"${xf}>${esc(mode)}</text>`
+      );
+      parts.push(
+        `<text x="${x + v.w - 10}" y="${y + 48}" font-size="16" text-anchor="end" fill="${esc(exportTextInk(v, inkPaper, SHAPE_INK))}"${xf}>${esc(label)}</text>`
+      );
+      continue;
+    }
     parts.push(
       `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${v.cornerRadius === undefined ? 6 : Math.max(0, v.cornerRadius)}" ${paint(v, `${opacity}${xf}`)}/>`
     );

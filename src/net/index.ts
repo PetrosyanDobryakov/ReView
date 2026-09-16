@@ -130,6 +130,11 @@ export function publishErasePreview(preview: PeerErasePreview | null): void {
   p2pClient.publishErasePreview(preview);
 }
 
+export function publishFocus(shapeId: string | null): void {
+  syncClient.publishFocus(shapeId);
+  p2pClient.publishFocus(shapeId);
+}
+
 function mergePeers(a: PeerCursor[], b: PeerCursor[]): PeerCursor[] {
   const byId = new Map<string, PeerCursor>();
   for (const p of [...a, ...b]) {

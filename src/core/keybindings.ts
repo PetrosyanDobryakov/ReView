@@ -27,6 +27,7 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'display',
   'frame',
   'graph',
+  'calculator',
   'table',
 ];
 
@@ -42,6 +43,7 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   arrow: 'KeyL',
   eraser: 'KeyE',
   graph: 'KeyG',
+  calculator: '',
   diamond: 'KeyD',
   frame: 'KeyF',
   triangle: 'KeyJ',
