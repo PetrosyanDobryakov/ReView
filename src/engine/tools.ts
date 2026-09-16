@@ -16,6 +16,7 @@ import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
 import { clampCalcSize, CALC_REF_W, CALC_REF_H } from '../core/calcGeometry';
 import { defaultCalcPersisted, shapeFieldsFromPersisted } from '../core/calcEngine';
+import { dragThresholdPx } from '../core/pointerEnv';
 
 /** Rebake free-arrow AABB from the painted curve whenever points change. */
 function bakedArrowGeom<T extends { points?: number[] }>(
@@ -431,7 +432,7 @@ export class SelectTool extends Tool {
   }
   onUp(engine: Engine, p: PointerInfo): void {
     if (this.mode === 'marquee' && this.marquee) {
-      if (this.moved > 3) {
+      if (this.moved > dragThresholdPx()) {
         const ids: string[] = [];
         for (const id of engine.grid.query(this.marquee)) {
           if (!store.isOnActivePage(id)) continue;
@@ -1097,7 +1098,7 @@ abstract class BoxTool extends Tool {
     if (!this.start || !this.cur) return null;
     this.shift = p.shift;
     let box: ShapeBox;
-    if (this.movedScreen < 3) {
+    if (this.movedScreen < dragThresholdPx()) {
       box = {
         x: p.world.x - this.defaultW / 2,
         y: p.world.y - this.defaultH / 2,

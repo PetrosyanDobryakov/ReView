@@ -22,6 +22,7 @@ import { Icon } from './icons';
 import { t } from './i18n';
 import { zoomedPortalPosition } from './portalPlace';
 import { onPrefsChange } from '../core/prefs';
+import { shareUrl } from '../core/pointerEnv';
 
 function Face({ color, title }: { color: string; title?: string }) {
   return (
@@ -189,7 +190,7 @@ export function MembersMenu({
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       close();
@@ -201,10 +202,10 @@ export function MembersMenu({
         triggerRef.current?.focus();
       }
     };
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, close]);
@@ -228,12 +229,21 @@ export function MembersMenu({
   const handleCopyInvite = async () => {
     try {
       const { url } = await resolveInviteBoardUrl(boardId);
-      const ok = await copyText(url);
-      setInviteFlash(ok ? 'ok' : 'fail');
+      if (await shareUrl(url, 'ReView')) {
+        setInviteFlash('ok');
+      } else {
+        const ok = await copyText(url);
+        setInviteFlash(ok ? 'ok' : 'fail');
+      }
     } catch {
       if (primaryHost) {
-        const ok = await copyText(lanBoardUrl(boardId, primaryHost));
-        setInviteFlash(ok ? 'ok' : 'fail');
+        const lan = lanBoardUrl(boardId, primaryHost);
+        if (await shareUrl(lan, 'ReView')) {
+          setInviteFlash('ok');
+        } else {
+          const ok = await copyText(lan);
+          setInviteFlash(ok ? 'ok' : 'fail');
+        }
       } else {
         setInviteFlash('fail');
       }

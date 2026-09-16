@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Engine, GraphEditTarget } from '../engine/Engine';
 import { compileGraph } from '../core/graphEval';
 import { graphChromeKind } from '../core/editChrome';
+import { clampToVisualViewport } from '../core/pointerEnv';
 import { readLocale } from '../core/locale';
 import { t } from './i18n';
 
@@ -92,8 +93,11 @@ export function GraphEditor({
     let raf = 0;
     const loop = () => {
       const p = engine.worldToScreen(target.x, target.y);
-      el.style.left = `${p.x}px`;
-      el.style.top = `${p.y + 10}px`;
+      const w = el.offsetWidth || 300;
+      const h = el.offsetHeight || 120;
+      const clamped = clampToVisualViewport(p.x, p.y + 10, w, h, 8);
+      el.style.left = `${clamped.left}px`;
+      el.style.top = `${clamped.top}px`;
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -101,12 +105,13 @@ export function GraphEditor({
   }, [engine, target.x, target.y]);
 
   const left = engine.worldToScreen(target.x, target.y);
+  const initial = clampToVisualViewport(left.x, left.y + 10, 300, 120, 8);
 
   return (
     <div
       ref={rootRef}
       className="graph-editor"
-      style={{ left: left.x, top: left.y + 10 }}
+      style={{ left: initial.left, top: initial.top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="graph-editor-row">

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.10 — unreleased
+
+### Phone / tablet support
+- **Touch context menu**: long-press (~500ms, small move) opens the board context menu (desktop still uses right-click).
+- **Touch edit**: double-tap opens sticky/text/graph/calc/table/crop the same way as desktop double-click.
+- **Finger hit targets**: coarse/no-hover pointers use larger resize (24px), rotate (28px), and port (24px) screen hit radii; drawn knobs slightly larger; select/draw tap thresholds raised to ~10px.
+- **Narrow chrome (functional)**: ≤720 hides the zoom cluster; file island scrolls horizontally; safe-area insets on file/toolbelt/style; `viewport-fit=cover` + `100dvh` shell; export modal uses `dvh`. Chrome look/spacing left to the separate visual UI pass.
+- **Overlays**: GraphEditor and TextOverlay clamp into `visualViewport` (soft keyboard / URL bar).
+- **Polish**: outside-dismiss uses `pointerdown`; invite prefers Web Share then clipboard; tool reorder disabled on coarse pointers; Settings Gestures documents pinch / long-press / double-tap.
+
 ## 0.15.9 — unreleased
 
 ### Stylus / graphical tablet

@@ -6,6 +6,7 @@ import { viewPaperBg } from '../core/store';
 import { spansToHtml, plainToSpans, sanitizeRichHtml } from '../core/richText';
 import { overlayFinishNow, overlayKeepEdit } from '../core/editChrome';
 import { readLiveFormat, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
+import { clampToVisualViewport } from '../core/pointerEnv';
 
 export function TextOverlay({
   target,
@@ -106,9 +107,14 @@ export function TextOverlay({
       const z = engine.camera.zoom;
       const p = engine.worldToScreen(target.x, target.y);
       const size = Math.max(0.5, target.fontSize * z);
-      el.style.left = `${p.x}px`;
-      el.style.top = `${p.y}px`;
-      el.style.width = `${textOverlayWidthPx(target, z)}px`;
+      const width = textOverlayWidthPx(target, z);
+      const estH = isCentered
+        ? target.h * z
+        : Math.max(size * textOverlayLineHeight(target.type), el.offsetHeight || size * 2);
+      const clamped = clampToVisualViewport(p.x, p.y, width, estH, 8);
+      el.style.left = `${clamped.left}px`;
+      el.style.top = `${clamped.top}px`;
+      el.style.width = `${width}px`;
       el.style.fontSize = `${size}px`;
       el.style.font = boardFont(size, target);
       el.style.padding = textOverlayPaddingCss(target, z);

@@ -13,6 +13,7 @@ import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
 import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
+import { isCoarsePointer } from '../core/pointerEnv';
 
 function readOrders(): ToolbarOrders {
   return readToolbarOrders(readPrefs().toolbarOrder);
@@ -91,8 +92,13 @@ function ToolButtons({
 }) {
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
+  const allowReorder = !isCoarsePointer();
 
   const beginDrag = (e: React.DragEvent, id: ToolId) => {
+    if (!allowReorder) {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.effectAllowed = 'move';
     armToolbarClickSuppress();
@@ -130,7 +136,7 @@ function ToolButtons({
           title={t(locale, id)}
           aria-label={t(locale, id)}
           aria-pressed={tool === id}
-          draggable
+          draggable={allowReorder}
           onDragStart={(e) => beginDrag(e, id)}
           onDragEnd={endDrag}
           onDragOver={(e) => {
@@ -186,6 +192,7 @@ function MoreMenu({
   const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
+  const allowReorder = !isCoarsePointer();
 
   useEffect(() => {
     if (SCHEME.includes(tool)) setLastSchemeTool(tool);
@@ -243,6 +250,10 @@ function MoreMenu({
   };
 
   const beginDrag = (e: React.DragEvent, id: ToolId) => {
+    if (!allowReorder) {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.effectAllowed = 'move';
     armToolbarClickSuppress();
@@ -272,6 +283,7 @@ function MoreMenu({
         }}
         onDragOver={(e) => {
           // Spring-load: hovering the shelf button mid-drag opens the popover.
+          if (!allowReorder) return;
           if (!open) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
@@ -280,6 +292,7 @@ function MoreMenu({
           }
         }}
         onDrop={(e) => {
+          if (!allowReorder) return;
           if (e.defaultPrevented) return;
           const drag = dropToolId(e);
           if (!drag) return;
@@ -317,7 +330,7 @@ function MoreMenu({
               key={id}
               type="button"
               role="menuitem"
-              draggable
+              draggable={allowReorder}
               className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
               title={t(locale, id)}
               aria-label={t(locale, id)}

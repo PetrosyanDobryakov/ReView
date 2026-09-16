@@ -258,7 +258,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   // Close overflow menu on outside click / Escape.
   useEffect(() => {
     if (!openMenuId) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       const target = e.target as Element | null;
       if (target && target.closest('.board-row-menu-wrap')) return;
       setOpenMenuId(null);
@@ -266,10 +266,10 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpenMenuId(null);
     };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [openMenuId]);

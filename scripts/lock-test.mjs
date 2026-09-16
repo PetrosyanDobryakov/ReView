@@ -4,6 +4,10 @@ globalThis.window = { devicePixelRatio: 1, addEventListener() {}, removeEventLis
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 globalThis.requestAnimationFrame = () => 0;
 globalThis.cancelAnimationFrame = () => {};
+globalThis.Path2D = class {
+  constructor() {}
+  addPath() {}
+};
 const fakeReq = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: null, error: null, addEventListener() {} };
 globalThis.indexedDB = { open: () => fakeReq };
 
