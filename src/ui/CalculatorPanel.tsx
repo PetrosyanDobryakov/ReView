@@ -9,6 +9,8 @@ import {
   type CalcKey,
   type CalcPersisted,
 } from '../core/calcEngine';
+import { calcFrameScale } from '../core/calcGeometry';
+import { shapeRotation } from '../core/transform';
 import { graphChromeKind } from '../core/editChrome';
 import { viewPaperBg } from '../core/store';
 import { readLocale } from '../core/locale';
@@ -147,7 +149,10 @@ export function CalculatorPanel({
   const locale = readLocale();
   const [tick, setTick] = useState(0);
   const live = engine.views.get(target.id);
-  const persisted = useMemo(() => shapeToPersisted(engine, target.id), [engine, target.id, tick, live?.calcState, live?.calcDisplay, live?.calcMode]);
+  const persisted = useMemo(
+    () => shapeToPersisted(engine, target.id),
+    [engine, target.id, tick, live?.calcState, live?.calcDisplay, live?.calcMode]
+  );
   const pub = calcPublicFromPersisted(persisted);
   const paper = viewPaperBg();
 
@@ -157,14 +162,6 @@ export function CalculatorPanel({
   };
 
   const press = (key: CalcKey) => {
-    if (key === 'mode-standard' || key === 'mode-scientific') {
-      sync(applyCalcKey(persisted, key));
-      return;
-    }
-    if (key === 'DEG' || key === 'RAD') {
-      sync(applyCalcKey(persisted, key));
-      return;
-    }
     sync(applyCalcKey(persisted, key));
   };
 
@@ -193,11 +190,13 @@ export function CalculatorPanel({
       if (rootRef.current?.contains(el)) return;
       const kind = graphChromeKind(el);
       if (kind === 'keep') return;
+      // Canvas geometry drags (resize/move) while the keypad is open — keep session.
+      if (el === engine.canvas || engine.canvas.contains(el)) return;
       finishRef.current();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, []);
+  }, [engine]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -210,12 +209,15 @@ export function CalculatorPanel({
         return;
       }
       const z = engine.camera.zoom;
+      const frame = calcFrameScale(v.w, v.h);
       const p = engine.worldToScreen(v.x, v.y);
       el.style.left = `${p.x}px`;
       el.style.top = `${p.y}px`;
       el.style.width = `${Math.max(1, v.w * z)}px`;
       el.style.height = `${Math.max(1, v.h * z)}px`;
-      el.style.setProperty('--calc-zoom', String(z));
+      el.style.setProperty('--calc-zoom', String(z * frame));
+      const rot = shapeRotation(v);
+      el.style.transform = rot ? `rotate(${rot}deg)` : '';
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -228,7 +230,8 @@ export function CalculatorPanel({
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        press('CE');
+        // Close keypad session (resize/undo access). CE remains an on-pad key.
+        finishRef.current();
         return;
       }
       const mapped = calcKeyFromKeyboard(e, pub.mode, pub.second);
@@ -246,6 +249,8 @@ export function CalculatorPanel({
   const stroke = live?.stroke || target.stroke;
   const screen = engine.worldToScreen(target.x, target.y);
   const z = engine.camera.zoom;
+  const frame = calcFrameScale(target.w, target.h);
+  const rot = target.rotation ?? (live ? shapeRotation(live) : 0);
 
   return (
     <div
@@ -259,12 +264,13 @@ export function CalculatorPanel({
         background: fill || (relativeLight(paper) ? '#f0eee8' : '#2a2a27'),
         borderColor: stroke,
         borderWidth: Math.max(1, (live?.strokeWidth ?? target.strokeWidth) * z),
+        ['--calc-zoom' as string]: String(z * frame),
+        transform: rot ? `rotate(${rot}deg)` : undefined,
+        transformOrigin: 'top left',
       }}
       tabIndex={0}
       role="application"
       aria-label={t(locale, 'calculator')}
-      onMouseDown={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="calc-toolbar">
         <div className="calc-modes" role="tablist">

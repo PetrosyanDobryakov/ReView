@@ -3489,6 +3489,13 @@ h3 .swap-text,
   overflow: hidden;
   outline: none;
   transform-origin: top left;
+  /* Let selection handles / rotate knob under the corners reach the canvas. */
+  pointer-events: none;
+}
+.calc-panel .calc-toolbar,
+.calc-panel .calc-display,
+.calc-panel .calc-key {
+  pointer-events: auto;
 }
 .calc-panel.is-error .calc-value {
   color: var(--chrome-danger);
