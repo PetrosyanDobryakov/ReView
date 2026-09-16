@@ -18,9 +18,11 @@ import { downsamplePolyline } from '../core/pointsSpace';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
 import { syncReconnectMode } from './syncReconnect';
-import { isNetLogEnabled, netLog } from './log';
+import { isNetLogEnabled, netLog, registerNetDebugPeek } from './log';
 import { tapWebSocketTraffic } from './wsTraffic';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
+
+const WS_READY = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'] as const;
 
 type StatusListener = (status: SyncStatus) => void;
 type PeerListener = (peers: PeerCursor[]) => void;
@@ -90,6 +92,18 @@ export class SyncClient {
   private offWsTraffic: (() => void) | null = null;
 
   constructor() {
+    registerNetDebugPeek(() => {
+      const ws = this.provider?.ws;
+      const rs = ws?.readyState;
+      return {
+        attached: this.isAttached(),
+        boardId: this.boardId,
+        room: this.providerRoom,
+        url: this.providerUrl ?? effectiveSyncUrl(),
+        wsReadyState: typeof rs === 'number' ? (WS_READY[rs] ?? rs) : null,
+        syncEnabled: isSyncEnabled(),
+      };
+    });
     // ponytail: hidden tabs suspend the socket but KEEP the provider — destroying
     // it resets awareness clocks on the same doc.clientID, and the hub then drops
     // every update as stale (ghost peer). provider.disconnect/connect preserves clocks.
@@ -253,6 +267,9 @@ export class SyncClient {
 
     this.teardownProvider();
     netLog.info('provider create', () => ({ url, room, boardId: this.boardId }));
+    if (isNetLogEnabled()) {
+      console.warn('[review:net] opening websocket', { url, room, boardId: this.boardId });
+    }
     const provider = new WebsocketProvider(url, room, this.doc, {
       resyncInterval: RESYNC_INTERVAL_MS,
       maxBackoffTime: 10_000,
@@ -669,8 +686,45 @@ export class SyncClient {
     this.offWsTraffic?.();
     this.offWsTraffic = null;
     const ws = provider.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    this.offWsTraffic = tapWebSocketTraffic(ws);
+    if (!ws) return;
+    const announceOpen = () => {
+      const marked = ws as WebSocket & { __reviewNetOpenLogged?: boolean };
+      if (marked.__reviewNetOpenLogged || !isNetLogEnabled()) return;
+      marked.__reviewNetOpenLogged = true;
+      console.warn('[review:net] websocket open', {
+        url: this.providerUrl,
+        room: this.providerRoom,
+        boardId: this.boardId,
+      });
+    };
+    if (ws.readyState === WebSocket.OPEN) {
+      this.offWsTraffic = tapWebSocketTraffic(ws);
+      announceOpen();
+      return;
+    }
+    // Socket still connecting — tap on open so Network→WS + console both light up.
+    if (ws.readyState === WebSocket.CONNECTING) {
+      const onOpen = () => {
+        ws.removeEventListener('open', onOpen);
+        this.offWsTraffic = tapWebSocketTraffic(ws);
+        announceOpen();
+      };
+      const onError = () => {
+        if (isNetLogEnabled()) {
+          console.warn('[review:net] websocket error (check Network → WS / sync URL)', {
+            url: this.providerUrl,
+            room: this.providerRoom,
+            boardId: this.boardId,
+          });
+        }
+      };
+      ws.addEventListener('open', onOpen);
+      ws.addEventListener('error', onError);
+      this.offWsTraffic = () => {
+        ws.removeEventListener('open', onOpen);
+        ws.removeEventListener('error', onError);
+      };
+    }
   }
 
   private teardownProvider(): void {

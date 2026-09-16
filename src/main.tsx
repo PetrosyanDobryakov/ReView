@@ -12,6 +12,7 @@ import { migrateLegacyOrbitPaper } from './core/orbit';
 import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
+import { bootNetLog } from './net/log';
 import { OrbitAtmosphere } from './ui/OrbitAtmosphere';
 import { OrbitTactile } from './ui/OrbitTactile';
 import { navigateThemed } from './ui/navTransition';
@@ -35,6 +36,9 @@ applyChromeTheme(chromeId);
 applyLocale(locale);
 applyUiScale();
 document.title = t(locale, 'title');
+
+// Net debug must announce before any board attach — otherwise ?netDebug=1 looks dead.
+bootNetLog();
 
 window.addEventListener('pagehide', () => leaveBoard());
 

@@ -1,2 +1,6 @@
+# HTML / SPA routes must not stick on an old index.html (stale JS = silent netDebug).
+/*
+  Cache-Control: no-cache
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

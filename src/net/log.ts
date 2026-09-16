@@ -1,20 +1,23 @@
-/** Dedicated sync/network debug logger. Console + session files via sync server. */
+/**
+ * Dedicated sync/network debug logger.
+ * Console (always when enabled) + optional POST to sync `/net-log` when that route exists.
+ */
 
-import { effectiveSyncUrl } from './config';
+import { effectiveSyncUrl, isSyncEnabled } from './config';
 
 export type NetLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const PREFIX = '[review:net]';
 const STORAGE_KEY = 'review-net-log';
-/** Also accepted so Chrome users find the flag without Settings. */
 const STORAGE_ALIASES = ['REVIEW_NET_DEBUG', 'review-net-debug'] as const;
 const QUERY_KEYS = ['netLog', 'netDebug'] as const;
-/** Default OFF — enable via Settings / ?netLog=1 / ?netDebug=1 / localStorage / `npm run dev:log`. */
+/** Default OFF — enable via Settings / ?netLog=1 / ?netDebug=1 / localStorage / VITE_NET_LOG. */
 const DEFAULT_ENABLED =
   typeof import.meta !== 'undefined' &&
   (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_NET_LOG === '1';
 
 type LogData = unknown | (() => unknown);
+type NetDebugPeek = () => Record<string, unknown>;
 
 let cachedEnabled: boolean | null = null;
 
@@ -32,16 +35,60 @@ let clientTag: string | null = null;
 let sessionHintLogged = false;
 let flushInFlight = false;
 let serverNetLogDisabled = false;
-let enableHintLogged = false;
+let booted = false;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let statusPeek: NetDebugPeek | null = null;
+
+/** SyncClient registers a peek so heartbeats can report real WS state without import cycles. */
+export function registerNetDebugPeek(fn: NetDebugPeek): void {
+  statusPeek = fn;
+}
+
+export function parseNetFlag(raw: string | null | undefined): boolean | null {
+  if (raw == null) return null;
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  return null;
+}
+
+/**
+ * Merge `location.search` with `?…` inside the hash (SPA / workers.dev safe).
+ * Exported for unit tests.
+ */
+export function mergeLocationSearch(search: string, hash: string): URLSearchParams {
+  const merged = new URLSearchParams();
+  try {
+    const sp = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+    for (const [k, v] of sp) merged.set(k, v);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const h = hash || '';
+    const q = h.indexOf('?');
+    if (q >= 0) {
+      const hp = new URLSearchParams(h.slice(q + 1));
+      for (const [k, v] of hp) merged.set(k, v);
+    }
+  } catch {
+    /* ignore */
+  }
+  return merged;
+}
+
+/** Search params from location.search and from `?…` inside the hash (SPA-safe). */
+function allSearchParams(): URLSearchParams {
+  if (typeof location === 'undefined') return new URLSearchParams();
+  return mergeLocationSearch(location.search || '', location.hash || '');
+}
 
 function readQueryFlag(): boolean | null {
   if (typeof location === 'undefined') return null;
   try {
-    const params = new URLSearchParams(location.search);
+    const params = allSearchParams();
     for (const key of QUERY_KEYS) {
-      const q = params.get(key);
-      if (q === '1' || q === 'true') return true;
-      if (q === '0' || q === 'false') return false;
+      const v = parseNetFlag(params.get(key));
+      if (v !== null) return v;
     }
   } catch {
     /* ignore */
@@ -49,20 +96,13 @@ function readQueryFlag(): boolean | null {
   return null;
 }
 
-function parseFlag(raw: string | null): boolean | null {
-  if (raw === null) return null;
-  if (raw === '1' || raw === 'true') return true;
-  if (raw === '0' || raw === 'false') return false;
-  return null;
-}
-
 function readStorageFlag(): boolean {
   if (typeof localStorage === 'undefined') return DEFAULT_ENABLED;
   try {
-    const primary = parseFlag(localStorage.getItem(STORAGE_KEY));
+    const primary = parseNetFlag(localStorage.getItem(STORAGE_KEY));
     if (primary !== null) return primary;
     for (const key of STORAGE_ALIASES) {
-      const v = parseFlag(localStorage.getItem(key));
+      const v = parseNetFlag(localStorage.getItem(key));
       if (v !== null) return v;
     }
     return DEFAULT_ENABLED;
@@ -81,14 +121,13 @@ function writeStorageFlag(on: boolean): void {
   }
 }
 
-/** Resolve enable flag (query wins once, then localStorage). Cached until setNetLogEnabled. */
+/** Resolve enable flag (query wins, then localStorage). Cached until setNetLogEnabled. */
 export function isNetLogEnabled(): boolean {
   if (cachedEnabled !== null) return cachedEnabled;
   const q = readQueryFlag();
   if (q === true) {
     writeStorageFlag(true);
     cachedEnabled = true;
-    logEnableHint();
     return true;
   }
   if (q === false) {
@@ -97,17 +136,69 @@ export function isNetLogEnabled(): boolean {
     return false;
   }
   cachedEnabled = readStorageFlag();
-  if (cachedEnabled) logEnableHint();
   return cachedEnabled;
 }
 
-function logEnableHint(): void {
-  if (enableHintLogged || typeof console === 'undefined') return;
-  enableHintLogged = true;
-  console.info(
-    PREFIX,
-    'enabled — WS traffic summaries every 1s (sync vs awareness). Off: ?netLog=0 or localStorage.REVIEW_NET_DEBUG=0'
-  );
+/**
+ * Call once at app boot (main.tsx). Prints a Console line even before any sync
+ * traffic — otherwise ?netDebug=1 looks like a no-op on the home screen.
+ * Uses console.warn so Chrome shows it without enabling Verbose.
+ */
+export function bootNetLog(): void {
+  if (booted || typeof window === 'undefined') return;
+  booted = true;
+
+  // Expose a one-liner for DevTools when the query string is awkward.
+  (window as unknown as { reviewNetDebug?: (on?: boolean) => void }).reviewNetDebug = (on = true) => {
+    setNetLogEnabled(on);
+  };
+
+  const on = isNetLogEnabled();
+  if (!on) return;
+
+  const syncUrl = effectiveSyncUrl();
+  const syncOn = isSyncEnabled();
+  const path = typeof location !== 'undefined' ? location.pathname : '';
+  const onBoard = typeof path === 'string' && path.startsWith('/board/');
+  // warn = visible under Chrome's default filter (Info/Verbose can be off).
+  console.warn(`${PREFIX} review net debug ON`, {
+    syncUrl,
+    syncEnabled: syncOn,
+    path,
+    peek: statusPeek?.() ?? null,
+    tip: onBoard
+      ? 'Network → WS should show wss://…review-sync…/<room>. Off: ?netLog=0 or reviewNetDebug(false)'
+      : 'No WS until you open /board/…. Then Network → WS → review-sync. Off: ?netLog=0 or reviewNetDebug(false)',
+  });
+  if (!syncOn) {
+    console.warn(
+      `${PREFIX} sync is DISABLED in Settings — Network → WS will stay empty until sync is turned on`
+    );
+  }
+
+  startHeartbeat();
+}
+
+function startHeartbeat(): void {
+  if (heartbeatTimer || typeof setInterval === 'undefined') return;
+  heartbeatTimer = setInterval(() => {
+    if (!isNetLogEnabled()) return;
+    const peek = statusPeek?.() ?? { note: 'open a /board/… to attach SyncClient' };
+    // warn so periodic proof stays visible
+    console.warn(`${PREFIX} heartbeat`, {
+      t: new Date().toISOString(),
+      syncUrl: effectiveSyncUrl(),
+      syncEnabled: isSyncEnabled(),
+      ...peek,
+    });
+  }, 5000);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 }
 
 /** Toggle net logging (Settings / console). Persists to localStorage. */
@@ -115,9 +206,12 @@ export function setNetLogEnabled(on: boolean): void {
   cachedEnabled = on;
   writeStorageFlag(on);
   if (on) {
-    enableHintLogged = false;
-    logEnableHint();
+    booted = false;
+    bootNetLog();
     scheduleFlush(0);
+  } else {
+    stopHeartbeat();
+    console.warn(`${PREFIX} review net debug OFF`);
   }
 }
 
@@ -189,6 +283,7 @@ async function flushQueue(): Promise<void> {
       keepalive: true,
     });
     if (res.status === 404) {
+      // Cloudflare sync worker has no /net-log — console-only is fine.
       serverNetLogDisabled = true;
       queue.length = 0;
       return;
@@ -197,13 +292,12 @@ async function flushQueue(): Promise<void> {
       sessionHintLogged = true;
       try {
         const info = (await res.json()) as { file?: string };
-        if (info.file) console.info(PREFIX, 'session file', info.file);
+        if (info.file) console.warn(PREFIX, 'session file', info.file);
       } catch {
         /* body optional */
       }
     }
   } catch {
-    // Put back so a later flush can retry (cap to avoid unbounded growth).
     queue.unshift(...batch.slice(-200));
   } finally {
     flushInFlight = false;
@@ -237,16 +331,18 @@ if (typeof window !== 'undefined') {
 function emit(level: NetLogLevel, msg: string, data?: LogData): void {
   if (!isNetLogEnabled()) return;
   const payload = resolveData(data);
-  const fn =
-    level === 'debug'
-      ? console.debug
-      : level === 'info'
-        ? console.info
-        : level === 'warn'
-          ? console.warn
-          : console.error;
-  if (payload !== undefined) fn(PREFIX, msg, payload);
-  else fn(PREFIX, msg);
+  // Prefer warn for high-signal lines so Default Chrome filters still show them.
+  // debug stays debug (needs Verbose). info → warn for visibility.
+  if (level === 'debug') {
+    if (payload !== undefined) console.debug(PREFIX, msg, payload);
+    else console.debug(PREFIX, msg);
+  } else if (level === 'error') {
+    if (payload !== undefined) console.error(PREFIX, msg, payload);
+    else console.error(PREFIX, msg);
+  } else {
+    if (payload !== undefined) console.warn(PREFIX, msg, payload);
+    else console.warn(PREFIX, msg);
+  }
   enqueue(level, msg, payload);
 }
 
