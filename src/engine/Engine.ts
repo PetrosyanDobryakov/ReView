@@ -469,8 +469,10 @@ export class Engine {
   private erasing = new Set<string>();
   private partialErase = new Map<string, Set<number>>();
   private lastEraseAt: { x: number; y: number } | null = null;
-  private pointers = new Map<number, { x: number; y: number }>();
+  private pointers = new Map<number, { x: number; y: number; type: string }>();
   private gesture: { dist: number; mid: { x: number; y: number } } | null = null;
+  /** Stylus eraser tip (button 5) temporarily overrides the active tool via `override`. */
+  private stylusEraserOverride = false;
   private crop: {
     id: string;
     box: ShapeBox;
@@ -3129,17 +3131,61 @@ export class Engine {
     };
   }
 
+  private hasPenPointer(): boolean {
+    for (const p of this.pointers.values()) if (p.type === 'pen') return true;
+    return false;
+  }
+
+  private clearStylusEraserOverride(): void {
+    if (!this.stylusEraserOverride) return;
+    this.stylusEraserOverride = false;
+    if (this.override === 'eraser') this.override = null;
+    this.setCursor(this.toolCursor());
+  }
+
   private onPointerDown = (e: PointerEvent): void => {
     this.ensureStoreBound();
-    this.canvas.setPointerCapture(e.pointerId);
-    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (this.pointers.size >= 2) {
+    const pType = e.pointerType || 'mouse';
+    // Palm reject: ignore touch while a stylus contact is already active.
+    if (pType === 'touch' && this.hasPenPointer()) {
+      e.preventDefault();
+      return;
+    }
+    // Stylus arrives while a non-pen contact is down — drop palm/finger contacts
+    // so we do not cancel into pinch-zoom; abort the non-pen tool drag first.
+    if (pType === 'pen' && this.pointers.size >= 1 && !this.hasPenPointer()) {
       this.abortConnecting();
       this.cancelToolDrag();
       this.pointerDown = false;
       this.toolArmed = false;
-      this.updateGesture();
-      return;
+      this.pointers.clear();
+      this.gesture = null;
+    }
+    this.canvas.setPointerCapture(e.pointerId);
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: pType });
+    if (this.pointers.size >= 2) {
+      // Never pinch-cancel an active stylus stroke (belt-and-suspenders vs palm filter).
+      if (this.hasPenPointer()) {
+        for (const [id, p] of [...this.pointers.entries()]) {
+          if (p.type !== 'pen') this.pointers.delete(id);
+        }
+        if (this.pointers.size >= 2) {
+          this.abortConnecting();
+          this.cancelToolDrag();
+          this.pointerDown = false;
+          this.toolArmed = false;
+          this.updateGesture();
+          return;
+        }
+        // Single remaining pen — continue as a normal tool press below.
+      } else {
+        this.abortConnecting();
+        this.cancelToolDrag();
+        this.pointerDown = false;
+        this.toolArmed = false;
+        this.updateGesture();
+        return;
+      }
     }
     this.pointerDown = true;
     this.toolArmed = false;
@@ -3175,6 +3221,12 @@ export class Engine {
       this.setCursor('grabbing');
       e.preventDefault();
       return;
+    }
+    // Stylus eraser tip (W3C button 5) — temporary eraser without setTool abort.
+    if (pType === 'pen' && e.button === 5) {
+      this.override = 'eraser';
+      this.stylusEraserOverride = true;
+      this.setCursor(this.toolCursor());
     }
     try {
       const info = this.pointerInfo(e);
@@ -3249,6 +3301,9 @@ export class Engine {
     if (p) {
       p.x = e.clientX;
       p.y = e.clientY;
+    } else if ((e.pointerType || 'mouse') === 'touch' && this.hasPenPointer()) {
+      // Untracked palm contact while inking — ignore.
+      return;
     }
     if (this.pointers.size >= 2 && this.gesture) {
       this.updateGesture();
@@ -3347,9 +3402,15 @@ export class Engine {
       if (!this.calcGeometryInteractive() && this.pointerDown && this.dragTool !== this.tools.select) return;
     }
     try {
-      const p = this.pointerInfo(e);
-      if (this.pointerDown) this.dragTool.onMove(this, p);
-      else this.tool.onHover(this, p);
+      if (this.pointerDown) {
+        const useCoalesced =
+          e.pointerType === 'pen' && typeof e.getCoalescedEvents === 'function';
+        const raw = useCoalesced ? e.getCoalescedEvents() : [];
+        const batch = raw.length > 0 ? raw : [e];
+        for (const ce of batch) this.dragTool.onMove(this, this.pointerInfo(ce));
+      } else {
+        this.tool.onHover(this, this.pointerInfo(e));
+      }
     } catch (err) {
       console.error('[review] pointermove error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
@@ -3479,7 +3540,10 @@ export class Engine {
       this.toolArmed = false;
       return;
     }
-    if (!this.toolArmed) return;
+    if (!this.toolArmed) {
+      this.clearStylusEraserOverride();
+      return;
+    }
     this.toolArmed = false;
     try {
       this.dragTool.onUp(this, this.pointerInfo(e));
@@ -3487,6 +3551,7 @@ export class Engine {
       console.error('[review] pointerup error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
+    this.clearStylusEraserOverride();
     this.dirty = true;
   };
 
@@ -3569,6 +3634,7 @@ export class Engine {
       this.pointers.clear();
       this.gesture = null;
     }
+    this.clearStylusEraserOverride();
   }
 
   /** Palm reject / capture loss must not commit a connector or export region. */
@@ -3592,6 +3658,7 @@ export class Engine {
       this.panDrag = false;
       this.camera.instant = false;
     }
+    this.clearStylusEraserOverride();
     this.setCursor(this.toolCursor());
     this.dirty = true;
   };

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.9 — unreleased
+
+### Stylus / graphical tablet
+- **Palm reject while inking**: ignore touch contacts while a pen pointer is active so a palm does not cancel the stroke into pinch-pan.
+- **Eraser tip**: stylus button 5 temporarily overrides to eraser without `setTool` abort; restores prior tool on up/cancel.
+- **Coalesced pen samples**: pen `pointermove` folds `getCoalescedEvents()` into the polyline/pressure path for smoother high-rate ink.
+
 ## 0.15.8 — unreleased
 
 ### UI polish

@@ -5394,6 +5394,166 @@ assert.equal(afterUndo.fontSize, 64, 'one undo keeps the live StyleBar font size
 assert.ok(afterUndo.h > 20, 'undo of commit remasures the box to the remaining font size');
 engine.setSelection([]);
 
+// --- Graphical tablet / stylus: palm reject + eraser tip + pressure ---
+{
+  const pensBefore = [...store.board].filter(([, m]) => m.get('type') === 'pen').length;
+  engine.setTool('pen');
+  engine.onPointerDown({
+    clientX: 200,
+    clientY: 200,
+    button: 0,
+    pointerId: 701,
+    pointerType: 'pen',
+    pressure: 0.2,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  engine.onPointerMove({
+    clientX: 230,
+    clientY: 240,
+    button: 0,
+    pointerId: 701,
+    pointerType: 'pen',
+    pressure: 0.85,
+    shiftKey: false,
+    altKey: false,
+    getCoalescedEvents() {
+      return [
+        {
+          clientX: 210,
+          clientY: 210,
+          button: 0,
+          pointerId: 701,
+          pointerType: 'pen',
+          pressure: 0.4,
+          shiftKey: false,
+          altKey: false,
+        },
+        {
+          clientX: 220,
+          clientY: 225,
+          button: 0,
+          pointerId: 701,
+          pointerType: 'pen',
+          pressure: 0.6,
+          shiftKey: false,
+          altKey: false,
+        },
+        {
+          clientX: 230,
+          clientY: 240,
+          button: 0,
+          pointerId: 701,
+          pointerType: 'pen',
+          pressure: 0.85,
+          shiftKey: false,
+          altKey: false,
+        },
+      ];
+    },
+  });
+  // Palm/touch while pen is down must NOT cancel the stroke into pinch-pan.
+  engine.onPointerDown({
+    clientX: 400,
+    clientY: 400,
+    button: 0,
+    pointerId: 702,
+    pointerType: 'touch',
+    pressure: 0.5,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  engine.onPointerMove({
+    clientX: 260,
+    clientY: 270,
+    button: 0,
+    pointerId: 701,
+    pointerType: 'pen',
+    pressure: 0.55,
+    shiftKey: false,
+    altKey: false,
+  });
+  engine.onPointerUp({
+    clientX: 260,
+    clientY: 270,
+    button: 0,
+    pointerId: 701,
+    pointerType: 'pen',
+    pressure: 0.55,
+    shiftKey: false,
+    altKey: false,
+  });
+  const pensAfterPalm = [...store.board].filter(([, m]) => m.get('type') === 'pen');
+  assert.equal(pensAfterPalm.length, pensBefore + 1, 'pen+palm: stroke still commits');
+  const palmStroke = store.readShape(pensAfterPalm[pensAfterPalm.length - 1][1]);
+  assert.ok((palmStroke.points?.length ?? 0) >= 6, 'pen+palm: stroke kept multiple points');
+  assert.ok(
+    palmStroke.pressures && palmStroke.pressures.length >= 2,
+    'stylus pressure persisted on committed stroke'
+  );
+  assert.ok(
+    Math.max(...palmStroke.pressures) - Math.min(...palmStroke.pressures) > 0.08,
+    'coalesced/stylus pressures actually vary'
+  );
+  store.undoManager.undo();
+  assert.equal(
+    [...store.board].filter(([, m]) => m.get('type') === 'pen').length,
+    pensBefore,
+    'stylus stroke undoes as one gesture'
+  );
+
+  // Eraser tip (button 5) temporarily erases without leaving Pen as the toolbar tool.
+  const victim = store.addShape({
+    type: 'pen',
+    x: 800,
+    y: 800,
+    w: 40,
+    h: 40,
+    fill: 'transparent',
+    stroke: '#111111',
+    strokeWidth: 3,
+    points: [810, 810, 830, 830],
+  });
+  engine.setTool('pen');
+  assert.equal(engine.active, 'pen', 'toolbar still Pen before eraser tip');
+  const eraseScr = engine.worldToScreen(820, 820);
+  engine.onPointerDown({
+    clientX: eraseScr.x,
+    clientY: eraseScr.y,
+    button: 5,
+    pointerId: 703,
+    pointerType: 'pen',
+    pressure: 0.5,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  engine.onPointerMove({
+    clientX: eraseScr.x + 2,
+    clientY: eraseScr.y + 2,
+    button: 5,
+    pointerId: 703,
+    pointerType: 'pen',
+    pressure: 0.5,
+    shiftKey: false,
+    altKey: false,
+  });
+  engine.onPointerUp({
+    clientX: eraseScr.x + 2,
+    clientY: eraseScr.y + 2,
+    button: 5,
+    pointerId: 703,
+    pointerType: 'pen',
+    pressure: 0.5,
+    shiftKey: false,
+    altKey: false,
+  });
+  assert.equal(store.board.has(victim), false, 'eraser tip removes ink under the tip');
+  assert.equal(engine.active, 'pen', 'eraser tip restores Pen as the active tool');
+}
+
 const staleDropBefore = store.board.size;
 const staleReaders = [];
 const stalePrevFR = globalThis.FileReader;
