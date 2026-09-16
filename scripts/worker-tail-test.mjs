@@ -34,9 +34,10 @@ const { BoardRoom } = await import(pathToFileURL(outFile).href);
 
 function makeStorage() {
   const map = new Map();
-  const ops = { puts: 0, gets: 0 };
+  const ops = { puts: 0, gets: 0, deleteAlls: 0 };
   return {
     ops,
+    map,
     async get(k) {
       ops.gets += 1;
       if (Array.isArray(k)) {
@@ -56,6 +57,10 @@ function makeStorage() {
       let n = 0;
       for (const key of keys) if (map.delete(key)) n += 1;
       return n;
+    },
+    async deleteAll() {
+      ops.deleteAlls += 1;
+      map.clear();
     },
     async deleteAlarm() {},
     async setAlarm() {},
@@ -91,7 +96,7 @@ const state = {
   },
 };
 
-const room = new BoardRoom(state, {});
+const room = new BoardRoom(state, { REVIEW_COMPACT_TOKEN: 'test-token' });
 for (let i = 0; i < 50 && !room.doc; i++) await sleep(10);
 assert.ok(room.doc, 'room doc boots');
 // Boot sends sync step 1 to live sockets (hibernation restore) — clear it.
@@ -134,6 +139,32 @@ const tail = await readBlob(storage, 'tail');
 if (tail && tail.length) Y.applyUpdate(doc, tail);
 assert.equal(doc.getMap('b').get('seed'), 1, 'seed survives the round-trip');
 assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip');
+
+// DELETE must cancel the debounced tail and ignore late close handlers —
+// otherwise waitUntil / webSocketClose rewrite blobs after deleteAll and
+// compact/GC resurrect the room.
+{
+  const d = new Y.Doc();
+  d.getMap('b').set('after', 1);
+  await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(d)));
+  // Timer is armed (~150ms). Wipe immediately, before it fires.
+  const del = await room.fetch(
+    new Request('https://review-sync.test/room/wipe-race', {
+      method: 'DELETE',
+      headers: { 'X-Review-Compact-Token': 'test-token' },
+    }),
+  );
+  assert.equal(del.status, 200, 'authorized DELETE clears an occupied room');
+  assert.equal(storage.ops.deleteAlls > 0, true, 'DELETE wiped storage');
+  // Simulate hibernation close handlers that arrive after fetch returns.
+  await room.webSocketClose(sockets[0], 1000, 'room cleared', true);
+  await room.webSocketClose(sockets[1], 1000, 'room cleared', true);
+  await sleep(400);
+  await Promise.all(waited.splice(0));
+  assert.equal(storage.map.size, 0, 'no doc/tail resurrection after DELETE + close race');
+  assert.equal(await readBlob(storage, 'doc'), null, 'doc blob stays gone');
+  assert.equal(await readBlob(storage, 'tail'), null, 'tail blob stays gone');
+}
 
 // Awareness runs a 15s housekeeping interval — clear it so the process exits.
 try {

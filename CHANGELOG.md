@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.26 — unreleased
+
+### Fix
+- Worker room DELETE / empty-room GC cancels the debounced tail timer, drains the persist gate, and latches a wipe flag so late `waitUntil` flushes and `webSocketClose` handlers cannot rewrite doc/tail blobs after `deleteAll` (compact/GC no longer resurrects a cleared room).
+
 ## 0.14.25 — unreleased
 
 ### Sync smoothness
