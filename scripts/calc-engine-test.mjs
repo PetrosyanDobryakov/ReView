@@ -73,6 +73,8 @@ assert.ok(sci.keys.length > std.keys.length);
 const bigScale = calcFrameScale(CALC_REF_W * 2, CALC_REF_H * 2);
 const big = buildCalcFaceLayout(CALC_REF_W * 2, CALC_REF_H * 2, 'standard', false, bigScale);
 assert.ok(big.fonts.key > std.fonts.key);
+assert.ok(std.fonts.key >= 15);
+assert.ok(std.fonts.keyFn >= 13);
 
 assert.equal(calcKeypadRows('standard').length, 8);
 assert.equal(calcKeypadRows('scientific').length, 9);

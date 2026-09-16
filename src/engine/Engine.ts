@@ -4330,8 +4330,11 @@ export class Engine {
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it.
-      // Calculator keeps canvas paint always (hit-layer overlay); do not blank the face.
-      const hideText = this.editing && this.editId === v.id;
+      // Calculator: keep display+keys on canvas; hide only overlay-owned header
+      // chrome (mode label) so open tabs do not ghost a second “Standard”.
+      const hideText =
+        (this.editing && this.editId === v.id) ||
+        (v.type === 'calculator' && this.calcEditId === v.id);
       // tables hide only the edited cell so the rest stays visible while typing
       const active = hideText && v.type === 'table' ? this.tableActive.get(v.id) : undefined;
       const hideCell = active ? { row: active.r, col: active.c } : undefined;

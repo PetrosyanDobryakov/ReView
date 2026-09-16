@@ -221,8 +221,9 @@ export function buildCalcFaceLayout(
       header: Math.max(9, 11 * scale),
       expr: Math.max(9, 11 * scale),
       display: Math.min(36, Math.max(14, 22 * scale)),
-      key: Math.max(10, 13 * scale),
-      keyFn: Math.max(9, 11 * scale),
+      // Modest bump vs 0.15.3–0.15.5 so glyphs fill spacious wells better.
+      key: Math.max(11, 15 * scale),
+      keyFn: Math.max(10, 13 * scale),
     },
   };
 }

@@ -2380,15 +2380,16 @@ function calcInkOn(fill: string, boardBg: string): {
 }
 
 /**
- * Canvas is the single visual source of truth for the calculator face
- * (peers, export, unfocused, and under the open hit-layer overlay).
- * `hideKeys` is ignored — open overlay no longer replaces the painted pad.
+ * Canvas paints the calculator face (peers, export, unfocused, open session).
+ * When `hideOverlayOwned` is true (local keypad open), skip header chrome the
+ * overlay owns (mode row) so “Standard” is not double-painted under the tabs.
+ * Display + keypad stay on canvas; closed/unfocused still shows the full face.
  */
 function drawCalculator(
   ctx: CanvasRenderingContext2D,
   v: ShapeView,
   boardBg: string,
-  _hideKeys = false
+  hideOverlayOwned = false
 ): void {
   const mode = v.calcMode === 'scientific' ? 'scientific' : 'standard';
   const scale = calcFrameScale(v.w, v.h);
@@ -2410,16 +2411,18 @@ function drawCalculator(
   ctx.lineWidth = Math.max(1, v.strokeWidth || 1.5);
   ctx.stroke();
 
-  // Header — mode label (+ memory). Interaction chrome (tabs/stamp) lives only in the overlay.
-  ctx.fillStyle = ink.muted;
-  ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(modeLabel, v.x + layout.header.x, v.y + layout.header.y + layout.header.h * 0.45, layout.header.w * 0.7);
-  if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
-    ctx.textAlign = 'right';
-    ctx.fillStyle = ink.text;
-    ctx.fillText('M', v.x + layout.header.x + layout.header.w, v.y + layout.header.y + layout.header.h * 0.45);
+  // Header — mode label (+ memory). Tabs/stamp live only in the open overlay.
+  if (!hideOverlayOwned) {
+    ctx.fillStyle = ink.muted;
+    ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(modeLabel, v.x + layout.header.x, v.y + layout.header.y + layout.header.h * 0.45, layout.header.w * 0.7);
+    if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = ink.text;
+      ctx.fillText('M', v.x + layout.header.x + layout.header.w, v.y + layout.header.y + layout.header.h * 0.45);
+    }
   }
 
   const dx = v.x + layout.display.x;

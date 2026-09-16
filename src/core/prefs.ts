@@ -29,8 +29,8 @@ export interface AppPrefs {
    */
   rotateSnap: boolean;
   /**
-   * When true (default), selection rotate control sits at the **top-middle**
-   * of the selected object. When false, legacy corner grab (bottom-left).
+   * When true, selection rotate control sits at the **top-middle** of the
+   * selected object. When false (default), legacy corner grab (bottom-left).
    * Both placements use the Lucide-style rotate-cw SVG (`rotateIcon.ts`).
    * Applies to board selection chrome generally (not calculator-only).
    */
@@ -76,7 +76,7 @@ const DEFAULTS: AppPrefs = {
   paperBg: null,
   recognizeShapes: false,
   rotateSnap: true,
-  rotateHandleTop: true,
+  rotateHandleTop: false,
   smoothPeerCursors: false,
   syncUrl: null,
   syncEnabled: true,
@@ -296,6 +296,26 @@ export function onPrefsChange(cb: Listener): () => void {
   return () => {
     listeners.delete(cb);
   };
+}
+
+/**
+ * 0.15.6: rotate handle default is legacy corner (off). 0.15.2–0.15.5 shipped
+ * default-on, so stored `true` is usually inherited rather than chosen. Flip
+ * once per device so Customize matches the new default; users can turn top-middle
+ * back on afterward. Marker prevents repeat resets.
+ */
+const ROTATE_HANDLE_TOP_OFF_MIGRATE = 'review-migrate-rotate-handle-top-off-0156';
+
+export function migrateRotateHandleTopDefaultOff(): void {
+  try {
+    if (localStorage.getItem(ROTATE_HANDLE_TOP_OFF_MIGRATE) === '1') return;
+    localStorage.setItem(ROTATE_HANDLE_TOP_OFF_MIGRATE, '1');
+  } catch {
+    return;
+  }
+  if (readPrefs().rotateHandleTop) {
+    writePrefs({ rotateHandleTop: false });
+  }
 }
 
 export { CURSOR_SCALE_MIN, CURSOR_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_MAX };
