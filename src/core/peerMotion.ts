@@ -1,12 +1,15 @@
 /**
- * Peer cursor motion: critically-damped follow + bounded dead-reckoning.
+ * Peer cursor motion: critically-damped follow + age-based dead-reckoning.
  * Pure math (no DOM/canvas) so the motion contract is unit-testable.
  *
- * Why the caps exist: dead-reckoning aims past the last sample by
- * velocity × lead. On an abrupt stop (pen-up after a fast flick) the aim
- * whips ahead and glides back — a visible hook. Capping the lead offset
- * bounds that hook; killing velocity on direction reversal stops zigzag
- * slingshots on short choppy strokes.
+ * Aim must advance with sample age (classic dead-reckon), never retract
+ * toward the last sample between packets. The old `leadSec - age*0.5`
+ * formula jumped ahead on each awareness packet then pulled back until the
+ * next one — periodic micromovement jerks that felt like stutter, not lag.
+ *
+ * Cap the extrapolated offset so a sudden stop (pen-up after a fast flick)
+ * cannot hook more than maxLead past the final point. Kill rendered velocity
+ * on direction reversal to stop zigzag slingshots on short choppy strokes.
  *
  * Callers must step once per frame. Stepping from both the on-canvas glyph
  * and the off-screen pill doubles the spring rate and looks like stutter.
@@ -83,6 +86,9 @@ export function sampleDeltaSec(prevAt: number, now: number): number {
  * Fold a fresh sample in. When the new sample velocity opposes the previous
  * one (zigzag corner), drop the rendered velocity so the spring doesn't
  * slingshot past the corner.
+ *
+ * Does not snap the rendered pose — spring/lerp absorbs the correction so
+ * each awareness packet does not pop the glyph.
  */
 export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: number): void {
   const dt = sampleDeltaSec(s.sampleAt, now);
@@ -103,7 +109,10 @@ export function pushPeerSample(s: PeerMotionState, x: number, y: number, now: nu
 }
 
 export interface PeerAimOptions {
-  /** Dead-reckoning horizon, seconds (matches the ~50 Hz sample rate). */
+  /**
+   * Max age (seconds) to dead-reckon past the last sample.
+   * Matches ~one awareness interval so we bridge the gap without racing ahead.
+   */
   leadSec: number;
   /** Hard cap on the lead offset, world units (pass screen-bound × 1/zoom). */
   maxLead: number;
@@ -112,9 +121,8 @@ export interface PeerAimOptions {
 }
 
 /**
- * Where the spring should aim: last target + capped velocity lead.
- * The returned offset from (tx, ty) never exceeds maxLead, so a sudden stop
- * can hook at most maxLead past the final point.
+ * Where the spring should aim: last sample + velocity × age (capped).
+ * Aim advances with time between packets and never retracts toward (tx, ty).
  */
 export function aimPeerMotion(
   s: PeerMotionState,
@@ -126,7 +134,8 @@ export function aimPeerMotion(
   const svx = (s.tx - s.prevTx) / sampleDt;
   const svy = (s.ty - s.prevTy) / sampleDt;
   const age = Math.max(0, (now - s.sampleAt) / 1000);
-  const lead = Math.min(opts.leadSec, Math.max(0, opts.leadSec - age * 0.5));
+  // Extrapolate forward with age — do NOT shrink lead back toward the sample.
+  const lead = Math.min(opts.leadSec, age);
   if (Math.hypot(svx, svy) <= minSpeed || lead <= 0) return { x: s.tx, y: s.ty };
   let ox = svx * lead;
   let oy = svy * lead;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.34 — unreleased
+
+### Sync smoothness
+- Remote cursors no longer micro-jerk at awareness packet rate. Dead-reckon aim used to jump ahead on each sample then *retract* toward the last point (`leadSec - age×0.5`) until the next packet — periodic micromovements that looked like stutter, not lag. Aim now advances with sample age only, soft spring (`smoothTime` 0.1) absorbs corrections, and samples never snap the rendered pose.
+
 ## 0.14.33 — unreleased
 
 ### Net debug visibility
