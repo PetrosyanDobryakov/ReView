@@ -1276,6 +1276,69 @@ button.brand {
   gap: 0;
 }
 
+.file-zoom-overflow {
+  display: none;
+  position: relative;
+  align-items: center;
+}
+
+.file-zoom-overflow-btn {
+  min-width: 3.25em;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-zoom-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 168px;
+  padding: 6px;
+  pointer-events: auto;
+}
+
+.file-zoom-menu .menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chrome-text);
+  font-size: var(--chrome-type-label);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--chrome-dur-fast) var(--chrome-ease),
+    transform var(--chrome-dur-press) var(--chrome-ease);
+}
+
+.file-zoom-menu .menu-row:hover {
+  background: var(--chrome-panel-2);
+}
+
+.file-zoom-menu .menu-row:active {
+  transform: scale(0.94);
+}
+
+.file-bar[data-zoom-collapsed='true'] .file-zoom-cluster {
+  display: none;
+}
+
+.file-bar[data-zoom-collapsed='true'] .file-zoom-overflow {
+  display: inline-flex;
+}
+
+.meta-island {
+  flex-shrink: 0;
+}
+
 .zoom-value:hover {
   background: var(--chrome-panel-2);
 }
@@ -3308,6 +3371,10 @@ button.brand {
     display: none;
   }
 
+  .file-zoom-overflow {
+    display: inline-flex;
+  }
+
   .brand-sub {
     display: none;
   }
@@ -3326,6 +3393,20 @@ button.brand {
     justify-content: flex-start;
     width: 100%;
     padding-bottom: 2px;
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent
+    );
   }
 
   .style-island {
@@ -3334,6 +3415,25 @@ button.brand {
     transform: none;
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     overflow-x: auto;
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent
+    );
+  }
+
+  .ui-hidden-hint {
+    bottom: max(18px, calc(12px + env(safe-area-inset-bottom, 0px)));
+    font-size: var(--chrome-type-meta);
   }
 
   @keyframes island-in {
@@ -3467,6 +3567,10 @@ button.brand {
     display: none;
   }
 
+  .file-zoom-overflow {
+    display: inline-flex;
+  }
+
   /* 96px reserve undershoots ~125px coarse meta — use 140. */
   .file-island {
     max-width: min(
@@ -3480,6 +3584,22 @@ button.brand {
 
   .file-island::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/* Tablet portrait / small laptop (fine pointer): same islands, more air. */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .file-island,
+  .meta-island {
+    padding: 7px 8px;
+  }
+
+  .file-island .brand,
+  .file-island .brand-edit {
+    max-width: 36vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

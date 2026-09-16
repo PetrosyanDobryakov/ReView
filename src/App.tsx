@@ -190,6 +190,13 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [hostOffline, setHostOffline] = useState(false);
   // ponytail: UI-hide is session-only — H toggles, board switch/reload restores
   const [uiHidden, setUiHidden] = useState(false);
+  const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
+  const fileBarRef = useRef<HTMLElement | null>(null);
+  const fileIslandRef = useRef<HTMLDivElement | null>(null);
+  const metaIslandRef = useRef<HTMLDivElement | null>(null);
+  const zoomClusterRef = useRef<HTMLSpanElement | null>(null);
+  const zoomOverflowRef = useRef<HTMLSpanElement | null>(null);
+  const zoomCollapsedRef = useRef(false);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -200,8 +207,71 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     syncWasOnline.current = false;
     setHostOffline(false);
     setUiHidden(false);
+    setZoomMenuOpen(false);
     recordBoardVisit(boardId);
   }, [boardId]);
+
+  useEffect(() => {
+    const bar = fileBarRef.current;
+    const file = fileIslandRef.current;
+    const meta = metaIslandRef.current;
+    if (!bar || !file || !meta) return;
+
+    const measure = () => {
+      const narrow = window.matchMedia('(max-width: 720px)').matches;
+      const tablet = window.matchMedia('(min-width: 721px) and (max-width: 1024px)').matches;
+      let next = narrow;
+      if (!narrow && tablet) {
+        const fileRect = file.getBoundingClientRect();
+        const metaRect = meta.getBoundingClientRect();
+        const gap = metaRect.left - fileRect.right;
+        const overflow = file.scrollWidth > file.clientWidth + 1;
+        const clusterW = zoomClusterRef.current?.offsetWidth
+          ?? zoomOverflowRef.current?.offsetWidth
+          ?? 148;
+        if (zoomCollapsedRef.current) {
+          next = gap < 12 + clusterW;
+        } else {
+          next = gap < 12 || overflow;
+        }
+      }
+      zoomCollapsedRef.current = next;
+      if (next) bar.setAttribute('data-zoom-collapsed', 'true');
+      else {
+        bar.removeAttribute('data-zoom-collapsed');
+        setZoomMenuOpen(false);
+      }
+    };
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(bar);
+    ro.observe(file);
+    ro.observe(meta);
+    window.addEventListener('resize', measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [boardTitle, hostOffline, ephemeral, error, zoom]);
+
+  useEffect(() => {
+    if (!zoomMenuOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      const root = zoomOverflowRef.current;
+      if (root && e.target instanceof Node && root.contains(e.target)) return;
+      setZoomMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoomMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointer, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointer, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [zoomMenuOpen]);
 
   useEffect(() => {
     const m = getBoard(boardId);
@@ -916,8 +986,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           {t(locale, 'showUi')}
         </div>
       )}
-      <header className="file-bar">
-        <div className="island file-island">
+      <header className="file-bar" ref={fileBarRef}>
+        <div className="island file-island" ref={fileIslandRef}>
           <button type="button" className="icon-btn" data-dismiss-edit title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
             <Icon name="home" />
           </button>
@@ -997,7 +1067,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <Icon name="redo" />
           </button>
           <div className="island-sep" />
-          <span className="file-zoom-cluster">
+          <span className="file-zoom-cluster" ref={zoomClusterRef}>
             <button type="button" className="icon-btn" title={t(locale, 'zoomOut')} aria-label={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
               <Icon name="minus" />
             </button>
@@ -1010,6 +1080,57 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
               <Icon name="fit" />
             </button>
+            <div className="island-sep" />
+          </span>
+          <span className="file-zoom-overflow" ref={zoomOverflowRef}>
+            <button
+              type="button"
+              className={`zoom-value file-zoom-overflow-btn${zoomMenuOpen ? ' is-open' : ''}`}
+              title={t(locale, 'zoomMenu')}
+              aria-label={t(locale, 'zoomMenu')}
+              aria-haspopup="menu"
+              aria-expanded={zoomMenuOpen}
+              onClick={() => setZoomMenuOpen((v) => !v)}
+            >
+              {zoom}%
+            </button>
+            {zoomMenuOpen && (
+              <div className="island file-zoom-menu" role="menu" aria-label={t(locale, 'zoomMenu')}>
+                <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1 / 1.2)}>
+                  <Icon name="minus" />
+                  <span>{t(locale, 'zoomOut')}</span>
+                </button>
+                <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1.2)}>
+                  <Icon name="plus" />
+                  <span>{t(locale, 'zoomIn')}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-row"
+                  onClick={() => {
+                    engine?.resetZoom();
+                    setZoomMenuOpen(false);
+                  }}
+                >
+                  <span>
+                    {zoom}% — {t(locale, 'zoomResetShort')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-row"
+                  onClick={() => {
+                    engine?.fitContent();
+                    setZoomMenuOpen(false);
+                  }}
+                >
+                  <Icon name="fit" />
+                  <span>{t(locale, 'fit')}</span>
+                </button>
+              </div>
+            )}
             <div className="island-sep" />
           </span>
           <button
@@ -1040,7 +1161,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             </>
           )}
         </div>
-        <div className="island meta-island">
+        <div className="island meta-island" ref={metaIslandRef}>
           {hostOffline && ephemeral && (
             <button
               type="button"

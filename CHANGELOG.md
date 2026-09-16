@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.11 — unreleased
+
+### Phone / tablet visual hierarchy
+- **Zoom overflow chip**: ≤720 / tablet collision / ≤1024 coarse show a `%` chip that opens an island zoom menu (in/out/reset/fit) instead of scroll-only or pinch-only.
+- **Host-offline CTA-only** on ≤720 (long copy stays in `title`); Meta 13px.
+- **Scroll edge fades**: toolbelt + style `mask-image` at ≤720.
+- **Tablet band 721–1024**: island pad 7px; brand ellipsis 36vw; JS collision collapse → same overflow chip (hysteresis).
+- **Coarse ctx / zoom menu rows**: min-height 44px; ui-hidden hint respects safe-area.
+
 ## 0.15.10 — unreleased
 
 ### Phone / tablet support
