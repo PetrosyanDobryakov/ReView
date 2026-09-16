@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.35 — unreleased
+
+### Deploy / version visibility
+- Home always shows `v{version}+{sha}` (no more version-less “dev build” label). Production HTML gets `<meta name="review-build">` for curl checks (`scripts/check-live-version.mjs`).
+- Docs: Workers Builds **Deploy command must be `npx wrangler deploy`**. Preview was stuck on **0.14.25** while tips through 0.14.34 only ran `echo done` after `npm run build` — Builds succeeded, assets never uploaded. That is why “0.14.34 unchanged” was observed on the live preview.
+
+### Sync smoothness (wire)
+- Cursor awareness quantization `0.5` → **`0.05`** world units so zoomed remotes do not stair-step (periodic micromovements that are not lag). Live **0.14.25** also still double-steps the peer spring (glyph+pill); that fix is already in tip since 0.14.29 and will land once deploy actually uploads.
+
 ## 0.14.34 — unreleased
 
 ### Sync smoothness

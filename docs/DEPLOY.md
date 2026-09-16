@@ -15,9 +15,30 @@ No backend storage is used on Vercel. The public board is the static SPA; each b
 
 Same static build, same P2P/file-share flow. Do not add `public/_redirects` with `/* /index.html 200`. Wrangler uploads `dist` as Workers static assets, and `html_handling` strips `.html` / `/index`. That splat rewrite then matches again and Cloudflare rejects the deploy with error 100324 (infinite redirect loop).
 
+### Workers Builds — deploy must actually deploy
+
+Preview `https://review.zpro-driftman.workers.dev/` was stuck on **0.14.25** while git tip moved through 0.14.26–0.14.34 because the Worker’s Builds **Deploy command** was set to `echo done` (build uploads nothing). Build logs showed `Executing user deploy command: echo done` then success.
+
+Fix in Cloudflare dashboard → Worker **review** → **Settings** → **Build**:
+
+| Setting | Value |
+|---------|--------|
+| Build command | `npm run build` (ok) |
+| **Deploy command** | **`npx wrangler deploy`** (not `echo done`) |
+| Non-production branch deploy | Prefer `npx wrangler deploy` if `dev-warexpor` feeds the public preview URL; otherwise `npx wrangler versions upload` only creates an unpromoted version |
+
+After the next green build, verify:
+
+```bash
+node scripts/check-live-version.mjs 0.14.35
+# or: curl -sS https://review.zpro-driftman.workers.dev/ | grep review-build
+```
+
+Home header shows `v0.14.35+<sha>`. HTML includes `<meta name="review-build" content="…">`.
+
 1. Create a Pages or Workers project from the same repo. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
 2. Upload a new Worker version (does not flip 100% production traffic): `npx wrangler versions upload`. Build + ship immediately: `npx wrangler deploy`. Same as npm scripts `cf:version` / `cf:deploy`. Wrangler runs `npm run build` first because of `[build] command`. Sync hub is a separate Worker: `cd worker && npx wrangler deploy`.
-3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable`.
+3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable` and HTML routes stay `no-cache`.
 4. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS`, so websocket sync is not attempted at `ws://host:1234`, and P2P is on unless the user turns it off.
 
 

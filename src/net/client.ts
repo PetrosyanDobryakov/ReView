@@ -34,7 +34,13 @@ const ERASE_MAX_WHOLE = 48;
 const ERASE_MAX_PARTIAL_SHAPES = 16;
 const ERASE_MAX_PARTIAL_VERTS = 64;
 /** Quantize world coords to cut awareness churn from sub-pixel jitter. */
-const CURSOR_QUANT = 0.5;
+/**
+ * Quantize cursor/erase coords before awareness publish.
+ * 0.5 world units stair-steps visibly when zoomed (periodic micromovements
+ * that are not lag). Keep enough precision for smooth remote glyphs while
+ * still collapsing sub-pixel pointer jitter.
+ */
+const CURSOR_QUANT = 0.05;
 /** Self-heal rare desync without hammering the hub. */
 const RESYNC_INTERVAL_MS = 60_000;
 /** Re-publish presence so a hibernating hub that dropped in-memory awareness recovers. */
