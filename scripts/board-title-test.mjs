@@ -185,12 +185,13 @@ console.log('board-title import strip: ok');
 }
 console.log('board-title empty-pages heal: ok');
 
-// --- draft/erase awareness trailing flush (parity with cursors) ---
+// --- draft/erase awareness rAF batch (one setLocalState with cursor) ---
 {
   const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
-  assert.match(clientSrc, /draftFlushTimer/, 'draft has trailing flush timer');
-  assert.match(clientSrc, /eraseFlushTimer/, 'erase preview has trailing flush timer');
-  assert.match(clientSrc, /flushDraft\(/, 'draft flush helper exists');
-  assert.match(clientSrc, /flushErasePreview\(/, 'erase flush helper exists');
+  assert.match(clientSrc, /AwarenessBatch/, 'client uses AwarenessBatch');
+  assert.match(clientSrc, /hotAwareness/, 'hot awareness coalescer wired');
+  assert.match(clientSrc, /applyHotAwareness/, 'single setLocalState apply path');
+  const batchSrc = readFileSync(root + '/src/net/awarenessBatch.ts', 'utf8');
+  assert.match(batchSrc, /setLocalState/, 'batch docs one setLocalState per frame');
 }
-console.log('board-title draft trailing flush: ok');
+console.log('board-title awareness batch: ok');

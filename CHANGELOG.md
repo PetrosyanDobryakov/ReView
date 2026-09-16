@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.31 — unreleased
+
+### Sync smoothness
+- Live freehand + cursors no longer emit two awareness WebSocket frames per tick: cursor, draft, and erase coalesce into one `setLocalState` per animation frame (`AwarenessBatch`). While drawing, the dual cursor+draft flood was jamming the Durable Object and arriving as jagged bursts on peers.
+- Draft polyline budget raised to 96 vertices; heavy gesture doc flushes ~60 Hz (16 ms) for mid-gesture point rewrites.
+
 ## 0.14.30 — unreleased
 
 ### Sync smoothness

@@ -8,6 +8,7 @@ import * as Y from 'yjs';
 import type { WebrtcProvider } from 'y-webrtc';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
+import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
 import { netLog } from './log';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
@@ -46,6 +47,7 @@ class P2pClient {
   private offPeerDisplay: (() => void) | null = null;
   private awarenessChangeHandler: (() => void) | null = null;
   private statusHandler: (() => void) | null = null;
+  private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
   attach(doc: Y.Doc, boardId: string): void {
     if (this.doc === doc && this.boardId === boardId && this.provider) return;
@@ -129,12 +131,15 @@ class P2pClient {
       this.providerRoom = room;
       this.bind(provider);
       if (this.lastUser) this.write('user', this.lastUser); else this.write('user', loadUser());
-      if (this.lastCursor) this.write('cursor', this.lastCursor);
       if (this.lastTool) this.write('tool', this.lastTool);
       if (this.lastPage) this.write('page', this.lastPage);
       this.write('viewing', this.lastViewing);
-      if (this.lastDraft) this.write('draft', this.lastDraft);
-      if (this.lastErase) this.write('erasePreview', this.lastErase);
+      this.hotAwareness.clear();
+      this.applyHotAwareness({
+        cursor: this.lastCursor,
+        draft: this.lastDraft,
+        erasePreview: this.lastErase,
+      });
       this.lastError = null;
       this.retryAttempt = 0;
       this.clearRetryTimer();
@@ -243,19 +248,40 @@ class P2pClient {
   publishTool(tool: string): void {
     if (this.lastTool === tool) return;
     this.lastTool = tool;
-    if (tool !== 'eraser') { this.lastErase = null; this.write('erasePreview', null); }
+    if (tool !== 'eraser') {
+      this.lastErase = null;
+      this.hotAwareness.queue({ erasePreview: null });
+      this.hotAwareness.flushNow();
+    }
     this.write('tool', tool);
   }
   publishPage(page: string): void { if (this.lastPage === page) return; this.lastPage = page; this.write('page', page); }
   publishBoardView(viewing: boolean): void {
     if (this.lastViewing === viewing) return;
     this.lastViewing = viewing;
-    if (!viewing) { this.lastDraft = null; this.lastErase = null; this.write('draft', null); this.write('erasePreview', null); }
+    if (!viewing) {
+      this.lastDraft = null;
+      this.lastErase = null;
+      this.hotAwareness.queue({ draft: null, erasePreview: null });
+      this.hotAwareness.flushNow();
+    }
     this.write('viewing', viewing);
   }
-  sendCursor(pos: CursorPos | null): void { this.lastCursor = pos; this.write('cursor', pos); }
-  publishDraft(d: PeerDraft | null): void { this.lastDraft = d; this.write('draft', d); }
-  publishErasePreview(p: PeerErasePreview | null): void { this.lastErase = p; this.write('erasePreview', p); }
+  sendCursor(pos: CursorPos | null): void {
+    this.lastCursor = pos;
+    this.hotAwareness.queue({ cursor: pos });
+    if (!pos) this.hotAwareness.flushNow();
+  }
+  publishDraft(d: PeerDraft | null): void {
+    this.lastDraft = d;
+    this.hotAwareness.queue({ draft: d });
+    if (!d) this.hotAwareness.flushNow();
+  }
+  publishErasePreview(p: PeerErasePreview | null): void {
+    this.lastErase = p;
+    this.hotAwareness.queue({ erasePreview: p });
+    if (!p) this.hotAwareness.flushNow();
+  }
 
   onStatus(cb: StatusListener): () => void { this.statusListeners.add(cb); cb(this.getStatus()); return () => { this.statusListeners.delete(cb); }; }
   onPeers(cb: PeerListener): () => void { this.peerListeners.add(cb); cb(this.collectPeers()); return () => { this.peerListeners.delete(cb); }; }
@@ -263,6 +289,21 @@ class P2pClient {
 
   rosterKey(peers: PeerCursor[] = this.collectPeers()): string {
     return peers.map(p => `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.tool ?? ''}\0${p.page ?? ''}`).join('\n');
+  }
+
+  private applyHotAwareness(patch: AwarenessPatch): void {
+    const p = this.provider as unknown as {
+      awareness?: {
+        getLocalState(): Record<string, unknown> | null;
+        setLocalState(v: Record<string, unknown> | null): void;
+      };
+    } | null;
+    const awareness = p?.awareness;
+    if (!awareness) return;
+    try {
+      const prev = awareness.getLocalState() ?? {};
+      awareness.setLocalState({ ...prev, ...patch });
+    } catch {}
   }
 
   private write(field: string, value: unknown): void {
@@ -292,6 +333,7 @@ class P2pClient {
   }
 
   private teardown(): void {
+    this.hotAwareness.clear();
     const p = (this as unknown as { _p?: { awareness: { off(e: string, fn: () => void): void } ; off?(e: string, fn: () => void): void } })._p as { awareness: { off(e: string, fn: () => void): void }; off?(e:string, fn:()=>void):void } | undefined;
     if (p && this.awarenessChangeHandler) {
       try { p.awareness.off('update', this.awarenessChangeHandler); } catch {}
