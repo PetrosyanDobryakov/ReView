@@ -2282,11 +2282,54 @@ export {
 import { buildCalcFaceLayout } from './calcKeypad';
 import { calcFrameScale } from './calcGeometry';
 
-function calcBodyFill(boardBg: string, shapeFill: string): string {
-  if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
+/** Live `--chrome-*` read without importing chromeTheme (avoids shapes↔theme cycle). */
+function chromeCssColor(name: string): string {
+  try {
+    if (typeof document === 'undefined') return '';
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Tool-default / transparent fill — treat as untouched so body tracks chrome theme. */
+function isUntouchedCalcFill(shapeFill: string): boolean {
+  return (
+    !shapeFill ||
+    shapeFill === 'transparent' ||
+    shapeFill === 'none' ||
+    shapeFill.toLowerCase() === COLORS.fill.toLowerCase()
+  );
+}
+
+/**
+ * Calculator body fill.
+ * Untouched (transparent / default tool white) → active `--chrome-panel`
+ * (same family as UI chrome). Explicit StyleBar fills keep their color.
+ */
+export function resolveCalcBodyFill(boardBg: string, shapeFill: string): string {
+  if (!isUntouchedCalcFill(shapeFill)) return shapeFill;
+  const panel = chromeCssColor('--chrome-panel');
+  if (panel && /^#[0-9a-fA-F]{6}$/i.test(panel)) return panel;
+  // Non-hex panels (e.g. Orbit rgba): lift off paper like graph defaults.
   const lum = relativeLuminance(boardBg);
   if (lum == null) return '#2e2e2b';
-  return lum > 0.5 ? '#f0eee8' : '#2a2a27';
+  return lum > 0.5 ? '#ffffff' : '#2a2a27';
+}
+
+function calcInkBase(body: string, boardBg: string): string {
+  const panel = chromeCssColor('--chrome-panel');
+  const chromeText = chromeCssColor('--chrome-text');
+  if (
+    panel &&
+    chromeText &&
+    /^#[0-9a-fA-F]{6}$/i.test(panel) &&
+    /^#[0-9a-fA-F]{6}$/i.test(chromeText) &&
+    body.toLowerCase() === panel.toLowerCase()
+  ) {
+    return chromeText;
+  }
+  return themeFor(body).text || themeFor(boardBg).text;
 }
 
 function calcInkOn(fill: string, boardBg: string): {
@@ -2302,34 +2345,37 @@ function calcInkOn(fill: string, boardBg: string): {
   eq: string;
   eqInk: string;
 } {
+  const base = calcInkBase(fill, boardBg);
   const lum = relativeLuminance(fill) ?? relativeLuminance(boardBg) ?? 0.1;
-  if (lum > 0.55) {
+  const light = lum > 0.55;
+  // Prefer hex→rgba via withAlpha when base is #rrggbb; else fall back to theme alphas.
+  if (/^#[0-9a-fA-F]{6}$/i.test(base)) {
     return {
-      text: 'rgba(28, 28, 26, 0.92)',
-      muted: 'rgba(28, 28, 26, 0.5)',
-      key: 'rgba(28, 28, 26, 0.08)',
-      keyInk: 'rgba(28, 28, 26, 0.78)',
-      keyBorder: 'rgba(28, 28, 26, 0.12)',
-      display: 'rgba(28, 28, 26, 0.06)',
-      displayInk: 'rgba(28, 28, 26, 0.92)',
-      bezel: 'rgba(28, 28, 26, 0.22)',
-      op: 'rgba(28, 28, 26, 0.92)',
-      eq: 'rgba(28, 28, 26, 0.12)',
-      eqInk: 'rgba(28, 28, 26, 0.92)',
+      text: withAlpha(base, 0.92),
+      muted: withAlpha(base, 0.5),
+      key: withAlpha(base, light ? 0.08 : 0.1),
+      keyInk: withAlpha(base, light ? 0.78 : 0.82),
+      keyBorder: withAlpha(base, light ? 0.12 : 0.14),
+      display: light ? withAlpha(base, 0.06) : 'rgba(0, 0, 0, 0.28)',
+      displayInk: withAlpha(base, light ? 0.92 : 0.95),
+      bezel: withAlpha(base, light ? 0.22 : 0.2),
+      op: withAlpha(base, light ? 0.92 : 0.95),
+      eq: withAlpha(base, light ? 0.12 : 0.16),
+      eqInk: withAlpha(base, light ? 0.92 : 0.95),
     };
   }
   return {
-    text: 'rgba(236, 234, 228, 0.92)',
-    muted: 'rgba(236, 234, 228, 0.5)',
-    key: 'rgba(236, 234, 228, 0.1)',
-    keyInk: 'rgba(236, 234, 228, 0.82)',
-    keyBorder: 'rgba(236, 234, 228, 0.14)',
-    display: 'rgba(0, 0, 0, 0.28)',
-    displayInk: 'rgba(236, 234, 228, 0.95)',
-    bezel: 'rgba(236, 234, 228, 0.2)',
-    op: 'rgba(236, 234, 228, 0.95)',
-    eq: 'rgba(236, 234, 228, 0.16)',
-    eqInk: 'rgba(236, 234, 228, 0.95)',
+    text: light ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.92)',
+    muted: light ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)',
+    key: light ? 'rgba(28, 28, 26, 0.08)' : 'rgba(236, 234, 228, 0.1)',
+    keyInk: light ? 'rgba(28, 28, 26, 0.78)' : 'rgba(236, 234, 228, 0.82)',
+    keyBorder: light ? 'rgba(28, 28, 26, 0.12)' : 'rgba(236, 234, 228, 0.14)',
+    display: light ? 'rgba(28, 28, 26, 0.06)' : 'rgba(0, 0, 0, 0.28)',
+    displayInk: light ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.95)',
+    bezel: light ? 'rgba(28, 28, 26, 0.22)' : 'rgba(236, 234, 228, 0.2)',
+    op: light ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.95)',
+    eq: light ? 'rgba(28, 28, 26, 0.12)' : 'rgba(236, 234, 228, 0.16)',
+    eqInk: light ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.95)',
   };
 }
 
@@ -2347,7 +2393,7 @@ function drawCalculator(
   const mode = v.calcMode === 'scientific' ? 'scientific' : 'standard';
   const scale = calcFrameScale(v.w, v.h);
   const layout = buildCalcFaceLayout(v.w, v.h, mode, Boolean(v.calcSecond), scale);
-  const body = calcBodyFill(boardBg, v.fill);
+  const body = resolveCalcBodyFill(boardBg, v.fill);
   const ink = calcInkOn(body, boardBg);
   const stroke = displayInk(v.stroke || COLORS.stroke, boardBg);
   const display = v.calcDisplay ?? '0';

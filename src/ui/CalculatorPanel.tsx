@@ -14,6 +14,8 @@ import { buildCalcFaceLayout } from '../core/calcKeypad';
 import { shapeRotation } from '../core/transform';
 import { graphChromeKind } from '../core/editChrome';
 import { viewPaperBg } from '../core/store';
+import { resolveCalcBodyFill, relativeLuminance, withAlpha, themeFor } from '../core/shapes';
+import { readChromeCssColor } from '../core/chromeTheme';
 import { readLocale } from '../core/locale';
 import { t } from './i18n';
 
@@ -144,16 +146,26 @@ export function CalculatorPanel({
     pub.second,
     calcFrameScale(live?.w ?? target.w, live?.h ?? target.h)
   );
-  const fill = live?.fill && live.fill !== 'transparent' ? live.fill : undefined;
   const stroke = live?.stroke || target.stroke;
   const screen = engine.worldToScreen(target.x, target.y);
   const z = engine.camera.zoom;
   const frame = calcFrameScale(target.w, target.h);
   const rot = target.rotation ?? (live ? shapeRotation(live) : 0);
-  const bodyBg = fill || (relativeLight(paper) ? '#f0eee8' : '#2a2a27');
-  const lightBody = relativeLight(bodyBg);
-  const ink = lightBody ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.92)';
-  const muted = lightBody ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)';
+  // Same rule as canvas: untouched → chrome panel; explicit fill kept.
+  const bodyBg = resolveCalcBodyFill(paper, live?.fill ?? 'transparent');
+  const lightBody = (relativeLuminance(bodyBg) ?? 0) > 0.55;
+  const panel = readChromeCssColor('--chrome-panel');
+  const chromeText = readChromeCssColor('--chrome-text');
+  const inkHex =
+    panel &&
+    chromeText &&
+    /^#[0-9a-fA-F]{6}$/i.test(panel) &&
+    /^#[0-9a-fA-F]{6}$/i.test(chromeText) &&
+    bodyBg.toLowerCase() === panel.toLowerCase()
+      ? chromeText
+      : themeFor(bodyBg).text;
+  const ink = /^#[0-9a-fA-F]{6}$/i.test(inkHex) ? withAlpha(inkHex, 0.92) : lightBody ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.92)';
+  const muted = /^#[0-9a-fA-F]{6}$/i.test(inkHex) ? withAlpha(inkHex, 0.5) : lightBody ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)';
   const fw = Math.max(1, live?.w ?? target.w);
   const fh = Math.max(1, live?.h ?? target.h);
 
@@ -253,15 +265,4 @@ export function CalculatorPanel({
       ))}
     </div>
   );
-}
-
-function relativeLight(hex: string): boolean {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return false;
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.55;
 }

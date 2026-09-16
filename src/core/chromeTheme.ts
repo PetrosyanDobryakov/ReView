@@ -194,10 +194,20 @@ export function writeChromeTheme(id: ChromeThemeId): void {
   }
 }
 
+/** Read a live `--chrome-*` CSS variable from the document (hex or css color). */
+export function readChromeCssColor(name: string, fallback = ''): string {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** Push the CSS `--chrome-selection` of the active theme into the canvas COLORS. */
 function syncSelectionColor(): void {
   try {
-    const value = getComputedStyle(document.documentElement).getPropertyValue('--chrome-selection').trim();
+    const value = readChromeCssColor('--chrome-selection');
     if (isHex(value)) COLORS.selection = value;
   } catch {
     /* keep current */
