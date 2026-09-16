@@ -10,7 +10,7 @@ import {
   type CalcPersisted,
 } from '../core/calcEngine';
 import { calcCssZoom, calcFrameScale } from '../core/calcGeometry';
-import { calcKeypadRows } from '../core/calcKeypad';
+import { buildCalcFaceLayout } from '../core/calcKeypad';
 import { shapeRotation } from '../core/transform';
 import { graphChromeKind } from '../core/editChrome';
 import { viewPaperBg } from '../core/store';
@@ -22,6 +22,11 @@ function shapeToPersisted(engine: Engine, id: string): CalcPersisted {
   return persistedFromShape(v ?? {});
 }
 
+/**
+ * Open calculator session: interaction layer only.
+ * Canvas always paints the face (shared `buildCalcFaceLayout`); this panel
+ * supplies mode/stamp chrome + invisible key hit targets aligned to that layout.
+ */
 export function CalculatorPanel({
   target,
   engine,
@@ -102,7 +107,7 @@ export function CalculatorPanel({
       el.style.top = `${p.y}px`;
       el.style.width = `${Math.max(1, v.w * z)}px`;
       el.style.height = `${Math.max(1, v.h * z)}px`;
-      // Shared floor with silhouette — all overlay type scales stop together.
+      // Frame × zoom only — no readability floor (labels track the object like board text).
       el.style.setProperty('--calc-zoom', String(calcCssZoom(z, frame)));
       const rot = shapeRotation(v);
       el.style.transform = rot ? `rotate(${rot}deg)` : '';
@@ -132,7 +137,13 @@ export function CalculatorPanel({
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
-  const rows = calcKeypadRows(pub.mode, pub.second);
+  const layout = buildCalcFaceLayout(
+    live?.w ?? target.w,
+    live?.h ?? target.h,
+    pub.mode,
+    pub.second,
+    calcFrameScale(live?.w ?? target.w, live?.h ?? target.h)
+  );
   const fill = live?.fill && live.fill !== 'transparent' ? live.fill : undefined;
   const stroke = live?.stroke || target.stroke;
   const screen = engine.worldToScreen(target.x, target.y);
@@ -143,27 +154,24 @@ export function CalculatorPanel({
   const lightBody = relativeLight(bodyBg);
   const ink = lightBody ? 'rgba(28, 28, 26, 0.92)' : 'rgba(236, 234, 228, 0.92)';
   const muted = lightBody ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)';
-  const keyFace = lightBody ? 'rgba(28, 28, 26, 0.08)' : 'rgba(236, 234, 228, 0.06)';
-  const displayWell = lightBody ? 'rgba(28, 28, 26, 0.06)' : 'rgba(0, 0, 0, 0.22)';
+  const fw = Math.max(1, live?.w ?? target.w);
+  const fh = Math.max(1, live?.h ?? target.h);
 
   return (
     <div
       ref={rootRef}
-      className={`calc-panel${pub.error ? ' is-error' : ''}${pub.mode === 'scientific' ? ' is-sci' : ''}${lightBody ? ' is-light' : ''}`}
+      className={`calc-panel calc-panel--hit${pub.error ? ' is-error' : ''}${pub.mode === 'scientific' ? ' is-sci' : ''}${lightBody ? ' is-light' : ''}`}
       style={{
         left: screen.x,
         top: screen.y,
         width: Math.max(1, target.w * z),
         height: Math.max(1, target.h * z),
-        background: bodyBg,
         borderColor: stroke,
         borderWidth: Math.max(1, (live?.strokeWidth ?? target.strokeWidth) * z),
         color: ink,
         ['--calc-zoom' as string]: String(calcCssZoom(z, frame)),
         ['--calc-ink' as string]: ink,
         ['--calc-muted' as string]: muted,
-        ['--calc-key' as string]: keyFace,
-        ['--calc-display' as string]: displayWell,
         transform: rot ? `rotate(${rot}deg)` : undefined,
         transformOrigin: 'top left',
       }}
@@ -171,7 +179,16 @@ export function CalculatorPanel({
       role="application"
       aria-label={t(locale, 'calculator')}
     >
-      <div className="calc-toolbar">
+      <div
+        className="calc-toolbar"
+        style={{
+          position: 'absolute',
+          left: `${(layout.header.x / fw) * 100}%`,
+          top: `${(layout.header.y / fh) * 100}%`,
+          width: `${(layout.header.w / fw) * 100}%`,
+          height: `${(layout.header.h / fh) * 100}%`,
+        }}
+      >
         <div className="calc-modes" role="tablist">
           <button
             type="button"
@@ -211,33 +228,29 @@ export function CalculatorPanel({
         </div>
       </div>
 
-      <div className="calc-display">
-        <div className="calc-expr">
-          {pub.hasMemory ? <span className="calc-mem">M</span> : <span />}
-          <span>{pub.expr}</span>
-        </div>
-        <div className="calc-value" aria-live="polite">
-          {pub.display}
-        </div>
+      {/* Live display is canvas-painted; keep a polite aria mirror for AT. */}
+      <div className="calc-display calc-display--sr" aria-live="polite">
+        {pub.hasMemory ? 'M ' : ''}
+        {pub.expr ? `${pub.expr} ` : ''}
+        {pub.display}
       </div>
 
-      <div className="calc-pad">
-        {rows.map((row, ri) => (
-          <div key={ri} className="calc-row">
-            {row.map((k) => (
-              <button
-                key={`${ri}-${k.id}-${k.label}`}
-                type="button"
-                className={`calc-key${k.cls ? ` ${k.cls}` : ''}`}
-                style={k.span ? { gridColumn: `span ${k.span}` } : undefined}
-                onClick={() => press(k.id)}
-              >
-                {k.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      {layout.keys.map((k) => (
+        <button
+          key={`${k.id}-${k.label}-${k.x}-${k.y}`}
+          type="button"
+          className={`calc-key calc-key--hit${k.cls ? ` ${k.cls}` : ''}`}
+          style={{
+            position: 'absolute',
+            left: `${(k.x / fw) * 100}%`,
+            top: `${(k.y / fh) * 100}%`,
+            width: `${(k.w / fw) * 100}%`,
+            height: `${(k.h / fh) * 100}%`,
+          }}
+          onClick={() => press(k.id)}
+          aria-label={k.label}
+        />
+      ))}
     </div>
   );
 }

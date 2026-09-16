@@ -3472,47 +3472,61 @@ h3 .swap-text,
   outline-offset: 1px;
 }
 
-/* --- board calculator (on-object overlay) --- */
+/* --- board calculator (on-object hit layer over canvas face) --- */
 .calc-panel {
   position: absolute;
   z-index: 28;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: calc(6px * var(--calc-zoom, 1));
-  padding: calc(8px * var(--calc-zoom, 1));
   border-style: solid;
-  border-radius: calc(12px * var(--calc-zoom, 1));
-  box-shadow: var(--chrome-shadow);
-  color: var(--calc-ink, var(--chrome-text));
-  font-family: "Space Grotesk", Onest, system-ui, sans-serif;
   overflow: hidden;
   outline: none;
   transform-origin: top left;
   /* Let selection handles / rotate knob under the corners reach the canvas. */
   pointer-events: none;
+  font-family: "Space Grotesk", Onest, system-ui, sans-serif;
+}
+/* Open session: transparent shell — canvas is the only painted face. */
+.calc-panel--hit {
+  background: transparent;
+  border-color: transparent !important;
+  box-shadow: none;
 }
 .calc-panel .calc-toolbar,
-.calc-panel .calc-display,
 .calc-panel .calc-key {
   pointer-events: auto;
 }
-.calc-panel.is-error .calc-value {
-  color: var(--chrome-danger);
-  font-size: calc(15px * var(--calc-zoom, 1));
+.calc-display--sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .calc-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: calc(6px * var(--calc-zoom, 1));
+  gap: calc(4px * var(--calc-zoom, 1));
   flex-wrap: wrap;
+  box-sizing: border-box;
+  /* Frosted strip so mode/stamp chrome stays readable over the canvas header. */
+  background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 82%, transparent);
+  border-radius: calc(8px * var(--calc-zoom, 1));
+  border: 1px solid var(--chrome-border-soft);
+  padding: calc(2px * var(--calc-zoom, 1)) calc(4px * var(--calc-zoom, 1));
+}
+.calc-panel.is-light .calc-toolbar {
+  background: color-mix(in srgb, #f0eee8 88%, transparent);
 }
 .calc-modes,
 .calc-actions {
   display: flex;
   align-items: center;
-  gap: calc(4px * var(--calc-zoom, 1));
+  gap: calc(3px * var(--calc-zoom, 1));
   flex-wrap: wrap;
 }
 .calc-modes button,
@@ -3521,10 +3535,10 @@ h3 .swap-text,
   border: 1px solid var(--chrome-border-soft);
   background: transparent;
   color: var(--calc-muted, var(--chrome-text-dim));
-  border-radius: calc(8px * var(--calc-zoom, 1));
-  height: calc(26px * var(--calc-zoom, 1));
-  padding: 0 calc(8px * var(--calc-zoom, 1));
-  font: 500 calc(11px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
+  border-radius: calc(7px * var(--calc-zoom, 1));
+  height: calc(22px * var(--calc-zoom, 1));
+  padding: 0 calc(7px * var(--calc-zoom, 1));
+  font: 500 calc(10px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
   cursor: pointer;
 }
 .calc-modes button.is-on,
@@ -3538,92 +3552,27 @@ h3 .swap-text,
   background: var(--chrome-panel-2);
   color: var(--chrome-text);
 }
-.calc-display {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: calc(4px * var(--calc-zoom, 1));
-  min-height: calc(64px * var(--calc-zoom, 1));
-  padding: calc(8px * var(--calc-zoom, 1)) calc(10px * var(--calc-zoom, 1));
-  border-radius: calc(10px * var(--calc-zoom, 1));
-  background: var(--calc-display, rgba(0, 0, 0, 0.22));
-  border: 1px solid var(--chrome-border-soft);
-}
-.calc-expr {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: calc(14px * var(--calc-zoom, 1));
-  color: var(--calc-muted, var(--chrome-text-dim));
-  font-size: calc(11px * var(--calc-zoom, 1));
-  text-align: right;
-}
-.calc-mem {
-  color: var(--chrome-accent-strong);
-  font-weight: 600;
-}
-.calc-value {
-  font-size: calc(26px * var(--calc-zoom, 1));
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  text-align: right;
-  line-height: 1.1;
-  word-break: break-all;
-}
-.calc-pad {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: calc(4px * var(--calc-zoom, 1));
-  min-height: 0;
-}
-.calc-row {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: calc(4px * var(--calc-zoom, 1));
-  min-height: 0;
-}
-.calc-panel.is-sci .calc-row {
-  grid-template-columns: repeat(5, 1fr);
-}
-.calc-key {
+.calc-key--hit {
   appearance: none;
-  border: 1px solid var(--chrome-border-soft);
-  border-radius: calc(8px * var(--calc-zoom, 1));
-  background: var(--calc-key, rgba(236, 234, 228, 0.06));
-  color: var(--calc-ink, var(--chrome-text));
-  font: 500 calc(13px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
-  cursor: pointer;
-  min-width: 0;
-  min-height: 0;
+  border: 0;
+  margin: 0;
   padding: 0;
-  transition: background-color var(--chrome-dur-fast) var(--chrome-ease);
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  border-radius: calc(8px * var(--calc-zoom, 1));
 }
-.calc-key:hover {
-  background: var(--chrome-panel-2);
+.calc-key--hit:hover {
+  background: color-mix(in srgb, var(--chrome-panel-2, #fff) 28%, transparent);
 }
-.calc-key:active {
-  background: var(--chrome-active-bg);
+.calc-key--hit:active {
+  background: color-mix(in srgb, var(--chrome-active-bg, #fff) 40%, transparent);
 }
-.calc-key.fn,
-.calc-key.mem {
-  color: var(--calc-muted, var(--chrome-text-dim));
-  font-size: calc(11px * var(--calc-zoom, 1));
+.calc-panel.is-light .calc-key--hit:hover {
+  background: rgba(28, 28, 26, 0.08);
 }
-.calc-key.op {
-  color: var(--chrome-accent-strong);
-  font-weight: 600;
-}
-.calc-key.eq {
-  background: var(--chrome-active-bg);
-  color: var(--chrome-accent-strong);
-  font-weight: 600;
-  border-color: transparent;
-}
-.calc-key.active {
-  background: var(--chrome-active-bg);
-  color: var(--chrome-accent-strong);
+.calc-panel.is-light .calc-key--hit:active {
+  background: rgba(28, 28, 26, 0.14);
 }
 
 /* --- pages pull menu (left file island) --- */

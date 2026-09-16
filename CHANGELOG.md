@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.3 — unreleased
+
+### Board calculator — one paint path
+- **Canvas is the only face**: shared `buildCalcFaceLayout` drives labeled keypad for peers, export, unfocused, and open session. Open overlay is a transparent hit layer (mode/stamp chrome + key targets) — no separate low-res silhouette vs high-res panel.
+- **Labels track frame, not zoom floor**: removed `CALC_CSS_ZOOM_FLOOR` / screen-px label floors. Key/display type scales with object geometry like other board content; far zoom shrinks with the board.
+- **Rotate icon redesign**: same curved rotate-cw arrow for top-middle and legacy corner placements (no swirl “C” blob). Customize toggle for placement kept.
+
 ## 0.15.2 — unreleased
 
 ### Board calculator + selection chrome

@@ -2278,12 +2278,9 @@ export {
   calcFrameScale,
   calcCssZoom,
   calcLabelWorldSize,
-  calcCtxZoom,
-  CALC_LABEL_MIN_SCREEN_PX,
-  CALC_CSS_ZOOM_FLOOR,
 } from './calcGeometry';
-import { calcFrameScale, calcLabelWorldSize, calcCtxZoom } from './calcGeometry';
-import { calcKeypadRows } from './calcKeypad';
+import { buildCalcFaceLayout } from './calcKeypad';
+import { calcFrameScale } from './calcGeometry';
 
 function calcBodyFill(boardBg: string, shapeFill: string): string {
   if (shapeFill && shapeFill !== 'transparent' && shapeFill !== COLORS.fill) return shapeFill;
@@ -2292,7 +2289,19 @@ function calcBodyFill(boardBg: string, shapeFill: string): string {
   return lum > 0.5 ? '#f0eee8' : '#2a2a27';
 }
 
-function calcInkOn(fill: string, boardBg: string): { text: string; muted: string; key: string; keyInk: string; display: string; displayInk: string; bezel: string } {
+function calcInkOn(fill: string, boardBg: string): {
+  text: string;
+  muted: string;
+  key: string;
+  keyInk: string;
+  keyBorder: string;
+  display: string;
+  displayInk: string;
+  bezel: string;
+  op: string;
+  eq: string;
+  eqInk: string;
+} {
   const lum = relativeLuminance(fill) ?? relativeLuminance(boardBg) ?? 0.1;
   if (lum > 0.55) {
     return {
@@ -2300,9 +2309,13 @@ function calcInkOn(fill: string, boardBg: string): { text: string; muted: string
       muted: 'rgba(28, 28, 26, 0.5)',
       key: 'rgba(28, 28, 26, 0.08)',
       keyInk: 'rgba(28, 28, 26, 0.78)',
+      keyBorder: 'rgba(28, 28, 26, 0.12)',
       display: 'rgba(28, 28, 26, 0.06)',
       displayInk: 'rgba(28, 28, 26, 0.92)',
       bezel: 'rgba(28, 28, 26, 0.22)',
+      op: 'rgba(28, 28, 26, 0.92)',
+      eq: 'rgba(28, 28, 26, 0.12)',
+      eqInk: 'rgba(28, 28, 26, 0.92)',
     };
   }
   return {
@@ -2310,36 +2323,37 @@ function calcInkOn(fill: string, boardBg: string): { text: string; muted: string
     muted: 'rgba(236, 234, 228, 0.5)',
     key: 'rgba(236, 234, 228, 0.1)',
     keyInk: 'rgba(236, 234, 228, 0.82)',
+    keyBorder: 'rgba(236, 234, 228, 0.14)',
     display: 'rgba(0, 0, 0, 0.28)',
     displayInk: 'rgba(236, 234, 228, 0.95)',
     bezel: 'rgba(236, 234, 228, 0.2)',
+    op: 'rgba(236, 234, 228, 0.95)',
+    eq: 'rgba(236, 234, 228, 0.16)',
+    eqInk: 'rgba(236, 234, 228, 0.95)',
   };
 }
 
-/** Canvas silhouette — peers/export always see a real calc, not an empty frame. */
+/**
+ * Canvas is the single visual source of truth for the calculator face
+ * (peers, export, unfocused, and under the open hit-layer overlay).
+ * `hideKeys` is ignored — open overlay no longer replaces the painted pad.
+ */
 function drawCalculator(
   ctx: CanvasRenderingContext2D,
   v: ShapeView,
   boardBg: string,
-  hideKeys = false
+  _hideKeys = false
 ): void {
+  const mode = v.calcMode === 'scientific' ? 'scientific' : 'standard';
   const scale = calcFrameScale(v.w, v.h);
-  const zoom = calcCtxZoom(ctx);
-  const pad = Math.max(8, 12 * scale);
-  const radius = Math.max(8, Math.min(18, 12 * scale));
+  const layout = buildCalcFaceLayout(v.w, v.h, mode, Boolean(v.calcSecond), scale);
   const body = calcBodyFill(boardBg, v.fill);
   const ink = calcInkOn(body, boardBg);
   const stroke = displayInk(v.stroke || COLORS.stroke, boardBg);
   const display = v.calcDisplay ?? '0';
   const expr = (v.calcExpr ?? '').trim();
-  const mode = v.calcMode === 'scientific' ? 'Scientific' : 'Standard';
-  const sci = v.calcMode === 'scientific';
-  const second = Boolean(v.calcSecond);
-  const headerPx = Math.round(calcLabelWorldSize(11, scale, zoom));
-  const exprPx = Math.round(calcLabelWorldSize(11, scale, zoom));
-  const keyPx = Math.round(calcLabelWorldSize(13, scale, zoom));
-  const keyFnPx = Math.round(calcLabelWorldSize(11, scale, zoom));
-  const dispSize = Math.round(Math.min(36, calcLabelWorldSize(22, scale, zoom)));
+  const modeLabel = mode === 'scientific' ? 'Scientific' : 'Standard';
+  const { pad, radius, fonts } = layout;
 
   ctx.save();
   ctx.beginPath();
@@ -2350,80 +2364,64 @@ function drawCalculator(
   ctx.lineWidth = Math.max(1, v.strokeWidth || 1.5);
   ctx.stroke();
 
-  // Header
+  // Header — mode label (+ memory). Interaction chrome (tabs/stamp) lives only in the overlay.
   ctx.fillStyle = ink.muted;
-  ctx.font = `600 ${headerPx}px ${BOARD_TYPEFACE}`;
+  ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(mode, v.x + pad, v.y + pad * 0.85, v.w - pad * 2);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(modeLabel, v.x + layout.header.x, v.y + layout.header.y + layout.header.h * 0.45, layout.header.w * 0.7);
   if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
     ctx.textAlign = 'right';
-    ctx.fillText('M', v.x + v.w - pad, v.y + pad * 0.85);
+    ctx.fillStyle = ink.text;
+    ctx.fillText('M', v.x + layout.header.x + layout.header.w, v.y + layout.header.y + layout.header.h * 0.45);
   }
 
-  // Display well
-  const headerH = Math.max(18, 22 * scale);
-  const dispH = Math.max(52, 64 * scale);
-  const dispY = v.y + headerH + pad * 0.4;
-  const dispX = v.x + pad;
-  const dispW = Math.max(20, v.w - pad * 2);
+  const dx = v.x + layout.display.x;
+  const dy = v.y + layout.display.y;
+  const dw = layout.display.w;
+  const dh = layout.display.h;
   ctx.beginPath();
-  ctx.roundRect(dispX, dispY, dispW, dispH, Math.max(6, 8 * scale));
+  ctx.roundRect(dx, dy, dw, dh, Math.max(6, 8 * layout.scale));
   ctx.fillStyle = ink.display;
   ctx.fill();
   ctx.strokeStyle = ink.bezel;
-  ctx.lineWidth = Math.max(0.75, scale);
+  ctx.lineWidth = Math.max(0.75, layout.scale);
   ctx.stroke();
 
   if (expr) {
     ctx.fillStyle = ink.muted;
-    ctx.font = `${exprPx}px ${BOARD_TYPEFACE}`;
+    ctx.font = `${Math.round(fonts.expr)}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText(expr, dispX + dispW - pad * 0.6, dispY + pad * 0.45, dispW - pad);
+    ctx.fillText(expr, dx + dw - pad * 0.6, dy + pad * 0.45, dw - pad);
   }
   ctx.fillStyle = ink.displayInk;
-  ctx.font = `600 ${dispSize}px ${BOARD_TYPEFACE}`;
+  ctx.font = `600 ${Math.round(fonts.display)}px ${BOARD_TYPEFACE}`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(display, dispX + dispW - pad * 0.6, dispY + dispH - pad * 0.55, dispW - pad);
+  ctx.fillText(display, dx + dw - pad * 0.6, dy + dh - pad * 0.55, dw - pad);
 
-  if (hideKeys) {
-    ctx.restore();
-    return;
-  }
-
-  // Keypad silhouette — labeled wells matching the overlay (not hollow stubs).
-  const padRows = calcKeypadRows(sci ? 'scientific' : 'standard', second);
-  const gridTop = dispY + dispH + pad * 0.7;
-  const gridH = Math.max(40, v.y + v.h - pad - gridTop);
-  const cols = sci ? 5 : 4;
-  const rows = padRows.length;
-  const gap = Math.max(3, 4.5 * scale);
-  const cellW = (dispW - gap * (cols - 1)) / cols;
-  const cellH = (gridH - gap * (rows - 1)) / rows;
-  const rr = Math.max(4, Math.min(cellW, cellH) * 0.22);
-
-  for (let r = 0; r < rows; r++) {
-    const row = padRows[r] ?? [];
-    let c = 0;
-    for (const key of row) {
-      const span = Math.max(1, key.span ?? 1);
-      const x = dispX + c * (cellW + gap);
-      const y = gridTop + r * (cellH + gap);
-      const kw = cellW * span + gap * (span - 1);
-      ctx.beginPath();
-      ctx.roundRect(x, y, kw, cellH, rr);
-      ctx.fillStyle = ink.key;
-      ctx.fill();
-      const fn = key.cls?.includes('fn') || key.cls?.includes('mem');
-      ctx.fillStyle = fn ? ink.muted : ink.keyInk;
-      ctx.font = `${fn ? '500' : '500'} ${fn ? keyFnPx : keyPx}px ${BOARD_TYPEFACE}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(key.label, x + kw / 2, y + cellH / 2, kw - 2);
-      c += span;
-    }
+  // Full-fidelity labeled keypad (same layout module as the open overlay hit targets).
+  for (const key of layout.keys) {
+    const x = v.x + key.x;
+    const y = v.y + key.y;
+    const rr = Math.max(4, Math.min(key.w, key.h) * 0.22);
+    const isEq = key.cls?.includes('eq');
+    const isOp = key.cls?.includes('op');
+    const isFn = key.cls?.includes('fn') || key.cls?.includes('mem');
+    ctx.beginPath();
+    ctx.roundRect(x, y, key.w, key.h, rr);
+    ctx.fillStyle = isEq ? ink.eq : ink.key;
+    ctx.fill();
+    ctx.strokeStyle = isEq ? 'transparent' : ink.keyBorder;
+    ctx.lineWidth = Math.max(0.6, 0.75 * layout.scale);
+    if (!isEq) ctx.stroke();
+    ctx.fillStyle = isOp || isEq ? ink.op : isFn ? ink.muted : ink.keyInk;
+    const px = Math.round(isFn ? fonts.keyFn : fonts.key);
+    ctx.font = `${isOp || isEq ? '600' : '500'} ${px}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(key.label, x + key.w / 2, y + key.h / 2, key.w - 2);
   }
   ctx.restore();
 }

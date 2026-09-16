@@ -4312,9 +4312,9 @@ export class Engine {
     }
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
-      // hide canvas text of the shape being edited — the overlay renders it
-      const hideText =
-        (this.editing && this.editId === v.id) || this.calcEditId === v.id;
+      // hide canvas text of the shape being edited — the overlay renders it.
+      // Calculator keeps canvas paint always (hit-layer overlay); do not blank the face.
+      const hideText = this.editing && this.editId === v.id;
       // tables hide only the edited cell so the rest stays visible while typing
       const active = hideText && v.type === 'table' ? this.tableActive.get(v.id) : undefined;
       const hideCell = active ? { row: active.r, col: active.c } : undefined;
@@ -4770,60 +4770,61 @@ export class Engine {
     ctx.restore();
   }
 
-  /** Paint selection rotate affordance at world (x,y). */
+  /**
+   * Paint selection rotate affordance at world (x,y).
+   * Same curved rotate-cw arrow for top-middle and legacy corner placements —
+   * no swirl “C” / blob glyph.
+   */
   private paintRotateKnob(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
     hr: number,
     s: number,
-    topMiddle: boolean
+    _topMiddle: boolean
   ): void {
     const bg = store.viewPaperBg();
     const rotTheme = themeFor(bg);
     const rotStroke = rotTheme.text;
-    const rotFill = withAlpha(bg, 0.92);
+    const rotFill = withAlpha(bg, 0.94);
     ctx.save();
     ctx.translate(x, y);
+    // Soft disc so the glyph stays readable on dark and light boards.
     ctx.fillStyle = rotFill;
-    ctx.strokeStyle = rotStroke;
-    ctx.lineWidth = 1.55 * s;
+    ctx.strokeStyle = withAlpha(rotStroke, 0.35);
+    ctx.lineWidth = 1.35 * s;
     ctx.beginPath();
-    ctx.arc(0, 0, hr * 1.65, 0, Math.PI * 2);
+    ctx.arc(0, 0, hr * 1.7, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+
+    // Standard rotate-clockwise: open arc + filled arrowhead (Lucide/Heroicons language).
+    const r = hr * 0.92;
+    const a0 = -Math.PI * 0.75;
+    const a1 = Math.PI * 0.85;
     ctx.strokeStyle = rotStroke;
     ctx.fillStyle = rotStroke;
-    ctx.lineWidth = 1.75 * s;
+    ctx.lineWidth = Math.max(1.4 * s, hr * 0.22);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    if (topMiddle) {
-      // Clean rotate-cw glyph (standard affordance).
-      const r = hr * 0.95;
-      ctx.beginPath();
-      ctx.arc(0, 0, r, -Math.PI * 0.85, Math.PI * 0.7);
-      ctx.stroke();
-      const tipA = Math.PI * 0.7;
-      const tx = Math.cos(tipA) * r;
-      const ty = Math.sin(tipA) * r;
-      const ah = hr * 0.55;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx - ah * 0.85, ty - ah * 0.15);
-      ctx.lineTo(tx - ah * 0.15, ty + ah * 0.75);
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      // Legacy swirl “C” corner glyph.
-      ctx.beginPath();
-      ctx.arc(0, 0, hr * 0.95, -Math.PI * 0.9, Math.PI * 0.75);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(hr * 0.42, -hr * 0.45);
-      ctx.lineTo(hr * 0.68, -hr * 0.12);
-      ctx.lineTo(hr * 0.28, -hr * 0.12);
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    ctx.arc(0, 0, r, a0, a1);
+    ctx.stroke();
+
+    const tipX = Math.cos(a1) * r;
+    const tipY = Math.sin(a1) * r;
+    const tang = a1 + Math.PI / 2;
+    const ah = hr * 0.62;
+    const bx = Math.cos(tang);
+    const by = Math.sin(tang);
+    const nx = Math.cos(a1);
+    const ny = Math.sin(a1);
+    ctx.beginPath();
+    ctx.moveTo(tipX + nx * ah * 0.15, tipY + ny * ah * 0.15);
+    ctx.lineTo(tipX - bx * ah * 0.55 - nx * ah * 0.35, tipY - by * ah * 0.55 - ny * ah * 0.35);
+    ctx.lineTo(tipX + bx * ah * 0.55 - nx * ah * 0.35, tipY + by * ah * 0.55 - ny * ah * 0.35);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 
