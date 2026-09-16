@@ -30,8 +30,8 @@ export interface AppPrefs {
   rotateSnap: boolean;
   /**
    * When true (default), selection rotate control sits at the **top-middle**
-   * of the selected object with a normal rotate-arrow icon.
-   * When false, legacy corner grab (bottom-left) with the swirl “C” glyph.
+   * of the selected object. When false, legacy corner grab (bottom-left).
+   * Both placements use the same curved rotate-cw arrow icon (not a swirl “C”).
    * Applies to board selection chrome generally (not calculator-only).
    */
   rotateHandleTop: boolean;

@@ -5,8 +5,6 @@ import {
   defaultCalcPersisted,
 } from '../src/core/calcEngine.ts';
 import {
-  CALC_CSS_ZOOM_FLOOR,
-  CALC_LABEL_MIN_SCREEN_PX,
   CALC_MIN_H,
   CALC_MIN_W,
   CALC_REF_H,
@@ -16,7 +14,7 @@ import {
   calcLabelWorldSize,
   clampCalcSize,
 } from '../src/core/calcGeometry.ts';
-import { calcKeypadRows } from '../src/core/calcKeypad.ts';
+import { buildCalcFaceLayout, calcKeypadRows } from '../src/core/calcKeypad.ts';
 import { rotateHandleLocal, rotateHandleOnBox } from '../src/core/transform.ts';
 
 function run(keys) {
@@ -55,18 +53,32 @@ assert.equal(calcFrameScale(CALC_REF_W, CALC_REF_H), 1);
 assert.ok(calcFrameScale(CALC_REF_W * 4, CALC_REF_H * 4) > 1);
 assert.ok(calcFrameScale(80, 60) >= 0.45);
 
-// Shared zoom floor — overlay + silhouette stop shrinking together
-assert.equal(calcCssZoom(0.1, 1), CALC_CSS_ZOOM_FLOOR);
-assert.ok(calcCssZoom(1, 1) >= 1);
-assert.ok(calcLabelWorldSize(13, 1, 0.2) >= CALC_LABEL_MIN_SCREEN_PX / 0.2);
-assert.equal(calcLabelWorldSize(13, 1, 2), 13);
+// Labels track frame only — no camera-zoom floor / compensation
+assert.equal(calcLabelWorldSize(13, 1), 13);
+assert.equal(calcLabelWorldSize(13, 2), 26);
+assert.equal(calcCssZoom(0.1, 1), 0.1);
+assert.equal(calcCssZoom(2, 1.5), 3);
+assert.ok(calcCssZoom(0.05, 1) < 0.55);
 
-// Keypad layouts stay in sync for silhouette labels
+// Shared face layout — one geometry for canvas + hit overlay
+const std = buildCalcFaceLayout(CALC_REF_W, CALC_REF_H, 'standard', false, 1);
+assert.equal(std.cols, 4);
+assert.ok(std.keys.length >= 20);
+assert.equal(std.keys.at(-1)?.id, '=');
+assert.equal(std.keys.at(-1)?.span, 4);
+const sci = buildCalcFaceLayout(CALC_REF_W, CALC_REF_H, 'scientific', false, 1);
+assert.equal(sci.cols, 5);
+assert.ok(sci.keys.length > std.keys.length);
+// Key labels scale with frame, not zoom
+const bigScale = calcFrameScale(CALC_REF_W * 2, CALC_REF_H * 2);
+const big = buildCalcFaceLayout(CALC_REF_W * 2, CALC_REF_H * 2, 'standard', false, bigScale);
+assert.ok(big.fonts.key > std.fonts.key);
+
 assert.equal(calcKeypadRows('standard').length, 8);
 assert.equal(calcKeypadRows('scientific').length, 9);
 assert.equal(calcKeypadRows('standard').at(-1)?.[0]?.span, 4);
 
-// Rotate handle placement (Customize toggle)
+// Rotate handle placement (Customize toggle) — same positions, shared icon language
 assert.deepEqual(rotateHandleLocal(100, 80, 10, true), { x: 50, y: -10 });
 assert.deepEqual(rotateHandleLocal(100, 80, 10, false), { x: -10, y: 90 });
 assert.deepEqual(rotateHandleOnBox({ x: 0, y: 0, w: 100, h: 80 }, 10, true), { x: 50, y: -10 });

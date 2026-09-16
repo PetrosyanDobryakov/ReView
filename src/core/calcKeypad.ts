@@ -126,3 +126,104 @@ export function scientificCalcKeys(second: boolean): CalcKeyDef[][] {
 export function calcKeypadRows(mode: 'standard' | 'scientific', second = false): CalcKeyDef[][] {
   return mode === 'scientific' ? scientificCalcKeys(second) : standardCalcKeys(second);
 }
+
+export type CalcRect = { x: number; y: number; w: number; h: number };
+
+export type CalcKeyRect = CalcKeyDef & CalcRect;
+
+export type CalcFaceLayout = {
+  scale: number;
+  pad: number;
+  radius: number;
+  gap: number;
+  cols: number;
+  header: CalcRect;
+  display: CalcRect;
+  padArea: CalcRect;
+  keys: CalcKeyRect[];
+  fonts: {
+    header: number;
+    expr: number;
+    display: number;
+    key: number;
+    keyFn: number;
+  };
+};
+
+/**
+ * World-local face geometry for a calculator frame.
+ * Pass `scale` from `calcFrameScale(w,h)` — label sizes track frame only (never camera zoom).
+ * Canvas paint and open-session hit targets must both use this.
+ */
+export function buildCalcFaceLayout(
+  w: number,
+  h: number,
+  mode: 'standard' | 'scientific',
+  second: boolean,
+  scale: number
+): CalcFaceLayout {
+  const pad = Math.max(8, 12 * scale);
+  const radius = Math.max(8, Math.min(18, 12 * scale));
+  const gap = Math.max(3, 4.5 * scale);
+  const sci = mode === 'scientific';
+  const cols = sci ? 5 : 4;
+
+  const headerH = Math.max(22, 28 * scale);
+  const header: CalcRect = { x: pad, y: pad * 0.75, w: Math.max(20, w - pad * 2), h: headerH };
+
+  const dispH = Math.max(52, 64 * scale);
+  const dispY = header.y + header.h + pad * 0.35;
+  const display: CalcRect = {
+    x: pad,
+    y: dispY,
+    w: Math.max(20, w - pad * 2),
+    h: dispH,
+  };
+
+  const gridTop = display.y + display.h + pad * 0.7;
+  const gridH = Math.max(40, h - pad - gridTop);
+  const padArea: CalcRect = { x: display.x, y: gridTop, w: display.w, h: gridH };
+
+  const rows = calcKeypadRows(mode, second);
+  const rowCount = rows.length;
+  const cellW = (padArea.w - gap * (cols - 1)) / cols;
+  const cellH = (padArea.h - gap * (rowCount - 1)) / rowCount;
+
+  const keys: CalcKeyRect[] = [];
+  for (let r = 0; r < rowCount; r++) {
+    const row = rows[r] ?? [];
+    let c = 0;
+    for (const key of row) {
+      const span = Math.max(1, key.span ?? 1);
+      const kw = cellW * span + gap * (span - 1);
+      keys.push({
+        ...key,
+        x: padArea.x + c * (cellW + gap),
+        y: padArea.y + r * (cellH + gap),
+        w: kw,
+        h: cellH,
+      });
+      c += span;
+    }
+  }
+
+  return {
+    scale,
+    pad,
+    radius,
+    gap,
+    cols,
+    header,
+    display,
+    padArea,
+    keys,
+    fonts: {
+      header: Math.max(9, 11 * scale),
+      expr: Math.max(9, 11 * scale),
+      display: Math.min(36, Math.max(14, 22 * scale)),
+      key: Math.max(10, 13 * scale),
+      keyFn: Math.max(9, 11 * scale),
+    },
+  };
+}
+
