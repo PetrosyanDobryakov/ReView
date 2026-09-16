@@ -48,6 +48,7 @@ import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import {
   aimPeerMotion,
   initPeerMotion,
+  peerMotionShouldAnimate,
   pushPeerSample,
   stepPeerMotion,
   type PeerMotionState,
@@ -4152,10 +4153,10 @@ export class Engine {
     const s = 1 / this.camera.zoom;
     const dt = this.frameDt;
     const reduce = this.reduceMotion;
-    // Smooth-damp time constant (~follows 25 Hz samples without rubber-banding).
-    const smoothTime = 0.055;
+    // Smooth-damp time constant (~follows ~50 Hz samples without rubber-banding).
+    const smoothTime = 0.07;
     // Dead-reckon slightly past the last sample to bridge the next packet.
-    const leadSec = 0.045;
+    const leadSec = 0.035;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
     const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
@@ -4227,9 +4228,10 @@ export class Engine {
         screen.y <= this.h - edgePad;
       if (!onScreen) continue;
 
-      const err = Math.hypot(aimX - pos.x, aimY - pos.y);
-      const speed = Math.hypot(pos.vx, pos.vy);
-      if (err > 0.15 || speed > 2) this.peersAnimating = true;
+      // Hold frames between awareness packets — otherwise the spring settles in
+      // 1–2 frames, peersAnimating clears, and the glyph freezes until the next
+      // sample (packet-rate stutter even on a healthy socket).
+      if (peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
 
       const fill = peer.color || '#7c8cff';
       const icon = peerToolIcon(peer.tool);
@@ -4276,8 +4278,8 @@ export class Engine {
       }
       if (peer.viewing === false) {
         if (!reduce) {
-          const aim = aimPeerMotion(pos, now, { leadSec: 0.045, maxLead: 20 / this.camera.zoom });
-          stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.055);
+          const aim = aimPeerMotion(pos, now, { leadSec: 0.035, maxLead: 20 / this.camera.zoom });
+          stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.07);
         } else {
           pos.x = pos.tx;
           pos.y = pos.ty;

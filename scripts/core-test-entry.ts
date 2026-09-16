@@ -23,9 +23,12 @@ export {
 export {
   aimPeerMotion,
   initPeerMotion,
+  peerMotionShouldAnimate,
   pushPeerSample,
+  sampleDeltaSec,
   smoothDamp,
   stepPeerMotion,
+  PEER_MOTION_HOLD_SEC,
 } from '../src/core/peerMotion';
 export {
   boardHadRemoteCollaborators,

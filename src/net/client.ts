@@ -3,7 +3,7 @@
  *
  * Traffic posture:
  * - Doc updates: coalesced in store writeGate; polylines stored local-space.
- * - Cursors: ~25 Hz + trailing flush so the last pose always lands.
+ * - Cursors: ~50 Hz + trailing flush so the last pose always lands.
  * - Draft strokes / erase preview: awareness-only, throttled + trailing flush.
  * - Periodic resync heals rare stuck states without constant full dumps.
  */
@@ -23,7 +23,7 @@ type StatusListener = (status: SyncStatus) => void;
 type PeerListener = (peers: PeerCursor[]) => void;
 type LifecycleListener = () => void;
 
-const CURSOR_MIN_MS = 40;
+const CURSOR_MIN_MS = 20;
 const CURSOR_LOG_SUMMARY_MS = 5000;
 const DRAFT_MIN_MS = 50;
 const DRAFT_MAX_VERTICES = 64;
@@ -576,17 +576,6 @@ export class SyncClient {
     this.lastSentCursor = pos;
     this.logCursorSend(pos, now);
     this.writeCursor(pos);
-  }
-
-  private flushDraft(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
-    if (this.draftFlushTimer) {
-      clearTimeout(this.draftFlushTimer);
-      this.draftFlushTimer = null;
-    }
-    const draft = this.lastDraft;
-    if (!draft) return;
-    this.lastDraftSent = now;
-    this.writeDraft(draft);
   }
 
   private flushErasePreview(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
