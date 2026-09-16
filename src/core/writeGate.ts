@@ -5,7 +5,7 @@
  * once polylines are shape-local. Peers must see moves at pointer rate;
  * holding light fields back until the heavy flush turns drags into 30 Hz
  * teleports for everyone else.
- * Heavy patches (points/pressures/src) coalesce ~30 Hz. A heavy patch keeps
+ * Heavy patches (points/pressures/src) coalesce ~60 Hz. A heavy patch keeps
  * a copy of its light fields so the flush still writes a consistent row.
  */
 
@@ -17,8 +17,8 @@ export type PatchBatch = Array<[string, ShapePatch]>;
 type FlushFn = (batch: PatchBatch) => void;
 type LiveFn = (batch: PatchBatch) => void;
 
-/** Max doc sync rate for heavy fields while a gesture is open (~30 Hz). */
-const HEAVY_FLUSH_MS = 32;
+/** Max doc sync rate for heavy fields while a gesture is open (~60 Hz). */
+const HEAVY_FLUSH_MS = 16;
 
 let gestureDepth = 0;
 let pendingHeavy = new Map<string, ShapePatch>();

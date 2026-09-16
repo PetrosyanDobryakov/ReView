@@ -3,8 +3,9 @@
  *
  * Traffic posture:
  * - Doc updates: coalesced in store writeGate; polylines stored local-space.
- * - Cursors: ~50 Hz + trailing flush so the last pose always lands.
- * - Draft strokes / erase preview: awareness-only, throttled + trailing flush.
+ * - Cursors / live drafts / erase previews: awareness-only, rAF-batched into
+ *   one setLocalState per frame so drawing does not emit cursor+draft as two
+ *   WS messages (DO floods → jagged peers).
  * - Periodic resync heals rare stuck states without constant full dumps.
  */
 
@@ -14,6 +15,7 @@ import type { UserInfo } from '../core/user';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { downsamplePolyline } from '../core/pointsSpace';
+import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { boardRoomName, effectiveSyncUrl, isSyncEnabled } from './config';
 import { syncReconnectMode } from './syncReconnect';
 import { isNetLogEnabled, netLog } from './log';
@@ -23,11 +25,8 @@ type StatusListener = (status: SyncStatus) => void;
 type PeerListener = (peers: PeerCursor[]) => void;
 type LifecycleListener = () => void;
 
-const CURSOR_MIN_MS = 20;
 const CURSOR_LOG_SUMMARY_MS = 5000;
-const DRAFT_MIN_MS = 50;
-const DRAFT_MAX_VERTICES = 64;
-const ERASE_MIN_MS = 50;
+const DRAFT_MAX_VERTICES = 96;
 const ERASE_MAX_WHOLE = 48;
 const ERASE_MAX_PARTIAL_SHAPES = 16;
 const ERASE_MAX_PARTIAL_VERTS = 64;
@@ -70,12 +69,8 @@ export class SyncClient {
   private lastViewing = true;
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
-  private lastCursorSent = 0;
-  private lastDraftSent = 0;
-  private lastEraseSent = 0;
-  private cursorFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  private draftFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  private eraseFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** High-freq awareness (cursor/draft/erase) — one WS frame per rAF. */
+  private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
   private lastEmittedStatus: SyncStatus | null = null;
   private lastLoggedRosterKey = '';
@@ -415,32 +410,16 @@ export class SyncClient {
 
   sendCursor(pos: CursorPos | null): void {
     this.lastCursor = pos ? quantizeCursor(pos) : null;
-    if (this.lastCursor && sameCursor(this.lastCursor, this.lastSentCursor)) {
-      return;
-    }
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (this.lastCursor) {
-      const wait = CURSOR_MIN_MS - (now - this.lastCursorSent);
-      if (wait > 0) {
-        if (!this.cursorFlushTimer) {
-          this.cursorFlushTimer = setTimeout(() => {
-            this.cursorFlushTimer = null;
-            this.flushCursor();
-          }, wait);
-        }
-        return;
-      }
-    } else if (this.cursorFlushTimer) {
-      clearTimeout(this.cursorFlushTimer);
-      this.cursorFlushTimer = null;
-    }
-    this.flushCursor(now);
+    if (this.lastCursor && sameCursor(this.lastCursor, this.lastSentCursor)) return;
+    this.hotAwareness.queue({ cursor: this.lastCursor });
+    // Null must land this frame so remotes hide a frozen cursor.
+    if (!this.lastCursor) this.hotAwareness.flushNow();
   }
 
   /**
    * Publish an in-progress pen stroke to peers (awareness only).
    * Pass null to clear after commit/cancel.
-   * Throttled like cursors, with a trailing flush so the last vertices land.
+   * Batched with cursor/erase on the next animation frame.
    */
   publishDraft(draft: PeerDraft | null): void {
     if (!draft) {
@@ -455,24 +434,13 @@ export class SyncClient {
       ...(draft.alpha !== undefined ? { alpha: draft.alpha } : {}),
     };
     this.lastDraft = slim;
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const wait = DRAFT_MIN_MS - (now - this.lastDraftSent);
-    if (wait > 0) {
-      if (!this.draftFlushTimer) {
-        this.draftFlushTimer = setTimeout(() => {
-          this.draftFlushTimer = null;
-          this.flushDraft();
-        }, wait);
-      }
-      return;
-    }
-    this.flushDraft(now);
+    this.hotAwareness.queue({ draft: slim });
   }
 
   /**
    * Publish live eraser hover targets to peers (awareness only).
    * Pass null to clear after commit/cancel/tool change.
-   * Trailing flush mirrors cursors/drafts so the last preview is not dropped.
+   * Batched with cursor/draft on the next animation frame.
    */
   publishErasePreview(preview: PeerErasePreview | null): void {
     if (!preview) {
@@ -497,18 +465,7 @@ export class SyncClient {
     };
     if (sameErasePreview(slim, this.lastErase)) return;
     this.lastErase = slim;
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const wait = ERASE_MIN_MS - (now - this.lastEraseSent);
-    if (wait > 0) {
-      if (!this.eraseFlushTimer) {
-        this.eraseFlushTimer = setTimeout(() => {
-          this.eraseFlushTimer = null;
-          this.flushErasePreview();
-        }, wait);
-      }
-      return;
-    }
-    this.flushErasePreview(now);
+    this.hotAwareness.queue({ erasePreview: slim });
   }
 
   onStatus(cb: StatusListener): () => void {
@@ -535,58 +492,36 @@ export class SyncClient {
   }
 
   private clearErasePreview(): void {
-    if (this.eraseFlushTimer) {
-      clearTimeout(this.eraseFlushTimer);
-      this.eraseFlushTimer = null;
-    }
     if (this.lastErase === null && !this.provider) return;
     this.lastErase = null;
-    this.writeErasePreview(null);
+    this.hotAwareness.queue({ erasePreview: null });
+    this.hotAwareness.flushNow();
   }
 
   private clearDraft(): void {
-    if (this.draftFlushTimer) {
-      clearTimeout(this.draftFlushTimer);
-      this.draftFlushTimer = null;
-    }
     if (this.lastDraft === null && !this.provider) return;
     this.lastDraft = null;
-    this.writeDraft(null);
+    this.hotAwareness.queue({ draft: null });
+    this.hotAwareness.flushNow();
   }
 
-  private flushDraft(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
-    if (this.draftFlushTimer) {
-      clearTimeout(this.draftFlushTimer);
-      this.draftFlushTimer = null;
+  /** Merge hot fields into one awareness setLocalState (one WS frame). */
+  private applyHotAwareness(patch: AwarenessPatch): void {
+    const awareness = this.provider?.awareness;
+    if (!awareness) return;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const prev = (awareness.getLocalState() ?? {}) as Record<string, unknown>;
+      awareness.setLocalState({ ...prev, ...patch });
+    } catch (err) {
+      netLog.warn('applyHotAwareness failed', () => ({ err, keys: Object.keys(patch) }));
+      return;
     }
-    const draft = this.lastDraft;
-    if (!draft) return;
-    this.lastDraftSent = now;
-    this.writeDraft(draft);
-  }
-
-  private flushCursor(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
-    if (this.cursorFlushTimer) {
-      clearTimeout(this.cursorFlushTimer);
-      this.cursorFlushTimer = null;
+    if ('cursor' in patch) {
+      const pos = (patch.cursor ?? null) as CursorPos | null;
+      this.lastSentCursor = pos;
+      this.logCursorSend(pos, now);
     }
-    const pos = this.lastCursor;
-    if (pos && sameCursor(pos, this.lastSentCursor)) return;
-    this.lastCursorSent = now;
-    this.lastSentCursor = pos;
-    this.logCursorSend(pos, now);
-    this.writeCursor(pos);
-  }
-
-  private flushErasePreview(now = typeof performance !== 'undefined' ? performance.now() : Date.now()): void {
-    if (this.eraseFlushTimer) {
-      clearTimeout(this.eraseFlushTimer);
-      this.eraseFlushTimer = null;
-    }
-    const preview = this.lastErase;
-    if (!preview) return;
-    this.lastEraseSent = now;
-    this.writeErasePreview(preview);
   }
 
   private logCursorSend(pos: CursorPos | null, now: number): void {
@@ -615,14 +550,20 @@ export class SyncClient {
   }
 
   private republishAwareness(): void {
+    // Drop coalesced pendings — snapshot below is authoritative.
+    this.hotAwareness.clear();
     if (this.lastUser) this.writePresence(this.lastUser);
     else this.writePresence(loadUser());
     if (this.lastTool) this.writeTool(this.lastTool);
     if (this.lastPage) this.writePage(this.lastPage);
     this.writeViewing(this.lastViewing);
-    if (this.lastCursor) this.writeCursor(this.lastCursor);
-    if (this.lastDraft) this.writeDraft(this.lastDraft);
-    if (this.lastErase) this.writeErasePreview(this.lastErase);
+    // Hot fields in one setLocalState (not three setLocalStateField trips).
+    const hot: AwarenessPatch = {
+      cursor: this.lastCursor,
+      draft: this.lastDraft,
+      erasePreview: this.lastErase,
+    };
+    this.applyHotAwareness(hot);
   }
 
   private writePresence(user: UserInfo): void {
@@ -630,14 +571,6 @@ export class SyncClient {
       this.provider?.awareness.setLocalStateField('user', user);
     } catch (err) {
       netLog.warn('writePresence failed', () => ({ err }));
-    }
-  }
-
-  private writeCursor(pos: CursorPos | null): void {
-    try {
-      this.provider?.awareness.setLocalStateField('cursor', pos);
-    } catch (err) {
-      netLog.warn('writeCursor failed', () => ({ err }));
     }
   }
 
@@ -662,22 +595,6 @@ export class SyncClient {
       this.provider?.awareness.setLocalStateField('viewing', viewing);
     } catch (err) {
       netLog.warn('writeViewing failed', () => ({ err }));
-    }
-  }
-
-  private writeDraft(draft: PeerDraft | null): void {
-    try {
-      this.provider?.awareness.setLocalStateField('draft', draft);
-    } catch (err) {
-      netLog.warn('writeDraft failed', () => ({ err }));
-    }
-  }
-
-  private writeErasePreview(preview: PeerErasePreview | null): void {
-    try {
-      this.provider?.awareness.setLocalStateField('erasePreview', preview);
-    } catch (err) {
-      netLog.warn('writeErasePreview failed', () => ({ err }));
     }
   }
 
@@ -731,18 +648,7 @@ export class SyncClient {
   }
 
   private teardownProvider(): void {
-    if (this.cursorFlushTimer) {
-      clearTimeout(this.cursorFlushTimer);
-      this.cursorFlushTimer = null;
-    }
-    if (this.draftFlushTimer) {
-      clearTimeout(this.draftFlushTimer);
-      this.draftFlushTimer = null;
-    }
-    if (this.eraseFlushTimer) {
-      clearTimeout(this.eraseFlushTimer);
-      this.eraseFlushTimer = null;
-    }
+    this.hotAwareness.clear();
     this.offProviderStatus?.();
     this.offAwareness?.();
     this.offProviderStatus = null;
