@@ -90,11 +90,16 @@ export class BoardRoom implements DurableObject {
   /** Trailing tail-flush timer (debounced off the hot path). */
   private tailTimer: ReturnType<typeof setTimeout> | null = null;
   /**
-   * True while DELETE / empty-room GC is wiping storage. Blocks trailing
-   * tail/full persists and close-handler flushes from resurrecting blobs
-   * after deleteAll (debounced waitUntil + webSocketClose race).
+   * True only while wipeRoomStorage runs. Upgrade fetches return 503 so they
+   * cannot clear latches mid-deleteAll / resetRoom.
    */
-  private wiping = false;
+  private wipeInFlight = false;
+  /**
+   * Set for the whole wipe and kept until the next successful websocket
+   * accept. Blocks trailing persists and close-handler flushes from
+   * resurrecting blobs after deleteAll.
+   */
+  private suppressPersist = false;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     this.state.blockConcurrencyWhile(async () => {
@@ -228,7 +233,7 @@ export class BoardRoom implements DurableObject {
 
   /** Merge pending updates into the `tail` blob (O(update), hibernation-safe). */
   private async flushTailUnlocked(): Promise<void> {
-    if (this.wiping || !this.pending.length) return;
+    if (this.suppressPersist || !this.pending.length) return;
     const batch = this.pending;
     this.pending = [];
     try {
@@ -237,7 +242,7 @@ export class BoardRoom implements DurableObject {
       if (merged) await writeBlob(this.state.storage, 'tail', merged);
     } catch (err) {
       // Put the batch back so a later flushFull / retry can recover.
-      if (this.wiping) return;
+      if (this.suppressPersist) return;
       this.pending = batch.concat(this.pending);
       this.dirty = true;
       console.error('[BoardRoom] tail persist failed', err);
@@ -246,14 +251,14 @@ export class BoardRoom implements DurableObject {
 
   /** Full-doc encode into chunked `doc`. Keep a tail if updates arrived during the write. */
   private async flushFullUnlocked(): Promise<void> {
-    if (this.wiping || !this.doc) return;
+    if (this.suppressPersist || !this.doc) return;
     await this.flushTailUnlocked();
-    if (this.wiping) return;
+    if (this.suppressPersist) return;
     try {
       const encodeGen = this.persistGen;
       await writeBlob(this.state.storage, 'doc', Y.encodeStateAsUpdate(this.doc));
       await this.flushTailUnlocked();
-      if (this.wiping) return;
+      if (this.suppressPersist) return;
       if (!canDropPersistedTail(encodeGen, this.persistGen, this.pending.length)) {
         this.dirty = true;
         return;
@@ -267,7 +272,7 @@ export class BoardRoom implements DurableObject {
       this.dirty = false;
       this.lastPersist = Date.now();
     } catch (err) {
-      if (this.wiping) return;
+      if (this.suppressPersist) return;
       this.dirty = true;
       console.error('[BoardRoom] full persist failed', err);
     }
@@ -283,17 +288,17 @@ export class BoardRoom implements DurableObject {
    * blob writes. A flush already in flight just picks the batch up.
    */
   private queueTailFlush(): void {
-    if (this.wiping || this.tailTimer) return;
+    if (this.suppressPersist || this.tailTimer) return;
     this.tailTimer = setTimeout(() => {
       this.tailTimer = null;
-      if (this.wiping) return;
+      if (this.suppressPersist) return;
       this.state.waitUntil(
         this.persist(async () => {
           try {
             await this.flushTailUnlocked();
           } finally {
             // More arrived while flushing — trail it, don't drop it.
-            if (!this.wiping && this.pending.length) this.queueTailFlush();
+            if (!this.suppressPersist && this.pending.length) this.queueTailFlush();
           }
         }),
       );
@@ -305,28 +310,39 @@ export class BoardRoom implements DurableObject {
    * (close/alarm) still await flushFull directly.
    */
   private persistFullSoon(): void {
-    if (this.wiping || !this.dirty) return;
+    if (this.suppressPersist || !this.dirty) return;
     if (!shouldFullPersist(this.lastPersist, Date.now())) return;
     this.state.waitUntil(this.flushFull());
   }
 
   /**
    * Cancel trailing persists, drain the persist gate, wipe Durable Object
-   * storage, then install a fresh empty doc. `wiping` stays true until the
-   * next websocket accept so late webSocketClose handlers cannot rewrite
-   * blobs after deleteAll.
+   * storage, then install a fresh empty doc. `suppressPersist` stays true
+   * until the next websocket accept so late webSocketClose handlers cannot
+   * rewrite blobs after deleteAll.
+   *
+   * Runs under `blockConcurrencyWhile` so an Upgrade fetch cannot accept a
+   * socket between deleteAll and resetRoom. `wipeInFlight` makes concurrent
+   * Upgrades return 503 until wipe finishes.
    */
   private async wipeRoomStorage(): Promise<void> {
-    this.wiping = true;
+    this.wipeInFlight = true;
+    this.suppressPersist = true;
     this.clearTailTimer();
     this.pending = [];
     this.dirty = false;
-    await this.persist(async () => {
-      this.pending = [];
-      this.dirty = false;
-      await this.state.storage.deleteAll();
-    });
-    this.resetRoom();
+    try {
+      await this.state.blockConcurrencyWhile(async () => {
+        await this.persist(async () => {
+          this.pending = [];
+          this.dirty = false;
+          await this.state.storage.deleteAll();
+        });
+        this.resetRoom();
+      });
+    } finally {
+      this.wipeInFlight = false;
+    }
   }
 
   /** Destroy current doc/awareness and create a fresh pair with handlers rebound. */
@@ -363,7 +379,8 @@ export class BoardRoom implements DurableObject {
       }
       // Mark wipe before close so webSocketClose handlers skip flushFull and
       // cannot rewrite blobs after deleteAll.
-      this.wiping = true;
+      this.wipeInFlight = true;
+      this.suppressPersist = true;
       this.clearTailTimer();
       this.pending = [];
       this.dirty = false;
@@ -382,11 +399,27 @@ export class BoardRoom implements DurableObject {
       return new Response('Expected websocket', { status: 426 });
     }
 
+    // Reject accepts while wipeRoomStorage is running. Post-wipe
+    // suppressPersist stays set so close handlers remain no-ops until we
+    // accept below — that must not 503 forever.
+    if (this.wipeInFlight) {
+      return new Response(JSON.stringify({ ok: false, wiping: true }), {
+        status: 503,
+        headers: cors,
+      });
+    }
+
     if (!this.doc || (this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) {
       await this.loadOrCreate();
     }
-    // A prior DELETE/GC left wiping latched so late close handlers stay no-ops.
-    this.wiping = false;
+    if (this.wipeInFlight) {
+      return new Response(JSON.stringify({ ok: false, wiping: true }), {
+        status: 503,
+        headers: cors,
+      });
+    }
+    // Clear the post-wipe latch now that a real peer is joining again.
+    this.suppressPersist = false;
     const doc = this.doc!;
     const awareness = this.awareness!;
 
@@ -461,7 +494,7 @@ export class BoardRoom implements DurableObject {
   }
 
   private async handleSocketGone(ws: WebSocket): Promise<void> {
-    if (this.wiping) return;
+    if (this.suppressPersist) return;
     if (this.awareness) {
       const clients = readAttachment(ws).clients;
       if (clients.length) {
@@ -473,14 +506,14 @@ export class BoardRoom implements DurableObject {
       }
     }
     await this.flushFull();
-    if (this.wiping) return;
+    if (this.suppressPersist) return;
     if (this.state.getWebSockets().length === 0) {
       await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
     }
   }
 
   async alarm(): Promise<void> {
-    if (this.wiping) return;
+    if (this.suppressPersist) return;
     if (this.dirty || this.pending.length) await this.flushFull();
     if (!canGcEmptyRoom(this.state.getWebSockets().length, this.dirty, this.pending.length)) {
       if (this.state.getWebSockets().length === 0) {

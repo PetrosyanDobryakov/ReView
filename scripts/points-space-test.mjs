@@ -8,6 +8,7 @@ import {
   toWorldPoints,
   beginWriteGesture,
   configureWriteGate,
+  closeWriteGate,
   endWriteGesture,
   enqueuePatches,
   flushNow,
@@ -68,5 +69,37 @@ assert.equal(flushes, 1, 'light move flushes immediately despite pending heavy')
 assert.deepEqual(lastBatch, [['b', { x: 9 }]]);
 endWriteGesture();
 resetWriteGate();
+
+// Compact must flush pending heavy patches before snapshotting the doc.
+// Light fields already flushed; points stay gated — a mid-gesture compact
+// that copies maps without closeWriteGate() would drop the new polyline.
+{
+  /** @type {Record<string, unknown>} */
+  const fakeDoc = { x: 0, points: [0, 0] };
+  configureWriteGate({
+    flush: (batch) => {
+      for (const [, patch] of batch) Object.assign(fakeDoc, patch);
+    },
+  });
+  beginWriteGesture();
+  enqueuePatches([['pen', { x: 9, points: [0, 0, 4, 4] }]]);
+  assert.equal(fakeDoc.x, 9, 'light geometry already in the doc');
+  assert.deepEqual(fakeDoc.points, [0, 0], 'heavy points still pending');
+  // closeWriteGate is what compactBoard must call before copying maps.
+  closeWriteGate();
+  assert.deepEqual(fakeDoc.points, [0, 0, 4, 4], 'flush before compact keeps stroke points');
+  resetWriteGate();
+
+  const storeSrc = await import('node:fs').then((fs) =>
+    fs.readFileSync(new URL('../src/core/store.ts', import.meta.url), 'utf8'),
+  );
+  const start = storeSrc.indexOf('export async function compactBoard');
+  const end = storeSrc.indexOf('\nfunction fileLogFallback', start);
+  const body = storeSrc.slice(start, end === -1 ? undefined : end);
+  const flushAt = body.indexOf('closeWriteGate()');
+  const snapAt = body.indexOf('const compact = new Y.Doc');
+  assert.ok(flushAt >= 0, 'compactBoard calls closeWriteGate');
+  assert.ok(snapAt > flushAt, 'closeWriteGate runs before the compact snapshot');
+}
 
 console.log('points-space + writeGate: ok');
