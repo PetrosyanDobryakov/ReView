@@ -28,6 +28,12 @@ export const EMPTY_GC_MS = 90 * 1000;
  * (sync step 1 to live sockets) heals anything the gap missed.
  */
 export const TAIL_FLUSH_MS = 150;
+/**
+ * Full-doc encode is O(board) CPU on the single-threaded DO. Never start it from
+ * an awareness (cursor) frame, and only arm it after sync traffic goes quiet so
+ * a draw flood cannot freeze relay mid-stroke.
+ */
+export const FULL_PERSIST_IDLE_MS = 250;
 
 type SocketAttachment = { clients: number[] };
 
@@ -89,6 +95,8 @@ export class BoardRoom implements DurableObject {
   private readonly persist = createAsyncGate();
   /** Trailing tail-flush timer (debounced off the hot path). */
   private tailTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Trailing full-doc persist — only after sync idles (never from awareness). */
+  private fullTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * True only while wipeRoomStorage runs. Upgrade fetches return 503 so they
    * cannot clear latches mid-deleteAll / resetRoom.
@@ -229,6 +237,10 @@ export class BoardRoom implements DurableObject {
       clearTimeout(this.tailTimer);
       this.tailTimer = null;
     }
+    if (this.fullTimer) {
+      clearTimeout(this.fullTimer);
+      this.fullTimer = null;
+    }
   }
 
   /** Merge pending updates into the `tail` blob (O(update), hibernation-safe). */
@@ -306,13 +318,19 @@ export class BoardRoom implements DurableObject {
   }
 
   /**
-   * Full encode at most once per second, off the hot path. Teardown paths
-   * (close/alarm) still await flushFull directly.
+   * Trailing full encode after sync idles. Awareness must never call this —
+   * Y.encodeStateAsUpdate on a photo board freezes the isolate and bursts
+   * every queued cursor/stroke relay. Teardown still awaits flushFull.
    */
-  private persistFullSoon(): void {
+  private queueFullPersist(): void {
     if (this.suppressPersist || !this.dirty) return;
-    if (!shouldFullPersist(this.lastPersist, Date.now())) return;
-    this.state.waitUntil(this.flushFull());
+    if (this.fullTimer) clearTimeout(this.fullTimer);
+    this.fullTimer = setTimeout(() => {
+      this.fullTimer = null;
+      if (this.suppressPersist || !this.dirty) return;
+      if (!shouldFullPersist(this.lastPersist, Date.now())) return;
+      this.state.waitUntil(this.flushFull());
+    }, FULL_PERSIST_IDLE_MS);
   }
 
   /**
@@ -475,14 +493,14 @@ export class BoardRoom implements DurableObject {
         encoding.writeVarUint(encoder, messageSync);
         syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
         if (encoding.length(encoder) > 1) ws.send(encoding.toUint8Array(encoder));
+        // Doc path only — awareness must not arm O(board) encode.
+        this.queueFullPersist();
       } else if (type === messageAwareness) {
         awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
       }
     } catch (e) {
       console.error('[BoardRoom] message error', e);
     }
-    // Relay already happened above; persist trails via waitUntil (never awaited here).
-    this.persistFullSoon();
   }
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
