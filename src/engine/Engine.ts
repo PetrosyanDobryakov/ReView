@@ -47,6 +47,7 @@ import { readPenSlots } from '../core/penColors';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import {
   aimPeerMotion,
+  applyRealtimePeerPose,
   initPeerMotion,
   peerMotionShouldAnimate,
   pushPeerSample,
@@ -57,6 +58,49 @@ import {
 import { onPrefsChange, readPrefs } from '../core/prefs';
 import { ORBIT_PAPER } from '../core/orbit';
 import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
+import type { PeerDraft, PeerErasePreview } from '../net/types';
+
+/** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
+function peerDraftPaintDirty(a: PeerDraft | null | undefined, b: PeerDraft | null | undefined): boolean {
+  if (Boolean(a) !== Boolean(b)) return true;
+  if (!a || !b) return false;
+  if (a.stroke !== b.stroke || a.strokeWidth !== b.strokeWidth) return true;
+  if ((a.alpha ?? 0.85) !== (b.alpha ?? 0.85)) return true;
+  const ap = a.points;
+  const bp = b.points;
+  if (ap.length !== bp.length) return true;
+  const n = ap.length;
+  if (n >= 2 && (ap[n - 2] !== bp[n - 2] || ap[n - 1] !== bp[n - 1])) return true;
+  if (n >= 4 && (ap[0] !== bp[0] || ap[1] !== bp[1])) return true;
+  return false;
+}
+
+/** Cheap erase-preview equality — avoid JSON.stringify on the awareness hot path. */
+function samePeerErasePreview(a: PeerErasePreview | null | undefined, b: PeerErasePreview | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.x !== b.x || a.y !== b.y || a.r !== b.r || a.mode !== b.mode) return false;
+  if (a.whole.length !== b.whole.length) return false;
+  for (let i = 0; i < a.whole.length; i++) {
+    if (a.whole[i] !== b.whole[i]) return false;
+  }
+  const ap = a.partial ?? null;
+  const bp = b.partial ?? null;
+  if (ap === bp) return true;
+  if (!ap || !bp) return !ap && !bp;
+  const aKeys = Object.keys(ap);
+  const bKeys = Object.keys(bp);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    const ai = ap[k];
+    const bi = bp[k];
+    if (!bi || ai.length !== bi.length) return false;
+    for (let i = 0; i < ai.length; i++) {
+      if (ai[i] !== bi[i]) return false;
+    }
+  }
+  return true;
+}
 
 function isOrbitChromeLive(): boolean {
   return typeof document !== 'undefined' && document.documentElement.dataset.chromeTheme === 'orbit';
@@ -338,13 +382,8 @@ export class Engine {
         old.tool !== peer.tool ||
         old.page !== peer.page ||
         old.viewing !== peer.viewing ||
-        Boolean(old.draft) !== Boolean(peer.draft) ||
-        (peer.draft &&
-          old.draft &&
-          (old.draft.points.length !== peer.draft.points.length ||
-            old.draft.stroke !== peer.draft.stroke ||
-            old.draft.strokeWidth !== peer.draft.strokeWidth)) ||
-        JSON.stringify(old.erasePreview ?? null) !== JSON.stringify(peer.erasePreview ?? null)
+        peerDraftPaintDirty(old.draft, peer.draft) ||
+        !samePeerErasePreview(old.erasePreview, peer.erasePreview)
       ) {
         shouldPaint = true;
       }
@@ -362,10 +401,9 @@ export class Engine {
         shouldPaint = true;
       } else if (cur.tx !== peer.x || cur.ty !== peer.y) {
         pushPeerSample(cur, peer.x, peer.y, now);
+        // Snap only on a fresh sample. Do not snap when tx is unchanged —
+        // unrelated awareness emits would kill realtime dead-reckon between packets.
         if (!smooth) snapPeerMotionToSample(cur);
-        shouldPaint = true;
-      } else if (!smooth && (cur.x !== cur.tx || cur.y !== cur.ty)) {
-        snapPeerMotionToSample(cur);
         shouldPaint = true;
       }
     }
@@ -484,7 +522,12 @@ export class Engine {
     }
     this.smoothPeerCursors = readPrefs().smoothPeerCursors;
     this.offPrefs = onPrefsChange((prefs) => {
+      const wasSmooth = this.smoothPeerCursors;
       this.smoothPeerCursors = prefs.smoothPeerCursors;
+      // Leaving smooth mode: drop any spring lead so realtime starts on-sample.
+      if (wasSmooth && !prefs.smoothPeerCursors) {
+        for (const pos of this.peerLerp.values()) snapPeerMotionToSample(pos);
+      }
       clearToolCursorCache();
       this.setCursor(this.toolCursor());
       this.dirty = true;
@@ -4220,8 +4263,12 @@ export class Engine {
         // Age-based dead-reckon (no between-packet retract) + soft spring.
         const aim = aimPeerMotion(pos, now, { leadSec, maxLead: 14 * s });
         stepPeerMotion(pos, aim.x, aim.y, now, dt, smoothTime);
-      } else {
+      } else if (reduce) {
         snapPeerMotionToSample(pos);
+      } else {
+        // Realtime: short dead-reckon, no spring trail — bridges WS gaps
+        // without the laggy smooth-follow delay.
+        applyRealtimePeerPose(pos, now, { leadSec, maxLead: 14 * s });
       }
 
       const screen = this.worldToScreen(pos.x, pos.y);
@@ -4233,9 +4280,9 @@ export class Engine {
         screen.y <= this.h - edgePad;
       if (!onScreen) continue;
 
-      // Hold frames between awareness packets only in smooth mode — realtime
-      // paints on each sample via setPeers; holding would just burn rAF.
-      if (smooth && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
+      // Hold frames between awareness packets so brief gaps do not freeze the
+      // glyph at packet rate (realtime uses dead-reckon; smooth uses spring).
+      if (!reduce && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
 
       const fill = peer.color || '#7c8cff';
       const icon = peerToolIcon(peer.tool);
@@ -4285,8 +4332,10 @@ export class Engine {
         if (smooth) {
           const aim = aimPeerMotion(pos, now, { leadSec: 0.04, maxLead: 14 / this.camera.zoom });
           stepPeerMotion(pos, aim.x, aim.y, now, this.frameDt, 0.1);
-        } else {
+        } else if (reduce) {
           snapPeerMotionToSample(pos);
+        } else {
+          applyRealtimePeerPose(pos, now, { leadSec: 0.04, maxLead: 14 / this.camera.zoom });
         }
       }
 
