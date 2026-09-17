@@ -27,6 +27,15 @@ assert.doesNotMatch(engineSrc, /triggerFireworks|private fireworks/, 'glow-orb f
 assert.match(toolsSrc, /rotateHandleWorldPos\(rotHit\)\s*\?\?\s*p\.world/, 'tools use live knob origin');
 assert.match(toolsSrc, /handleRotateClick\(origin\.x,\s*origin\.y\)/, 'world XY args preserved');
 assert.doesNotMatch(toolsSrc, /44\s*\/\s*engine\.camera\.zoom/, 'no hardcoded AABB corner spawn');
+// Physics polish: always shoot up; lighter fall; longer life.
+assert.match(engineSrc, /const aim = -Math\.PI \/ 2/, 'cannon aim locked to world −y (up)');
+assert.doesNotMatch(
+  engineSrc,
+  /atan2\(wy - \(box\.y \+ box\.h \/ 2\)/,
+  'no away-from-selection-center aim'
+);
+assert.match(engineSrc, /const g = 420 \* invZ/, 'reduced gravity / fall weight');
+assert.match(engineSrc, /p\.life -= dt \* 0\.32/, 'longer confetti lifetime');
 
 /** Pure geometry matching rotateHandleWorldPos */
 function knobWorld(hitId, zoom, topMiddle, selectionBounds, getView) {
