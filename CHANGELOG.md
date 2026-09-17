@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.24 — unreleased
+
+### Feature
+- **Confetti lasts longer (~10s)** so bits can fall through the floor / off the bottom of the view.
+- **Peer-visible confetti**: awareness broadcasts burst origin+seed so other users see your triple-press cannon (was local-only).
+
 ## 0.15.23 — unreleased
 
 ### Polish
