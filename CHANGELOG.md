@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.26 — unreleased
+
+### Polish
+- **Align submenu close**: keep children mounted and roll `0fr↔1fr` so close matches the open animation (was unmounting and snapping shut).
+
 ## 0.15.25 — unreleased
 
 ### Feature
