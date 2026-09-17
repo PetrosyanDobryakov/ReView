@@ -28,7 +28,11 @@ function resolveCommitSha(): string {
 const commitSha = resolveCommitSha();
 const buildId = `${pkg.version}+${commitSha}`;
 
+const isTauri = Boolean(process.env.TAURI_ENV_PLATFORM);
+
 export default defineConfig({
+  // Tauri expects a quiet terminal when it nests Vite under `tauri dev`.
+  clearScreen: !isTauri,
   plugins: [
     react(),
     {
@@ -49,8 +53,13 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Tauri binds to a fixed URL; fail fast if 5173 is taken.
+    strictPort: isTauri,
     // LAN / mesh friends hit us by IP; keep host check off for local collab.
     allowedHosts: true,
+    watch: {
+      ignored: ['**/src-tauri/**'],
+    },
   },
   preview: {
     host: true,

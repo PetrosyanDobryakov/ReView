@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.15.27",
+  "version": "0.15.28",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with optional Yjs sync (LAN websocket or P2P WebRTC) and file share; static/Vercel-ready",
   "type": "module",
@@ -12,6 +12,9 @@
     "dev:log": "node scripts/dev.mjs --log",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "cf:deploy": "npx wrangler deploy",
     "cf:version": "npx wrangler versions upload",
     "bundle:engine": "node scripts/bundle-engine.mjs",
@@ -33,6 +36,7 @@
     "yjs": "^13.6.25"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",

@@ -37,7 +37,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 | Sync server only | `npm run server` |
 | Run tests | `npm test` |
 | Production build | `npm run build` |
-| Preview production build | `npm run preview` |
+| Tauri desktop (Linux) | `npm run tauri:dev` / `npm run tauri:build` (needs WebKitGTK — `docs/TAURI-LINUX.md`) |
 
 The dev server starts automatically in the **dev** terminal. Vite listens on port **5173**; the Yjs websocket sync server listens on port **1234**. Per-board rooms are `review-<boardId>`.
 

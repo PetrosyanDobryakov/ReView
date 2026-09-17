@@ -46,6 +46,21 @@ npm test
 npm run build
 ```
 
+## Desktop (Linux / Tauri 2)
+
+Minimal WebKitGTK shell — same SPA, no rewritten UI.
+
+```bash
+# once: WebKitGTK + GTK build deps (Debian/Ubuntu)
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+npm install
+npm run tauri:dev     # Vite + sync + native window
+npm run tauri:build   # release .deb under src-tauri/target/release/bundle/deb/
+```
+
+Details and WebKit notes: [docs/TAURI-LINUX.md](docs/TAURI-LINUX.md).
+
 ## Deploy
 
 - **Vercel / Cloudflare Pages (static, no server):** push to Vercel or Pages — it builds `dist/` and serves as SPA. Boards stay in the browser (IndexedDB). P2P (WebRTC) starts on these hosts automatically via `wss://signaling.yjs.dev` (room `review-<boardId>`). Use **Export** / **Import** for file share. LAN/self-host still treats P2P as opt-in.

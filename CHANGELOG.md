@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.28 — unreleased
+
+### Feature
+- **Tauri 2 Linux shell**: minimal desktop wrapper (`src-tauri/`) loads the existing Vite SPA (dev URL / built `dist`). WebKitGTK only — no frontend/backend rewrite. See `docs/TAURI-LINUX.md`.
+
 ## 0.15.27 — unreleased
 
 ### Polish
