@@ -10,6 +10,17 @@ Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and opt
 - For GitHub (`github.com`) and all other remotes, use native Windows Git from this workspace; do not route the operation through WSL.
 - Check `git remote -v` before choosing the Git environment. Do not infer the host from the repository name or apply the Cursor Origin rule to GitHub.
 
+## Versioning
+
+Semver lives in `package.json` (and matching `package-lock.json`). Current line is `0.15.x`.
+
+1. **Every ship that changes product behavior or ships to preview** bumps the version and adds a `CHANGELOG.md` section for that version. Do not reuse a version string already on `dev-warexpor` / live.
+2. **Patch** (`0.15.N` → `0.15.N+1`) for fixes and polish. **Minor** only when Warexpor JR asks. Do not invent majors.
+3. **After every version bump:** push `dev-warexpor` to GitHub **and** deploy the preview worker (`npx wrangler deploy` / Project wrangler). Never leave https://review.zpro-driftman.workers.dev/ ahead of `origin/dev-warexpor` as the normal state.
+4. **`main`:** fast-forward only when Warexpor explicitly says the tip is stable enough — not automatic on every patch.
+5. **One tip lineage:** branch from latest `origin/dev-warexpor`. If two agents race the same next version, rebase and take the next free patch — do not publish duplicate `0.15.N` tips.
+6. **Verify live:** Home `v{version}+{sha}` / `node scripts/check-live-version.mjs` / `<meta name="review-build">` should match the pushed tip.
+
 ## Cursor Cloud specific instructions
 
 ### Prerequisites
