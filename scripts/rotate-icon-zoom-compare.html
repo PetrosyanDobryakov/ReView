@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>rotate icon zoom stroke compare</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #2a2a2a;
+        color: #eee;
+        font: 14px/1.4 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 12px 16px 4px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0 16px 12px;
+        opacity: 0.75;
+        font-size: 12px;
+      }
+      canvas {
+        display: block;
+        margin: 0 auto 16px;
+        background: #1e1e1e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="label">Rotate icon stroke — before vs after</h1>
+    <p>Left: old `lineWidth = max(1.5, 2*s)` under path scale. Right: Lucide `lineWidth = 2` (zoom-stable).</p>
+    <canvas id="c" width="720" height="420"></canvas>
+    <script>
+      const ARC = 'M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8';
+      const HEAD = 'M21 3v5h-5';
+      const VIEW = 24;
+      const ICON_SCALE = 1.28;
+      const DISC_SCALE = 2.0;
+      const HR = 4.25;
+      const arcPath = new Path2D(ARC);
+      const headPath = new Path2D(HEAD);
+
+      function paintKnob(ctx, x, y, zoom, broken) {
+        const s = 1 / zoom;
+        const hr = HR * s;
+        const radius = hr * ICON_SCALE;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = 'rgba(40,40,38,0.94)';
+        ctx.strokeStyle = 'rgba(240,240,235,0.35)';
+        ctx.lineWidth = 1.35 * s;
+        ctx.beginPath();
+        ctx.arc(0, 0, hr * DISC_SCALE, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        const box = radius * 2;
+        const pathScale = box / VIEW;
+        ctx.save();
+        ctx.scale(pathScale, pathScale);
+        ctx.translate(-VIEW / 2, -VIEW / 2);
+        ctx.strokeStyle = '#f4f4f0';
+        ctx.lineWidth = broken ? Math.max(1.5, 2 * s) : 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke(arcPath);
+        ctx.stroke(headPath);
+        ctx.restore();
+        ctx.restore();
+      }
+
+      function frame(ctx, x0, y0, w, h, title) {
+        ctx.fillStyle = '#252525';
+        ctx.fillRect(x0, y0, w, h);
+        ctx.strokeStyle = '#3a3a3a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+        ctx.fillStyle = '#c8c8c4';
+        ctx.font = '12px system-ui';
+        ctx.fillText(title, x0 + 12, y0 + 20);
+      }
+
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const zooms = [
+        { z: 1, label: '100% zoom' },
+        { z: 0.25, label: '25% zoom' },
+        { z: 0.08, label: '8% zoom' },
+      ];
+
+      zooms.forEach((row, i) => {
+        const y = 24 + i * 130;
+        frame(ctx, 16, y, 330, 118, `BEFORE — ${row.label}`);
+        frame(ctx, 374, y, 330, 118, `AFTER — ${row.label}`);
+        // Draw in a world-ish space scaled so icon screen size matches board chrome:
+        // paint at identity screen coords by pre-multiplying zoom into a temp transform.
+        function drawAt(cx, cy, broken) {
+          ctx.save();
+          // Simulate world→screen: world coords * zoom. Icon world size ∝ 1/zoom,
+          // so on screen it stays ~constant — same as Engine camera.
+          ctx.translate(cx, cy);
+          ctx.scale(row.z, row.z);
+          paintKnob(ctx, 0, 0, row.z, broken);
+          ctx.restore();
+        }
+        drawAt(180, y + 68, true);
+        drawAt(538, y + 68, false);
+      });
+
+      document.getElementById('label').dataset.ready = '1';
+    </script>
+  </body>
+</html>
