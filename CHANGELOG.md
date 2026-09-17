@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.23 — unreleased
+
+### Polish
+- **Selection context menu**: group with separators; Align moves into a submenu (incl. distribute). Long-press on coarse pointers already opened the menu — move-slop hardened so holds cancel less often.
+
 ## 0.15.22 — unreleased
 
 ### Polish
