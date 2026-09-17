@@ -446,6 +446,8 @@ export class Engine {
 
   private active: ToolId = 'select';
   private override: ToolId | null = null;
+  /** True while Space is physically held — survives setTool so temp-pan stays armed. */
+  private spaceHeld = false;
   /** Board drawing surface — overlays use this to distinguish canvas vs chrome hits. */
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -930,7 +932,9 @@ export class Engine {
     // Crop and export-region pick are modal layers; leave those alone.
     if (this.pointerDown || this.connecting) this.abortPointerGesture();
     this.active = id;
-    this.override = null;
+    // Keep Space temp-pan armed across toolbar/keyboard tool swaps while Space
+    // is still held; only clear the override when Space is up.
+    this.override = this.spaceHeld ? 'pan' : null;
     // ponytail: drawing tools drop the selection — the frame hides off-select
     // anyway, and a stale selection would keep showing its style island with
     // no frame while the new tool's own panel stays hidden
@@ -4231,9 +4235,12 @@ export class Engine {
     if (this.editing) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === ' ') {
-      if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement && target.closest('button, [role="switch"]')) return;
+      // Always arm temp pan (except inputs / open sheets above). Do not skip when
+      // focus is still on a toolbar button after picking a tool — that early
+      // return made the first Space hold keep the prior tool until a second press.
       e.preventDefault();
-      if (!this.override) {
+      this.spaceHeld = true;
+      if (this.override !== 'pan') {
         this.override = 'pan';
         this.setCursor(this.toolCursor());
       }
@@ -4392,6 +4399,7 @@ export class Engine {
 
   /** Space-to-pan and middle-button pan stick if keyup/pointerup never arrives (alt-tab). */
   private clearSpacePan(): void {
+    this.spaceHeld = false;
     if (this.override === 'pan') {
       this.override = null;
       this.setCursor(this.toolCursor());
