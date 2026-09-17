@@ -1,4 +1,7 @@
 import type { UserInfo } from '../core/user';
+import type { PeerConfettiBurst } from './peerConfetti';
+
+export type { PeerConfettiBurst };
 
 export type SyncStatus = {
   online: boolean;
@@ -57,6 +60,8 @@ export type PeerCursor = {
   focus: string | null;
   /** Shape ids currently selected with the Select tool (awareness only). */
   selection: string[] | null;
+  /** Latest confetti cannon burst (awareness only; one-shot by id). */
+  confetti: PeerConfettiBurst | null;
 };
 
 export type CursorPos = { x: number; y: number };

@@ -12,6 +12,7 @@ import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
 import { netLog } from './log';
+import { parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
@@ -39,6 +40,9 @@ class P2pClient {
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
   private lastSelection: string[] | null = null;
+  private lastConfetti: PeerConfettiBurst | null = null;
+  private confettiClearTimer: ReturnType<typeof setTimeout> | null = null;
+  private confettiSeq = 0;
 
   private lastError: string | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -235,6 +239,7 @@ class P2pClient {
         erasePreview: parseErasePreview(st.erasePreview),
         focus: typeof st.focus === 'string' && (st.focus as string).trim() ? (st.focus as string).trim() : null,
         selection: parsePeerSelection(st.selection),
+        confetti: parsePeerConfetti(st.confetti),
       });
     }
     return [...byUser.values()];
@@ -278,6 +283,34 @@ class P2pClient {
     this.hotAwareness.queue({ selection: slim });
     if (!slim) this.hotAwareness.flushNow();
   }
+  publishConfetti(origin: { x: number; y: number; seed: number }): void {
+    this.confettiSeq = (this.confettiSeq + 1) >>> 0;
+    const burst: PeerConfettiBurst = {
+      x: origin.x,
+      y: origin.y,
+      seed: origin.seed >>> 0,
+      id: this.confettiSeq,
+      t: Date.now(),
+    };
+    this.lastConfetti = burst;
+    if (this.confettiClearTimer) {
+      clearTimeout(this.confettiClearTimer);
+      this.confettiClearTimer = null;
+    }
+    this.hotAwareness.queue({ confetti: burst });
+    this.hotAwareness.flushNow();
+    this.confettiClearTimer = setTimeout(() => this.clearConfettiField(), 2500);
+  }
+  private clearConfettiField(): void {
+    if (this.confettiClearTimer) {
+      clearTimeout(this.confettiClearTimer);
+      this.confettiClearTimer = null;
+    }
+    if (this.lastConfetti === null && !this.provider) return;
+    this.lastConfetti = null;
+    this.hotAwareness.queue({ confetti: null });
+    this.hotAwareness.flushNow();
+  }
   publishPage(page: string): void { if (this.lastPage === page) return; this.lastPage = page; this.write('page', page); }
   publishBoardView(viewing: boolean): void {
     if (this.lastViewing === viewing) return;
@@ -286,6 +319,7 @@ class P2pClient {
       this.lastDraft = null;
       this.lastErase = null;
       this.lastSelection = null;
+      this.clearConfettiField();
       this.hotAwareness.queue({ draft: null, erasePreview: null, selection: null });
       this.hotAwareness.flushNow();
     }

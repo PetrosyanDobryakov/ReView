@@ -13,7 +13,7 @@ export {
 } from './config';
 export { SyncClient, syncClient } from './client';
 export { p2pClient, attachP2p, detachP2p, reconnectP2p } from './p2p';
-export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser } from './types';
+export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser, PeerConfettiBurst } from './types';
 export {
   isNetLogEnabled,
   setNetLogEnabled,
@@ -138,6 +138,11 @@ export function publishFocus(shapeId: string | null): void {
 export function publishSelection(ids: string[] | null): void {
   syncClient.publishSelection(ids);
   p2pClient.publishSelection(ids);
+}
+
+export function publishConfetti(origin: { x: number; y: number; seed: number }): void {
+  syncClient.publishConfetti(origin);
+  p2pClient.publishConfetti(origin);
 }
 
 function mergePeers(a: PeerCursor[], b: PeerCursor[]): PeerCursor[] {

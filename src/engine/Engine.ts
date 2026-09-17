@@ -40,8 +40,9 @@ import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon, polylineHitsPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
-import { sendCursor, publishTool, publishFocus, publishSelection } from '../net';
+import { sendCursor, publishTool, publishFocus, publishSelection, publishConfetti } from '../net';
 import { samePeerSelection } from '../net/peerSelection';
+import { CONFETTI_STALE_MS, mulberry32, samePeerConfetti } from '../net/peerConfetti';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import {
@@ -395,6 +396,7 @@ export class Engine {
     const prevById = new Map(this.remotePeers.map((p) => [p.id, p]));
     let shouldPaint = peers.length !== this.remotePeers.length;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const wall = Date.now();
     const smooth = this.smoothPeerCursors && !this.reduceMotion;
 
     const live = new Set(peers.map((p) => p.id));
@@ -403,6 +405,9 @@ export class Engine {
         this.peerLerp.delete(id);
         shouldPaint = true;
       }
+    }
+    for (const id of [...this.peerConfettiSeen.keys()]) {
+      if (!live.has(id)) this.peerConfettiSeen.delete(id);
     }
 
     for (const peer of peers) {
@@ -417,9 +422,21 @@ export class Engine {
         peerDraftPaintDirty(old.draft, peer.draft) ||
         !samePeerErasePreview(old.erasePreview, peer.erasePreview) ||
         old.focus !== peer.focus ||
-        !samePeerSelection(old.selection, peer.selection)
+        !samePeerSelection(old.selection, peer.selection) ||
+        !samePeerConfetti(old.confetti, peer.confetti)
       ) {
         shouldPaint = true;
+      }
+      // Replay remote confetti cannon once per burst id (awareness-only FX).
+      const burst = peer.confetti;
+      if (burst) {
+        const seen = this.peerConfettiSeen.get(peer.id);
+        if (seen !== burst.id) {
+          this.peerConfettiSeen.set(peer.id, burst.id);
+          if (wall - burst.t <= CONFETTI_STALE_MS) {
+            this.triggerConfetti(burst.x, burst.y, burst.seed, false);
+          }
+        }
       }
       if (peer.x === null || peer.y === null) {
         if (this.peerLerp.has(peer.id)) {
@@ -525,6 +542,8 @@ export class Engine {
   }> = [];
   private easterRotateClicks = 0;
   private lastEasterTime = 0;
+  /** Last replayed peer confetti id per awareness client — fire once per burst. */
+  private peerConfettiSeen = new Map<number, number>();
 
   private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
   private observedMeta: Y.Map<unknown> | null = null;
@@ -1198,8 +1217,12 @@ export class Engine {
     this.triggerConfetti(worldX, worldY);
   }
 
-  /** Board-space paper confetti cannon at the rotate knob (replaces glow-orb fireworks). */
-  private triggerConfetti(wx: number, wy: number): void {
+  /**
+   * Board-space paper confetti cannon at the rotate knob (replaces glow-orb fireworks).
+   * @param seed optional PRNG seed for peer-identical layout
+   * @param broadcast when true (default), publish awareness so remotes replay
+   */
+  private triggerConfetti(wx: number, wy: number, seed?: number, broadcast = true): void {
     // Paper-like saturated bits that read on light/dark board chrome (no glow orbs).
     const colors = [
       '#e03131',
@@ -1218,27 +1241,31 @@ export class Engine {
     const cone = reduce ? 0.55 : 0.95; // radians half-angle around aim
     // Cannon always points world −y (screen up), not away-from-selection-center.
     const aim = -Math.PI / 2;
+    const useSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
+    const rand = mulberry32(useSeed);
     for (let i = 0; i < count; i++) {
       const t = i / Math.max(count - 1, 1);
-      const ang = aim + (t - 0.5) * 2 * cone + (Math.random() - 0.5) * 0.35;
+      const ang = aim + (t - 0.5) * 2 * cone + (rand() - 0.5) * 0.35;
       // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~800–1300 px/s snappy).
-      const speed = (800 + Math.random() * 500) * invZ;
-      const w = (6 + Math.random() * 10) * invZ;
-      const h = (3 + Math.random() * 4.5) * invZ;
+      const speed = (800 + rand() * 500) * invZ;
+      const w = (6 + rand() * 10) * invZ;
+      const h = (3 + rand() * 4.5) * invZ;
       this.confetti.push({
-        x: wx + (Math.random() - 0.5) * 6 * invZ,
-        y: wy + (Math.random() - 0.5) * 6 * invZ,
+        x: wx + (rand() - 0.5) * 6 * invZ,
+        y: wy + (rand() - 0.5) * 6 * invZ,
         vx: Math.cos(ang) * speed,
         vy: Math.sin(ang) * speed,
         life: 1,
         color: colors[i % colors.length],
         w,
         h,
-        rot: Math.random() * Math.PI * 2,
-        spin: (Math.random() - 0.5) * 18,
+        rot: rand() * Math.PI * 2,
+        spin: (rand() - 0.5) * 18,
       });
     }
     this.dirty = true;
+    // Awareness-only FX — remotes replay the same origin/seed; never write particles to the doc.
+    if (broadcast) publishConfetti({ x: wx, y: wy, seed: useSeed });
   }
 
   private updateConfetti(dt: number): void {
@@ -1253,7 +1280,8 @@ export class Engine {
       p.vx *= Math.pow(0.4, dt); // horizontal air drag
       p.vy *= Math.pow(0.28, dt); // kills ascent fast; ~110 px/s terminal fall
       p.rot += p.spin * dt;
-      p.life -= dt * 0.32; // ~3.1s from life=1
+      // ~10s from life=1 — long enough to fall through the viewport floor.
+      p.life -= dt * 0.1;
     }
     this.confetti = this.confetti.filter((p) => p.life > 0);
     if (this.confetti.length) this.dirty = true;
@@ -1265,9 +1293,10 @@ export class Engine {
     ctx.shadowBlur = 0;
     for (const p of this.confetti) {
       const alpha = Math.max(0, Math.min(1, p.life));
-      // Hold full opacity longer, then snap-fade so bits stay readable on chrome.
+      // Stay opaque through most of the fall; soft fade only near the end so
+      // pieces remain readable while exiting past the bottom of the view.
       ctx.save();
-      ctx.globalAlpha = alpha > 0.25 ? 1 : alpha / 0.25;
+      ctx.globalAlpha = alpha > 0.12 ? 1 : alpha / 0.12;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.rot);
       ctx.fillStyle = p.color;

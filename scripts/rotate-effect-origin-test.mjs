@@ -36,13 +36,28 @@ assert.doesNotMatch(
 );
 assert.match(
   engineSrc,
-  /const speed = \(800 \+ Math\.random\(\) \* 500\) \* invZ/,
+  /const speed = \(800 \+ Math\.random\(\) \* 500\) \* invZ|const speed = \(800 \+ rand\(\) \* 500\) \* invZ/,
   'snappy launch speed ~800–1300 px/s'
 );
 assert.match(engineSrc, /const g = 240 \* invZ/, 'low-ish gravity for floaty fall');
 assert.match(engineSrc, /p\.vx \*= Math\.pow\(0\.4, dt\)/, 'horizontal air drag');
 assert.match(engineSrc, /p\.vy \*= Math\.pow\(0\.28, dt\)/, 'vertical drag → slow terminal fall');
-assert.match(engineSrc, /p\.life -= dt \* 0\.32/, 'longer confetti lifetime');
+assert.match(engineSrc, /p\.life -= dt \* 0\.1/, 'long confetti lifetime (~10s fall through floor)');
+assert.match(engineSrc, /publishConfetti\(\{ x: wx, y: wy, seed: useSeed \}\)/, 'broadcast confetti via awareness');
+assert.match(engineSrc, /triggerConfetti\(burst\.x,\s*burst\.y,\s*burst\.seed,\s*false\)/, 'replay peer bursts without rebroadcast');
+assert.match(engineSrc, /mulberry32/, 'seeded PRNG for peer-identical layout');
+assert.doesNotMatch(engineSrc, /p\.life -= dt \* 0\.32/, 'old 0.32 drain retired');
+
+const netIndex = readFileSync(
+  fileURLToPath(new URL('../src/net/index.ts', import.meta.url)),
+  'utf8'
+);
+assert.match(netIndex, /export function publishConfetti/, 'net export publishConfetti');
+assert.doesNotMatch(
+  readFileSync(fileURLToPath(new URL('../src/net/peerConfetti.ts', import.meta.url)), 'utf8'),
+  /Y\.Map|ydoc|doc\.get/,
+  'confetti FX stays off the durable Yjs doc'
+);
 
 /** Pure geometry matching rotateHandleWorldPos */
 function knobWorld(hitId, zoom, topMiddle, selectionBounds, getView) {
