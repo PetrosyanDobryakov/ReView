@@ -182,10 +182,9 @@ export class SelectTool extends Tool {
     store.beginGesture();
     const rotHit = engine.hitRotateHandle(p.screen.x, p.screen.y);
     if (rotHit) {
-      // easter egg — triple click on rotation handle
-      const hx = rotHit === '__group__' ? (engine.selectionBounds()!.x - 44 / engine.camera.zoom) : (engine.views.get(rotHit)!.x - 44 / engine.camera.zoom);
-      const hy = rotHit === '__group__' ? (engine.selectionBounds()!.y + engine.selectionBounds()!.h + 44 / engine.camera.zoom) : (engine.views.get(rotHit)!.y + engine.views.get(rotHit)!.h + 44 / engine.camera.zoom);
-      (engine as any).handleRotateClick?.(hx, hy);
+      // easter egg — triple click on rotation handle (spawn at live knob world pos)
+      const origin = engine.rotateHandleWorldPos(rotHit) ?? p.world;
+      engine.handleRotateClick(origin.x, origin.y);
       if (rotHit === '__group__') {
         const box = engine.selectionBounds();
         if (!box) return;
