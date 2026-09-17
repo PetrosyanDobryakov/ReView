@@ -3563,8 +3563,40 @@ button.brand {
 
 /* Phone width: type + sep + host-offline compact (visual.md).
    Brand floor: overflow:hidden zeros flex min-width — without a floor the
-   title crushes to a sliver between Home and Pages (phone-board-name-eaten). */
+   title crushes to a sliver between Home and Pages (phone-board-name-eaten).
+   Vertical tighten (after coarse 44-hit path): file/meta islands were
+   pad8+44+pad8 ≈ 60px tall — reclaim board/Home viewport; keep H0 floor. */
 @media (max-width: 720px) {
+  .file-island,
+  .meta-island {
+    padding: 4px 8px;
+    min-height: 0;
+  }
+
+  .file-island .icon-btn,
+  .meta-island .icon-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    flex: 0 0 36px;
+  }
+
+  /* Coarse sets .zoom-value min-height 44 — overflow chip alone kept board
+     file-island ~54px tall after icon/pad tighten. */
+  .file-island .zoom-value,
+  .file-island .file-zoom-overflow-btn {
+    min-height: 0;
+    height: 32px;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  .file-island .brand,
+  .file-island > .brand,
+  .file-island > .brand-edit {
+    height: 32px;
+  }
+
   .file-island > .brand,
   .file-island > .brand-edit {
     flex: 1 1 auto;
@@ -3588,11 +3620,11 @@ button.brand {
 
   .file-island .island-sep,
   .meta-island .island-sep {
-    margin: 8px 6px;
+    margin: 6px 6px;
   }
 
   .home-root .file-island .island-sep {
-    margin: 8px 4px;
+    margin: 6px 4px;
   }
 
   .home-root .home-title {
@@ -3612,6 +3644,11 @@ button.brand {
 
   .host-offline-banner > span:first-child {
     display: none;
+  }
+
+  /* Style strip: less vertical pad only — toolbelt stays 44 thumb targets. */
+  .style-island {
+    padding-block: 6px;
   }
 }
 
@@ -4940,8 +4977,9 @@ h3 .swap-text,
     font-size: 13px;
     gap: 4px;
   }
+  /* Top clear: file-bar inset (~8–12) + tightened island (~40) + air. */
   .home-root {
-    padding: 68px 12px 20px;
+    padding: 56px 12px 20px;
   }
 }
 .home-title {
