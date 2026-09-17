@@ -1221,8 +1221,8 @@ export class Engine {
     for (let i = 0; i < count; i++) {
       const t = i / Math.max(count - 1, 1);
       const ang = aim + (t - 0.5) * 2 * cone + (Math.random() - 0.5) * 0.35;
-      // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~350–700 px/s).
-      const speed = (350 + Math.random() * 350) * invZ;
+      // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~800–1300 px/s snappy).
+      const speed = (800 + Math.random() * 500) * invZ;
       const w = (6 + Math.random() * 10) * invZ;
       const h = (3 + Math.random() * 4.5) * invZ;
       this.confetti.push({
@@ -1244,14 +1244,16 @@ export class Engine {
   private updateConfetti(dt: number): void {
     if (!this.confetti.length) return;
     const invZ = 1 / Math.max(this.camera.zoom, 0.05);
-    const g = 420 * invZ; // world units/s² ≈ 420 screen px/s² (lighter float)
+    // Low-ish g + strong vertical drag → snappy pop, then terminal float (not a slam).
+    const g = 240 * invZ; // world units/s² ≈ 240 screen px/s²
     for (const p of this.confetti) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.vy += g * dt;
-      p.vx *= Math.pow(0.55, dt); // air drag
+      p.vx *= Math.pow(0.4, dt); // horizontal air drag
+      p.vy *= Math.pow(0.28, dt); // kills ascent fast; ~110 px/s terminal fall
       p.rot += p.spin * dt;
-      p.life -= dt * 0.32; // ~3.1s from life=1 (was ~1.3s at 0.75)
+      p.life -= dt * 0.32; // ~3.1s from life=1
     }
     this.confetti = this.confetti.filter((p) => p.life > 0);
     if (this.confetti.length) this.dirty = true;

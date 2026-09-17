@@ -27,14 +27,21 @@ assert.doesNotMatch(engineSrc, /triggerFireworks|private fireworks/, 'glow-orb f
 assert.match(toolsSrc, /rotateHandleWorldPos\(rotHit\)\s*\?\?\s*p\.world/, 'tools use live knob origin');
 assert.match(toolsSrc, /handleRotateClick\(origin\.x,\s*origin\.y\)/, 'world XY args preserved');
 assert.doesNotMatch(toolsSrc, /44\s*\/\s*engine\.camera\.zoom/, 'no hardcoded AABB corner spawn');
-// Physics polish: always shoot up; lighter fall; longer life.
+// Physics: always shoot up; snappy launch; floaty slow fall; long life.
 assert.match(engineSrc, /const aim = -Math\.PI \/ 2/, 'cannon aim locked to world −y (up)');
 assert.doesNotMatch(
   engineSrc,
   /atan2\(wy - \(box\.y \+ box\.h \/ 2\)/,
   'no away-from-selection-center aim'
 );
-assert.match(engineSrc, /const g = 420 \* invZ/, 'reduced gravity / fall weight');
+assert.match(
+  engineSrc,
+  /const speed = \(800 \+ Math\.random\(\) \* 500\) \* invZ/,
+  'snappy launch speed ~800–1300 px/s'
+);
+assert.match(engineSrc, /const g = 240 \* invZ/, 'low-ish gravity for floaty fall');
+assert.match(engineSrc, /p\.vx \*= Math\.pow\(0\.4, dt\)/, 'horizontal air drag');
+assert.match(engineSrc, /p\.vy \*= Math\.pow\(0\.28, dt\)/, 'vertical drag → slow terminal fall');
 assert.match(engineSrc, /p\.life -= dt \* 0\.32/, 'longer confetti lifetime');
 
 /** Pure geometry matching rotateHandleWorldPos */
