@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.18 — unreleased
+
+### Feature
+- **Rotate triple-press confetti cannon**: replaces glow-bubble fireworks with noticeable paper confetti bursting from the live rotate knob.
+- **Knob origin fix**: spawn uses `rotateHandleWorldPos` (same geometry as paint/hit-test, including rotate-handle-on-top + shape rotation) instead of a hardcoded bottom-left AABB corner.
+
 ## 0.15.17 — unreleased
 
 ### Polish
