@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ToolId } from '../engine/tools';
 import { onPrefsChange, readPrefs, writePrefs } from '../core/prefs';
 import {
@@ -14,6 +15,7 @@ import type { LocaleId } from '../core/locale';
 import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
 import { isCoarsePointer } from '../core/pointerEnv';
+import { zoomedPortalPosition } from './portalPlace';
 
 function readOrders(): ToolbarOrders {
   return readToolbarOrders(readPrefs().toolbarOrder);
@@ -169,7 +171,9 @@ function ToolButtons({
   );
 }
 
-/** Overflow shelf: parked tool rows + nested block-scheme submenu. Rows are draggable both ways. */
+/** Overflow shelf: parked tool rows + nested block-scheme submenu. Rows are draggable both ways.
+ * Menu is portaled: ≤720 `.toolbelt-scroll` uses overflow-x:auto (which forces y clipping) +
+ * mask-image, so an in-tree absolute popover was painted/clipped away on phone — tap looked dead. */
 function MoreMenu({
   tool,
   locale,
@@ -184,7 +188,6 @@ function MoreMenu({
   onMove: (id: ToolId, to: StripGroup, before: ToolId | null, after: boolean) => void;
 }) {
   const menuId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -192,7 +195,39 @@ function MoreMenu({
   const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
+  const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
   const allowReorder = !isCoarsePointer();
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setSub(false);
+  }, []);
+
+  const placeMenu = useCallback(() => {
+    const trigger = btnRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const scale =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+    const width = 220;
+    const estimatedHeight = Math.min(360, 48 + ids.length * 44 + 52);
+    const scaledW = width * scale;
+    const centered = {
+      left: rect.left + rect.width / 2 - scaledW / 2,
+      right: rect.left + rect.width / 2 + scaledW / 2,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+    setMenuStyle(
+      zoomedPortalPosition(centered, {
+        width,
+        estimatedHeight,
+        align: 'left',
+        scale,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
+    );
+  }, [ids.length]);
 
   useEffect(() => {
     if (SCHEME.includes(tool)) setLastSchemeTool(tool);
@@ -200,27 +235,37 @@ function MoreMenu({
 
   const prevTool = useRef(tool);
   useEffect(() => {
-    if (prevTool.current !== tool) {
-      setOpen(false);
-      setSub(false);
-    }
+    if (prevTool.current !== tool) close();
     prevTool.current = tool;
-  }, [tool]);
+  }, [tool, close]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    placeMenu();
+    const onReflow = () => placeMenu();
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
+    return () => {
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
+    };
+  }, [open, placeMenu, sub]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
-      if (rootRef.current?.contains(target)) return;
-      setOpen(false);
-      setSub(false);
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      close();
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
       e.stopPropagation();
-      setOpen(false);
-      setSub(false);
+      close();
       btnRef.current?.focus();
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -229,7 +274,7 @@ function MoreMenu({
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [open]);
+  }, [open, close]);
 
   useEffect(() => {
     if (!open) return;
@@ -237,15 +282,14 @@ function MoreMenu({
       '[data-scheme-active="true"], button'
     );
     active?.focus();
-  }, [open ]);
+  }, [open]);
 
   const isActive = ids.includes(tool) || SCHEME.includes(tool);
 
   const pick = (id: ToolId) => {
     if (SCHEME.includes(id)) setLastSchemeTool(id);
     onTool(id);
-    setOpen(false);
-    setSub(false);
+    close();
     btnRef.current?.focus();
   };
 
@@ -265,8 +309,112 @@ function MoreMenu({
     clearToolbarClickSuppressSoon();
   };
 
+  const menu =
+    open && menuStyle
+      ? createPortal(
+          <div
+            ref={menuRef}
+            id={menuId}
+            className="island block-scheme-popover more-pop"
+            role="menu"
+            aria-label={t(locale, 'more')}
+            style={{ left: menuStyle.left, top: menuStyle.top }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              if (e.defaultPrevented) return;
+              const drag = dropToolId(e);
+              if (!drag) return;
+              e.preventDefault();
+              onMove(drag, 'more', null, false);
+              clearToolbarClickSuppressNow();
+            }}
+          >
+            <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
+            {ids.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="menuitem"
+                draggable={allowReorder}
+                className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
+                title={t(locale, id)}
+                aria-label={t(locale, id)}
+                onDragStart={(e) => beginDrag(e, id)}
+                onDragEnd={endDrag}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientY > r.top + r.height / 2;
+                  setDrop((cur) => (cur && cur.id === id && cur.after === after ? cur : { id, after }));
+                }}
+                onDragLeave={() => {
+                  setDrop((cur) => (cur && cur.id === id ? null : cur));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const drag = dropToolId(e);
+                  const at = drop?.id === id ? drop.after : false;
+                  setDrop(null);
+                  if (drag) onMove(drag, 'more', id, at);
+                  clearToolbarClickSuppressNow();
+                }}
+                onClick={() => {
+                  if (suppressToolbarClick) return;
+                  pick(id);
+                }}
+              >
+                <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+                <span className="more-row-label">{t(locale, id)}</span>
+              </button>
+            ))}
+            <div
+              className="more-sub"
+              onMouseEnter={() => setSub(true)}
+              onMouseLeave={() => setSub(false)}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="tool-btn more-row"
+                aria-haspopup="menu"
+                aria-expanded={sub}
+                title={t(locale, 'blockScheme')}
+                onClick={() => setSub((v) => !v)}
+              >
+                <Icon name={lastSchemeTool as IconName} size={TOOLBELT_ICON_SIZE} />
+                <span className="more-row-label">{t(locale, 'blockScheme')}</span>
+                <Icon name="chevronRight" size={14} />
+              </button>
+              {sub && (
+                <div className="island block-scheme-submenu" role="menu" aria-label={t(locale, 'blockScheme')}>
+                  {SCHEME.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitemradio"
+                      className={`tool-btn${tool === id ? ' active' : ''}`}
+                      title={t(locale, id)}
+                      aria-label={t(locale, id)}
+                      aria-checked={tool === id}
+                      onClick={() => pick(id)}
+                    >
+                      <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
-    <div className="tool-group scheme-group" ref={rootRef}>
+    <div className="tool-group scheme-group">
       <button
         ref={btnRef}
         type="button"
@@ -304,104 +452,7 @@ function MoreMenu({
       >
         <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
       </button>
-      {open && (
-        <div
-          ref={menuRef}
-          id={menuId}
-          className="island block-scheme-popover more-pop"
-          role="menu"
-          aria-label={t(locale, 'more')}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-          }}
-          onDrop={(e) => {
-            if (e.defaultPrevented) return;
-            const drag = dropToolId(e);
-            if (!drag) return;
-            e.preventDefault();
-            onMove(drag, 'more', null, false);
-            clearToolbarClickSuppressNow();
-          }}
-        >
-          <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
-          {ids.map((id) => (
-            <button
-              key={id}
-              type="button"
-              role="menuitem"
-              draggable={allowReorder}
-              className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
-              title={t(locale, id)}
-              aria-label={t(locale, id)}
-              onDragStart={(e) => beginDrag(e, id)}
-              onDragEnd={endDrag}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                const r = e.currentTarget.getBoundingClientRect();
-                const after = e.clientY > r.top + r.height / 2;
-                setDrop((cur) => (cur && cur.id === id && cur.after === after ? cur : { id, after }));
-              }}
-              onDragLeave={() => {
-                setDrop((cur) => (cur && cur.id === id ? null : cur));
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const drag = dropToolId(e);
-                const at = drop?.id === id ? drop.after : false;
-                setDrop(null);
-                if (drag) onMove(drag, 'more', id, at);
-                clearToolbarClickSuppressNow();
-              }}
-              onClick={() => {
-                if (suppressToolbarClick) return;
-                pick(id);
-              }}
-            >
-              <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
-              <span className="more-row-label">{t(locale, id)}</span>
-            </button>
-          ))}
-          <div
-            className="more-sub"
-            onMouseEnter={() => setSub(true)}
-            onMouseLeave={() => setSub(false)}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              className="tool-btn more-row"
-              aria-haspopup="menu"
-              aria-expanded={sub}
-              title={t(locale, 'blockScheme')}
-              onClick={() => setSub((v) => !v)}
-            >
-              <Icon name={lastSchemeTool as IconName} size={TOOLBELT_ICON_SIZE} />
-              <span className="more-row-label">{t(locale, 'blockScheme')}</span>
-              <Icon name="chevronRight" size={14} />
-            </button>
-            {sub && (
-              <div className="island block-scheme-submenu" role="menu" aria-label={t(locale, 'blockScheme')}>
-                {SCHEME.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="menuitemradio"
-                    className={`tool-btn${tool === id ? ' active' : ''}`}
-                    title={t(locale, id)}
-                    aria-label={t(locale, id)}
-                    aria-checked={tool === id}
-                    onClick={() => pick(id)}
-                  >
-                    <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
