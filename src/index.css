@@ -1480,12 +1480,20 @@ button.brand {
   padding: 0 0 4px;
 }
 
-/* More shelf: labeled list popover, schemes fly out to the right. */
+/* More shelf: labeled list popover, schemes fly out to the right.
+   Portaled (fixed) so ≤720 toolbelt-scroll overflow/mask cannot clip it.
+   Keep overflow visible so .block-scheme-submenu can fly out past the shelf. */
 .block-scheme-popover.more-pop {
+  position: fixed;
+  z-index: 220;
+  left: auto;
+  bottom: auto;
+  transform: none;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   min-width: 212px;
+  width: 220px;
   gap: 4px;
 }
 .tool-btn.more-row {
@@ -3392,19 +3400,21 @@ button.brand {
     overflow-y: visible;
     justify-content: flex-start;
     width: 100%;
+    /* Keep tools (and the slide-thumb ring) out of the edge fade zone. */
+    padding-inline: 16px;
     padding-bottom: 2px;
     -webkit-mask-image: linear-gradient(
       90deg,
       transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
+      #000 16px,
+      #000 calc(100% - 16px),
       transparent
     );
     mask-image: linear-gradient(
       90deg,
       transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
+      #000 16px,
+      #000 calc(100% - 16px),
       transparent
     );
   }
@@ -3415,18 +3425,19 @@ button.brand {
     transform: none;
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     overflow-x: auto;
+    padding-inline: 16px;
     -webkit-mask-image: linear-gradient(
       90deg,
       transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
+      #000 16px,
+      #000 calc(100% - 16px),
       transparent
     );
     mask-image: linear-gradient(
       90deg,
       transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
+      #000 16px,
+      #000 calc(100% - 16px),
       transparent
     );
   }

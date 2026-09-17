@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.13 — unreleased
+
+### Polish
+- **Calculator key glyphs**: larger shared-face `key` / `keyFn` sizes (Standard + Scientific) so symbols fill spacious wells better.
+- **Phone scroll edge fades**: toolbelt + style island `mask-image` stops + inline padding so the slide-thumb selection ring is not eaten at the edges.
+- **More on phone**: portal the More shelf (like Pages/Members) so ≤720 `toolbelt-scroll` overflow/mask no longer clips the popover — tap opens Calculator / Table / etc.
+
 ## 0.15.12 — unreleased
 
 ### Space → temp pan
