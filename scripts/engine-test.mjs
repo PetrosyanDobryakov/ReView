@@ -3158,6 +3158,56 @@ for (const fn of documentListeners.get('visibilitychange') ?? []) fn();
 assert.equal(engine.tool.id, 'select', 'hiding the tab drops Space-to-pan');
 document.visibilityState = 'visible';
 
+// Regression: first Space after a tool pick must pan even when focus is still on
+// the toolbar button (browser leaves focus there after click).
+if (typeof globalThis.HTMLElement === 'undefined') {
+  globalThis.HTMLElement = class HTMLElement {};
+}
+const toolBtn = {
+  tagName: 'BUTTON',
+  isContentEditable: false,
+  closest(sel) {
+    return String(sel).includes('button') ? toolBtn : null;
+  },
+};
+Object.setPrototypeOf(toolBtn, globalThis.HTMLElement.prototype);
+engine.setTool('pen');
+assert.equal(engine.tool.id, 'pen', 'setup: pen active before Space');
+let spacePrevented = false;
+engine.onKeyDown({
+  key: ' ',
+  code: 'Space',
+  target: toolBtn,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  altKey: false,
+  preventDefault() {
+    spacePrevented = true;
+  },
+});
+assert.equal(spacePrevented, true, 'Space on focused tool button still preventDefaults');
+assert.equal(engine.tool.id, 'pan', 'first Space after tool pick pans (button focus)');
+assert.equal(engine.active, 'pen', 'active tool stays pen under Space override');
+engine.setTool('eraser');
+assert.equal(engine.tool.id, 'pan', 'tool swap while Space held keeps temp pan');
+assert.equal(engine.active, 'eraser', 'active tool updates under held Space');
+engine.onKeyUp({ key: ' ' });
+assert.equal(engine.tool.id, 'eraser', 'Space up restores the tool chosen while held');
+engine.onKeyDown({
+  key: ' ',
+  code: 'Space',
+  target: toolBtn,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  altKey: false,
+  preventDefault() {},
+});
+assert.equal(engine.tool.id, 'pan', 'second Space hold still pans');
+engine.onKeyUp({ key: ' ' });
+assert.equal(engine.tool.id, 'eraser', 'Space up restores eraser again');
+
 assert.equal(penStrokeWidthForSize({ alpha: 0.3 }, 5), 20, 'highlighter brush size is 4× the slider');
 assert.equal(penStrokeWidthForSize({ alpha: 1 }, 5), 5, 'marker brush size matches the slider');
 assert.equal(penStrokeWidthForSize({}, 5), 5, 'missing alpha is treated as a marker');

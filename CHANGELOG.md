@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.12 — unreleased
+
+### Space → temp pan
+- **First Space after tool pick** arms temporary pan even when focus is still on the toolbar button (was early-returning on `button` / `role=switch`).
+- **Tool swap while Space held** keeps temp pan armed until keyup.
+
 ## 0.15.11 — unreleased
 
 ### Phone / tablet visual hierarchy
