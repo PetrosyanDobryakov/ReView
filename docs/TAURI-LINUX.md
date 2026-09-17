@@ -26,7 +26,7 @@ sudo apt install \
   libssl-dev
 ```
 
-Needs **Rust** (rustup) and **Node 20+**.
+Needs **Rust via rustup** (stable **≥ 1.88**; Tauri 2 crates use `edition2024` — **1.83 fails**) and **Node 20+**. `rustup update stable && rustup default stable`.
 
 ## Run
 
