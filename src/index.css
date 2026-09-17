@@ -1507,13 +1507,16 @@ button.brand {
   gap: 10px;
   justify-content: flex-start;
   text-align: left;
+  /* Keep the row's hit box fixed. translateX on the button itself (0.15.8)
+     moved pointer geometry; on leave the transition slid the row back under
+     the cursor and :hover flashed on the left-behind tool. Slide/scale live
+     on children only. */
   transition:
     background-color var(--chrome-dur-fast) var(--chrome-ease),
-    transform var(--chrome-dur-fast) var(--chrome-ease);
+    color var(--chrome-dur-fast) var(--chrome-ease);
 }
 .tool-btn.more-row:hover {
   background: var(--chrome-panel-2);
-  transform: translateX(2px);
 }
 .tool-btn.more-row:hover:not(.active) {
   color: var(--chrome-accent-strong);
@@ -1521,31 +1524,38 @@ button.brand {
 .tool-btn.more-row > svg:first-child {
   flex: none;
   opacity: 0.82;
-  transform: scale(1);
+  transform: scale(1) translateX(0);
   transform-origin: center;
   transition:
     opacity var(--chrome-dur-fast) var(--chrome-ease),
     transform var(--chrome-dur-fast) var(--chrome-ease);
 }
+.tool-btn.more-row .more-row-label {
+  transition: transform var(--chrome-dur-fast) var(--chrome-ease);
+}
 .tool-btn.more-row:hover > svg:first-child,
 .tool-btn.more-row.active > svg:first-child {
   opacity: 1;
-  transform: scale(1.08);
+  transform: scale(1.08) translateX(2px);
 }
-.tool-btn.more-row.dragging,
-.tool-btn.more-row.dragging:hover {
+.tool-btn.more-row:hover .more-row-label {
+  transform: translateX(2px);
+}
+.tool-btn.more-row.dragging:hover > svg:first-child,
+.tool-btn.more-row.dragging .more-row-label {
   transform: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .tool-btn.more-row,
-  .tool-btn.more-row > svg:first-child {
+  .tool-btn.more-row > svg:first-child,
+  .tool-btn.more-row .more-row-label {
     transition: none;
-  }
-  .tool-btn.more-row:hover {
-    transform: none;
   }
   .tool-btn.more-row:hover > svg:first-child,
   .tool-btn.more-row.active > svg:first-child {
+    transform: none;
+  }
+  .tool-btn.more-row:hover .more-row-label {
     transform: none;
   }
 }

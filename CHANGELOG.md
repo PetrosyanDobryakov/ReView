@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.17 — unreleased
+
+### Polish
+- **More shelf row hover**: keep the row hit box fixed — slide/scale live on icon + label only. Stops the intermittent highlight flash on the previous tool when moving across Calculator / Table / Graph rows (translateX on the button itself re-entered `:hover` on leave).
+
 ## 0.15.16 — unreleased
 
 ### Sync (invisible)
