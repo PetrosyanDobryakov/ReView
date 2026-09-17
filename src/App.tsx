@@ -1166,7 +1166,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             <button
               type="button"
               className="host-offline-banner"
-              title={t(locale, 'keepOnDeviceHint')}
+              title={`${t(locale, 'hostOfflineBanner')} — ${t(locale, 'keepOnDeviceHint')}`}
               onClick={handleKeepOnDevice}
             >
               <span>{t(locale, 'hostOfflineBanner')}</span>

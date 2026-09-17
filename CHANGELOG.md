@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.15 — unreleased
+
+### Phone layout
+- **Board file-island title floor**: ≤720 / tablet brand keeps `min-width: 5.5em` so `overflow: hidden` cannot crush the title to a sliver between Home and Pages; Home product name stays `flex: 0`.
+- **Home notice stack**: ≤720 wraps desktop CTA under the cache notice (full-width text, no one-word column / promo overlap); version truncates; seps tighten.
+- **Board rows denser**: ≤520 container — tighter pad/gap, `align-items: start`, narrower idx, auto actions; ≤400 hides date + header; Home main “New board” + list padding compact on ≤720.
+- **Host-offline CTA-only** on ≤720 (long copy stays for `title` where set).
+
 ## 0.15.14 — unreleased
 
 ### Perf (invisible)

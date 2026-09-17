@@ -3551,13 +3551,29 @@ button.brand {
   }
 }
 
-/* Phone width: type + sep + host-offline compact (visual.md). */
+/* Phone width: type + sep + host-offline compact (visual.md).
+   Brand floor: overflow:hidden zeros flex min-width — without a floor the
+   title crushes to a sliver between Home and Pages (phone-board-name-eaten). */
 @media (max-width: 720px) {
-  .file-island .brand {
-    font-size: 15px;
-    max-width: 28vw;
+  .file-island > .brand,
+  .file-island > .brand-edit {
+    flex: 1 1 auto;
+    min-width: 5.5em;
+    /* Prefer leftover island width over a tight vw cap (title was readable
+       but truncated early while meta still had air). */
+    max-width: min(56vw, 18em);
+    width: auto;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+  }
+
+  /* Home product name is short — grow would steal space from version. */
+  .home-root .file-island > .brand {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: none;
   }
 
   .file-island .island-sep,
@@ -3565,8 +3581,27 @@ button.brand {
     margin: 8px 6px;
   }
 
+  .home-root .file-island .island-sep {
+    margin: 8px 4px;
+  }
+
+  .home-root .home-title {
+    font-size: 15px;
+  }
+
+  .home-root .home-version {
+    max-width: 30vw;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .host-offline-banner {
     max-width: min(220px, 48vw);
+  }
+
+  .host-offline-banner > span:first-child {
+    display: none;
   }
 }
 
@@ -3605,12 +3640,21 @@ button.brand {
     padding: 7px 8px;
   }
 
-  .file-island .brand,
-  .file-island .brand-edit {
+  .file-island > .brand,
+  .file-island > .brand-edit {
+    flex: 1 1 auto;
+    min-width: 5.5em;
     max-width: 36vw;
+    width: auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .home-root .file-island > .brand {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: none;
   }
 }
 
@@ -4313,6 +4357,26 @@ h3 .swap-text,
     transition: none;
   }
 }
+/* Phone: stack promo under notice so nowrap CTA cannot crush the copy. */
+@media (max-width: 720px) {
+  .home-notice {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px 10px;
+    margin: 10px auto 12px;
+    padding: 10px 12px;
+  }
+  .home-notice-text {
+    flex: 1 1 0;
+    min-width: min(100%, 14rem);
+  }
+  .home-notice-cta {
+    flex: 1 0 100%;
+    white-space: normal;
+    margin-left: 26px; /* icon 16 + gap 10 */
+    max-width: calc(100% - 26px);
+  }
+}
 .home-side-head, .home-main-head {
   display: flex;
   justify-content: space-between;
@@ -4805,21 +4869,69 @@ h3 .swap-text,
 }
 @container home-list (max-width: 520px) {
   .board-row {
-    grid-template-columns: 36px minmax(0, 1fr) 96px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px 10px;
+    padding: 10px 12px;
+    align-items: start;
+  }
+  .board-col-idx {
+    padding-top: 4px;
+    justify-self: start;
+  }
+  .board-col-name {
+    gap: 2px;
   }
   .board-col-status {
     display: none;
   }
+  .board-col-actions {
+    align-items: flex-start;
+    width: auto;
+    justify-self: end;
+  }
   .board-meta-badge-inline {
     display: inline-flex;
+  }
+  .board-meta-line {
+    gap: 3px 5px;
+  }
+  .board-row-tools .icon-btn {
+    width: 36px;
+    height: 36px;
   }
 }
 @container home-list (max-width: 400px) {
   .board-row {
-    grid-template-columns: 36px minmax(0, 1fr) 96px;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    padding: 8px 10px;
   }
   .board-row-head {
     display: none;
+  }
+  .board-meta-date,
+  .board-meta-sep:has(+ .board-meta-date) {
+    display: none;
+  }
+}
+/* Phone Home denser chrome around the list (viewport, not container). */
+@media (max-width: 720px) {
+  .home-side,
+  .home-main {
+    padding: 12px;
+    gap: 8px;
+  }
+  .home-list {
+    gap: 6px;
+  }
+  .home-main-head .style-btn {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+    gap: 4px;
+  }
+  .home-root {
+    padding: 68px 12px 20px;
   }
 }
 .home-title {
