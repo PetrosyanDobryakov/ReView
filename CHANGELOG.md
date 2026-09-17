@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.19 — unreleased
+
+### Polish
+- **Confetti cannon physics**: always shoots upward; lighter gravity; longer particle lifetime (~3s).
+
 ## 0.15.18 — unreleased
 
 ### Feature
