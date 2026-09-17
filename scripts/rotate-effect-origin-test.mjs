@@ -43,9 +43,14 @@ assert.match(engineSrc, /const g = 240 \* invZ/, 'low-ish gravity for floaty fal
 assert.match(engineSrc, /p\.vx \*= Math\.pow\(0\.4, dt\)/, 'horizontal air drag');
 assert.match(engineSrc, /p\.vy \*= Math\.pow\(0\.28, dt\)/, 'vertical drag → slow terminal fall');
 assert.match(engineSrc, /p\.life -= dt \* 0\.1/, 'long confetti lifetime (~10s fall through floor)');
-assert.match(engineSrc, /publishConfetti\(\{ x: wx, y: wy, seed: useSeed \}\)/, 'broadcast confetti via awareness');
-assert.match(engineSrc, /triggerConfetti\(burst\.x,\s*burst\.y,\s*burst\.seed,\s*false\)/, 'replay peer bursts without rebroadcast');
+assert.match(engineSrc, /publishConfetti\(\{ x: wx, y: wy, seed: useSeed, power \}\)/, 'broadcast confetti via awareness with power');
+assert.match(engineSrc, /triggerConfetti\(burst\.x,\s*burst\.y,\s*burst\.seed,\s*false,\s*burst\.power\)/, 'replay peer bursts with power, no rebroadcast');
 assert.match(engineSrc, /mulberry32/, 'seeded PRNG for peer-identical layout');
+assert.match(engineSrc, /nextConfettiPower/, 'spam streak escalates intensity');
+assert.match(engineSrc, /confettiBurstParams/, 'power drives count/cone/cannons');
+assert.match(engineSrc, /CONFETTI_MAX_LIVE/, 'live particle cap / recycle');
+assert.match(engineSrc, /this\.confetti\.push\(/, 'bursts accumulate (push, no clear-on-trigger)');
+assert.doesNotMatch(engineSrc, /this\.confetti\s*=\s*\[\]/, 'spam does not wipe prior particles');
 assert.doesNotMatch(engineSrc, /p\.life -= dt \* 0\.32/, 'old 0.32 drain retired');
 
 const netIndex = readFileSync(

@@ -42,7 +42,14 @@ import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
 import { sendCursor, publishTool, publishFocus, publishSelection, publishConfetti } from '../net';
 import { samePeerSelection } from '../net/peerSelection';
-import { CONFETTI_STALE_MS, mulberry32, samePeerConfetti } from '../net/peerConfetti';
+import {
+  CONFETTI_MAX_LIVE,
+  CONFETTI_STALE_MS,
+  confettiBurstParams,
+  mulberry32,
+  nextConfettiPower,
+  samePeerConfetti,
+} from '../net/peerConfetti';
 import type { PatchBatch } from '../core/writeGate';
 import { ICON_PATHS, LASSO_HANDLE, type IconName } from '../ui/icons';
 import {
@@ -434,7 +441,7 @@ export class Engine {
         if (seen !== burst.id) {
           this.peerConfettiSeen.set(peer.id, burst.id);
           if (wall - burst.t <= CONFETTI_STALE_MS) {
-            this.triggerConfetti(burst.x, burst.y, burst.seed, false);
+            this.triggerConfetti(burst.x, burst.y, burst.seed, false, burst.power);
           }
         }
       }
@@ -544,6 +551,10 @@ export class Engine {
   private lastEasterTime = 0;
   /** Last replayed peer confetti id per awareness client — fire once per burst. */
   private peerConfettiSeen = new Map<number, number>();
+  /** Local spam streak power (1 = normal); climbs when triple-press fires again quickly. */
+  private confettiPower = 1;
+  /** performance.now() of last local confetti trigger (for streak window). */
+  private lastConfettiBurstAt = 0;
 
   private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
   private observedMeta: Y.Map<unknown> | null = null;
@@ -1219,10 +1230,19 @@ export class Engine {
 
   /**
    * Board-space paper confetti cannon at the rotate knob (replaces glow-orb fireworks).
+   * Repeated invokes within the streak window accumulate particles and escalate intensity
+   * (more bits, wider cone, overlapping cannons) instead of resetting the prior burst.
    * @param seed optional PRNG seed for peer-identical layout
    * @param broadcast when true (default), publish awareness so remotes replay
+   * @param remotePower when set (peer replay), use that intensity instead of local streak
    */
-  private triggerConfetti(wx: number, wy: number, seed?: number, broadcast = true): void {
+  private triggerConfetti(
+    wx: number,
+    wy: number,
+    seed?: number,
+    broadcast = true,
+    remotePower?: number
+  ): void {
     // Paper-like saturated bits that read on light/dark board chrome (no glow orbs).
     const colors = [
       '#e03131',
@@ -1237,35 +1257,57 @@ export class Engine {
     ];
     const invZ = 1 / Math.max(this.camera.zoom, 0.05);
     const reduce = this.reduceMotion;
-    const count = reduce ? 18 : 64;
-    const cone = reduce ? 0.55 : 0.95; // radians half-angle around aim
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let power: number;
+    if (typeof remotePower === 'number') {
+      power = remotePower;
+    } else {
+      const gap = this.lastConfettiBurstAt > 0 ? now - this.lastConfettiBurstAt : Number.POSITIVE_INFINITY;
+      power = nextConfettiPower(this.confettiPower, gap);
+      this.confettiPower = power;
+      this.lastConfettiBurstAt = now;
+    }
+    const { count, cone, cannons, scatter } = confettiBurstParams(power, reduce);
     // Cannon always points world −y (screen up), not away-from-selection-center.
     const aim = -Math.PI / 2;
     const useSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
     const rand = mulberry32(useSeed);
-    for (let i = 0; i < count; i++) {
-      const t = i / Math.max(count - 1, 1);
-      const ang = aim + (t - 0.5) * 2 * cone + (rand() - 0.5) * 0.35;
-      // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~800–1300 px/s snappy).
-      const speed = (800 + rand() * 500) * invZ;
-      const w = (6 + rand() * 10) * invZ;
-      const h = (3 + rand() * 4.5) * invZ;
-      this.confetti.push({
-        x: wx + (rand() - 0.5) * 6 * invZ,
-        y: wy + (rand() - 0.5) * 6 * invZ,
-        vx: Math.cos(ang) * speed,
-        vy: Math.sin(ang) * speed,
-        life: 1,
-        color: colors[i % colors.length],
-        w,
-        h,
-        rot: rand() * Math.PI * 2,
-        spin: (rand() - 0.5) * 18,
-      });
+    const perCannon = Math.max(1, Math.ceil(count / cannons));
+    for (let c = 0; c < cannons; c++) {
+      const cannonT = cannons === 1 ? 0 : c / (cannons - 1) - 0.5; // -0.5..0.5
+      const aimOff = cannons === 1 ? 0 : cannonT * 0.55;
+      const xOff = cannons === 1 ? 0 : cannonT * 36 * invZ;
+      const cannonAim = aim + aimOff;
+      for (let i = 0; i < perCannon; i++) {
+        const t = i / Math.max(perCannon - 1, 1);
+        const ang = cannonAim + (t - 0.5) * 2 * cone + (rand() - 0.5) * scatter;
+        // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~800–1300 px/s snappy).
+        // High power nudges the upper end a bit for overlapping secondary pop feel.
+        const speedBoost = power >= 5 ? 1 + (power - 4) * 0.06 : 1;
+        const speed = (800 + rand() * 500) * invZ * speedBoost;
+        const w = (6 + rand() * 10) * invZ;
+        const h = (3 + rand() * 4.5) * invZ;
+        this.confetti.push({
+          x: wx + xOff + (rand() - 0.5) * 6 * invZ,
+          y: wy + (rand() - 0.5) * 6 * invZ,
+          vx: Math.cos(ang) * speed,
+          vy: Math.sin(ang) * speed,
+          life: 1,
+          color: colors[(i + c * 3) % colors.length],
+          w,
+          h,
+          rot: rand() * Math.PI * 2,
+          spin: (rand() - 0.5) * (18 + power * 1.5),
+        });
+      }
+    }
+    // Recycle oldest bits so a spam frenzy stays huge without bricking the board.
+    if (this.confetti.length > CONFETTI_MAX_LIVE) {
+      this.confetti.splice(0, this.confetti.length - CONFETTI_MAX_LIVE);
     }
     this.dirty = true;
-    // Awareness-only FX — remotes replay the same origin/seed; never write particles to the doc.
-    if (broadcast) publishConfetti({ x: wx, y: wy, seed: useSeed });
+    // Awareness-only FX — remotes replay the same origin/seed/power; never write particles to the doc.
+    if (broadcast) publishConfetti({ x: wx, y: wy, seed: useSeed, power });
   }
 
   private updateConfetti(dt: number): void {

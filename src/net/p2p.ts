@@ -12,7 +12,7 @@ import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
 import { netLog } from './log';
-import { parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
+import { clampConfettiPower, parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
@@ -283,7 +283,7 @@ class P2pClient {
     this.hotAwareness.queue({ selection: slim });
     if (!slim) this.hotAwareness.flushNow();
   }
-  publishConfetti(origin: { x: number; y: number; seed: number }): void {
+  publishConfetti(origin: { x: number; y: number; seed: number; power?: number }): void {
     this.confettiSeq = (this.confettiSeq + 1) >>> 0;
     const burst: PeerConfettiBurst = {
       x: origin.x,
@@ -291,6 +291,7 @@ class P2pClient {
       seed: origin.seed >>> 0,
       id: this.confettiSeq,
       t: Date.now(),
+      power: clampConfettiPower(origin.power),
     };
     this.lastConfetti = burst;
     if (this.confettiClearTimer) {

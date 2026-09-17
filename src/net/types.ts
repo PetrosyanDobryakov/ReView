@@ -60,7 +60,7 @@ export type PeerCursor = {
   focus: string | null;
   /** Shape ids currently selected with the Select tool (awareness only). */
   selection: string[] | null;
-  /** Latest confetti cannon burst (awareness only; one-shot by id). */
+  /** Latest confetti cannon burst (awareness only; one-shot by id; power = spam intensity). */
   confetti: PeerConfettiBurst | null;
 };
 
