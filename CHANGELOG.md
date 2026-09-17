@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.22 — unreleased
+
+### Polish
+- **Rotate handle icon at low zoom**: stroke stays Lucide viewBox-stable (no s² fattening) so the knob stays a clean rotate-cw, not a blob.
+
 ## 0.15.21 — unreleased
 
 ### Polish
