@@ -3311,6 +3311,22 @@ button.brand {
   color: var(--chrome-text-dim);
 }
 
+/* Symmetric Align roll: open 0fr→1fr, close 1fr→0fr (never display:none / unmount mid-transition). */
+.ctx-submenu-roll {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--chrome-dur-sheet) var(--chrome-ease);
+}
+
+.ctx-sub.is-open .ctx-submenu-roll {
+  grid-template-rows: 1fr;
+}
+
+.ctx-submenu-roll-clip {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .ctx-submenu {
   display: flex;
   flex-direction: column;
@@ -3321,6 +3337,52 @@ button.brand {
 
 .ctx-item-nested {
   padding-left: 12px;
+}
+
+/* Nested rows: transition (not one-shot animation) so close rolls back like open. */
+.ctx-submenu .ctx-item {
+  animation: none;
+  opacity: 0;
+  transform: translateX(-8px);
+  transition:
+    opacity var(--chrome-dur) var(--chrome-ease),
+    transform var(--chrome-dur-move) var(--chrome-ease);
+  transition-delay: 0ms;
+}
+
+.ctx-sub.is-open .ctx-submenu .ctx-item {
+  opacity: 1;
+  transform: none;
+}
+
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(1) {
+  transition-delay: 20ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(2) {
+  transition-delay: 38ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(3) {
+  transition-delay: 56ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(4) {
+  transition-delay: 74ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(5) {
+  transition-delay: 92ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(6) {
+  transition-delay: 110ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(7) {
+  transition-delay: 128ms;
+}
+.ctx-sub.is-open .ctx-submenu .ctx-item:nth-child(8) {
+  transition-delay: 146ms;
+}
+
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item {
+  transition-delay: 0ms;
+  transition-duration: var(--chrome-dur-fast), var(--chrome-dur-fast);
 }
 
 .ctx-hint {
