@@ -23,6 +23,7 @@ import { noteAwarenessReceive } from './hitchDebug';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { isNetLogEnabled, netLog, registerNetDebugPeek } from './log';
 import {
+  clampConfettiPower,
   parsePeerConfetti,
   type PeerConfettiBurst,
 } from './peerConfetti';
@@ -466,7 +467,7 @@ export class SyncClient {
    * Publish a confetti cannon burst to peers (awareness only — not the Yjs doc).
    * Flush immediately for timing; auto-clears so late joiners do not re-fire.
    */
-  publishConfetti(origin: { x: number; y: number; seed: number }): void {
+  publishConfetti(origin: { x: number; y: number; seed: number; power?: number }): void {
     this.confettiSeq = (this.confettiSeq + 1) >>> 0;
     const burst: PeerConfettiBurst = {
       x: origin.x,
@@ -474,6 +475,7 @@ export class SyncClient {
       seed: origin.seed >>> 0,
       id: this.confettiSeq,
       t: Date.now(),
+      power: clampConfettiPower(origin.power),
     };
     this.lastConfetti = burst;
     if (this.confettiClearTimer) {

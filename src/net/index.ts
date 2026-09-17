@@ -140,7 +140,7 @@ export function publishSelection(ids: string[] | null): void {
   p2pClient.publishSelection(ids);
 }
 
-export function publishConfetti(origin: { x: number; y: number; seed: number }): void {
+export function publishConfetti(origin: { x: number; y: number; seed: number; power?: number }): void {
   syncClient.publishConfetti(origin);
   p2pClient.publishConfetti(origin);
 }
