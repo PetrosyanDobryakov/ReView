@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.20 — unreleased
+
+### Phone layout
+- **Top chrome vertical tighten (≤720)**: file/meta islands ~42–46px (was ~60); icons 36, brand/title 32, zoom chip 32; style island pad-block 6. Board title floor kept. Toolbelt stays 44.
+
 ## 0.15.19 — unreleased
 
 ### Polish
