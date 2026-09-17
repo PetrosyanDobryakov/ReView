@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.21 — unreleased
+
+### Polish
+- **Confetti cannon feel**: faster launch speed, lighter gravity + drag so bits pop up quick then drift down slowly (lifetime unchanged).
+
 ## 0.15.20 — unreleased
 
 ### Phone layout
