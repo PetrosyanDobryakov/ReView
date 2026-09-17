@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.25 — unreleased
+
+### Feature
+- **Confetti spam frenzy**: repeated rotate triple-press within ~1.6s escalates power (more bits, wider cone, multi-cannon) and stacks; peers get the same `power` via awareness. Cap ~900 live particles.
+
 ## 0.15.24 — unreleased
 
 ### Feature
