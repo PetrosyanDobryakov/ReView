@@ -13,6 +13,7 @@ import {
   applyRealtimePeerPose,
   stepPeerMotion,
   PEER_MOTION_HOLD_SEC,
+  PEER_MOTION_REALTIME_HOLD_SEC,
   PEER_MOTION_RESUME_GAP_SEC,
   REALTIME_LEAD_SEC,
 } from './core-bundle.mjs';
@@ -149,6 +150,35 @@ const REALTIME_OPTS = { leadSec: REALTIME_LEAD_SEC, maxLead: 20 };
     peerMotionShouldAnimate(hold, 1040 + PEER_MOTION_HOLD_SEC * 1000 + 50),
     false,
     'releases hold after the window when at rest',
+  );
+}
+
+// Realtime hold is shorter than the spring-trail hold: past leadSec the pose
+// is snapped, so we only need a tiny bridge — not a full 0.14s full-board paint.
+{
+  assert.ok(
+    PEER_MOTION_REALTIME_HOLD_SEC < PEER_MOTION_HOLD_SEC,
+    'realtime hold tighter than smooth hold',
+  );
+  assert.ok(
+    PEER_MOTION_REALTIME_HOLD_SEC >= REALTIME_LEAD_SEC,
+    'realtime hold covers dead-reckon window',
+  );
+  const hold = initPeerMotion(0, 0, 1000);
+  pushPeerSample(hold, 50, 0, 1040);
+  hold.x = hold.tx;
+  hold.y = hold.ty;
+  hold.vx = 0;
+  hold.vy = 0;
+  assert.equal(
+    peerMotionShouldAnimate(hold, 1040 + (PEER_MOTION_REALTIME_HOLD_SEC * 1000) / 2, PEER_MOTION_REALTIME_HOLD_SEC),
+    true,
+    'realtime hold still bridges mid-window',
+  );
+  assert.equal(
+    peerMotionShouldAnimate(hold, 1040 + PEER_MOTION_REALTIME_HOLD_SEC * 1000 + 20, PEER_MOTION_REALTIME_HOLD_SEC),
+    false,
+    'realtime hold releases sooner when at rest',
   );
 }
 

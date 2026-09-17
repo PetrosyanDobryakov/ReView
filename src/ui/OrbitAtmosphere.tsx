@@ -14,11 +14,17 @@ const ORBIT_SHADER_COLORS = [
   ORBIT_COLORS.lilac,
 ];
 
+function readWarpCovered(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.orbitWarpCovered === '1';
+}
+
 export function OrbitAtmosphere() {
   const [reduce, setReduce] = useState(
     () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   );
   const [visible, setVisible] = useState(() => typeof document !== 'undefined' && !document.hidden);
+  /** Board solid/non-Orbit paper fills the canvas opaquely — Warp is fully covered. */
+  const [covered, setCovered] = useState(readWarpCovered);
 
   useEffect(() => {
     const mq = matchMedia('(prefers-reduced-motion: reduce)');
@@ -26,13 +32,23 @@ export function OrbitAtmosphere() {
     mq.addEventListener('change', onMq);
     const onVis = () => setVisible(!document.hidden);
     document.addEventListener('visibilitychange', onVis);
+    const onCover = (e: Event) => {
+      const detail = (e as CustomEvent<{ covered?: boolean }>).detail;
+      setCovered(Boolean(detail?.covered));
+    };
+    window.addEventListener('review-orbit-warp-cover', onCover);
+    // Sync in case Engine set the dataset before this listener attached.
+    setCovered(readWarpCovered());
     return () => {
       mq.removeEventListener('change', onMq);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('review-orbit-warp-cover', onCover);
     };
   }, []);
 
-  const paused = reduce || !visible;
+  // Pause only when invisible: reduced-motion, tab hidden, or solid paper covers Warp.
+  // Never pause on home / Orbit paper — atmosphere is meant to be seen there.
+  const paused = reduce || !visible || covered;
 
   return (
     <div className="orbit-atmosphere" aria-hidden="true">
