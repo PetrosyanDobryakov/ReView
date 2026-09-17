@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.27 — unreleased
+
+### Polish
+- **Align submenu close feel**: 320ms ease-in-out roll + reverse-stagger opacity (verifier caught ~60ms snap with `--chrome-ease`).
+
 ## 0.15.26 — unreleased
 
 ### Polish
