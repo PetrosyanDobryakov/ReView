@@ -3311,11 +3311,15 @@ button.brand {
   color: var(--chrome-text-dim);
 }
 
-/* Symmetric Align roll: open 0fr→1fr, close 1fr→0fr (never display:none / unmount mid-transition). */
+/*
+ * Symmetric Align roll: open 0fr→1fr, close 1fr→0fr (never unmount mid-transition).
+ * Use ease-in-out (not --chrome-ease): that curve is a hard ease-out and collapses
+ * ~210px of rows in ~60ms, which reads as a snap.
+ */
 .ctx-submenu-roll {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--chrome-dur-sheet) var(--chrome-ease);
+  transition: grid-template-rows 320ms cubic-bezier(0.45, 0.05, 0.55, 0.95);
 }
 
 .ctx-sub.is-open .ctx-submenu-roll {
@@ -3339,14 +3343,14 @@ button.brand {
   padding-left: 12px;
 }
 
-/* Nested rows: transition (not one-shot animation) so close rolls back like open. */
+/* Nested rows ride the same 320ms window; reverse stagger on close = roll-back. */
 .ctx-submenu .ctx-item {
   animation: none;
   opacity: 0;
   transform: translateX(-8px);
   transition:
-    opacity var(--chrome-dur) var(--chrome-ease),
-    transform var(--chrome-dur-move) var(--chrome-ease);
+    opacity 280ms cubic-bezier(0.45, 0.05, 0.55, 0.95),
+    transform 280ms cubic-bezier(0.45, 0.05, 0.55, 0.95);
   transition-delay: 0ms;
 }
 
@@ -3380,9 +3384,30 @@ button.brand {
   transition-delay: 146ms;
 }
 
-.ctx-sub:not(.is-open) .ctx-submenu .ctx-item {
+/* Close: reverse cascade (bottom first) so content rolls up with the height. */
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(1) {
+  transition-delay: 100ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(2) {
+  transition-delay: 80ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(3) {
+  transition-delay: 60ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(4) {
+  transition-delay: 40ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(5) {
+  transition-delay: 24ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(6) {
+  transition-delay: 12ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(7) {
+  transition-delay: 4ms;
+}
+.ctx-sub:not(.is-open) .ctx-submenu .ctx-item:nth-child(8) {
   transition-delay: 0ms;
-  transition-duration: var(--chrome-dur-fast), var(--chrome-dur-fast);
 }
 
 .ctx-hint {
