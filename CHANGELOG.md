@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.14 — unreleased
+
+### Perf (invisible)
+- **Stop idle Orbit paper ambient dirty**: the rAF loop no longer forces a full-board paint every ~80ms while Orbit paper is live. Pin field is already off (`if (false)`) and the screen vignette is static — idle boards no longer repaint ~12.5fps for nothing.
+- **Static peer drafts / erase previews** no longer keep `peersAnimating` hot; tip/geometry changes still dirty via `setPeers` (`peerDraftPaintDirty` / erase equality).
+- **Realtime peer hold** tightened to `REALTIME_LEAD_SEC + 1/60` (smooth spring path keeps 0.14s) so snapped realtime glyphs do not force extra full-board paints.
+- **Pause Warp when covered**: on a board with solid/non-Orbit paper the opaque canvas fill covers Warp — shader speed goes to 0. Home and Orbit paper keep the live atmosphere. No backdrop-filter / quality / DPR changes.
+
 ## 0.15.13 — unreleased
 
 ### Polish

@@ -238,6 +238,13 @@ export const PEER_MOTION_HOLD_SEC = 0.14;
 export const REALTIME_LEAD_SEC = 0.08;
 
 /**
+ * Frame-hold for realtime (non-smooth) cursors. Past `REALTIME_LEAD_SEC` the
+ * pose is already snapped to the sample — only need a short bridge so a late
+ * packet does not freeze the glyph for an extra spring-trail window.
+ */
+export const PEER_MOTION_REALTIME_HOLD_SEC = REALTIME_LEAD_SEC + 1 / 60;
+
+/**
  * True while the cursor still needs frames: either visually moving, or within
  * the hold window after the last sample (expecting the next awareness packet).
  */

@@ -66,6 +66,8 @@ import {
   pushPeerSample,
   snapPeerMotionToSample,
   stepPeerMotion,
+  PEER_MOTION_HOLD_SEC,
+  PEER_MOTION_REALTIME_HOLD_SEC,
   REALTIME_LEAD_SEC,
   type PeerMotionState,
 } from '../core/peerMotion';
@@ -459,9 +461,8 @@ export class Engine {
   private lastT = 0;
   private lastCam = { x: 0, y: 0, z: 1 };
   private dirty = true;
-  /** Next time Orbit paper ambient may force a paint (~12fps when idle). */
-  private orbitAmbientDue = 0;
-  private orbitPaperLive = false;
+  /** Last Warp-cover signal sent to OrbitAtmosphere (board solid paper → pause). */
+  private orbitWarpCovered: boolean | null = null;
   private paperFrom = '';
   private paperTo = '';
   private paperFill = '';
@@ -578,12 +579,31 @@ export class Engine {
     });
     // Untouched calc bodies follow --chrome-panel; repaint when Customize theme flips.
     window.addEventListener('review-chrome-theme', this.onChromeTheme);
+    // Solid (non-Orbit) paper fills the canvas opaquely — pause Warp while covered.
+    {
+      const paper = store.viewPaperBg();
+      this.syncOrbitWarpCovered(!(orbitPaperActive(paper, paper) && isOrbitChromeLive()));
+    }
     this.rafId = requestAnimationFrame(this.loop);
   }
 
   private onChromeTheme = (): void => {
     this.dirty = true;
   };
+
+  /**
+   * Tell OrbitAtmosphere when the board canvas fully covers Warp (solid paper).
+   * Home has no Engine → attribute cleared on destroy so Warp keeps animating.
+   * Orbit paper (`orbitLive`) leaves Warp visible — never pause then.
+   */
+  private syncOrbitWarpCovered(covered: boolean): void {
+    if (this.orbitWarpCovered === covered) return;
+    this.orbitWarpCovered = covered;
+    if (typeof document === 'undefined') return;
+    if (covered) document.documentElement.dataset.orbitWarpCovered = '1';
+    else delete document.documentElement.dataset.orbitWarpCovered;
+    window.dispatchEvent(new CustomEvent('review-orbit-warp-cover', { detail: { covered } }));
+  }
 
   /** Watch the live store maps (rebind after initBoard replaces the Y.Doc). */
   bindStore(): void {
@@ -862,6 +882,7 @@ export class Engine {
   destroy(): void {
     this.alive = false;
     this.cancelTransientUi();
+    this.syncOrbitWarpCovered(false);
     cancelAnimationFrame(this.rafId);
     this.resizer.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -4436,10 +4457,10 @@ export class Engine {
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
-      if (this.orbitPaperLive && !this.reduceMotion && t >= this.orbitAmbientDue) {
-        this.orbitAmbientDue = t + 80;
-        this.dirty = true;
-      }
+      // Pin field is disabled (`if (false && orbitLive)` in render). Do not
+      // dirty on a timer for the static screen vignette — that forced full-board
+      // paints ~12.5fps while idle on Orbit paper. Re-enable a pulse only
+      // together with drawOrbitPaperField.
       if (moved || this.dirty || this.peersAnimating) {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -4632,7 +4653,8 @@ export class Engine {
     }
     this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
-    this.orbitPaperLive = orbitLive;
+    // Opaque paper fill covers Warp; Orbit live clears and must keep shader running.
+    this.syncOrbitWarpCovered(!orbitLive);
     this.dirty = u < 1 || this.peersAnimating;
   }
 
@@ -4647,6 +4669,9 @@ export class Engine {
     const smoothTime = 0.1;
     // Dead-reckon: realtime uses a longer bridge for occasional WS/main-thread stalls.
     const leadSec = smooth ? 0.04 : REALTIME_LEAD_SEC;
+    // Realtime pose is already snapped past leadSec — no need for the longer
+    // spring-trail hold (0.14s) that kept full-board paints hot on a frozen glyph.
+    const holdSec = smooth ? PEER_MOTION_HOLD_SEC : PEER_MOTION_REALTIME_HOLD_SEC;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
     const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
@@ -4671,7 +4696,9 @@ export class Engine {
           undefined,
           { bloom: orbitPaperActive(boardBg, boardBg) }
         );
-        this.peersAnimating = true;
+        // Do not set peersAnimating from a static draft — setPeers already
+        // dirties when tip/geometry changes (peerDraftPaintDirty). Keeping the
+        // flag hot forced full-board paints after the tip went stable.
       }
 
       if (peer.erasePreview) {
@@ -4684,7 +4711,7 @@ export class Engine {
         ctx.arc(ep.x, ep.y, ep.r, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
-        this.peersAnimating = true;
+        // Same as drafts: erase motion dirties via setPeers / samePeerErasePreview.
       }
 
       if (peer.focus) {
@@ -4763,7 +4790,7 @@ export class Engine {
 
       // Hold frames between awareness packets so brief gaps do not freeze the
       // glyph at packet rate (realtime uses dead-reckon; smooth uses spring).
-      if (!reduce && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
+      if (!reduce && peerMotionShouldAnimate(pos, now, holdSec)) this.peersAnimating = true;
 
       const fill = peer.color || '#7c8cff';
       const icon = peerToolIcon(peer.tool);
@@ -4794,6 +4821,7 @@ export class Engine {
     const pages = store.listPages();
     const reduce = this.reduceMotion;
     const smooth = this.smoothPeerCursors && !reduce;
+    const holdSec = smooth ? PEER_MOTION_HOLD_SEC : PEER_MOTION_REALTIME_HOLD_SEC;
 
     for (const peer of this.remotePeers) {
       if (peer.x === null || peer.y === null) continue;
@@ -4873,7 +4901,7 @@ export class Engine {
       ctx.restore();
       // Only keep the loop alive while the pill still needs motion frames —
       // static away/off-screen labels must not force full-board paints forever.
-      if (!reduce && peerMotionShouldAnimate(pos, now)) this.peersAnimating = true;
+      if (!reduce && peerMotionShouldAnimate(pos, now, holdSec)) this.peersAnimating = true;
     }
   }
 
