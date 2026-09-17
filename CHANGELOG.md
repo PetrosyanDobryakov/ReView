@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.16 — unreleased
+
+### Sync (invisible)
+- **Awareness heartbeat is one WebSocket frame**: the 20s `republishAwareness` path now builds one snapshot (`user` / `tool` / `page` / `viewing` / hot fields) and calls `setLocalState` once instead of up to five `setLocalStateField` publishes. Idle overnight floor ~5× quieter; cursor/draft rAF rates and heartbeat interval unchanged.
+
 ## 0.15.15 — unreleased
 
 ### Phone layout

@@ -195,3 +195,21 @@ console.log('board-title empty-pages heal: ok');
   assert.match(batchSrc, /setLocalState/, 'batch docs one setLocalState per frame');
 }
 console.log('board-title awareness batch: ok');
+
+// --- 20s heartbeat: one setLocalState, not multipublish ---
+{
+  const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
+  const start = clientSrc.indexOf('private republishAwareness');
+  const end = clientSrc.indexOf('private writePresence');
+  assert.ok(start >= 0 && end > start, 'republishAwareness before writePresence');
+  const body = clientSrc.slice(start, end);
+  assert.doesNotMatch(
+    body,
+    /this\.writePresence|this\.writeTool|this\.writePage|this\.writeViewing/,
+    'heartbeat must not fan out via setLocalStateField wrappers'
+  );
+  assert.match(body, /applyHotAwareness/, 'heartbeat uses single setLocalState path');
+  assert.match(body, /user[,:\s]/, 'heartbeat snapshot includes presence');
+  assert.match(body, /viewing/, 'heartbeat snapshot includes viewing');
+}
+console.log('board-title awareness heartbeat single-frame: ok');

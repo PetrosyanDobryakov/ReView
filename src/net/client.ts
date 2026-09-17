@@ -6,6 +6,7 @@
  * - Cursors / live drafts / erase previews: awareness-only, rAF-batched into
  *   one setLocalState per frame so drawing does not emit cursor+draft as two
  *   WS messages (DO floods → jagged peers).
+ * - 20s awareness heartbeat: one setLocalState snapshot (not multipublish).
  * - Periodic resync heals rare stuck states without constant full dumps.
  */
 
@@ -630,20 +631,21 @@ export class SyncClient {
 
   private republishAwareness(): void {
     // Drop coalesced pendings — snapshot below is authoritative.
+    // One setLocalState (via applyHotAwareness) so the 20s heartbeat is a
+    // single WS frame — not writePresence/tool/page/viewing + hot (≤5 frames).
     this.hotAwareness.clear();
-    if (this.lastUser) this.writePresence(this.lastUser);
-    else this.writePresence(loadUser());
-    if (this.lastTool) this.writeTool(this.lastTool);
-    if (this.lastPage) this.writePage(this.lastPage);
-    this.writeViewing(this.lastViewing);
-    // Hot fields in one setLocalState (not three setLocalStateField trips).
-    const hot: AwarenessPatch = {
+    const user = this.lastUser ?? loadUser();
+    const snap: AwarenessPatch = {
+      user,
+      viewing: this.lastViewing,
       cursor: this.lastCursor,
       draft: this.lastDraft,
       erasePreview: this.lastErase,
       selection: this.lastSelection,
     };
-    this.applyHotAwareness(hot);
+    if (this.lastTool) snap.tool = this.lastTool;
+    if (this.lastPage) snap.page = this.lastPage;
+    this.applyHotAwareness(snap);
   }
 
   private writePresence(user: UserInfo): void {
