@@ -1423,13 +1423,16 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
                       <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} />
                     </span>
                   </button>
-                  {open && (
-                    <div className="ctx-submenu" role="menu" aria-label={entry.label}>
-                      {entry.children.map((child, j) =>
-                        renderMenuAction(child, `${entry.label}-${child.label}-${j}`, true)
-                      )}
+                  {/* Keep mounted so close can roll height back (mirrors custom-theme-roll). */}
+                  <div className="ctx-submenu-roll" aria-hidden={!open} inert={open ? undefined : true}>
+                    <div className="ctx-submenu-roll-clip">
+                      <div className="ctx-submenu" role="menu" aria-label={entry.label}>
+                        {entry.children.map((child, j) =>
+                          renderMenuAction(child, `${entry.label}-${child.label}-${j}`, true)
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             }
