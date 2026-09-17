@@ -1216,11 +1216,8 @@ export class Engine {
     const reduce = this.reduceMotion;
     const count = reduce ? 18 : 64;
     const cone = reduce ? 0.55 : 0.95; // radians half-angle around aim
-    // Cannon aim: from selection center toward the knob (fallback: world −y / up).
-    const box = this.selectionBounds();
-    const aim = box
-      ? Math.atan2(wy - (box.y + box.h / 2), wx - (box.x + box.w / 2))
-      : -Math.PI / 2;
+    // Cannon always points world −y (screen up), not away-from-selection-center.
+    const aim = -Math.PI / 2;
     for (let i = 0; i < count; i++) {
       const t = i / Math.max(count - 1, 1);
       const ang = aim + (t - 0.5) * 2 * cone + (Math.random() - 0.5) * 0.35;
@@ -1247,14 +1244,14 @@ export class Engine {
   private updateConfetti(dt: number): void {
     if (!this.confetti.length) return;
     const invZ = 1 / Math.max(this.camera.zoom, 0.05);
-    const g = 1100 * invZ; // world units/s² ≈ 1100 screen px/s²
+    const g = 420 * invZ; // world units/s² ≈ 420 screen px/s² (lighter float)
     for (const p of this.confetti) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.vy += g * dt;
       p.vx *= Math.pow(0.55, dt); // air drag
       p.rot += p.spin * dt;
-      p.life -= dt * 0.75;
+      p.life -= dt * 0.32; // ~3.1s from life=1 (was ~1.3s at 0.75)
     }
     this.confetti = this.confetti.filter((p) => p.life > 0);
     if (this.confetti.length) this.dirty = true;
