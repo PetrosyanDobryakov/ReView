@@ -510,8 +510,19 @@ export class Engine {
   private snapGuides: AlignGuide[] = [];
   private connecting: { fromId: string; fromPort: PortId; cur: { x: number; y: number } } | null = null;
   private hoverPort: { shapeId: string; port: PortId } | null = null;
-  // easter egg — fireworks from rotation handle triple click
-  private fireworks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }> = [];
+  // easter egg — confetti cannon from rotation handle triple click
+  private confetti: Array<{
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number;
+    color: string;
+    w: number;
+    h: number;
+    rot: number;
+    spin: number;
+  }> = [];
   private easterRotateClicks = 0;
   private lastEasterTime = 0;
 
@@ -1101,19 +1112,37 @@ export class Engine {
     return null;
   }
 
-  /** Screen hit-test for the rotation knob (single or group). */
-  hitRotateHandle(sx: number, sy: number): string | null {
+  /**
+   * World-space center of the rotate knob for a hit id (`__group__` or shape id).
+   * Same geometry as hit-test / paint — respect `rotateHandleTop` and shape rotation.
+   * Confetti / celebrate effects should spawn from this point (or a pointer world fallback).
+   */
+  rotateHandleWorldPos(hitId: string): { x: number; y: number } | null {
     const s = ROTATE_HANDLE_OFFSET_PX / this.camera.zoom;
     const top = readPrefs().rotateHandleTop;
+    if (hitId === '__group__') {
+      const box = this.selectionBounds();
+      if (!box) return null;
+      return rotateHandleOnBox(box, s, top);
+    }
+    const v = this.views.get(hitId);
+    if (!v) return null;
+    const local = rotateHandleLocal(v.w, v.h, s, top);
+    return localToWorld(v, local.x, local.y);
+  }
+
+  /** Screen hit-test for the rotation knob (single or group). */
+  hitRotateHandle(sx: number, sy: number): string | null {
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
     if (this.selection.size > 1) {
       const box = this.selectionBounds();
       if (!box) return null;
       const hasUnlocked = [...this.selection].some((id) => !this.views.get(id)?.locked);
       if (!hasUnlocked) return null;
-      const z = this.camera.zoom;
-      const ox = this.w / 2 - this.camera.x * z;
-      const oy = this.h / 2 - this.camera.y * z;
-      const rp = rotateHandleOnBox(box, s, top);
+      const rp = this.rotateHandleWorldPos('__group__');
+      if (!rp) return null;
       const hx = rp.x * z + ox;
       const hy = rp.y * z + oy;
       if (Math.hypot(hx - sx, hy - sy) <= rotateHitRadius()) return '__group__';
@@ -1123,11 +1152,8 @@ export class Engine {
     const id = [...this.selection][0];
     const v = this.views.get(id);
     if (!v || v.locked) return null;
-    const z = this.camera.zoom;
-    const ox = this.w / 2 - this.camera.x * z;
-    const oy = this.h / 2 - this.camera.y * z;
-    const local = rotateHandleLocal(v.w, v.h, s, top);
-    const w = localToWorld(v, local.x, local.y);
+    const w = this.rotateHandleWorldPos(id);
+    if (!w) return null;
     const hx = w.x * z + ox;
     const hy = w.y * z + oy;
     if (Math.hypot(hx - sx, hy - sy) <= rotateHitRadius()) return id;
@@ -1157,86 +1183,97 @@ export class Engine {
     return best ? { shapeId: best.shapeId, port: best.port } : null;
   }
 
+  /**
+   * Triple-press easter egg on the rotate knob.
+   * `worldX`/`worldY` are board-space spawn origin (not screen). Callers should pass
+   * `rotateHandleWorldPos(hitId)` so the burst tracks the control; pointer world is fine too.
+   */
   handleRotateClick(worldX: number, worldY: number): void {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (now - this.lastEasterTime > 700) this.easterRotateClicks = 0;
     this.lastEasterTime = now;
     this.easterRotateClicks++;
-    if (this.easterRotateClicks >= 3) {
-      this.easterRotateClicks = 0;
-      this.triggerFireworks(worldX, worldY);
-    }
+    if (this.easterRotateClicks < 3) return;
+    this.easterRotateClicks = 0;
+    this.triggerConfetti(worldX, worldY);
   }
 
-  private triggerFireworks(wx: number, wy: number): void {
-    const colors = ['#ff6b6b', '#ffe27a', '#4cd964', '#1c7ed6', '#b197fc', '#ff9fd0', '#ffa94d', '#ffffff'];
-    const count = 28;
+  /** Board-space paper confetti cannon at the rotate knob (replaces glow-orb fireworks). */
+  private triggerConfetti(wx: number, wy: number): void {
+    // Paper-like saturated bits that read on light/dark board chrome (no glow orbs).
+    const colors = [
+      '#e03131',
+      '#f08c00',
+      '#fab005',
+      '#37b24d',
+      '#1c7ed6',
+      '#ae3ec9',
+      '#f06595',
+      '#212529',
+      '#f8f9fa',
+    ];
+    const invZ = 1 / Math.max(this.camera.zoom, 0.05);
+    const reduce = this.reduceMotion;
+    const count = reduce ? 18 : 64;
+    const cone = reduce ? 0.55 : 0.95; // radians half-angle around aim
+    // Cannon aim: from selection center toward the knob (fallback: world −y / up).
+    const box = this.selectionBounds();
+    const aim = box
+      ? Math.atan2(wy - (box.y + box.h / 2), wx - (box.x + box.w / 2))
+      : -Math.PI / 2;
     for (let i = 0; i < count; i++) {
-      const ang = (i / count) * Math.PI * 2 + Math.random() * 0.3;
-      const speed = 2.5 + Math.random() * 5;
-      const hue = colors[i % colors.length];
-      this.fireworks.push({
-        x: wx,
-        y: wy,
+      const t = i / Math.max(count - 1, 1);
+      const ang = aim + (t - 0.5) * 2 * cone + (Math.random() - 0.5) * 0.35;
+      // Velocities in world units/sec; *invZ keeps on-screen kick zoom-stable (~350–700 px/s).
+      const speed = (350 + Math.random() * 350) * invZ;
+      const w = (6 + Math.random() * 10) * invZ;
+      const h = (3 + Math.random() * 4.5) * invZ;
+      this.confetti.push({
+        x: wx + (Math.random() - 0.5) * 6 * invZ,
+        y: wy + (Math.random() - 0.5) * 6 * invZ,
         vx: Math.cos(ang) * speed,
-        vy: Math.sin(ang) * speed - Math.random() * 2,
+        vy: Math.sin(ang) * speed,
         life: 1,
-        maxLife: 1,
-        color: hue,
-        size: 2 + Math.random() * 3,
-      });
-    }
-    // second burst
-    for (let i = 0; i < 14; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const speed = 1 + Math.random() * 3;
-      this.fireworks.push({
-        x: wx,
-        y: wy,
-        vx: Math.cos(ang) * speed,
-        vy: Math.sin(ang) * speed - 1,
-        life: 1,
-        maxLife: 1,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        size: 1.5 + Math.random() * 2,
+        color: colors[i % colors.length],
+        w,
+        h,
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 18,
       });
     }
     this.dirty = true;
   }
 
-  private updateFireworks(dt: number): void {
-    if (!this.fireworks.length) return;
-    const g = 9.8 * 0.6;
-    for (const p of this.fireworks) {
-      p.x += p.vx;
-      p.y += p.vy;
+  private updateConfetti(dt: number): void {
+    if (!this.confetti.length) return;
+    const invZ = 1 / Math.max(this.camera.zoom, 0.05);
+    const g = 1100 * invZ; // world units/s² ≈ 1100 screen px/s²
+    for (const p of this.confetti) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
       p.vy += g * dt;
-      p.vx *= 0.98;
-      p.life -= dt * 1.1;
+      p.vx *= Math.pow(0.55, dt); // air drag
+      p.rot += p.spin * dt;
+      p.life -= dt * 0.75;
     }
-    this.fireworks = this.fireworks.filter((p) => p.life > 0);
-    if (this.fireworks.length) this.dirty = true;
+    this.confetti = this.confetti.filter((p) => p.life > 0);
+    if (this.confetti.length) this.dirty = true;
   }
 
-  private drawFireworks(ctx: CanvasRenderingContext2D): void {
-    if (!this.fireworks.length) return;
+  private drawConfetti(ctx: CanvasRenderingContext2D): void {
+    if (!this.confetti.length) return;
     ctx.save();
-    for (const p of this.fireworks) {
-      const alpha = Math.max(0, p.life);
-      ctx.globalAlpha = alpha;
+    ctx.shadowBlur = 0;
+    for (const p of this.confetti) {
+      const alpha = Math.max(0, Math.min(1, p.life));
+      // Hold full opacity longer, then snap-fade so bits stay readable on chrome.
+      ctx.save();
+      ctx.globalAlpha = alpha > 0.25 ? 1 : alpha / 0.25;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
       ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-      // sparkle
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = alpha * 0.7;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
     }
     ctx.restore();
   }
@@ -4452,7 +4489,7 @@ export class Engine {
       this.lastT = t;
       this.frameDt = dt;
       this.camera.update(dt);
-      this.updateFireworks(dt);
+      this.updateConfetti(dt);
       const moved =
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
@@ -4646,7 +4683,7 @@ export class Engine {
       ctx.strokeRect(this.exportRect.x, this.exportRect.y, this.exportRect.w, this.exportRect.h);
       ctx.restore();
     }
-    this.drawFireworks(ctx);
+    this.drawConfetti(ctx);
     ctx.restore();
     if (orbitLive) {
       drawOrbitPaperScreen(ctx, w, h, performance.now(), reduce);
