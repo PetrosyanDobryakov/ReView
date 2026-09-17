@@ -3293,6 +3293,36 @@ button.brand {
   color: var(--chrome-danger);
 }
 
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--chrome-border);
+  flex: 0 0 auto;
+}
+
+.ctx-sub {
+  display: flex;
+  flex-direction: column;
+}
+
+.ctx-item-sub .ctx-sub-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--chrome-text-dim);
+}
+
+.ctx-submenu {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 2px;
+  padding: 2px 0 2px 6px;
+  border-left: 2px solid color-mix(in srgb, var(--chrome-border) 80%, transparent);
+}
+
+.ctx-item-nested {
+  padding-left: 12px;
+}
+
 .ctx-hint {
   color: var(--chrome-text-dim);
   font-size: var(--chrome-type-meta);

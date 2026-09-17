@@ -75,7 +75,17 @@ import { loadCamera, saveCamera } from './core/cameraStore';
 
 type BoardMenu = { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean };
 
-type MenuItem = { label: string; hint?: string; danger?: boolean; holdMs?: number; run: () => void };
+type MenuAction = {
+  kind?: 'action';
+  label: string;
+  hint?: string;
+  danger?: boolean;
+  holdMs?: number;
+  run: () => void;
+};
+type MenuSeparator = { kind: 'separator' };
+type MenuSubmenu = { kind: 'submenu'; label: string; children: MenuAction[] };
+type MenuEntry = MenuAction | MenuSeparator | MenuSubmenu;
 
 const UNLOCK_HOLD_MS = 800;
 
@@ -84,7 +94,7 @@ function HoldCtxItem({
   index,
   onDone,
 }: {
-  item: MenuItem;
+  item: MenuAction;
   index: number;
   onDone: () => void;
 }) {
@@ -134,6 +144,13 @@ function HoldCtxItem({
   );
 }
 
+function pushSep(entries: MenuEntry[]): void {
+  if (entries.length === 0) return;
+  const last = entries[entries.length - 1];
+  if (last && last.kind === 'separator') return;
+  entries.push({ kind: 'separator' });
+}
+
 export default function App({ boardId, onBack }: { boardId: string; onBack: () => void }) {
   const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -168,6 +185,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [canCrop, setCanCrop] = useState(false);
   const [sync, setSync] = useState<SyncStatus>({ online: false, users: 0, enabled: true });
   const [menu, setMenu] = useState<BoardMenu | null>(null);
+  const [ctxSubmenu, setCtxSubmenu] = useState<string | null>(null);
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
@@ -535,7 +553,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setSelected(engine.selectedViews());
     };
     engine.events.onCrop = (active) => setCropActive(active);
-    engine.events.onContextMenu = (m) => setMenu(m);
+    engine.events.onContextMenu = (m) => {
+      setCtxSubmenu(null);
+      setMenu(m);
+    };
     engine.events.onInfo = (i) => setInfo(i);
     engine.events.onStats = (s) => {
       setZoom(Math.round(s.zoom * 100));
@@ -775,6 +796,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   const dismissMenu = () => {
     engineRef.current?.setPasteAnchor(null);
+    setCtxSubmenu(null);
     setMenu(null);
   };
 
@@ -814,21 +836,23 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const menuX = menuView ? Math.min(menuView.x, window.innerWidth - 240) : 0;
   const menuY = menuView ? Math.min(menuView.y, window.innerHeight - 320) : 0;
 
-      const menuItems: MenuItem[] = [];
+  const menuEntries: MenuEntry[] = [];
   if (menuView) {
     const e = engine;
     if (menuView.shapeId) {
       const shapeId = menuView.shapeId;
-      menuItems.push(
+      menuEntries.push(
         { label: t(locale, 'ctxCopy'), hint: `${modKey()}+C`, run: () => { commitOpenEditors(); e?.copySelection(); } },
         { label: t(locale, 'ctxCopyImage'), hint: `${modKey()}+Shift+C`, run: () => { commitOpenEditors(); e?.copySelectionAsImage(); } },
         { label: t(locale, 'ctxDuplicate'), hint: `${modKey()}+D`, run: () => { commitOpenEditors(); e?.duplicateSelection(); } },
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
+
+      const typeExtras: MenuAction[] = [];
       if (menuView.type === 'image') {
         const view = engine?.views.get(shapeId);
         const cropped = Boolean(view && (view.cropW !== undefined || view.cropH !== undefined));
-        menuItems.push(
+        typeExtras.push(
           { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() },
           {
             label: t(locale, 'crop'),
@@ -840,17 +864,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
         );
         if (cropped) {
-          menuItems.push({
+          typeExtras.push({
             label: t(locale, 'ctxResetCrop'),
             run: () => e?.resetCropSelected(),
           });
         }
       }
       if (menuView.type === 'pen') {
-        menuItems.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
+        typeExtras.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
       if (menuView.type === 'table') {
-        menuItems.push(
+        typeExtras.push(
           { label: t(locale, 'ctxTableAddRow'), run: () => e?.tableInsertRow(shapeId) },
           { label: t(locale, 'ctxTableAddCol'), run: () => e?.tableInsertCol(shapeId) },
           { label: t(locale, 'ctxTableDelRow'), danger: true, run: () => e?.tableRemoveRow(shapeId) },
@@ -858,10 +882,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           { label: t(locale, 'ctxTableHeader'), run: () => e?.tableToggleHeader(shapeId) }
         );
       }
-      menuItems.push(
+      if (typeExtras.length) {
+        pushSep(menuEntries);
+        menuEntries.push(...typeExtras);
+      }
+
+      pushSep(menuEntries);
+      menuEntries.push(
         { label: t(locale, 'ctxFront'), run: () => e?.bringFront() },
         { label: t(locale, 'ctxBack'), run: () => e?.sendBack() },
       );
+
       const selViews = [...(e?.selection ?? [])]
         .map((id) => e?.views.get(id))
         .filter((v): v is ShapeView => Boolean(v));
@@ -870,6 +901,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       const canAlign = others > 0 || (selViews.length >= 2 && unlockedSel.length >= 1);
       const canDistribute = unlockedSel.length >= 3;
       if (canAlign) {
+        const alignChildren: MenuAction[] = [];
         const alignKinds: Array<[MessageKey, AlignKind]> = [
           ['alignLeft', 'left'],
           ['alignCenterH', 'centerH'],
@@ -879,18 +911,22 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           ['alignBottom', 'bottom'],
         ];
         for (const [key, kind] of alignKinds) {
-          menuItems.push({ label: t(locale, key), run: () => e?.alignSelection(kind) });
+          alignChildren.push({ label: t(locale, key), run: () => e?.alignSelection(kind) });
         }
+        if (canDistribute) {
+          alignChildren.push(
+            { label: t(locale, 'distributeH'), run: () => e?.alignSelection('distributeH') },
+            { label: t(locale, 'distributeV'), run: () => e?.alignSelection('distributeV') },
+          );
+        }
+        pushSep(menuEntries);
+        menuEntries.push({ kind: 'submenu', label: t(locale, 'ctxAlign'), children: alignChildren });
       }
-      if (canDistribute) {
-        menuItems.push(
-          { label: t(locale, 'distributeH'), run: () => e?.alignSelection('distributeH') },
-          { label: t(locale, 'distributeV'), run: () => e?.alignSelection('distributeV') },
-        );
-      }
+
+      pushSep(menuEntries);
       const anyUnlocked = selViews.some((v) => !v.locked);
       const allLocked = selViews.length > 0 && selViews.every((v) => v.locked);
-      menuItems.push(
+      menuEntries.push(
         {
           label: anyUnlocked ? t(locale, 'ctxLock') : t(locale, 'ctxUnlock'),
           hint: allLocked ? t(locale, 'holdHint') : `${modKey()}+Shift+L`,
@@ -906,9 +942,43 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         }
       );
     } else {
-      menuItems.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => void e?.pasteFromClipboard() });
+      menuEntries.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => void e?.pasteFromClipboard() });
     }
   }
+
+  let menuAnimIndex = 0;
+  const renderMenuAction = (item: MenuAction, key: string, nested = false) => {
+    const index = menuAnimIndex++;
+    if (item.holdMs) {
+      return (
+        <HoldCtxItem
+          key={key}
+          item={item}
+          index={index}
+          onDone={() => {
+            item.run();
+            dismissMenu();
+          }}
+        />
+      );
+    }
+    return (
+      <button
+        type="button"
+        key={key}
+        role="menuitem"
+        className={`ctx-item${item.danger ? ' danger' : ''}${nested ? ' ctx-item-nested' : ''}`}
+        style={{ animationDelay: `${index * 18}ms` }}
+        onClick={() => {
+          item.run();
+          dismissMenu();
+        }}
+      >
+        <span>{item.label}</span>
+        {item.hint && <span className="ctx-hint">{item.hint}</span>}
+      </button>
+    );
+  };
 
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
@@ -1326,28 +1396,45 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       {menuShown && menuView && (
         <div
           className={`ctx-menu${menu ? '' : ' is-leaving'}`}
+          role="menu"
           style={{ left: menuX, top: menuY }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          {menuItems.map((item, index) =>
-            item.holdMs ? (
-              <HoldCtxItem key={item.label} item={item} index={index} onDone={() => { item.run(); dismissMenu(); }} />
-            ) : (
-              <button
-                type="button"
-                key={item.label}
-                className={`ctx-item${item.danger ? ' danger' : ''}`}
-                style={{ animationDelay: `${index * 18}ms` }}
-                onClick={() => {
-                  item.run();
-                  dismissMenu();
-                }}
-              >
-                <span>{item.label}</span>
-                {item.hint && <span className="ctx-hint">{item.hint}</span>}
-              </button>
-            )
-          )}
+          {menuEntries.map((entry, i) => {
+            if (entry.kind === 'separator') {
+              return <div key={`sep-${i}`} className="ctx-sep" role="separator" />;
+            }
+            if (entry.kind === 'submenu') {
+              const open = ctxSubmenu === entry.label;
+              const index = menuAnimIndex++;
+              return (
+                <div key={`sub-${entry.label}`} className={`ctx-sub${open ? ' is-open' : ''}`}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    className="ctx-item ctx-item-sub"
+                    style={{ animationDelay: `${index * 18}ms` }}
+                    onClick={() => setCtxSubmenu(open ? null : entry.label)}
+                  >
+                    <span>{entry.label}</span>
+                    <span className="ctx-hint ctx-sub-chevron" aria-hidden="true">
+                      <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} />
+                    </span>
+                  </button>
+                  {open && (
+                    <div className="ctx-submenu" role="menu" aria-label={entry.label}>
+                      {entry.children.map((child, j) =>
+                        renderMenuAction(child, `${entry.label}-${child.label}-${j}`, true)
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return renderMenuAction(entry, `${entry.label}-${i}`);
+          })}
         </div>
       )}
       {joinPrompt && (

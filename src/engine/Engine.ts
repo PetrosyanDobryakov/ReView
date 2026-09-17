@@ -3442,7 +3442,8 @@ export class Engine {
       return;
     }
     if (this.longPressOrigin) {
-      const moveSlop = isCoarsePointer() ? 12 : 10;
+      // Coarse fingers jitter more during a still hold — keep slop above dragThresholdPx (10).
+      const moveSlop = isCoarsePointer() ? 18 : 10;
       if (Math.hypot(e.clientX - this.longPressOrigin.x, e.clientY - this.longPressOrigin.y) > moveSlop) {
         this.clearLongPress();
         this.lastTap = null;
