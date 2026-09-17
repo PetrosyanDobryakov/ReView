@@ -22,6 +22,10 @@ import { syncReconnectMode } from './syncReconnect';
 import { noteAwarenessReceive } from './hitchDebug';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { isNetLogEnabled, netLog, registerNetDebugPeek } from './log';
+import {
+  parsePeerConfetti,
+  type PeerConfettiBurst,
+} from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import { tapWebSocketTraffic } from './wsTraffic';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
@@ -83,6 +87,9 @@ export class SyncClient {
   private lastDraft: PeerDraft | null = null;
   private lastErase: PeerErasePreview | null = null;
   private lastSelection: string[] | null = null;
+  private lastConfetti: PeerConfettiBurst | null = null;
+  private confettiClearTimer: ReturnType<typeof setTimeout> | null = null;
+  private confettiSeq = 0;
   /** High-freq awareness (cursor/draft/erase) — one WS frame per rAF. */
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
@@ -200,6 +207,7 @@ export class SyncClient {
     this.clearDraft();
     this.clearErasePreview();
     this.clearSelection();
+    this.clearConfetti();
     this.teardownProvider();
     this.doc = null;
     this.boardId = null;
@@ -211,6 +219,7 @@ export class SyncClient {
     this.lastDraft = null;
     this.lastErase = null;
     this.lastSelection = null;
+    this.lastConfetti = null;
     this.lastEmittedStatus = null;
     this.lastLoggedRosterKey = '';
     this.lastCursorLogState = null;
@@ -365,6 +374,7 @@ export class SyncClient {
       const focusRaw = state.focus;
       const focus = typeof focusRaw === 'string' && focusRaw.trim() ? focusRaw.trim() : null;
       const selection = parsePeerSelection(state.selection);
+      const confetti = parsePeerConfetti(state.confetti);
       byUser.set(key, {
         id,
         userId: userId || `client:${id}`,
@@ -382,6 +392,7 @@ export class SyncClient {
         erasePreview,
         focus,
         selection,
+        confetti,
       });
     }
     return [...byUser.values()];
@@ -451,6 +462,30 @@ export class SyncClient {
     if (!slim) this.hotAwareness.flushNow();
   }
 
+  /**
+   * Publish a confetti cannon burst to peers (awareness only — not the Yjs doc).
+   * Flush immediately for timing; auto-clears so late joiners do not re-fire.
+   */
+  publishConfetti(origin: { x: number; y: number; seed: number }): void {
+    this.confettiSeq = (this.confettiSeq + 1) >>> 0;
+    const burst: PeerConfettiBurst = {
+      x: origin.x,
+      y: origin.y,
+      seed: origin.seed >>> 0,
+      id: this.confettiSeq,
+      t: Date.now(),
+    };
+    this.lastConfetti = burst;
+    if (this.confettiClearTimer) {
+      clearTimeout(this.confettiClearTimer);
+      this.confettiClearTimer = null;
+    }
+    this.hotAwareness.queue({ confetti: burst });
+    this.hotAwareness.flushNow();
+    // Drop the field after peers have had time to observe — keeps awareness lean.
+    this.confettiClearTimer = setTimeout(() => this.clearConfetti(), 2500);
+  }
+
   publishPage(page: string): void {
     if (this.lastPage === page) return;
     this.lastPage = page;
@@ -466,6 +501,7 @@ export class SyncClient {
       this.clearDraft();
       this.clearErasePreview();
       this.clearSelection();
+      this.clearConfetti();
     }
     netLog.info('publishBoardView', () => ({ viewing }));
     this.writeViewing(viewing);
@@ -575,6 +611,17 @@ export class SyncClient {
     this.hotAwareness.flushNow();
   }
 
+  private clearConfetti(): void {
+    if (this.confettiClearTimer) {
+      clearTimeout(this.confettiClearTimer);
+      this.confettiClearTimer = null;
+    }
+    if (this.lastConfetti === null && !this.provider) return;
+    this.lastConfetti = null;
+    this.hotAwareness.queue({ confetti: null });
+    this.hotAwareness.flushNow();
+  }
+
   /** Merge hot fields into one awareness setLocalState (one WS frame). */
   private applyHotAwareness(patch: AwarenessPatch): void {
     const awareness = this.provider?.awareness;
@@ -642,6 +689,7 @@ export class SyncClient {
       draft: this.lastDraft,
       erasePreview: this.lastErase,
       selection: this.lastSelection,
+      confetti: this.lastConfetti,
     };
     if (this.lastTool) snap.tool = this.lastTool;
     if (this.lastPage) snap.page = this.lastPage;
