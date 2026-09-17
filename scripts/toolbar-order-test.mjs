@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   CREATE_DEFAULTS,
   MORE_DEFAULTS,
@@ -44,3 +45,27 @@ const appended = moveToolInOrders(o, 'pen', 'create', 'nope', false);
 assert.equal(appended.create.at(-1), 'pen', 'missing anchor appends');
 
 console.log('toolbar-order: all checks passed');
+
+// More-row hover must not translate the button itself — that moves the hit box
+// and re-enters :hover on the left-behind row while the transform transitions out.
+{
+  const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+  const hoverBlock = css.match(/\.tool-btn\.more-row:hover\s*\{[^}]*\}/);
+  assert.ok(hoverBlock, 'more-row:hover rule present');
+  assert.doesNotMatch(
+    hoverBlock[0],
+    /transform\s*:/,
+    'more-row:hover must not set transform on the button (hit-box flash)'
+  );
+  assert.match(
+    css,
+    /\.tool-btn\.more-row:hover\s+\.more-row-label\s*\{[^}]*transform:\s*translateX\(2px\)/,
+    'hover slide lives on the label'
+  );
+  assert.match(
+    css,
+    /\.tool-btn\.more-row:hover\s*>\s*svg:first-child[\s\S]*?transform:\s*scale\(1\.08\)\s*translateX\(2px\)/,
+    'hover slide+scale lives on the icon'
+  );
+  console.log('toolbar-order more-row hover hit-box: ok');
+}
