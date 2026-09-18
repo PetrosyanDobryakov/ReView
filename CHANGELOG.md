@@ -5,6 +5,12 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.41
+
+### Perf
+- **Multiplayer awareness rate floor**: hot cursor/draft/erase flushes stay rAF-coalesced but are capped at ~20 Hz (50 ms min interval) so drawing storms no longer wake `review-sync` Durable Objects at display refresh. `flushNow()` still bypasses for clears/teardown; solo `review-ka` auto-response path unchanged.
+- **review-sync ws kind tags**: sampled (`~1/64`) `[review-sync] ws kind=awareness|sync|ka-fallback` logs in Observability for burst triage.
+
 ## 0.15.40
 
 ### Fix

@@ -136,6 +136,10 @@ export class BoardRoom implements DurableObject {
    * accept when no empty-room GC alarm was scheduled.
    */
   private alarmScheduled = false;
+  /** Latched from the Upgrade path for sampled Observability tags. */
+  private roomTag = '';
+  /** Counter for sampled `[review-sync] ws kind=…` logs (~1/64 messages). */
+  private wsKindSample = 0;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     // Do NOT loadOrCreate in the constructor. Hibernation wakes for awareness
@@ -540,6 +544,9 @@ export class BoardRoom implements DurableObject {
         headers: cors,
       });
     }
+    // Latch room id for sampled ws-kind logs (pathname is /review-<boardId>).
+    const pathRoom = url.pathname.replace(/^\//, '');
+    if (pathRoom) this.roomTag = pathRoom.slice(0, 80);
     // Clear the post-wipe latch now that a real peer is joining again.
     this.suppressPersist = false;
     const doc = this.doc!;
@@ -576,6 +583,21 @@ export class BoardRoom implements DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /**
+   * Low-rate Observability tag so dashboards can filter awareness vs sync wakes
+   * without flooding logs (~1/64 messages).
+   */
+  private maybeLogWsKind(kind: string): void {
+    if ((this.wsKindSample++ & 63) !== 0) return;
+    try {
+      const sockets = this.state.getWebSockets().length;
+      const room = this.roomTag || '?';
+      console.log(`[review-sync] ws kind=${kind} room=${room} sockets=${sockets}`);
+    } catch {
+      /* observability best-effort */
+    }
+  }
+
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
     try {
       // Fallback when auto-response is unavailable (tests / older runtime): still
@@ -583,6 +605,7 @@ export class BoardRoom implements DurableObject {
       // hibernation auto-response path — that does not invoke this handler.
       if (typeof message === 'string') {
         if (message === WS_KEEPALIVE_REQUEST) {
+          this.maybeLogWsKind('ka-fallback');
           try {
             ws.send(WS_KEEPALIVE_RESPONSE);
           } catch {
@@ -608,6 +631,7 @@ export class BoardRoom implements DurableObject {
       // Peek type before any storage I/O: awareness heartbeats must not reload
       // multi-MB board blobs on hibernation wake (~seconds of DO wall time).
       if (type === messageAwareness) {
+        this.maybeLogWsKind('awareness');
         this.ensureAwarenessHub();
         this.lastAwareAt = Date.now();
         awarenessProtocol.applyAwarenessUpdate(
@@ -619,6 +643,7 @@ export class BoardRoom implements DurableObject {
       }
 
       if (type === messageSync) {
+        this.maybeLogWsKind('sync');
         const freshlyLoaded = await this.ensureDocLoaded();
         if (freshlyLoaded) {
           this.sendSyncStep1(ws);
