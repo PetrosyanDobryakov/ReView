@@ -60,7 +60,15 @@ import {
   portHitRadius,
   rotateHitRadius,
 } from '../core/pointerEnv';
-import { computeSnap, groupBox, visualBox, type AlignGuide, type AlignKind, alignViews } from '../core/align';
+import {
+  computeSnap,
+  groupBox,
+  isAlignSnapTarget,
+  visualBox,
+  type AlignGuide,
+  type AlignKind,
+  alignViews,
+} from '../core/align';
 import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
@@ -1483,7 +1491,7 @@ export class Engine {
     const riderSkip = new Set(this.ridersOfHosts([...originals.keys()]));
     const otherBoxes: ShapeBox[] = [];
     for (const [id, v] of this.views) {
-      if (originals.has(id) || riderSkip.has(id)) continue;
+      if (originals.has(id) || riderSkip.has(id) || !isAlignSnapTarget(v.type)) continue;
       otherBoxes.push(visualBox(v));
     }
     const threshold = 8 / this.camera.zoom;
@@ -1504,11 +1512,16 @@ export class Engine {
     if (!unlocked.length) return;
     const lockedIds = new Set(selected.filter((v) => v.locked).map((v) => v.id));
     // Multi-select aligns within the selection (locked members stay put as anchors).
-    // Single unlocked shape aligns to other board shapes.
+    // Single unlocked shape aligns only to media containers (not ink / drawings).
     const others =
       selected.length >= 2
         ? []
-        : [...this.views.values()].filter((v) => !this.selection.has(v.id) && store.isOnActivePage(v.id));
+        : [...this.views.values()].filter(
+            (v) =>
+              !this.selection.has(v.id) &&
+              store.isOnActivePage(v.id) &&
+              isAlignSnapTarget(v.type)
+          );
     let patches: Array<[string, Partial<ShapeView>]> = [];
     if (kind === 'centerH' || kind === 'centerV' || kind === 'left' || kind === 'right' || kind === 'top' || kind === 'bottom') {
       if (selected.length >= 2) {
