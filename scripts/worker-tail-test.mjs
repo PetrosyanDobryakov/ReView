@@ -35,7 +35,7 @@ const { BoardRoom } = await import(pathToFileURL(outFile).href);
 
 function makeStorage() {
   const map = new Map();
-  const ops = { puts: 0, gets: 0, deleteAlls: 0 };
+  const ops = { puts: 0, gets: 0, deletes: 0, deleteAlls: 0, deleteAlarms: 0, setAlarms: 0 };
   return {
     ops,
     map,
@@ -43,18 +43,29 @@ function makeStorage() {
       ops.gets += 1;
       if (Array.isArray(k)) {
         const m = new Map();
-        for (const key of k) if (map.has(key)) m.set(key, map.get(key));
+        for (const key of k) {
+          ops.gets += 0; // batch still one call; CF bills per key — count extras:
+          if (map.has(key)) m.set(key, map.get(key));
+        }
+        // Bill-like: multi-key get ≈ 1 RPC but CF bills per key. Track keys:
+        ops.gets += Math.max(0, k.length - 1);
         return m;
       }
       return map.get(k);
     },
     async put(k, v) {
-      ops.puts += 1;
-      if (typeof k === 'string') map.set(k, v);
-      else for (const [key, val] of Object.entries(k)) map.set(key, val);
+      if (typeof k === 'string') {
+        ops.puts += 1;
+        map.set(k, v);
+      } else {
+        const entries = Object.entries(k);
+        ops.puts += entries.length;
+        for (const [key, val] of entries) map.set(key, val);
+      }
     },
     async delete(k) {
       const keys = Array.isArray(k) ? k : [k];
+      ops.deletes += keys.length;
       let n = 0;
       for (const key of keys) if (map.delete(key)) n += 1;
       return n;
@@ -63,8 +74,12 @@ function makeStorage() {
       ops.deleteAlls += 1;
       map.clear();
     },
-    async deleteAlarm() {},
-    async setAlarm() {},
+    async deleteAlarm() {
+      ops.deleteAlarms += 1;
+    },
+    async setAlarm() {
+      ops.setAlarms += 1;
+    },
   };
 }
 
@@ -273,6 +288,70 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
   assert.equal(kaStorage.ops.gets, getsBefore, 'keepalive must not read storage');
   assert.equal(kaRoom.doc, null, 'keepalive must not create awareness hub');
   assert.deepEqual(kaSocket.sent, ['review-ka-ack'], 'keepalive replies with ack text');
+}
+
+// Clean close / reconnect must NOT rewrite chunked blobs (storage-ops spike).
+{
+  const closeStorage = makeStorage();
+  const closeSocket = makeSocket();
+  let live = [closeSocket];
+  const closeState = {
+    storage: closeStorage,
+    getWebSockets: () => live,
+    blockConcurrencyWhile: async (fn) => {
+      await fn();
+    },
+    waitUntil(p) {
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    },
+  };
+  const closeRoom = new BoardRoom(closeState, { REVIEW_COMPACT_TOKEN: 'test-token' });
+  const seed = new Y.Doc();
+  seed.getMap('b').set('photo', 'y'.repeat(2048));
+  await closeRoom.webSocketMessage(closeSocket, syncUpdateMessage(Y.encodeStateAsUpdate(seed)));
+  seed.destroy();
+  await sleep(600);
+  await Promise.all([]);
+  // Drain trailing persists
+  await sleep(50);
+  const putsAfterPersist = closeStorage.ops.puts;
+  const deletesAfterPersist = closeStorage.ops.deletes;
+  // Simulate clean disconnect with nothing dirty.
+  live = [];
+  await closeRoom.webSocketClose(closeSocket, 1000, 'idle', true);
+  assert.equal(
+    closeStorage.ops.puts,
+    putsAfterPersist,
+    'clean close must not rewrite doc/tail blobs',
+  );
+  assert.equal(
+    closeStorage.ops.deletes,
+    deletesAfterPersist,
+    'clean close must not deleteBlob/rewrite generation',
+  );
+  assert.equal(closeStorage.ops.setAlarms, 1, 'empty room still schedules GC alarm');
+  assert.equal(closeRoom.alarmScheduled, true, 'close arms alarmScheduled latch');
+  const deleteAlarmsBefore = closeStorage.ops.deleteAlarms;
+  live = [closeSocket];
+  // Mimic accept's gated deleteAlarm (same condition as fetch upgrade path).
+  if (closeRoom.alarmScheduled) {
+    await closeStorage.deleteAlarm();
+    closeRoom.alarmScheduled = false;
+  }
+  assert.equal(closeStorage.ops.deleteAlarms, deleteAlarmsBefore + 1, 'armed alarm cleared once');
+  const deleteAlarmsArmed = closeStorage.ops.deleteAlarms;
+  if (closeRoom.alarmScheduled) {
+    await closeStorage.deleteAlarm();
+    closeRoom.alarmScheduled = false;
+  }
+  assert.equal(
+    closeStorage.ops.deleteAlarms,
+    deleteAlarmsArmed,
+    'accept without scheduled alarm must not deleteAlarm',
+  );
+  try {
+    clearInterval(closeRoom.awareness?._checkInterval);
+  } catch {}
 }
 
 // Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
