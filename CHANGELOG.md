@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.37 — unreleased
+
+### Polish
+- **Calculator Windows redesign**: Win-calc chrome — ≡ nav + mode title (same scale as keypad), generous display, modes/DEG/Copy/Sticky/Text in the nav flyout. Drops the tiny ··· overflow toolbar from 0.15.36.
+
 ## 0.15.36 — unreleased
 
 ### Polish

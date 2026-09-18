@@ -76,6 +76,14 @@ assert.ok(big.fonts.key > std.fonts.key);
 assert.ok(std.fonts.key >= 17);
 assert.ok(std.fonts.keyFn >= 15);
 
+// Win-calc proportions — header chrome matches keypad scale; display is generous.
+assert.ok(std.header.h >= 36, `header too short: ${std.header.h}`);
+assert.ok(std.display.h >= 78, `display too short: ${std.display.h}`);
+assert.ok(std.fonts.header >= 14, `header font too small: ${std.fonts.header}`);
+assert.ok(std.fonts.display >= 20, `display font too small: ${std.fonts.display}`);
+// Header text should not be a shrunk foreign toolbar vs keyFn.
+assert.ok(std.fonts.header + 0.5 >= std.fonts.keyFn - 1, 'header font far below keyFn');
+
 assert.equal(calcKeypadRows('standard').length, 8);
 assert.equal(calcKeypadRows('scientific').length, 9);
 assert.equal(calcKeypadRows('standard').at(-1)?.[0]?.span, 4);
