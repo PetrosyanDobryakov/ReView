@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Ops
+- **Origin → GitHub sync**: `bash scripts/sync-github.sh` (or `npm run sync:github`) pushes tip to GitHub `dev-warexpor` and `main` in one shot.
+
+## Unreleased
+
 ### Chore
 - **Persistent Wrangler deploy:** `scripts/deploy.sh` (+ `npm run cf:deploy:all`) idempotently deploys `review-sync` then `review` from tip. Docs cover `CLOUDFLARE_API_TOKEN` + account id for CI/agents, OAuth local fallback, and Cloudflare Builds dashboard fix (`echo done` → `bash scripts/deploy.sh all`).
 
