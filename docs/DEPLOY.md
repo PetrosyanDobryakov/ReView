@@ -60,30 +60,49 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 
 ### Workers Builds — deploy must actually deploy
 
-**Status (2026-09-18):** Warexpor JR set Worker **review** Builds **Deploy command** to `bash scripts/deploy.sh all`. Tip builds through `fbf39ab` (`0.15.42`) still recorded `deployCommand: echo done` (build UUID `1a416c8e-2034-49ad-bc7b-6f1f8b7e4c03`); live stayed `0.15.38+442924b` until a post-fix tip push retriggered Builds. Prior `echo done` confirmation: tip `442924b`, build UUID `53ec9a69-3064-45a7-802c-4ac12ff3f055`. Builds MCP/API remains **read-only** for agents — dashboard config only.
+**Status (2026-09-18):** Tip `e51661d` (`0.15.45`) — Worker **review** Builds still records `deployCommand: echo done` (e.g. build UUID `9465ccce-3a3b-4202-9540-100985b14ecd`); live stays `0.15.38+442924b`. Builds MCP/API remains **read-only** for agents — dashboard config only. Manual fallback: `bash scripts/deploy.sh all` with Wrangler auth.
 
-If live again lags tip while Builds is green, check that Deploy is still `bash scripts/deploy.sh all` (not `echo done`). Manual fallback: `bash scripts/deploy.sh all` with Wrangler auth.
+#### Preferred: one Builds project on Worker **review**
 
 **Dashboard click path (Zpro account `3058d81da41b02e06744d5d058570aab`):**
 
-1. Cloudflare dashboard → Workers & Pages → Worker **`review`**
-2. **Settings** → **Builds** (or Build configuration)
-3. Confirm **Deploy command** is `bash scripts/deploy.sh all` (restore if it drifted back to `echo done`)
-4. Save; next push to the watched branch should deploy both **review** and **review-sync**
-
-**Worker `review`** → Settings → Builds:
+1. Cloudflare dashboard → Workers & Pages → Worker **`review`** (id `3fbdea65706b420dbabd7efe946bf55b`)
+2. **Settings** → **Builds**
+3. Set **Deploy command** and **Non-production branch deploy command** to `bash scripts/deploy.sh all` (not `echo done`)
+4. Production / watch branch: `dev-warexpor`
+5. Save; next tip push should publish **review-sync** then **review**
 
 | Setting | Value |
 |---------|--------|
-| Root directory | `/` (repo root) |
+| Root directory | `/` (repo root) — must load root `wrangler.toml` with `name = "review"` |
 | Install command | `npm ci && cd worker && npm ci` |
 | Build command | `npm run build` |
-| **Deploy command** | **`bash scripts/deploy.sh all`** (not `echo done`) |
-| Watch paths / branch | `dev-warexpor` (and production branch if used) |
+| **Deploy command** | **`bash scripts/deploy.sh all`** |
+| **Non-production branch deploy command** | **`bash scripts/deploy.sh all`** (or set production branch to `dev-warexpor`) |
 
-That single Builds project publishes **both** Workers after each tip push. Alternative: Deploy command `npx wrangler deploy` (SPA only) **and** enable a second Builds trigger on Worker **review-sync** with Install `cd worker && npm ci`, Build empty/`true`, Deploy `cd worker && npx wrangler deploy`.
+#### Do NOT accept the “name = 'review-sync'” banner on root `wrangler.toml`
 
-After a green build with the real Deploy command:
+That banner means Builds is bound to Worker **review-sync** while Root directory is still the **repo root** (SPA config `name = "review"`). CI overrides the name and can upload SPA `dist/` as a **review-sync** version (log: “Failed to match Worker name… Overriding using the CI provided Worker name”). Confirmed on tip `e51661d`, build UUID `8f1f8215-fe10-4b50-a1dd-f10470218167` (`npx wrangler versions upload`).
+
+**Never** rename root `wrangler.toml` to `review-sync` — that would break https://review.zpro-driftman.workers.dev/.
+
+| If you see the banner on… | Correct action |
+|---------------------------|----------------|
+| Worker **review-sync** | Set **Root directory** to `worker` (reads `worker/wrangler.toml`, already `name = "review-sync"`). Prefer **disabling** Builds on **review-sync** and deploying both from Worker **review** via `deploy.sh all`. |
+| Worker **review** | Keep `name = "review"`. Fix Deploy / non-prod deploy to `bash scripts/deploy.sh all`. |
+
+#### Optional second Builds on Worker **review-sync**
+
+Only if you want a separate trigger (not required when **review** runs `deploy.sh all`):
+
+| Setting | Value |
+|---------|--------|
+| Root directory | **`worker`** (not `/`) |
+| Install | `npm ci` |
+| Build | empty / `true` |
+| Deploy | `npx wrangler deploy` — not SPA `npm run build` |
+
+After a green **review** build with the real Deploy command:
 
 ```bash
 node scripts/check-live-version.mjs
