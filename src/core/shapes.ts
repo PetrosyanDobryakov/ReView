@@ -2389,29 +2389,29 @@ function chromeCssColor(name: string): string {
   }
 }
 
-/** Tool-default / transparent fill — treat as untouched so body tracks chrome theme. */
-function isUntouchedCalcFill(shapeFill: string): boolean {
-  return (
-    !shapeFill ||
-    shapeFill === 'transparent' ||
-    shapeFill === 'none' ||
-    shapeFill.toLowerCase() === COLORS.fill.toLowerCase()
-  );
-}
-
 /**
- * Calculator body fill.
- * Untouched (transparent / default tool white) → active `--chrome-panel`
- * (same family as UI chrome). Explicit StyleBar fills keep their color.
+ * Calculator body fill — always board/chrome theme (`--chrome-panel`), never StyleBar
+ * / selected-shape stroke-fill. Peers paint the same rule from local chrome tokens.
+ * `_shapeFill` kept for call-site compatibility.
  */
-export function resolveCalcBodyFill(boardBg: string, shapeFill: string): string {
-  if (!isUntouchedCalcFill(shapeFill)) return shapeFill;
+export function resolveCalcBodyFill(boardBg: string, _shapeFill?: string): string {
+  void _shapeFill;
   const panel = chromeCssColor('--chrome-panel');
   if (panel && /^#[0-9a-fA-F]{6}$/i.test(panel)) return panel;
   // Non-hex panels (e.g. Orbit rgba): lift off paper like graph defaults.
   const lum = relativeLuminance(boardBg);
   if (lum == null) return '#2e2e2b';
   return lum > 0.5 ? '#ffffff' : '#2a2a27';
+}
+
+/** Calculator bezel — chrome border / muted ink, not shape stroke from the style island. */
+export function resolveCalcStroke(boardBg: string): string {
+  const border = chromeCssColor('--chrome-border');
+  if (border && /^#[0-9a-fA-F]{6}$/i.test(border)) return border;
+  const text = chromeCssColor('--chrome-text');
+  if (text && /^#[0-9a-fA-F]{6}$/i.test(text)) return withAlpha(text, 0.32);
+  const lum = relativeLuminance(boardBg);
+  return lum != null && lum > 0.5 ? 'rgba(28, 28, 26, 0.28)' : 'rgba(236, 234, 228, 0.28)';
 }
 
 function calcInkBase(body: string, boardBg: string): string {
@@ -2493,7 +2493,7 @@ function drawCalculator(
   const layout = buildCalcFaceLayout(v.w, v.h, mode, Boolean(v.calcSecond), scale);
   const body = resolveCalcBodyFill(boardBg, v.fill);
   const ink = calcInkOn(body, boardBg);
-  const stroke = displayInk(v.stroke || COLORS.stroke, boardBg);
+  const stroke = resolveCalcStroke(boardBg);
   const display = v.calcDisplay ?? '0';
   const expr = (v.calcExpr ?? '').trim();
   const modeLabel = mode === 'scientific' ? 'Scientific' : 'Standard';
@@ -2505,7 +2505,7 @@ function drawCalculator(
   ctx.fillStyle = body;
   ctx.fill();
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = Math.max(1, v.strokeWidth || 1.5);
+  ctx.lineWidth = Math.max(1, 1.5);
   ctx.stroke();
 
   // Header — mode label (+ memory). Tabs/stamp live only in the open overlay.

@@ -147,12 +147,11 @@ export function CalculatorPanel({
     pub.second,
     calcFrameScale(live?.w ?? target.w, live?.h ?? target.h)
   );
-  const stroke = live?.stroke || target.stroke;
   const screen = engine.worldToScreen(target.x, target.y);
   const z = engine.camera.zoom;
   const frame = calcFrameScale(target.w, target.h);
   const rot = target.rotation ?? (live ? shapeRotation(live) : 0);
-  // Same rule as canvas: untouched → chrome panel; explicit fill kept.
+  // Theme-only face (ignore shape fill/stroke / style island).
   const bodyBg = resolveCalcBodyFill(paper, live?.fill ?? 'transparent');
   const lightBody = (relativeLuminance(bodyBg) ?? 0) > 0.55;
   const panel = readChromeCssColor('--chrome-panel');
@@ -179,8 +178,6 @@ export function CalculatorPanel({
         top: screen.y,
         width: Math.max(1, target.w * z),
         height: Math.max(1, target.h * z),
-        borderColor: stroke,
-        borderWidth: Math.max(1, (live?.strokeWidth ?? target.strokeWidth) * z),
         color: ink,
         ['--calc-zoom' as string]: String(calcCssZoom(z, frame)),
         ['--calc-ink' as string]: ink,
@@ -217,18 +214,18 @@ export function CalculatorPanel({
           >
             {t(locale, 'calcScientific')}
           </button>
-        </div>
-        <div className="calc-actions">
           {pub.mode === 'scientific' && (
             <button
               type="button"
-              className={pub.angle === 'rad' ? 'is-on' : ''}
+              className={`calc-angle${pub.angle === 'rad' ? ' is-on' : ''}`}
               onClick={() => press(pub.angle === 'rad' ? 'DEG' : 'RAD')}
               title={pub.angle === 'rad' ? 'RAD' : 'DEG'}
             >
               {pub.angle === 'rad' ? 'RAD' : 'DEG'}
             </button>
           )}
+        </div>
+        <div className="calc-actions">
           <button type="button" onClick={() => engine.copyCalculatorDisplay(target.id)} title={t(locale, 'calcCopy')}>
             {t(locale, 'calcCopy')}
           </button>

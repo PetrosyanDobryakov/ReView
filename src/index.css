@@ -1,5 +1,9 @@
 /* FigJam / Figma UI3 chrome: islands over the board, not a 2015 window chrome */
 
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
 :root,
 [data-chrome-theme='packet'] {
   --chrome-bg: #242422;
@@ -3669,6 +3673,42 @@ button.brand {
     height: 28px;
   }
 
+  /* Intentional press — war/orbit tint, not OS blue tap highlight. */
+  .icon-btn:active:not(:disabled),
+  .tool-btn:active:not(:disabled),
+  .style-btn:active:not(:disabled),
+  .swatch:active,
+  .pen-slot:active,
+  .home-team-btn:active,
+  .ctx-item:active,
+  .menu-item:active,
+  .sheet-action:active,
+  .board-row:active,
+  .pages-trigger:active,
+  .members-trigger:active,
+  .calc-modes button:active,
+  .calc-actions button:active {
+    transform: scale(0.94);
+    background: var(--chrome-active-bg);
+    box-shadow: inset 0 0 0 1.5px var(--chrome-active-ring);
+    filter: brightness(1.06);
+    opacity: 0.92;
+  }
+
+  /* Sticky :hover on touch leaves a false "selected" ring — neutralize unless pressed. */
+  .tool-btn:hover:not(:disabled):not([aria-pressed='true']),
+  .icon-btn:hover:not(:disabled):not(.is-open),
+  .style-btn:hover:not(:disabled):not(.active) {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  [data-chrome-theme='orbit'] .tool-btn:hover:not(:disabled):not([aria-pressed='true']),
+  [data-chrome-theme='orbit'] .icon-btn:hover:not(:disabled):not(.is-open),
+  [data-chrome-theme='orbit'] .style-btn:hover:not(:disabled):not(.active) {
+    box-shadow: none;
+  }
+
   .file-island .brand {
     height: 44px;
   }
@@ -4037,11 +4077,13 @@ h3 .swap-text,
 }
 .calc-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(4px * var(--calc-zoom, 1));
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: calc(3px * var(--calc-zoom, 1));
+  flex-wrap: nowrap;
   box-sizing: border-box;
+  overflow: hidden;
   /* Frosted strip so mode/stamp chrome stays readable over the canvas header. */
   background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 82%, transparent);
   border-radius: calc(8px * var(--calc-zoom, 1));
@@ -4056,7 +4098,19 @@ h3 .swap-text,
   display: flex;
   align-items: center;
   gap: calc(3px * var(--calc-zoom, 1));
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.calc-modes {
+  width: 100%;
+}
+.calc-modes button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.calc-actions {
+  justify-content: flex-end;
+  width: 100%;
 }
 .calc-modes button,
 .calc-actions button {
@@ -4065,21 +4119,33 @@ h3 .swap-text,
   background: transparent;
   color: var(--calc-muted, var(--chrome-text-dim));
   border-radius: calc(7px * var(--calc-zoom, 1));
-  height: calc(22px * var(--calc-zoom, 1));
-  padding: 0 calc(7px * var(--calc-zoom, 1));
-  font: 500 calc(10px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
+  height: calc(18px * var(--calc-zoom, 1));
+  padding: 0 calc(6px * var(--calc-zoom, 1));
+  font: 500 calc(9px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .calc-modes button.is-on,
-.calc-actions button.is-on {
+.calc-actions button.is-on,
+.calc-modes button.calc-angle.is-on {
   background: var(--chrome-active-bg);
   color: var(--chrome-accent-strong);
   border-color: transparent;
+}
+.calc-modes button.calc-angle {
+  flex: 0 0 auto;
+  min-width: calc(32px * var(--calc-zoom, 1));
 }
 .calc-modes button:hover,
 .calc-actions button:hover {
   background: var(--chrome-panel-2);
   color: var(--chrome-text);
+}
+.calc-actions button {
+  flex: 0 1 auto;
+  max-width: 34%;
 }
 .calc-key--hit {
   appearance: none;

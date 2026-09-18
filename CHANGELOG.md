@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.33 — unreleased
+
+### Fix
+- **Lasso (OSO) leftover select ring**: clear marquee/hover/focus/tactile chrome when lasso finishes and auto-swaps back to select so the pointer tool does not keep a stale "selecting" halo.
+- **Phone tap highlight**: disable default blue `-webkit-tap-highlight` and add coarse-pointer press feedback (scale + active ring) that matches island chrome; neutralize sticky hover rings on touch.
+- **Calculator theme-only colors**: calc body/bezel/ink follow `--chrome-panel` / theme tokens only — no longer inherit StyleBar or selected-shape stroke/fill (e.g. red table).
+- **Calculator phone chrome**: two-row toolbar (modes / actions), no wrap overflow, taller header slot so open-session controls stop colliding with the display.
+
 ## 0.15.32 — unreleased
 
 ### Fix
