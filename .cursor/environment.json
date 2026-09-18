@@ -1,5 +1,5 @@
 {
-  "snapshot": "bld-20260823-9a69619a-d2bd-4142-ac81-b903ebedee15",
+  "snapshot": "snapshot-20260918-2317616e-50be-4d73-abe9-6141629c2c92",
   "install": "npm ci",
   "start": "true",
   "terminals": [
