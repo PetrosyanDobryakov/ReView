@@ -15,31 +15,78 @@ No backend storage is used on Vercel. The public board is the static SPA; each b
 
 Same static build, same P2P/file-share flow. Do not add `public/_redirects` with `/* /index.html 200`. Wrangler uploads `dist` as Workers static assets, and `html_handling` strips `.html` / `/index`. That splat rewrite then matches again and Cloudflare rejects the deploy with error 100324 (infinite redirect loop).
 
+### Canonical tip deploy (SPA + sync)
+
+Two Workers stay separate on purpose:
+
+| Worker | Config | Live URL |
+|--------|--------|----------|
+| **review** | root `wrangler.toml` (SPA Assets) | `https://review.zpro-driftman.workers.dev/` |
+| **review-sync** | `worker/wrangler.toml` (Durable Object) | `https://review-sync.zpro-driftman.workers.dev/` |
+
+Do **not** merge them into one wrangler project: DO migrations and the public `wss://review-sync…` URL already ship as `review-sync`.
+
+From tip (`dev-warexpor`), one command deploys both idempotently:
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID=3058d81da41b02e06744d5d058570aab
+# CI / agents (preferred):
+export CLOUDFLARE_API_TOKEN=…   # Account API Token — see “Auth” below
+bash scripts/deploy.sh all
+# or: npm run cf:deploy:all
+```
+
+`scripts/deploy.sh` order: **review-sync** first, then **review** (SPA). Targets: `all` (default), `spa`, `sync`.
+
+Local fallback without a token: `npx wrangler login` once, then the same script (OAuth).
+
+Verify:
+
+```bash
+node scripts/check-live-version.mjs
+curl -sS https://review-sync.zpro-driftman.workers.dev/health
+```
+
+### Auth (persistent)
+
+| Context | How |
+|---------|-----|
+| CI / cloud agents / CF Builds | Env **`CLOUDFLARE_API_TOKEN`** + **`CLOUDFLARE_ACCOUNT_ID=3058d81da41b02e06744d5d058570aab`** |
+| Laptop / coordinator with interactive login | Wrangler OAuth (`wrangler login`) — no token required |
+
+Token: Cloudflare dashboard → **My Profile** → **API Tokens** → Create Token with Workers Scripts Edit (and Workers KV/D1/DO as needed for this account). Name it something like `review-wrangler-deploy`. Paste the value only into CI secrets / agent env — never into chat or git.
+
+Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.driftman).
+
 ### Workers Builds — deploy must actually deploy
 
-Preview `https://review.zpro-driftman.workers.dev/` was stuck on **0.14.25** while git tip moved through 0.14.26–0.14.34 because the Worker’s Builds **Deploy command** was set to `echo done` (build uploads nothing). Build logs showed `Executing user deploy command: echo done` then success.
+Preview was stuck on old builds while git tip moved because Worker **review** Builds **Deploy command** was `echo done` (build uploads nothing). Confirmed still `echo done` on tip `cb9833f` Builds. The Builds MCP/API available to agents is **read-only** — Warexpor must change this in the dashboard once.
 
-Fix in Cloudflare dashboard → Worker **review** → **Settings** → **Build**:
+**Worker `review`** → Settings → Builds:
 
 | Setting | Value |
 |---------|--------|
-| Build command | `npm run build` (ok) |
-| **Deploy command** | **`npx wrangler deploy`** (not `echo done`) |
-| Non-production branch deploy | Prefer `npx wrangler deploy` if `dev-warexpor` feeds the public preview URL; otherwise `npx wrangler versions upload` only creates an unpromoted version |
+| Root directory | `/` (repo root) |
+| Install command | `npm ci && cd worker && npm ci` |
+| Build command | `npm run build` |
+| **Deploy command** | **`bash scripts/deploy.sh all`** (not `echo done`) |
+| Watch paths / branch | `dev-warexpor` (and production branch if used) |
 
-After the next green build, verify:
+That single Builds project publishes **both** Workers after each tip push. Alternative: Deploy command `npx wrangler deploy` (SPA only) **and** enable a second Builds trigger on Worker **review-sync** with Install `cd worker && npm ci`, Build empty/`true`, Deploy `cd worker && npx wrangler deploy`.
+
+After the next green build:
 
 ```bash
-node scripts/check-live-version.mjs 0.14.35
+node scripts/check-live-version.mjs
 # or: curl -sS https://review.zpro-driftman.workers.dev/ | grep review-build
 ```
 
-Home header shows `v0.14.35+<sha>`. HTML includes `<meta name="review-build" content="…">`.
+Home header shows `v{version}+{sha}`. HTML includes `<meta name="review-build" content="…">`.
 
-1. Create a Pages or Workers project from the same repo. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback is what serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
-2. Upload a new Worker version (does not flip 100% production traffic): `npx wrangler versions upload`. Build + ship immediately: `npx wrangler deploy`. Same as npm scripts `cf:version` / `cf:deploy`. Wrangler runs `npm run build` first because of `[build] command`. Sync hub is a separate Worker: `cd worker && npx wrangler deploy`.
+1. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
+2. Manual / agent ship: `bash scripts/deploy.sh all` (or `npm run cf:deploy:all`). Partial: `cf:deploy:spa` / `cf:deploy:sync`. Legacy: `npx wrangler deploy` (SPA) and `cd worker && npx wrangler deploy` (sync).
 3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable` and HTML routes stay `no-cache`.
-4. Open `https://your-app.pages.dev/` (or the Worker URL) — persistence, file share and P2P work as on Vercel. `pages.dev` is already in `STATIC_HOSTS`, so websocket sync is not attempted at `ws://host:1234`, and P2P is on unless the user turns it off.
+4. Open the Worker URL — persistence, file share and P2P work as on Vercel. `workers.dev` / `pages.dev` are in `STATIC_HOSTS`, so LAN `ws://host:1234` is not attempted, and P2P is on unless the user turns it off.
 
 
 ## Self-hosted
