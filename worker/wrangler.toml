@@ -20,3 +20,6 @@ new_sqlite_classes = ["BoardRoom"]
 
 [observability]
 enabled = true
+# Full sample was ~300k events/day and amplified dash noise during DO storms.
+# Does not change DO billing; cuts log volume while we still see error spikes.
+head_sampling_rate = 0.1

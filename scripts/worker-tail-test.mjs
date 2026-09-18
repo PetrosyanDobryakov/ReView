@@ -108,7 +108,8 @@ const state = {
 const room = new BoardRoom(state, { REVIEW_COMPACT_TOKEN: 'test-token' });
 for (let i = 0; i < 50 && !room.doc; i++) await sleep(10);
 assert.ok(room.doc, 'room doc boots');
-// Boot sends sync step 1 to live sockets (hibernation restore) — clear it.
+// Hibernation restore no longer fan-outs sync-step1 to all sockets (that
+// doubled DO wakes). Accept path and mid-message load still sync the peer.
 sockets[0].sent.length = 0;
 sockets[1].sent.length = 0;
 
