@@ -115,17 +115,46 @@ export class BoardRoom implements DurableObject {
    * resurrecting blobs after deleteAll.
    */
   private suppressPersist = false;
+  /**
+   * True after doc+tail were restored from storage (or after wipe left an
+   * authoritative empty doc). False for an awareness-only stub hub so we
+   * never encode an empty stub over persisted blobs on close/flush.
+   */
+  private docHydrated = false;
 
   constructor(private state: DurableObjectState, private env: unknown) {
-    this.state.blockConcurrencyWhile(async () => {
-      await this.loadOrCreate();
-      // Do NOT sendSyncStep1ToAll on every hibernation wake. loadOrCreate already
-      // restores doc+tail from storage; forcing sync-step1 here makes every
-      // awareness heartbeat spawn N client sync replies → another wake → full
-      // blob reload (~seconds of DO wall time each). Client resyncInterval and
-      // accept-time sync-step1 cover rare desync. Mid-message loadOrCreate still
-      // sends sync-step1 to the waking socket only.
-    });
+    // Do NOT loadOrCreate in the constructor. Hibernation wakes for awareness
+    // heartbeats were paying multi-second blob reads on every tick even though
+    // presence fan-out needs no CRDT state. Accept + sync paths load lazily;
+    // awareness-only uses ensureAwarenessHub() (empty in-memory stub).
+  }
+
+  /** Empty in-memory doc+awareness for awareness fan-out — no storage I/O. */
+  private ensureAwarenessHub(): void {
+    if (this.doc && !(this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) return;
+    this.doc = new Y.Doc({ gc: false } as Record<string, unknown>);
+    this.awareness = new awarenessProtocol.Awareness(this.doc);
+    this.dirty = false;
+    this.pending = [];
+    this.persistGen = 0;
+    this.docHydrated = false;
+    this.bindBroadcastHandlers();
+  }
+
+  /**
+   * Restore chunked doc+tail when sync/accept needs real CRDT state.
+   * @returns true when this call performed a fresh load (caller should sync-step1).
+   */
+  private async ensureDocLoaded(): Promise<boolean> {
+    if (
+      this.doc &&
+      !(this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed &&
+      this.docHydrated
+    ) {
+      return false;
+    }
+    await this.loadOrCreate();
+    return true;
   }
 
   private async loadOrCreate(): Promise<void> {
@@ -157,6 +186,7 @@ export class BoardRoom implements DurableObject {
     this.dirty = false;
     this.pending = [];
     this.persistGen = 0;
+    this.docHydrated = true;
     this.bindBroadcastHandlers();
   }
 
@@ -266,7 +296,8 @@ export class BoardRoom implements DurableObject {
 
   /** Full-doc encode into chunked `doc`. Keep a tail if updates arrived during the write. */
   private async flushFullUnlocked(): Promise<void> {
-    if (this.suppressPersist || !this.doc) return;
+    // Never encode an awareness-only stub over real blobs after a cheap wake.
+    if (this.suppressPersist || !this.doc || !this.docHydrated) return;
     await this.flushTailUnlocked();
     if (this.suppressPersist) return;
     try {
@@ -391,6 +422,8 @@ export class BoardRoom implements DurableObject {
     this.pending = [];
     this.persistGen = 0;
     this.lastPersist = 0;
+    // Wipe left storage empty — this empty doc is authoritative.
+    this.docHydrated = true;
     this.bindBroadcastHandlers();
   }
 
@@ -436,9 +469,8 @@ export class BoardRoom implements DurableObject {
       });
     }
 
-    if (!this.doc || (this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) {
-      await this.loadOrCreate();
-    }
+    // Accept needs real CRDT state for sync-step1 (never the awareness stub).
+    await this.ensureDocLoaded();
     if (this.wipeInFlight) {
       return new Response(JSON.stringify({ ok: false, wiping: true }), {
         status: 503,
@@ -477,13 +509,6 @@ export class BoardRoom implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    if (!this.doc || (this.doc as Y.Doc & { isDestroyed?: boolean }).isDestroyed) {
-      await this.loadOrCreate();
-      this.sendSyncStep1(ws);
-      this.sendAwarenessSnapshot(ws);
-    }
-    const doc = this.doc!;
-    const awareness = this.awareness!;
     try {
       let uint8: Uint8Array;
       if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
@@ -497,16 +522,33 @@ export class BoardRoom implements DurableObject {
 
       const decoder = decoding.createDecoder(uint8);
       const type = decoding.readVarUint(decoder);
-      const encoder = encoding.createEncoder();
+
+      // Peek type before any storage I/O: awareness heartbeats must not reload
+      // multi-MB board blobs on hibernation wake (~seconds of DO wall time).
+      if (type === messageAwareness) {
+        this.ensureAwarenessHub();
+        this.lastAwareAt = Date.now();
+        awarenessProtocol.applyAwarenessUpdate(
+          this.awareness!,
+          decoding.readVarUint8Array(decoder),
+          ws,
+        );
+        return;
+      }
+
       if (type === messageSync) {
+        const freshlyLoaded = await this.ensureDocLoaded();
+        if (freshlyLoaded) {
+          this.sendSyncStep1(ws);
+          this.sendAwarenessSnapshot(ws);
+        }
+        const doc = this.doc!;
+        const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, messageSync);
         syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
         if (encoding.length(encoder) > 1) ws.send(encoding.toUint8Array(encoder));
         // Doc path only — awareness must not arm O(board) encode.
         this.queueFullPersist();
-      } else if (type === messageAwareness) {
-        this.lastAwareAt = Date.now();
-        awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
       }
     } catch (e) {
       console.error('[BoardRoom] message error', e);
@@ -533,7 +575,8 @@ export class BoardRoom implements DurableObject {
         }
       }
     }
-    await this.flushFull();
+    // Awareness-only stub: storage already holds the last flush — do not rewrite.
+    if (this.docHydrated) await this.flushFull();
     if (this.suppressPersist) return;
     if (this.state.getWebSockets().length === 0) {
       await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
@@ -542,7 +585,7 @@ export class BoardRoom implements DurableObject {
 
   async alarm(): Promise<void> {
     if (this.suppressPersist) return;
-    if (this.dirty || this.pending.length) await this.flushFull();
+    if (this.docHydrated && (this.dirty || this.pending.length)) await this.flushFull();
     if (!canGcEmptyRoom(this.state.getWebSockets().length, this.dirty, this.pending.length)) {
       if (this.state.getWebSockets().length === 0) {
         await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);

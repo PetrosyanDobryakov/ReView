@@ -16,7 +16,7 @@ import * as Y from 'yjs';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import { readBlob } from '../worker/src/persist.ts';
+import { readBlob, writeBlob } from '../worker/src/persist.ts';
 
 const require = createRequire(import.meta.url);
 const esbuild = require('esbuild');
@@ -106,23 +106,26 @@ const state = {
 };
 
 const room = new BoardRoom(state, { REVIEW_COMPACT_TOKEN: 'test-token' });
-for (let i = 0; i < 50 && !room.doc; i++) await sleep(10);
-assert.ok(room.doc, 'room doc boots');
-// Hibernation restore no longer fan-outs sync-step1 to all sockets (that
-// doubled DO wakes). Accept path and mid-message load still sync the peer.
+// Constructor no longer loads blobs — first sync/accept hydrates.
+assert.equal(room.doc, null, 'cold room starts without a doc');
 sockets[0].sent.length = 0;
 sockets[1].sent.length = 0;
 
-// Seed one key so the room doc is non-empty.
+// Seed one key so the room doc is non-empty (also hydrates from storage path).
 {
   const seed = new Y.Doc();
   seed.getMap('b').set('seed', 1);
   await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(seed)));
 }
-await Promise.all(waited.splice(0));
+assert.ok(room.doc, 'first sync hydrates the room doc');
+assert.equal(room.docHydrated, true, 'sync path marks doc hydrated');
+// Fresh load on cold sync sends sync-step1 to the waking socket only.
+assert.ok(sockets[0].sent.length >= 1, 'cold sync wake sends sync-step1 to sender');
 assert.ok(sockets[1].sent.length > 0, 'update relays to the other socket');
-assert.equal(sockets[0].sent.length, 0, 'origin socket is skipped');
+sockets[0].sent.length = 0;
 sockets[1].sent.length = 0;
+
+await Promise.all(waited.splice(0));
 
 // Burst: 20 rapid moves. Relay must happen per message; storage must NOT
 // grow per message (debounced tail + waitUntil, never awaited in handler).
@@ -133,6 +136,7 @@ for (let i = 0; i < 20; i++) {
   await room.webSocketMessage(sockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(d)));
 }
 assert.equal(sockets[1].sent.length, 20, 'every burst update relays immediately');
+assert.equal(sockets[0].sent.length, 0, 'origin socket is skipped');
 assert.ok(
   storage.ops.puts - putsBefore <= 6,
   `persist stays off the hot path (puts=${storage.ops.puts - putsBefore} for 20 messages)`,
@@ -180,6 +184,68 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
     clearInterval(aw._checkInterval);
   } catch {}
   local.destroy();
+}
+
+// Hibernation wake for awareness must NOT read doc/tail blobs. Residual
+// ~5s wall time after 0.15.28 was loadOrCreate on every wake constructor.
+{
+  const coldStorage = makeStorage();
+  const seedDoc = new Y.Doc();
+  seedDoc.getMap('b').set('photo', 'x'.repeat(4096));
+  await writeBlob(coldStorage, 'doc', Y.encodeStateAsUpdate(seedDoc));
+  seedDoc.destroy();
+  const getsBefore = coldStorage.ops.gets;
+  const coldSockets = [makeSocket(), makeSocket()];
+  const coldState = {
+    storage: coldStorage,
+    getWebSockets: () => coldSockets,
+    blockConcurrencyWhile: async (fn) => {
+      await fn();
+    },
+    waitUntil(p) {
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    },
+  };
+  const cold = new BoardRoom(coldState, { REVIEW_COMPACT_TOKEN: 'test-token' });
+  assert.equal(cold.doc, null, 'hibernation wake starts unloaded');
+  const local = new Y.Doc();
+  const aw = new awarenessProtocol.Awareness(local);
+  aw.setLocalStateField('cursor', { x: 9, y: 9 });
+  await cold.webSocketMessage(coldSockets[0], awarenessMessage(aw, [local.clientID]));
+  assert.equal(
+    coldStorage.ops.gets,
+    getsBefore,
+    'awareness-only hibernation wake must not read doc/tail blobs',
+  );
+  assert.equal(cold.docHydrated, false, 'awareness hub is a non-hydrated stub');
+  assert.ok(cold.doc, 'stub hub exists for fan-out');
+  assert.equal(
+    cold.doc.getMap('b').get('photo'),
+    undefined,
+    'stub must not contain persisted board state',
+  );
+  assert.ok(coldSockets[1].sent.length > 0, 'awareness still relays to peers');
+  // Real sync after stub still loads blobs and syncs the waking socket.
+  const syncGetsBefore = coldStorage.ops.gets;
+  coldSockets[0].sent.length = 0;
+  const peer = new Y.Doc();
+  peer.getMap('b').set('stroke', 1);
+  await cold.webSocketMessage(coldSockets[0], syncUpdateMessage(Y.encodeStateAsUpdate(peer)));
+  assert.ok(coldStorage.ops.gets > syncGetsBefore, 'sync wake loads persisted blobs');
+  assert.equal(cold.docHydrated, true, 'sync hydrates after stub');
+  assert.equal(cold.doc.getMap('b').get('photo'), 'x'.repeat(4096), 'loaded board state');
+  assert.ok(coldSockets[0].sent.length >= 1, 'fresh load sends sync-step1 to waking socket');
+  try {
+    clearInterval(aw._checkInterval);
+  } catch {}
+  try {
+    clearInterval(cold.awareness._checkInterval);
+  } catch {}
+  local.destroy();
+  peer.destroy();
+  try {
+    cold.doc.destroy();
+  } catch {}
 }
 
 // Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
