@@ -662,12 +662,53 @@ export class BoardRoom implements DurableObject {
     }
   }
 
-  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
-    await this.handleSocketGone(ws);
+  /**
+   * Reciprocate the peer Close frame. Compat date 2024-10-01 predates
+   * `web_socket_auto_reply_to_close` (default ≥ 2026-04-07); without this the
+   * runtime can leave half-open sockets and Observability may treat the
+   * long-lived Upgrade as `responseStreamDisconnected` / exception noise.
+   * Codes 1005/1006/1015 are reserved — never pass them to `close()`.
+   */
+  private reciprocateClose(ws: WebSocket, code: number, reason: string): void {
+    try {
+      const safe =
+        code === 1000 || (code >= 3000 && code <= 4999)
+          ? code
+          : 1000;
+      ws.close(safe, typeof reason === 'string' ? reason.slice(0, 123) : '');
+    } catch {
+      try {
+        ws.close(1000, '');
+      } catch {
+        /* already closed / half-open */
+      }
+    }
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+    _wasClean: boolean,
+  ): Promise<void> {
+    // Quiet on purpose — normal tab close / network drop must not console.error.
+    this.reciprocateClose(ws, code, reason);
+    try {
+      await this.handleSocketGone(ws);
+    } catch {
+      /* never let teardown throw into the DO invocation */
+    }
   }
 
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-    await this.handleSocketGone(ws);
+    // Platform delivers this for abrupt peer loss; treat like a quiet close.
+    // Do not console.error — that inflates Workers Metrics "errors".
+    this.reciprocateClose(ws, 1000, '');
+    try {
+      await this.handleSocketGone(ws);
+    } catch {
+      /* */
+    }
   }
 
   private async handleSocketGone(ws: WebSocket): Promise<void> {

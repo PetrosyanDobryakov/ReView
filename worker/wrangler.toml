@@ -5,7 +5,10 @@ name = "review-sync"
 account_id = "3058d81da41b02e06744d5d058570aab"
 main = "src/index.ts"
 compatibility_date = "2024-10-01"
-compatibility_flags = ["nodejs_compat"]
+# Auto-reply Close frames so half-open sockets do not linger as dashboard
+# "client disconnected" / responseStreamDisconnected noise (also safe with
+# explicit ws.close in BoardRoom.webSocketClose).
+compatibility_flags = ["nodejs_compat", "web_socket_auto_reply_to_close"]
 
 # Destructive DELETE /room/<name> requires a Worker secret:
 #   wrangler secret put REVIEW_COMPACT_TOKEN

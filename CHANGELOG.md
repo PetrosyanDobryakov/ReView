@@ -8,6 +8,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.46
+
+### Fix
+- **review-sync disconnect noise**: Durable Object `webSocketClose` / `webSocketError` reciprocate Close frames (compat `web_socket_auto_reply_to_close`) and never `console.error` / throw on normal peer loss, so tab close and network drop stop looking like app failures in our logs. Cloudflare Metrics still classifies some long-lived WS ends as `responseStreamDisconnected` / `canceled` — filter those out when hunting real exceptions (see Project doc `do-client-disconnect-errors.md`).
+
 ## 0.15.45
 
 ### Feature

@@ -84,7 +84,16 @@ function makeStorage() {
 }
 
 function makeSocket() {
-  return { sent: [], send(m) { this.sent.push(m); } };
+  return {
+    sent: [],
+    closeCalls: [],
+    send(m) {
+      this.sent.push(m);
+    },
+    close(code, reason) {
+      this.closeCalls.push({ code, reason });
+    },
+  };
 }
 
 /** Wrap a raw Yjs update in a y-protocols sync message (messageSync + update). */
@@ -319,6 +328,11 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
   // Simulate clean disconnect with nothing dirty.
   live = [];
   await closeRoom.webSocketClose(closeSocket, 1000, 'idle', true);
+  assert.deepEqual(
+    closeSocket.closeCalls,
+    [{ code: 1000, reason: 'idle' }],
+    'webSocketClose must reciprocate Close (compat < auto-reply default)',
+  );
   assert.equal(
     closeStorage.ops.puts,
     putsAfterPersist,
@@ -352,6 +366,32 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
   try {
     clearInterval(closeRoom.awareness?._checkInterval);
   } catch {}
+}
+
+// Reserved WebSocket close codes (1005/1006/1015) must map to a safe reciprocation.
+{
+  const reservedStorage = makeStorage();
+  const reservedSocket = makeSocket();
+  const reservedState = {
+    storage: reservedStorage,
+    getWebSockets: () => [reservedSocket],
+    blockConcurrencyWhile: async (fn) => {
+      await fn();
+    },
+    waitUntil(p) {
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    },
+  };
+  const reservedRoom = new BoardRoom(reservedState, { REVIEW_COMPACT_TOKEN: 'test-token' });
+  await reservedRoom.webSocketClose(reservedSocket, 1006, 'abnormal', false);
+  assert.deepEqual(
+    reservedSocket.closeCalls,
+    [{ code: 1000, reason: 'abnormal' }],
+    '1006 must map to safe 1000',
+  );
+  await reservedRoom.webSocketError(reservedSocket, new Error('peer reset'));
+  assert.equal(reservedSocket.closeCalls.length, 2, 'webSocketError also reciprocates quietly');
+  assert.equal(reservedSocket.closeCalls[1].code, 1000);
 }
 
 // Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
