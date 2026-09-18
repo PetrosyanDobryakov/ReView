@@ -217,9 +217,10 @@ export function CalculatorPanel({
           ['--calc-nav-w' as string]: `${(layout.chrome.navW / layout.header.w) * 100}%`,
           ['--calc-nav-gap' as string]: `${(layout.chrome.navGap / layout.header.w) * 100}%`,
           ['--calc-control-h' as string]: `${(layout.chrome.controlH / layout.header.h) * 100}%`,
-          ['--calc-glyph-px' as string]: `${layout.chrome.glyphPx * z}px`,
           ['--calc-title-px' as string]: `${layout.chrome.titlePx * z}px`,
-          ['--calc-glyph-nudge' as string]: `${layout.chrome.glyphNudgeY * z}px`,
+          ['--calc-bar-h' as string]: `${Math.max(1.25, 1.75 * layout.scale) * z}px`,
+          ['--calc-bar-gap' as string]: `${Math.max(2.5, 3 * layout.scale) * z}px`,
+          ['--calc-bar-w' as string]: `${(layout.chrome.navW * 0.42 * z).toFixed(2)}px`,
         }}
       >
         <div className={`calc-nav${navOpen ? ' is-open' : ''}`} ref={navRef}>
@@ -232,7 +233,11 @@ export function CalculatorPanel({
             aria-label={t(locale, 'calcNavMenu')}
             onClick={() => setNavOpen((o) => !o)}
           >
-            {t(locale, 'calcNavGlyph')}
+            <span className="calc-nav-glyph" aria-hidden="true">
+              <span className="calc-nav-bar" />
+              <span className="calc-nav-bar" />
+              <span className="calc-nav-bar" />
+            </span>
           </button>
           <button
             type="button"

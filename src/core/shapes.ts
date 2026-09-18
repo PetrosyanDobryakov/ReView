@@ -2559,19 +2559,26 @@ function drawCalculator(
   ctx.lineWidth = Math.max(1, 1.5);
   ctx.stroke();
 
-  // Header — Win-calc ≡ + mode title (+ memory). Nav/stamp live only in the open overlay.
+  // Header — Win-calc nav bars + mode title (+ memory). Overlay owns interactive nav.
   // Metrics from layout.chrome so closed canvas matches open CSS overlay 1:1.
   if (!hideOverlayOwned) {
     const { chrome } = layout;
     const hx = v.x + layout.header.x;
     const hy = v.y + layout.header.y + layout.header.h * 0.5;
+    const cx = hx + chrome.navW * 0.5;
+    // Three bars — same geometry as .calc-nav-glyph / .calc-nav-bar CSS.
+    const barW = chrome.navW * 0.42;
+    const barH = Math.max(1.25, 1.75 * layout.scale);
+    const edgeGap = Math.max(2.5, 3 * layout.scale);
+    const pitch = barH + edgeGap;
     ctx.fillStyle = ink.text;
-    ctx.textBaseline = 'middle';
-    ctx.font = `500 ${Math.round(chrome.glyphPx)}px ${BOARD_TYPEFACE}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('≡', hx + chrome.navW * 0.5, hy + chrome.glyphNudgeY);
+    for (const dy of [-pitch, 0, pitch]) {
+      const y = hy + dy - barH * 0.5;
+      ctx.fillRect(cx - barW * 0.5, y, barW, barH);
+    }
     ctx.font = `600 ${Math.round(chrome.titlePx)}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillText(
       modeLabel,
       hx + chrome.navW + chrome.navGap,

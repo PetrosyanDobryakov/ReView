@@ -8,7 +8,7 @@
 ## 0.15.39
 
 ### Fix
-- **Calculator header align**: shared `layout.chrome` metrics so canvas (unfocused) and open overlay (focused) paint ≡ + mode title 1:1 — fixed nav cell, gap, type sizes, optical ≡ nudge; selection chrome no longer fights a divergent header layout.
+- **Calculator header align**: shared `layout.chrome` metrics so canvas (unfocused) and open overlay (focused) paint nav + mode title 1:1 — fixed nav cell, gap, type sizes; drawn three-bar hamburger (no ≡ em-box drift); selection chrome no longer fights a divergent header layout.
 
 ## 0.15.38
 
