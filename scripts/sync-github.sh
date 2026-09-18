@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Sync Origin tip → GitHub (dev-warexpor + main).
-# Day-to-day work stays on Cursor Origin; run this when you want GitHub caught up.
+# Keep GitHub tip branches aligned: push HEAD → dev-warexpor + main.
 #
 # Usage:
-#   ./scripts/sync-github.sh           # push tip to github/dev-warexpor and github/main
+#   ./scripts/sync-github.sh           # push tip to GitHub/dev-warexpor and GitHub/main
 #   ./scripts/sync-github.sh --dry-run # show what would be pushed
 #
-# Requires: `github` remote (https://github.com/PetrosyanDobryakov/ReView.git)
-# and auth (`gh` / credential helper). Coordinator has this; children usually do not.
+# Remote resolution (first match):
+#   1. remote named `github`
+#   2. remote named `origin` if it points at github.com/.../ReView
+# Requires auth (`gh` / credential helper).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,31 +29,51 @@ for arg in "$@"; do
   esac
 done
 
-if ! git remote get-url github >/dev/null 2>&1; then
-  echo "sync-github: missing remote 'github' — add:" >&2
+resolve_github_remote() {
+  if git remote get-url github >/dev/null 2>&1; then
+    echo github
+    return
+  fi
+  if git remote get-url origin >/dev/null 2>&1; then
+    local url
+    url="$(git remote get-url origin)"
+    case "$url" in
+      *github.com*PetrosyanDobryakov/ReView* | *github.com*/*ReView*)
+        echo origin
+        return
+        ;;
+    esac
+  fi
+  return 1
+}
+
+REMOTE="$(resolve_github_remote)" || {
+  echo "sync-github: no GitHub remote — add one of:" >&2
   echo "  git remote add github https://github.com/PetrosyanDobryakov/ReView.git" >&2
+  echo "  # or point origin at that URL (GitHub-primary setups)" >&2
   exit 1
-fi
+}
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 TIP="$(git rev-parse HEAD)"
 SHORT="$(git rev-parse --short HEAD)"
+URL="$(git remote get-url "$REMOTE")"
 
 echo "sync-github: local branch  $BRANCH"
 echo "sync-github: tip           $SHORT ($TIP)"
-echo "sync-github: github remote $(git remote get-url github)"
+echo "sync-github: remote        $REMOTE ($URL)"
 
 if [[ "$DRY" -eq 1 ]]; then
   echo "sync-github: dry-run — would push:"
-  echo "  $TIP → github/dev-warexpor"
-  echo "  $TIP → github/main"
-  git ls-remote --heads github dev-warexpor main 2>/dev/null || true
+  echo "  $TIP → ${REMOTE}/dev-warexpor"
+  echo "  $TIP → ${REMOTE}/main"
+  git ls-remote --heads "$REMOTE" dev-warexpor main 2>/dev/null || true
   exit 0
 fi
 
 # Push current tip SHA explicitly so we do not depend on being checked out as those names.
-git push github "$TIP:refs/heads/dev-warexpor"
-git push github "$TIP:refs/heads/main"
+git push "$REMOTE" "$TIP:refs/heads/dev-warexpor"
+git push "$REMOTE" "$TIP:refs/heads/main"
 
 echo "sync-github: done"
-echo "sync-github: github/dev-warexpor and github/main → $SHORT"
+echo "sync-github: ${REMOTE}/dev-warexpor and ${REMOTE}/main → $SHORT"
