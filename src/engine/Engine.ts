@@ -5300,8 +5300,6 @@ export class Engine {
     ctx.setLineDash([6 * s, 4 * s]);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.shadowColor = 'rgba(0,0,0,0.18)';
-    ctx.shadowBlur = 4 * s;
     const fromDir = worldPortDir(this.connecting.fromPort, shapeRotation(fromV));
     const dist = Math.hypot(bx - a.x, by - a.y);
     const off = Math.min(80, dist * 0.35);
@@ -5328,7 +5326,6 @@ export class Engine {
     if (toPort) ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
     else ctx.quadraticCurveTo(c1x, c1y, bx, by);
     ctx.stroke();
-    ctx.shadowColor = 'transparent';
     ctx.setLineDash([]);
     const head = 10 * s;
     const hx1f = bx - head * Math.cos(endAng - 0.42), hy1f = by - head * Math.sin(endAng - 0.42);
