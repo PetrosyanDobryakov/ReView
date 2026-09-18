@@ -398,6 +398,13 @@ export function shapesToSvg(
       );
       continue;
     }
+    if (v.type === 'video') {
+      // SVG has no portable video; export a placeholder frame matching board geometry.
+      parts.push(
+        `<g${opacity}${xf}><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" fill="#1a1a18" stroke="#454540" stroke-width="1"/><text x="${x + v.w / 2}" y="${y + v.h / 2}" fill="#eceae4" font-size="${Math.max(12, Math.min(v.w, v.h) * 0.08)}" text-anchor="middle" dominant-baseline="middle">video</text></g>`
+      );
+      continue;
+    }
     if (v.type === 'doc' && v.pages?.length) {
       const src = v.pages[docPageIndex(v.page, v.pages.length)] ?? v.pages[0];
       if (src) {

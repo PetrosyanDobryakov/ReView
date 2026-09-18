@@ -11,11 +11,15 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+
+/** Photo / video / PDF hosts that magnetize notes above them in z-order. */
+export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'doc']);
 
 /** Container-like shapes the eraser never touches (either mode) — ink on top of them still erases. */
 export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
   'image',
+  'video',
   'doc',
   'table',
   'graph',
@@ -794,7 +798,7 @@ export function stackOrderIndex(order: readonly string[]): Map<string, number> {
  * Shapes that should translate/rotate with a moved host: table trays (cascading),
  * annotations glued to a photo/PDF, and anything nested in a frame.
  *
- * Photo/PDF notes magnetize only when they sit *above* the host in stacking order
+ * Photo/PDF/video notes magnetize only when they sit *above* the host in stacking order
  * (`orderIndex` or, if omitted, position in `shapes`: later = on top). Notes under
  * a photo do not ride. Frames still use containment only.
  */
@@ -821,12 +825,12 @@ export function hostRiderIds(
       }
       return;
     }
-    if (host.type !== 'image' && host.type !== 'doc' && host.type !== 'frame') return;
+    if (host.type !== 'image' && host.type !== 'video' && host.type !== 'doc' && host.type !== 'frame') return;
     const hostZ = z.get(host.id) ?? -1;
     for (const s of shapes) {
       if (skip.has(s.id) || riding.has(s.id) || s.locked) continue;
-      if ((host.type === 'image' || host.type === 'doc') && !IMAGE_RIDER_TYPES.has(s.type)) continue;
-      if ((host.type === 'image' || host.type === 'doc') && (z.get(s.id) ?? -1) <= hostZ) continue;
+      if (MEDIA_HOST_TYPES.has(host.type) && !IMAGE_RIDER_TYPES.has(s.type)) continue;
+      if (MEDIA_HOST_TYPES.has(host.type) && (z.get(s.id) ?? -1) <= hostZ) continue;
       if (containedInShape(s, host)) riding.add(s.id);
     }
   };
@@ -2036,6 +2040,22 @@ export function drawShape(
       }
       break;
     }
+    case 'video': {
+      const vid = getVideo(v.src ?? '');
+      const ready = vid && vid.readyState >= 2 && vid.videoWidth > 0;
+      if (ready && vid) {
+        ctx.drawImage(vid, v.x, v.y, v.w, v.h);
+        if (vid.paused) drawVideoPlayAffordance(ctx, v);
+      } else {
+        ctx.fillStyle = '#1a1a18';
+        ctx.fillRect(v.x, v.y, v.w, v.h);
+        ctx.strokeStyle = '#454540';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(v.x, v.y, v.w, v.h);
+        drawVideoPlayAffordance(ctx, v);
+      }
+      break;
+    }
     case 'doc': {
       const pages = v.pages ?? [];
       const src = pages[docPageIndex(v.page, pages.length)] ?? '';
@@ -2711,6 +2731,103 @@ export function getImage(src: string): HTMLImageElement | null {
 
 export function releaseImage(src: string): void {
   if (src) imageCache.delete(src);
+}
+
+const videoCache = new Map<string, HTMLVideoElement>();
+const videoListeners = new Set<(src: string) => void>();
+
+export function onVideoLoad(cb: (src: string) => void): () => void {
+  videoListeners.add(cb);
+  return () => {
+    videoListeners.delete(cb);
+  };
+}
+
+export function getVideo(src: string): HTMLVideoElement | null {
+  if (!src.startsWith('data:video/') && !src.startsWith('blob:')) return null;
+  const hit = videoCache.get(src);
+  if (hit) return hit;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.setAttribute('playsinline', '');
+  const notify = () => {
+    for (const l of videoListeners) l(src);
+  };
+  video.addEventListener('loadeddata', notify);
+  video.addEventListener('error', () => {
+    videoCache.delete(src);
+  });
+  video.src = src;
+  videoCache.set(src, video);
+  return video;
+}
+
+export function releaseVideo(src: string): void {
+  if (!src) return;
+  const v = videoCache.get(src);
+  if (v) {
+    try {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    } catch {
+      /* ignore */
+    }
+    videoCache.delete(src);
+  }
+}
+
+export function toggleVideoPlayback(src: string): boolean {
+  const video = getVideo(src);
+  if (!video) return false;
+  if (video.paused) {
+    void video.play().catch(() => {
+      /* autoplay policy — user gesture should allow; ignore */
+    });
+    return true;
+  }
+  video.pause();
+  return false;
+}
+
+export function isVideoPlaying(src: string | undefined): boolean {
+  if (!src) return false;
+  const video = videoCache.get(src);
+  return Boolean(video && !video.paused && !video.ended);
+}
+
+/** True when the board needs continuous RAF paints for GIF / playing video. */
+export function boardNeedsMediaPaint(views: Iterable<Pick<ShapeView, 'type' | 'src'>>): boolean {
+  for (const v of views) {
+    if (v.type === 'image' && v.src && v.src.startsWith('data:image/gif')) return true;
+    if (v.type === 'video' && isVideoPlaying(v.src)) return true;
+  }
+  return false;
+}
+
+function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {
+  const cx = v.x + v.w / 2;
+  const cy = v.y + v.h / 2;
+  const r = Math.max(10, Math.min(v.w, v.h) * 0.12);
+  ctx.save();
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = '#000000';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = '#ffffff';
+  const tri = r * 0.45;
+  ctx.beginPath();
+  ctx.moveTo(cx - tri * 0.35, cy - tri);
+  ctx.lineTo(cx - tri * 0.35, cy + tri);
+  ctx.lineTo(cx + tri * 0.85, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?: string): void {

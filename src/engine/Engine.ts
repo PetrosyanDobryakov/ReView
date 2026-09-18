@@ -7,8 +7,10 @@ import {
   drawPenStroke,
   drawShape,
   getImage,
+  getVideo,
   hasFill,
   onImageLoad,
+  onVideoLoad,
   pointInShape,
   shapeLassoProbes,
   displayInk,
@@ -24,7 +26,18 @@ import {
   measureMixedLine,
   arrowHitPolyline,
   setPaintZoom,
+  boardNeedsMediaPaint,
+  toggleVideoPlayback,
+  isVideoPlaying,
 } from '../core/shapes';
+import {
+  MEDIA_MAX_BYTES,
+  isGifMime,
+  isVideoMime,
+  resolveFileMime,
+  imageDownloadExt,
+  videoDownloadExt,
+} from '../core/media';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import {
   ROTATE_CW_DISC_RADIUS_SCALE,
@@ -507,6 +520,7 @@ export class Engine {
   private lastStats = '';
   private dragTool: Tool;
   private offImageLoad: () => void = () => {};
+  private offVideoLoad: () => void = () => {};
   private offFormulaLoad: () => void = () => {};
   private offPrefs: () => void = () => {};
   private erasing = new Set<string>();
@@ -607,6 +621,9 @@ export class Engine {
     });
     this.boundPageId = store.currentPageId();
     this.offImageLoad = onImageLoad(() => {
+      this.dirty = true;
+    });
+    this.offVideoLoad = onVideoLoad(() => {
       this.dirty = true;
     });
     this.offFormulaLoad = onFormulaLoad(() => {
@@ -982,6 +999,7 @@ export class Engine {
     store.setLiveViewApplier(null);
     this.offPageChange();
     this.offImageLoad();
+    this.offVideoLoad();
     this.offFormulaLoad();
     this.offPrefs();
     window.removeEventListener('review-chrome-theme', this.onChromeTheme);
@@ -1911,7 +1929,14 @@ export class Engine {
     ) {
       const a = document.createElement('a');
       a.href = v.src;
-      a.download = 'review-image.png';
+      a.download = `review-image.${imageDownloadExt(v.src)}`;
+      a.click();
+      return;
+    }
+    if (ids.length === 1 && v?.type === 'video' && v.src && this.annotationsOn(v).length === 0) {
+      const a = document.createElement('a');
+      a.href = v.src;
+      a.download = `review-video.${videoDownloadExt(v.src)}`;
       a.click();
       return;
     }
@@ -1928,12 +1953,21 @@ export class Engine {
     const touched = new Set<string>();
     for (const id of this.selection) {
       const v = this.views.get(id);
-      if (!v || v.type !== 'image') continue;
-      const img = getImage(v.src ?? '');
-      if (!img || !img.complete || !img.naturalWidth) continue;
-      const f = cropFractions(v);
-      const nw = img.naturalWidth * f.w;
-      const nh = img.naturalHeight * f.h;
+      if (!v || (v.type !== 'image' && v.type !== 'video')) continue;
+      let nw = 0;
+      let nh = 0;
+      if (v.type === 'image') {
+        const img = getImage(v.src ?? '');
+        if (!img || !img.complete || !img.naturalWidth) continue;
+        const f = cropFractions(v);
+        nw = img.naturalWidth * f.w;
+        nh = img.naturalHeight * f.h;
+      } else {
+        const vid = getVideo(v.src ?? '');
+        if (!vid || !vid.videoWidth) continue;
+        nw = vid.videoWidth;
+        nh = vid.videoHeight;
+      }
       const cx = v.x + v.w / 2;
       const cy = v.y + v.h / 2;
       const orig = { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation };
@@ -1983,6 +2017,7 @@ export class Engine {
         doc: 'infoDoc',
         arrow: 'infoArrow',
         image: 'infoImage',
+        video: 'infoVideo',
         graph: 'infoGraph',
         calculator: 'infoCalculator',
         table: 'infoTable',
@@ -2012,6 +2047,13 @@ export class Engine {
         lines.push(`${t(locale, 'infoPixels')}: ${img.naturalWidth} × ${img.naturalHeight}`);
       }
     }
+    if (v.type === 'video') {
+      const vid = getVideo(v.src ?? '');
+      if (vid && vid.videoWidth) {
+        lines.push(`${t(locale, 'infoPixels')}: ${vid.videoWidth} × ${vid.videoHeight}`);
+      }
+      lines.push(isVideoPlaying(v.src) ? t(locale, 'videoPlaying') : t(locale, 'videoPaused'));
+    }
     if (v.locked) lines.push(t(locale, 'infoLocked'));
     return { title: t(locale, typeKey as unknown as import('../ui/i18n').MessageKey), lines };
   }
@@ -2022,40 +2064,53 @@ export class Engine {
 
   insertImageFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
     const locale = readLocale();
-    if (!file.type.startsWith('image/')) {
+    const mime = resolveFileMime(file);
+    if (!mime.startsWith('image/')) {
       this.events.onError?.(t(locale, 'imageFailed'));
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
+    if (file.size > MEDIA_MAX_BYTES) {
       this.events.onError?.(t(locale, 'imageTooLarge'));
       return;
     }
     const pos = this.resolvePastePos(at);
     const page = pageId ?? store.currentPageId();
     const boardId = store.getCurrentBoardId();
+    const keepGif = isGifMime(mime);
     const reader = new FileReader();
     reader.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
     reader.onload = () => {
       if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+      const rawSrc = String(reader.result);
       const img = new Image();
       img.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
       img.onload = () => {
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
-        const maxStore = 1600;
-        const storeScale = Math.min(1, maxStore / Math.max(img.naturalWidth, img.naturalHeight));
-        const sw = Math.max(1, Math.round(img.naturalWidth * storeScale));
-        const sh = Math.max(1, Math.round(img.naturalHeight * storeScale));
-        const scratch = document.createElement('canvas');
-        scratch.width = sw;
-        scratch.height = sh;
-        const sctx = scratch.getContext('2d');
-        if (!sctx) {
-          this.events.onError?.(t(locale, 'imageFailed'));
-          return;
+        let src: string;
+        let sw: number;
+        let sh: number;
+        if (keepGif) {
+          // Preserve original GIF bytes so animation survives (canvas re-encode freezes frame 0).
+          src = rawSrc;
+          sw = Math.max(1, img.naturalWidth);
+          sh = Math.max(1, img.naturalHeight);
+        } else {
+          const maxStore = 1600;
+          const storeScale = Math.min(1, maxStore / Math.max(img.naturalWidth, img.naturalHeight));
+          sw = Math.max(1, Math.round(img.naturalWidth * storeScale));
+          sh = Math.max(1, Math.round(img.naturalHeight * storeScale));
+          const scratch = document.createElement('canvas');
+          scratch.width = sw;
+          scratch.height = sh;
+          const sctx = scratch.getContext('2d');
+          if (!sctx) {
+            this.events.onError?.(t(locale, 'imageFailed'));
+            return;
+          }
+          sctx.drawImage(img, 0, 0, sw, sh);
+          const jpeg = mime === 'image/jpeg' || mime === 'image/jpg';
+          src = jpeg ? scratch.toDataURL('image/jpeg', 0.85) : scratch.toDataURL('image/png');
         }
-        sctx.drawImage(img, 0, 0, sw, sh);
-        const jpeg = file.type === 'image/jpeg' || file.type === 'image/jpg';
-        const src = jpeg ? scratch.toDataURL('image/jpeg', 0.85) : scratch.toDataURL('image/png');
         const maxShow = 600;
         const showScale = Math.min(1, maxShow / Math.max(sw, sh));
         const w = Math.max(1, sw * showScale);
@@ -2075,10 +2130,76 @@ export class Engine {
           page
         );
         this.setSelection([id]);
+        this.dirty = true;
       };
-      img.src = String(reader.result);
+      img.src = rawSrc;
     };
     reader.readAsDataURL(file);
+  }
+
+  insertVideoFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
+    const locale = readLocale();
+    const mime = resolveFileMime(file);
+    if (!isVideoMime(mime)) {
+      this.events.onError?.(t(locale, 'videoFailed'));
+      return;
+    }
+    if (file.size > MEDIA_MAX_BYTES) {
+      this.events.onError?.(t(locale, 'videoTooLarge'));
+      return;
+    }
+    const pos = this.resolvePastePos(at);
+    const page = pageId ?? store.currentPageId();
+    const boardId = store.getCurrentBoardId();
+    const reader = new FileReader();
+    reader.onerror = () => this.events.onError?.(t(locale, 'videoFailed'));
+    reader.onload = () => {
+      if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+      const src = String(reader.result);
+      const video = document.createElement('video');
+      video.muted = true;
+      video.preload = 'metadata';
+      video.onerror = () => this.events.onError?.(t(locale, 'videoFailed'));
+      video.onloadedmetadata = () => {
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+        const vw = Math.max(1, video.videoWidth || 640);
+        const vh = Math.max(1, video.videoHeight || 360);
+        const maxShow = 600;
+        const showScale = Math.min(1, maxShow / Math.max(vw, vh));
+        const w = Math.max(1, vw * showScale);
+        const h = Math.max(1, vh * showScale);
+        const id = store.addShape(
+          {
+            type: 'video',
+            x: pos.x - w / 2,
+            y: pos.y - h / 2,
+            w,
+            h,
+            fill: 'transparent',
+            stroke: 'transparent',
+            strokeWidth: 0,
+            src,
+          },
+          page
+        );
+        // Warm the shared cache so paint/play use the same element.
+        getVideo(src);
+        this.setSelection([id]);
+        this.dirty = true;
+      };
+      video.src = src;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /** Double-click / context: toggle play-pause for a video shape. */
+  toggleVideoSelected(id?: string): void {
+    const sid = id ?? (this.selection.size === 1 ? [...this.selection][0] : null);
+    if (!sid) return;
+    const v = this.views.get(sid);
+    if (!v || v.type !== 'video' || !v.src || v.locked) return;
+    toggleVideoPlayback(v.src);
+    this.dirty = true;
   }
 
   hasImageSelection(): boolean {
@@ -2328,6 +2449,14 @@ export class Engine {
             return;
           }
         }
+        if (item.type.startsWith('video/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            this.insertVideoFile(file, at, pageId);
+            return;
+          }
+        }
       }
       for (const item of items) {
         if (item.type === 'text/plain') {
@@ -2413,6 +2542,13 @@ export class Engine {
             this.insertImageFile(new File([blob], 'clipboard.png', { type }), at, pageId);
             return;
           }
+          const vtype = [...item.types].find((t) => t.startsWith('video/'));
+          if (vtype) {
+            const blob = await item.getType(vtype);
+            if (!stillHere()) return;
+            this.insertVideoFile(new File([blob], 'clipboard.mp4', { type: vtype }), at, pageId);
+            return;
+          }
         }
         for (const item of items) {
           if (![...item.types].includes('text/plain')) continue;
@@ -2485,7 +2621,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -3902,6 +4038,11 @@ export class Engine {
       this.startCropSelected();
       return;
     }
+    if (type === 'video') {
+      this.setSelection([id]);
+      this.toggleVideoSelected(id);
+      return;
+    }
     if (type === 'graph') {
       this.openGraphEditor(id);
       return;
@@ -4636,7 +4777,7 @@ export class Engine {
       // dirty on a timer for the static screen vignette — that forced full-board
       // paints ~12.5fps while idle on Orbit paper. Re-enable a pulse only
       // together with drawOrbitPaperField.
-      if (moved || this.dirty || this.peersAnimating) {
+      if (moved || this.dirty || this.peersAnimating || boardNeedsMediaPaint(this.views.values())) {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
@@ -4648,6 +4789,8 @@ export class Engine {
             shapeCount: this.views.size,
           });
         }
+        // Keep RAF dirty while GIF / playing video need continuous frames.
+        if (boardNeedsMediaPaint(this.views.values())) this.dirty = true;
       }
       this.emitStats();
     } catch (err) {
