@@ -3,17 +3,21 @@
 ## Unreleased
 
 ### Ops
-- **GitHub primary tip**: day-to-day work on `PetrosyanDobryakov/ReView` `dev-warexpor`; Cursor Origin demoted (not repo owner / admin). Remotes: `origin` → GitHub.
+- **`sync-github.sh`**: resolves GitHub via `github` remote or `origin` when it already points at `PetrosyanDobryakov/ReView` (no extra remote required on GitHub-primary checkouts).
+- **Wrangler `account_id`**: set in root + `worker/wrangler.toml` so non-interactive deploy picks Zpro without an interactive account prompt.
+
+## 0.15.38
+
+### Fix
+- **Idle DO storage ops**: cut storage work on clean close/resync (see prior tip landing).
 
 ### Ops
-- **Origin → GitHub sync**: `bash scripts/sync-github.sh` (or `npm run sync:github`) pushes tip to GitHub `dev-warexpor` and `main` in one shot.
+- **GitHub primary tip**: day-to-day work on `PetrosyanDobryakov/ReView` `dev-warexpor`; Cursor Origin demoted. Remotes: `origin` → GitHub.
+- **Tip → `main` sync**: `bash scripts/sync-github.sh` (or `npm run sync:github`) pushes tip to `dev-warexpor` and `main`.
+- **Persistent Wrangler deploy:** `scripts/deploy.sh` (+ `npm run cf:deploy:all`) deploys `review-sync` then `review` from tip.
+- **Cloud Agent snapshot**: tip env uses validated 2026-09-18 snapshot.
 
-## Unreleased
-
-### Chore
-- **Persistent Wrangler deploy:** `scripts/deploy.sh` (+ `npm run cf:deploy:all`) idempotently deploys `review-sync` then `review` from tip. Docs cover `CLOUDFLARE_API_TOKEN` + account id for CI/agents, OAuth local fallback, and Cloudflare Builds dashboard fix (`echo done` → `bash scripts/deploy.sh all`).
-
-## 0.15.37 — unreleased
+## 0.15.37
 
 ### Polish
 - **Calculator Windows redesign**: Win-calc chrome — ≡ nav + mode title (same scale as keypad), generous display, modes/DEG/Copy/Sticky/Text in the nav flyout. Drops the tiny ··· overflow toolbar from 0.15.36.

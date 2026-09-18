@@ -1,4 +1,5 @@
 name = "review"
+account_id = "3058d81da41b02e06744d5d058570aab"
 compatibility_date = "2026-08-29"
 
 # Wrangler runs this before `wrangler deploy` and `wrangler versions upload`.
