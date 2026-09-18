@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+<<<<<<< Updated upstream
 ### Ops
 - **Workers Builds Deploy:** dashboard Deploy command for Worker **review** is `bash scripts/deploy.sh all` (was `echo done`). Docs note in `docs/DEPLOY.md`; tip push retriggers a real publish of **review** + **review-sync**.
+=======
+## 0.15.43
+>>>>>>> Stashed changes
 
 ### Fix
+- **Table cell resize**: dragging a column/row divider no longer stretches glued pen strokes (or other point geometry); ink and photos keep size and only translate with the cell center — same non-distort intent as box riders.
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
 ## 0.15.43

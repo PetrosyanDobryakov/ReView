@@ -323,7 +323,8 @@ export function groupResizeMember(
 /**
  * Move a glued rider by mapping world points through the host's local frame.
  * Used when the host's local space warps without a uniform scale (table
- * insert/delete/divider). Strokes follow every point; boxes keep size.
+ * insert/delete/divider). Boxes and strokes keep size (rigid translate by
+ * center) so cell-divider stretch does not distort ink or photos.
  */
 export function mapShapeThroughLocalMap(
   o: GroupResizeMember,
@@ -345,33 +346,27 @@ export function mapShapeThroughLocalMap(
     const mapped = mapLocal(lp.x, lp.y);
     return localToWorld(nextFrame, mapped.x, mapped.y);
   };
+  const cx = o.x + o.w / 2;
+  const cy = o.y + o.h / 2;
+  const nc = mapPt(cx, cy);
+  const dx = nc.x - cx;
+  const dy = nc.y - cy;
   if (o.points && o.points.length >= 2) {
+    // Rigid translate: do not warp points through the cell-fraction map
+    // (that stretched drawings when a column/row divider moved).
     const pts: number[] = [];
     for (let i = 0; i < o.points.length; i += 2) {
-      const p = mapPt(o.points[i]!, o.points[i + 1]!);
-      pts.push(p.x, p.y);
+      pts.push(o.points[i]! + dx, o.points[i + 1]! + dy);
     }
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (let i = 0; i < pts.length; i += 2) {
-      minX = Math.min(minX, pts[i]!);
-      maxX = Math.max(maxX, pts[i]!);
-      minY = Math.min(minY, pts[i + 1]!);
-      maxY = Math.max(maxY, pts[i + 1]!);
-    }
-    const pad = (o.strokeWidth ?? 0) / 2;
     return {
-      x: minX - pad,
-      y: minY - pad,
-      w: Math.max(minSize, maxX - minX + pad * 2),
-      h: Math.max(minSize, maxY - minY + pad * 2),
+      x: o.x + dx,
+      y: o.y + dy,
+      w: Math.max(minSize, o.w),
+      h: Math.max(minSize, o.h),
       points: pts,
     };
   }
-  const c = mapPt(o.x + o.w / 2, o.y + o.h / 2);
-  return { x: c.x - o.w / 2, y: c.y - o.h / 2 };
+  return { x: o.x + dx, y: o.y + dy };
 }
 
 /** Keep a glued rider in the host's local frame while the host's unrotated box changes. */
