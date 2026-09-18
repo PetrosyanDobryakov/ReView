@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.32 — unreleased
+
+### Fix
+- **Arrow canvas lag**: cache tessellated shaft/head/bounds per arrow id (invalidate on geometry fingerprint), drop per-arrow `shadowBlur` paint, and adaptive sample counts so hover/snap/pan stay smooth as arrow count grows. Hit-test still follows the painted curve.
+
 ## 0.15.31 — unreleased
 
 ### Fix

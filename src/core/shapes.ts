@@ -925,7 +925,28 @@ function pointOnArrowCurve(curve: ArrowCurve, t: number): Point {
   };
 }
 
-function sampleArrowCurve(curve: ArrowCurve, segments = 24): number[] {
+/** Adaptive shaft samples: short arrows stay cheap; long ones keep hit fidelity. */
+function arrowSampleSegments(curve: ArrowCurve): number {
+  const { start, end } = curve;
+  let span = Math.hypot(end.x - start.x, end.y - start.y);
+  if (curve.kind === 'quadratic') {
+    span = Math.max(
+      span,
+      Math.hypot(curve.control.x - start.x, curve.control.y - start.y) +
+        Math.hypot(end.x - curve.control.x, end.y - curve.control.y)
+    );
+  } else if (curve.kind === 'cubic') {
+    span = Math.max(
+      span,
+      Math.hypot(curve.control1.x - start.x, curve.control1.y - start.y) +
+        Math.hypot(curve.control2.x - curve.control1.x, curve.control2.y - curve.control1.y) +
+        Math.hypot(end.x - curve.control2.x, end.y - curve.control2.y)
+    );
+  }
+  return Math.max(4, Math.min(24, Math.ceil(span / 48) + 4));
+}
+
+function sampleArrowCurve(curve: ArrowCurve, segments = arrowSampleSegments(curve)): number[] {
   const points: number[] = [];
   for (let i = 0; i <= segments; i++) {
     const point = pointOnArrowCurve(curve, i / segments);
@@ -941,6 +962,102 @@ function arrowHeadTips(curve: ArrowCurve, head: number): { x1: number; y1: numbe
     x2: curve.end.x - head * Math.cos(curve.endAngle + 0.42),
     y2: curve.end.y - head * Math.sin(curve.endAngle + 0.42),
   };
+}
+
+type ArrowGeom = {
+  fp: string;
+  curve: ArrowCurve;
+  shaft: number[];
+  hitPoly: number[];
+  bounds: ShapeBox;
+  tip: { x1: number; y1: number; x2: number; y2: number };
+  head: number;
+};
+
+/** Id → tessellated shaft/head/bounds. View objects are recreated on every Yjs patch. */
+const arrowGeomCache = new Map<string, ArrowGeom>();
+const ARROW_GEOM_CACHE_MAX = 4096;
+
+function arrowGeomFingerprint(v: ShapeView): string {
+  const pts = v.points ?? [];
+  return `${pts.length}:${pts.join(',')}|${v.strokeWidth}|${v.arrowHead ?? ''}|${v.fromId ?? ''}|${v.toId ?? ''}|${v.fromPort ?? ''}|${v.toPort ?? ''}`;
+}
+
+function buildArrowGeom(v: ShapeView, curve: ArrowCurve): ArrowGeom {
+  const head = arrowHeadLength(v);
+  const tip = arrowHeadTips(curve, head);
+  const shaft = sampleArrowCurve(curve);
+  const hitPoly = shaft.slice();
+  hitPoly.push(curve.end.x, curve.end.y, tip.x1, tip.y1, curve.end.x, curve.end.y, tip.x2, tip.y2);
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < shaft.length; i += 2) {
+    const x = shaft[i];
+    const y = shaft[i + 1];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  if (tip.x1 < minX) minX = tip.x1;
+  if (tip.y1 < minY) minY = tip.y1;
+  if (tip.x1 > maxX) maxX = tip.x1;
+  if (tip.y1 > maxY) maxY = tip.y1;
+  if (tip.x2 < minX) minX = tip.x2;
+  if (tip.y2 < minY) minY = tip.y2;
+  if (tip.x2 > maxX) maxX = tip.x2;
+  if (tip.y2 > maxY) maxY = tip.y2;
+  const pad = v.strokeWidth / 2 + 5;
+  return {
+    fp: arrowGeomFingerprint(v),
+    curve,
+    shaft,
+    hitPoly,
+    tip,
+    head,
+    bounds: {
+      x: minX - pad,
+      y: minY - pad,
+      w: maxX - minX + pad * 2,
+      h: maxY - minY + pad * 2,
+    },
+  };
+}
+
+function getArrowGeom(v: ShapeView): ArrowGeom | null {
+  const curve = arrowCurve(v);
+  if (!curve) return null;
+  const id = v.id;
+  const fp = arrowGeomFingerprint(v);
+  if (id) {
+    const hit = arrowGeomCache.get(id);
+    if (hit && hit.fp === fp) return hit;
+  }
+  const geom = buildArrowGeom(v, curve);
+  if (id) {
+    if (arrowGeomCache.size >= ARROW_GEOM_CACHE_MAX) {
+      let drop = (ARROW_GEOM_CACHE_MAX / 4) | 0;
+      for (const key of arrowGeomCache.keys()) {
+        arrowGeomCache.delete(key);
+        if (--drop <= 0) break;
+      }
+    }
+    arrowGeomCache.set(id, geom);
+  }
+  return geom;
+}
+
+/** Test helper — cache size after warm lookups (not a product API). */
+export function arrowGeomCacheSizeForTest(): number {
+  return arrowGeomCache.size;
+}
+
+/** Test helper — drop cached tessellations between cases. */
+export function clearArrowGeomCacheForTest(): void {
+  arrowGeomCache.clear();
 }
 
 function pointInTriangle(
@@ -993,30 +1110,9 @@ export function withArrowVisualBounds<T extends { points?: number[] }>(
 }
 
 export function arrowBounds(v: ShapeView): ShapeBox {
-  const curve = arrowCurve(v);
-  if (!curve) return { x: v.x, y: v.y, w: v.w, h: v.h };
-
-  const points = sampleArrowCurve(curve);
-  const head = arrowHeadTips(curve, arrowHeadLength(v));
-  points.push(head.x1, head.y1, head.x2, head.y2);
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (let i = 0; i < points.length; i += 2) {
-    minX = Math.min(minX, points[i]);
-    minY = Math.min(minY, points[i + 1]);
-    maxX = Math.max(maxX, points[i]);
-    maxY = Math.max(maxY, points[i + 1]);
-  }
-  const pad = v.strokeWidth / 2 + 5;
-  return {
-    x: minX - pad,
-    y: minY - pad,
-    w: maxX - minX + pad * 2,
-    h: maxY - minY + pad * 2,
-  };
+  const geom = getArrowGeom(v);
+  if (!geom) return { x: v.x, y: v.y, w: v.w, h: v.h };
+  return geom.bounds;
 }
 
 export function describeArrow(
@@ -1044,12 +1140,9 @@ export function describeArrow(
 
 /** Sampled shaft plus arrowhead outline — same geometry used to paint and hit-test. */
 export function arrowHitPolyline(v: ShapeView): number[] {
-  const curve = arrowCurve(v);
-  if (!curve) return v.points && v.points.length >= 2 ? v.points.slice() : [];
-  const points = sampleArrowCurve(curve);
-  const tip = arrowHeadTips(curve, arrowHeadLength(v));
-  points.push(curve.end.x, curve.end.y, tip.x1, tip.y1, curve.end.x, curve.end.y, tip.x2, tip.y2);
-  return points;
+  const geom = getArrowGeom(v);
+  if (!geom) return v.points && v.points.length >= 2 ? v.points.slice() : [];
+  return geom.hitPoly;
 }
 
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
@@ -1058,12 +1151,16 @@ export function pointInShape(v: ShapeView, px: number, py: number): boolean {
     return pointNearPolyline(v.points ?? [], px, py, v.strokeWidth / 2 + 3);
   }
   if (v.type === 'arrow') {
-    const curve = arrowCurve(v);
-    if (!curve) return false;
+    const geom = getArrowGeom(v);
+    if (!geom) return false;
     const tol = v.strokeWidth / 2 + 3;
-    if (pointNearPolyline(sampleArrowCurve(curve), px, py, tol)) return true;
-    const tip = arrowHeadTips(curve, arrowHeadLength(v));
-    return pointInTriangle(px, py, curve.end.x, curve.end.y, tip.x1, tip.y1, tip.x2, tip.y2);
+    const b = geom.bounds;
+    // Cheap reject before walking the tessellated shaft (bounds already pad stroke).
+    if (px < b.x - tol || px > b.x + b.w + tol || py < b.y - tol || py > b.y + b.h + tol) return false;
+    if (pointNearPolyline(geom.shaft, px, py, tol)) return true;
+    const tip = geom.tip;
+    const end = geom.curve.end;
+    return pointInTriangle(px, py, end.x, end.y, tip.x1, tip.y1, tip.x2, tip.y2);
   }
   const rotated = Boolean(shapeRotation(v));
   const box = rotated ? { ...v, x: 0, y: 0, rotation: 0 } : v;
@@ -2513,19 +2610,16 @@ export function releaseImage(src: string): void {
 }
 
 export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?: string): void {
-  const curve = arrowCurve(v);
-  if (!curve) return;
+  const geom = getArrowGeom(v);
+  if (!geom) return;
+  const curve = geom.curve;
   const ink = boardBg ? displayInk(v.stroke, boardBg) : v.stroke;
-  ctx.save();
+  // No shadowBlur — per-arrow canvas shadows scale badly and dominate paint cost.
   ctx.strokeStyle = ink;
   ctx.fillStyle = ink;
   ctx.lineWidth = v.strokeWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  // soft shadow for beauty
-  ctx.shadowColor = 'rgba(0,0,0,0.25)';
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetY = 1;
   ctx.beginPath();
   ctx.moveTo(curve.start.x, curve.start.y);
   if (curve.kind === 'cubic') {
@@ -2538,28 +2632,21 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
       curve.end.y
     );
   } else if (curve.kind === 'quadratic') {
-    // free arrow with gentle curve via quadratic
     ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
   } else {
     ctx.lineTo(curve.end.x, curve.end.y);
   }
   ctx.stroke();
-  ctx.shadowColor = 'transparent';
-  const head = arrowHeadLength(v);
-  if (head > 0) {
-    const hx1 = curve.end.x - head * Math.cos(curve.endAngle - 0.42);
-    const hy1 = curve.end.y - head * Math.sin(curve.endAngle - 0.42);
-    const hx2 = curve.end.x - head * Math.cos(curve.endAngle + 0.42);
-    const hy2 = curve.end.y - head * Math.sin(curve.endAngle + 0.42);
+  if (geom.head > 0) {
+    const tip = geom.tip;
     ctx.beginPath();
     ctx.moveTo(curve.end.x, curve.end.y);
-    ctx.lineTo(hx1, hy1);
-    ctx.lineTo(hx2, hy2);
+    ctx.lineTo(tip.x1, tip.y1);
+    ctx.lineTo(tip.x2, tip.y2);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
   }
-  ctx.restore();
 }
 
 function drawShapeRichText(
