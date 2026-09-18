@@ -939,6 +939,42 @@ assert.equal(store.readShape(store.board.get(cRiderKey)).x, 9050, 'rider in the 
 assert.equal(store.readShape(store.board.get(cRiderKey)).y, 9050, 'rider in the fixed column stays y');
 engine.setSelection([]);
 
+// whole-table handle resize moves glued riders without squeezing them
+const hKey = store.addShape({
+  type: 'table', x: 10000, y: 10000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+const hStickyKey = store.addShape({ type: 'sticky', x: 10050, y: 10050, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
+const hRectKey = store.addShape({ type: 'rect', x: 10250, y: 10100, w: 80, h: 50, fill: '#ffffff', stroke: '#000000', strokeWidth: 2 });
+const hPenPts = [10100, 10100, 10160, 10120, 10220, 10140];
+const hPenKey = store.addShape({ type: 'pen', x: 10100, y: 10100, w: 120, h: 40, points: [...hPenPts], stroke: '#000000', strokeWidth: 3 });
+engine.setSelection([hKey]);
+const hSeScr = engine.worldToScreen(10400, 10200);
+assert.equal(engine.hitHandle(hSeScr.x, hSeScr.y)?.handle, 'se', 'se dot hit');
+const hDown = { screen: hSeScr, world: { x: 10400, y: 10200 }, shift: false, alt: false };
+const hMove2 = engine.worldToScreen(10500, 10300);
+const hMove = { screen: hMove2, world: { x: 10500, y: 10300 }, shift: false, alt: false };
+selectTool.onDown(engine, hDown);
+selectTool.onMove(engine, hMove);
+selectTool.onUp(engine, hMove);
+const hv = store.readShape(store.board.get(hKey));
+assert.equal(hv.w, 500, 'whole-table resize widens');
+assert.equal(hv.h, 300, 'whole-table resize grows height');
+const hs = store.readShape(store.board.get(hStickyKey));
+assert.equal(hs.w, 60, 'sticky keeps width on whole-table resize');
+assert.equal(hs.h, 40, 'sticky keeps height on whole-table resize');
+const hr = store.readShape(store.board.get(hRectKey));
+assert.equal(hr.w, 80, 'rect keeps width on whole-table resize');
+assert.equal(hr.h, 50, 'rect keeps height on whole-table resize');
+const hp = store.readShape(store.board.get(hPenKey));
+assert.equal(hp.w, 120, 'pen keeps width on whole-table resize');
+assert.equal(hp.h, 40, 'pen keeps height on whole-table resize');
+assert.ok(
+  hp.points.every((v, i) => Math.abs(v - (i % 2 === 0 ? hp.x : hp.y) - (hPenPts[i] - 10100)) < 1e-9),
+  'pen strokes translate rigidly on whole-table resize'
+);
+engine.setSelection([]);
+
 // mouse-drag carries riders exactly (sticky + rect on a table)
 const mKey = store.addShape({
   type: 'table', x: 30000, y: 30000, w: 300, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,

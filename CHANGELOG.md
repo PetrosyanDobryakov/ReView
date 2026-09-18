@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.50
+
+### Fix
+- **Table riders keep size on whole-table resize**: handle-resize of a table now only translates glued notes, ink and photos (`keepSize` in `mapShapeThroughHostResize`, enabled for table hosts) instead of squeezing them. Same rigid behavior the 0.15.44 fix gave divider drags.
+
 ## 0.15.49
 
 ### Fix
