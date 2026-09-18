@@ -2427,7 +2427,7 @@ export {
   calcCssZoom,
   calcLabelWorldSize,
 } from './calcGeometry';
-import { buildCalcFaceLayout } from './calcKeypad';
+import { buildCalcFaceLayout, calcTitleBaselineY } from './calcKeypad';
 import { calcFrameScale } from './calcGeometry';
 
 /** Live `--chrome-*` read without importing chromeTheme (avoids shapes↔theme cycle). */
@@ -2564,31 +2564,33 @@ function drawCalculator(
   if (!hideOverlayOwned) {
     const { chrome } = layout;
     const hx = v.x + layout.header.x;
-    const hy = v.y + layout.header.y + layout.header.h * 0.5;
+    // Shared optical centerline for bars + title ink (not em-box mid alone).
+    const opticalY = v.y + layout.header.y + layout.header.h * 0.5;
+    const barCenterY = opticalY + chrome.iconAlignY;
     const cx = hx + chrome.navW * 0.5;
-    // Three bars — same geometry as .calc-nav-glyph / .calc-nav-bar CSS.
-    const barW = chrome.navW * 0.42;
-    const barH = Math.max(1.25, 1.75 * layout.scale);
-    const edgeGap = Math.max(2.5, 3 * layout.scale);
-    const pitch = barH + edgeGap;
+    const barW = chrome.navW * chrome.barWFrac;
+    const pitch = chrome.barH + chrome.barGap;
     ctx.fillStyle = ink.text;
     for (const dy of [-pitch, 0, pitch]) {
-      const y = hy + dy - barH * 0.5;
-      ctx.fillRect(cx - barW * 0.5, y, barW, barH);
+      const y = barCenterY + dy - chrome.barH * 0.5;
+      ctx.fillRect(cx - barW * 0.5, y, barW, chrome.barH);
     }
     ctx.font = `600 ${Math.round(chrome.titlePx)}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
+    ctx.textBaseline = 'alphabetic';
+    const metrics = ctx.measureText(modeLabel);
+    const baseline = calcTitleBaselineY(opticalY, metrics, chrome.titlePx);
     ctx.fillText(
       modeLabel,
       hx + chrome.navW + chrome.navGap,
-      hy,
+      baseline,
       Math.max(8, layout.header.w - chrome.navW - chrome.navGap)
     );
     if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
       ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = ink.text;
-      ctx.fillText('M', hx + layout.header.w, hy);
+      ctx.fillText('M', hx + layout.header.w, opticalY);
     }
   }
 

@@ -131,7 +131,7 @@ export type CalcRect = { x: number; y: number; w: number; h: number };
 
 export type CalcKeyRect = CalcKeyDef & CalcRect;
 
-/** Shared ≡ + mode-title metrics (canvas paint + open overlay must match 1:1). */
+/** Shared nav + mode-title metrics (canvas paint + open overlay must match 1:1). */
 export type CalcHeaderChrome = {
   /** World width of the nav (hamburger) hit/glyph cell. */
   navW: number;
@@ -139,13 +139,36 @@ export type CalcHeaderChrome = {
   navGap: number;
   /** World height of nav / title controls (vertically centered in header). */
   controlH: number;
-  /** Reserved (drawn bars replace ≡ — kept for layout callers / tests). */
+  /** Reserved sizing token (bars are drawn; kept for callers / tests). */
   glyphPx: number;
   /** Mode title font size (world px). */
   titlePx: number;
-  /** Unused when bars are drawn; kept 0 for stable chrome shape. */
-  glyphNudgeY: number;
+  /**
+   * World Y shift of the three-bar icon relative to the title ink optical center
+   * (positive = bars move down). Canvas + CSS share this so focused/unfocused match.
+   */
+  iconAlignY: number;
+  /** Bar thickness (world). */
+  barH: number;
+  /** Gap between bar edges (world). */
+  barGap: number;
+  /** Bar width as a fraction of navW. */
+  barWFrac: number;
 };
+
+/**
+ * Alphabetic baseline so the title ink box midpoint sits on `opticalY`
+ * (pairs with three-bar icon center after `chrome.iconAlignY`).
+ */
+export function calcTitleBaselineY(
+  opticalY: number,
+  metrics: { actualBoundingBoxAscent?: number; actualBoundingBoxDescent?: number },
+  titlePx: number
+): number {
+  const asc = metrics.actualBoundingBoxAscent ?? titlePx * 0.72;
+  const desc = metrics.actualBoundingBoxDescent ?? titlePx * 0.06;
+  return opticalY + (asc - desc) / 2;
+}
 
 export type CalcFaceLayout = {
   scale: number;
@@ -186,15 +209,20 @@ export function buildCalcFaceLayout(
   const sci = mode === 'scientific';
   const cols = sci ? 5 : 4;
 
-  // Win-calc chrome row: nav ≡ + mode title (+ DEG) — same scale family as keys.
-  // Design px (34 / 32 / 20 / 16 / 8) × frame scale — CSS uses the same via --calc-zoom.
+  // Win-calc chrome row: nav bars + mode title (+ DEG) — same scale family as keys.
+  // Design px × frame scale — CSS overlay reads the same via --calc-* vars.
   const chrome: CalcHeaderChrome = {
     navW: Math.max(28, 34 * scale),
     navGap: Math.max(6, 8 * scale),
     controlH: Math.max(28, 32 * scale),
     glyphPx: Math.max(16, 20 * scale),
     titlePx: Math.max(14, 16 * scale),
-    glyphNudgeY: 0,
+    // Short bar stack tops near the S cap when centers share the em mid — drop
+    // bars onto the title ink optical center (tight crops, 0.15.39).
+    iconAlignY: Math.max(1.4, 1.75 * scale),
+    barH: Math.max(1.25, 1.75 * scale),
+    barGap: Math.max(2.5, 3 * scale),
+    barWFrac: 0.42,
   };
   const headerH = Math.max(chrome.controlH + 14 * scale, 52 * scale);
   // Keep header clear of the top stroke / selection ring — same inset focused or not.

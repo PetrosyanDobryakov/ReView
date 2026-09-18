@@ -14,7 +14,7 @@ import {
   calcLabelWorldSize,
   clampCalcSize,
 } from '../src/core/calcGeometry.ts';
-import { buildCalcFaceLayout, calcKeypadRows } from '../src/core/calcKeypad.ts';
+import { buildCalcFaceLayout, calcKeypadRows, calcTitleBaselineY } from '../src/core/calcKeypad.ts';
 import { rotateHandleLocal, rotateHandleOnBox } from '../src/core/transform.ts';
 
 function run(keys) {
@@ -89,9 +89,13 @@ assert.equal(std.chrome.navGap, 8);
 assert.equal(std.chrome.controlH, 32);
 assert.equal(std.chrome.glyphPx, 20);
 assert.equal(std.chrome.titlePx, std.fonts.header);
-assert.equal(std.chrome.glyphNudgeY, 0);
+assert.ok(std.chrome.iconAlignY > 0, 'iconAlignY should drop bars onto title ink center');
+assert.ok(std.chrome.barH > 0);
+assert.ok(std.chrome.barGap > 0);
+assert.equal(std.chrome.barWFrac, 0.42);
 assert.ok(std.header.h >= 52, `header too short: ${std.header.h}`);
 assert.ok(std.header.y >= 12, `header too tight to top: ${std.header.y}`);
+assert.equal(calcTitleBaselineY(100, { actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 2 }, 16), 105);
 
 assert.equal(calcKeypadRows('standard').length, 8);
 assert.equal(calcKeypadRows('scientific').length, 9);
