@@ -975,6 +975,54 @@ assert.ok(
 );
 engine.setSelection([]);
 
+// tray hosts: first press selects + starts marquee, moving needs it pre-selected
+const pressTbl = store.addShape({
+  type: 'table', x: 11000, y: 11000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+const pressNote = store.addShape({ type: 'sticky', x: 11050, y: 11050, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
+engine.setSelection([]);
+// tap on empty table area selects and keeps the selection (no instant move)
+selectTool.onDown(engine, pinfo(11300, 11150));
+assert.deepEqual([...engine.selection], [pressTbl], 'tap selects the unselected table');
+selectTool.onUp(engine, pinfo(11300, 11150));
+assert.deepEqual([...engine.selection], [pressTbl], 'tap does not clear the fresh table selection');
+assert.equal(store.readShape(store.board.get(pressTbl)).x, 11000, 'tap does not move the table');
+// drag from an unselected host marquees instead of moving it
+engine.setSelection([]);
+selectTool.onDown(engine, pinfo(11300, 11150));
+selectTool.onMove(engine, pinfo(11020, 11020));
+selectTool.onUp(engine, pinfo(11020, 11020));
+assert.equal(store.readShape(store.board.get(pressTbl)).x, 11000, 'marquee drag does not move the table');
+assert.equal(store.readShape(store.board.get(pressTbl)).y, 11000, 'marquee drag does not move the table y');
+assert.ok(engine.selection.has(pressNote), 'marquee from a table grabs notes sitting on it');
+// press on the pre-selected host moves it (riders follow)
+engine.setSelection([pressTbl]);
+selectTool.onDown(engine, pinfo(11300, 11150));
+selectTool.onMove(engine, pinfo(11350, 11200));
+selectTool.onUp(engine, pinfo(11350, 11200));
+assert.equal(store.readShape(store.board.get(pressTbl)).x, 11050, 'pre-selected table moves');
+assert.equal(store.readShape(store.board.get(pressTbl)).y, 11050, 'pre-selected table moves y');
+assert.equal(store.readShape(store.board.get(pressNote)).x, 11100, 'table rider follows the move');
+assert.equal(store.readShape(store.board.get(pressNote)).y, 11100, 'table rider follows the move y');
+engine.setSelection([]);
+// plain shapes still move on first drag (control)
+const plainRect = store.addShape({ type: 'rect', x: 12000, y: 12000, w: 100, h: 80, fill: '#ffffff', stroke: '#000000', strokeWidth: 2 });
+engine.setSelection([]);
+selectTool.onDown(engine, pinfo(12010, 12010));
+selectTool.onMove(engine, pinfo(12030, 12030));
+selectTool.onUp(engine, pinfo(12030, 12030));
+assert.equal(store.readShape(store.board.get(plainRect)).x, 12020, 'plain rect still moves on first drag');
+assert.equal(store.readShape(store.board.get(plainRect)).y, 12020, 'plain rect still moves on first drag y');
+engine.setSelection([]);
+// photo host behaves the same on tap
+const trayImg = store.addShape({ type: 'image', x: 13000, y: 13000, w: 200, h: 100, stroke: '#000000', strokeWidth: 2 });
+engine.setSelection([]);
+selectTool.onDown(engine, pinfo(13050, 13040));
+selectTool.onUp(engine, pinfo(13050, 13040));
+assert.deepEqual([...engine.selection], [trayImg], 'tap selects the unselected photo');
+engine.setSelection([]);
+
 // mouse-drag carries riders exactly (sticky + rect on a table)
 const mKey = store.addShape({
   type: 'table', x: 30000, y: 30000, w: 300, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
@@ -985,13 +1033,16 @@ const rcRiderKey = store.addShape({ type: 'rect', x: 30200, y: 30100, w: 50, h: 
 const mselect = engine.tools.get('select');
 // alt = no snapping (snap is orthogonal, riders need exact deltas)
 const mpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
-mselect.onDown(engine, mpinfo(30150, 30150));
+// tray hosts need a tap to select first; the second press drags them
+mselect.onDown(engine, mpinfo(30050, 30150));
+mselect.onUp(engine, mpinfo(30050, 30150));
+mselect.onDown(engine, mpinfo(30050, 30150));
 // ponytail: incremental moves like a real drag (a single jump would mask
 // riders that only patch on the first move and freeze after)
-mselect.onMove(engine, mpinfo(30160, 30160));
-mselect.onMove(engine, mpinfo(30170, 30175));
-mselect.onMove(engine, mpinfo(30180, 30190));
-mselect.onUp(engine, mpinfo(30180, 30190));
+mselect.onMove(engine, mpinfo(30060, 30160));
+mselect.onMove(engine, mpinfo(30070, 30175));
+mselect.onMove(engine, mpinfo(30080, 30190));
+mselect.onUp(engine, mpinfo(30080, 30190));
 assert.equal(store.readShape(store.board.get(mKey)).x, 30030, 'dragged table moves');
 assert.equal(store.readShape(store.board.get(mKey)).y, 30040, 'dragged table moves y');
 assert.equal(store.readShape(store.board.get(stRiderKey)).x, 30080, 'sticky rider follows drag exactly');
@@ -1015,6 +1066,9 @@ const docOutsiderKey = store.addShape({
 });
 const docSelect = engine.tools.get('select');
 const docPinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
+// tray host: tap selects, second press drags
+docSelect.onDown(engine, docPinfo(50010, 50010));
+docSelect.onUp(engine, docPinfo(50010, 50010));
 docSelect.onDown(engine, docPinfo(50010, 50010));
 docSelect.onMove(engine, docPinfo(50020, 50020));
 docSelect.onMove(engine, docPinfo(50030, 50035));
@@ -1051,10 +1105,13 @@ const dArrKey = store.addShape({
 });
 const dselect = engine.tools.get('select');
 const dpinfo = (x, y) => ({ screen: { x, y }, world: { x, y }, shift: false, alt: true });
-dselect.onDown(engine, dpinfo(30180, 30100));
-dselect.onMove(engine, dpinfo(30190, 30110));
-dselect.onMove(engine, dpinfo(30200, 30120));
-dselect.onUp(engine, dpinfo(30200, 30120));
+// tray host: tap a free cell to select, second press drags +20/+20
+dselect.onDown(engine, dpinfo(30250, 30180));
+dselect.onUp(engine, dpinfo(30250, 30180));
+dselect.onDown(engine, dpinfo(30250, 30180));
+dselect.onMove(engine, dpinfo(30260, 30190));
+dselect.onMove(engine, dpinfo(30270, 30200));
+dselect.onUp(engine, dpinfo(30270, 30200));
 assert.equal(store.readShape(store.board.get(mKey)).x, 30050, 'table moves under pen riders');
 const penView = store.readShape(store.board.get(dPenKey));
 assert.equal(penView.x, 30080, 'pen rider follows');
@@ -2612,7 +2669,7 @@ engine.setTool('select');
 
 assert.ok(Math.abs(mapAlongTableFractions([0.5, 0.5], [0.6, 0.4], 0.5) - 0.6) < 1e-9, 'divider keeps the split on the divider');
 
-const trayTbl = store.addShape({
+const insTbl = store.addShape({
   type: 'table',
   x: 114000,
   y: 114000,
@@ -2645,21 +2702,21 @@ const botNote = store.addShape({
   stroke: '#d9b64d',
   strokeWidth: 2,
 });
-engine.tableInsertRow(trayTbl, 1);
+engine.tableInsertRow(insTbl, 1);
 store.flushPendingPatches();
 assert.equal(store.readShape(store.board.get(topNote)).y, 114010, 'notes above an inserted row stay put');
 assert.equal(store.readShape(store.board.get(botNote)).y, 114110, 'notes below an inserted row follow the cell');
-engine.tableRemoveRow(trayTbl, 1);
+engine.tableRemoveRow(insTbl, 1);
 store.flushPendingPatches();
 assert.equal(store.readShape(store.board.get(botNote)).y, 114060, 'removing the row restores the note');
-engine.tableInsertCol(trayTbl, 0);
+engine.tableInsertCol(insTbl, 0);
 store.flushPendingPatches();
 assert.equal(store.readShape(store.board.get(topNote)).x, 114120, 'inserting a column to the left pushes notes');
-engine.tableRemoveCol(trayTbl, 0);
+engine.tableRemoveCol(insTbl, 0);
 store.flushPendingPatches();
 assert.equal(store.readShape(store.board.get(topNote)).x, 114020, 'removing the column restores the note');
 
-engine.setSelection([trayTbl]);
+engine.setSelection([insTbl]);
 engine.duplicateSelection();
 store.flushPendingPatches();
 const dupNotes = [...engine.views.values()].filter(
@@ -4903,6 +4960,23 @@ const dragImg = store.addShape({
 });
 engine.setTool('select');
 const dragScr = engine.worldToScreen(246040, 246030);
+// tray host: first press selects, second press drags
+engine.onPointerDown({
+  clientX: dragScr.x,
+  clientY: dragScr.y,
+  button: 0,
+  pointerId: 102,
+  shiftKey: false,
+  altKey: false,
+});
+engine.onPointerUp({
+  clientX: dragScr.x,
+  clientY: dragScr.y,
+  button: 0,
+  pointerId: 102,
+  shiftKey: false,
+  altKey: false,
+});
 engine.onPointerDown({
   clientX: dragScr.x,
   clientY: dragScr.y,

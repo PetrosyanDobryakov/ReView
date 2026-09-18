@@ -16,6 +16,12 @@ export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow'
 /** Photo / video / PDF hosts that magnetize notes above them in z-order. */
 export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'doc']);
 
+/**
+ * Big tray-like hosts that carry riders (tables, media, frames). A press on an
+ * unselected host selects it and starts marquee — moving needs it pre-selected.
+ */
+export const RIDER_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['table', 'frame', 'image', 'video', 'doc']);
+
 /** Container-like shapes the eraser never touches (either mode) — ink on top of them still erases. */
 export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
   'image',

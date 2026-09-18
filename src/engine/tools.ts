@@ -2,7 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -147,6 +147,11 @@ export class SelectTool extends Tool {
     startX: number;
     startY: number;
   } | null = null;
+  /**
+   * Press landed on an unselected tray host (table / photo / PDF / frame):
+   * it got selected and the drag marquees — a tap must not clear the selection.
+   */
+  private downSelectedContainer = false;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
@@ -307,6 +312,7 @@ export class SelectTool extends Tool {
     // ponytail: click anywhere inside selection bbox drags the whole group
     const hitTarget = hit ?? (insideBounds && engine.selection.size ? [...engine.selection][0] : null);
     if (hit || insideBounds) {
+      const wasSelected = hit ? engine.selection.has(hit) : false;
       if (hit) {
         if (p.shift && engine.selection.has(hit)) {
           engine.setSelection([...engine.selection].filter((id) => id !== hit));
@@ -314,6 +320,18 @@ export class SelectTool extends Tool {
           engine.setSelection([...engine.selection, hit]);
         } else if (!engine.selection.has(hit)) {
           engine.setSelection([hit]);
+        }
+      }
+      // Tray hosts (tables / photos / PDFs / frames) select on first press and
+      // marquee from there, so riders sitting on them stay selectable. Moving
+      // a host needs it pre-selected — press again and drag.
+      if (hit && !p.shift && !wasSelected) {
+        const hv = engine.views.get(hit);
+        if (hv && RIDER_HOST_TYPES.has(hv.type) && !hv.locked) {
+          this.mode = 'marquee';
+          this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
+          this.downSelectedContainer = true;
+          return;
         }
       }
       for (const id of engine.selection) {
@@ -568,7 +586,8 @@ export class SelectTool extends Tool {
           if (intersects(b, this.marquee)) ids.push(id);
         }
         engine.setSelection(p.shift ? [...new Set([...engine.selection, ...ids])] : ids);
-      } else if (!p.shift) {
+      } else if (!p.shift && !this.downSelectedContainer) {
+        // tap on empty space clears; tap that selected a tray host keeps it
         engine.setSelection([]);
       }
     }
@@ -594,6 +613,7 @@ export class SelectTool extends Tool {
     this.marquee = null;
     this.tableDiv = null;
     this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
@@ -674,6 +694,7 @@ export class SelectTool extends Tool {
     this.marquee = null;
     this.tableDiv = null;
     this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
@@ -704,6 +725,7 @@ export class SelectTool extends Tool {
     this.groupOrigBox = null;
     this.tableDiv = null;
     this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.moved = 0;
   }
 
