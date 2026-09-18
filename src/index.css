@@ -3187,6 +3187,15 @@ button.brand {
   position: fixed;
   z-index: 100;
   min-width: 220px;
+  /* Cap to remaining viewport under the menu's top; Align expand scrolls instead of clipping. */
+  max-height: min(
+    var(--ctx-max-h, 100dvh),
+    calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 12px)
+  );
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background: var(--chrome-panel);
   border: 1px solid var(--chrome-border);
   border-radius: var(--chrome-radius);

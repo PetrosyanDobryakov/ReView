@@ -833,8 +833,17 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const menuView = menu ?? (menuShown ? menuHold.current : null);
   const infoView = info ?? (infoShown ? infoHold.current : null);
   const errorView = error ?? (errorShown ? errorHold.current : null);
-  const menuX = menuView ? Math.min(menuView.x, window.innerWidth - 240) : 0;
-  const menuY = menuView ? Math.min(menuView.y, window.innerHeight - 320) : 0;
+  const menuPad = 8;
+  const menuX = menuView
+    ? Math.min(Math.max(menuPad, menuView.x), Math.max(menuPad, window.innerWidth - 240))
+    : 0;
+  // Leave a short visible strip; height is capped via --ctx-max-h + overflow scroll (Align expand).
+  const menuY = menuView
+    ? Math.min(Math.max(menuPad, menuView.y), Math.max(menuPad, window.innerHeight - 96))
+    : 0;
+  const menuMaxH = menuView
+    ? Math.max(96, window.innerHeight - menuY - menuPad)
+    : undefined;
 
   const menuEntries: MenuEntry[] = [];
   if (menuView) {
@@ -1397,7 +1406,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         <div
           className={`ctx-menu${menu ? '' : ' is-leaving'}`}
           role="menu"
-          style={{ left: menuX, top: menuY }}
+          style={{
+            left: menuX,
+            top: menuY,
+            ['--ctx-max-h' as string]: menuMaxH != null ? `${menuMaxH}px` : undefined,
+          }}
           onContextMenu={(e) => e.preventDefault()}
         >
           {menuEntries.map((entry, i) => {
