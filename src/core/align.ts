@@ -1,6 +1,21 @@
-import type { ShapeBox, ShapeView } from './shapes';
+import type { ShapeBox, ShapeType, ShapeView } from './shapes';
 import { arrowBounds } from './shapes';
 import { rotatedAabb } from './transform';
+
+/**
+ * Snap / single-select align guides only use media-like containers
+ * (photos, PDFs, tables, frames) — not freehand ink or ordinary shapes.
+ */
+export const ALIGN_SNAP_TARGET_TYPES: ReadonlySet<ShapeType> = new Set([
+  'image',
+  'doc',
+  'table',
+  'frame',
+]);
+
+export function isAlignSnapTarget(type: ShapeType): boolean {
+  return ALIGN_SNAP_TARGET_TYPES.has(type);
+}
 
 /** World AABB of a shape, including rotation and arrow curves. */
 export function visualBox(v: ShapeView): ShapeBox {

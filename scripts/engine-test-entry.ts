@@ -4,7 +4,14 @@ export { settings, penStrokeWidthForSize } from '../src/core/settings';
 export { cropFractions, describeArrow, displayInk, uncroppedBox, restoreUncroppedBox, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, shapeLassoProbes, pointInShape, docPageIndex, docPageStep, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom, getPaintZoom } from '../src/core/shapes';
 export { ORBIT_PAPER } from '../src/core/orbit';
 export { isWriteGestureActive, closeWriteGate } from '../src/core/writeGate';
-export { computeSnap, alignViews, visualBox, groupBox } from '../src/core/align';
+export {
+  computeSnap,
+  alignViews,
+  visualBox,
+  groupBox,
+  isAlignSnapTarget,
+  ALIGN_SNAP_TARGET_TYPES,
+} from '../src/core/align';
 export { applyKeybinds, getColorBinds, getToolBinds } from '../src/core/keybindings';
 export { tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, defaultFontSizeFor, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../src/core/shapes';
 export { splitStrokeByErasedIndices } from '../src/engine/strokeClip';

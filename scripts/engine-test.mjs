@@ -1984,6 +1984,88 @@ const snapRes = engine.computeSnapForMove(new Map([[snapHost, snapOrig]]), 0, 0)
 assert.equal(snapRes.dx, 0, 'snap does not lock a photo to its own glued sticky (x)');
 assert.equal(snapRes.dy, 0, 'snap does not lock a photo to its own glued sticky (y)');
 
+// Snap / single-select align guides only target media containers — not pen ink.
+const alignTargetPage = store.currentPageId();
+store.addPage();
+const inkOnlyPen = store.addShape({
+  type: 'pen',
+  x: 100,
+  y: 100,
+  w: 50,
+  h: 50,
+  fill: 'transparent',
+  stroke: '#111111',
+  strokeWidth: 2,
+  points: [100, 100, 150, 150],
+});
+const inkOnlySticky = store.addShape({
+  type: 'sticky',
+  x: 300,
+  y: 102,
+  w: 40,
+  h: 40,
+  fill: '#ffe27a',
+  stroke: '#d9b64d',
+  strokeWidth: 2,
+});
+const inkOnlySnap = engine.computeSnapForMove(
+  new Map([[inkOnlySticky, engine.views.get(inkOnlySticky)]]),
+  -198,
+  0
+);
+assert.equal(inkOnlySnap.dx, -198, 'snap ignores pen drawings as targets');
+assert.equal(inkOnlySnap.guides.length, 0, 'no snap guides against pen ink');
+engine.setSelection([inkOnlySticky]);
+const stickyXBefore = engine.views.get(inkOnlySticky).x;
+engine.alignSelection('left');
+store.flushPendingPatches();
+assert.equal(
+  engine.views.get(inkOnlySticky).x,
+  stickyXBefore,
+  'single-select align ignores pen drawings as targets'
+);
+engine.setSelection([]);
+store.removeShapes([inkOnlyPen, inkOnlySticky]);
+store.flushPendingPatches();
+
+const inkMedia = store.addShape({
+  type: 'image',
+  x: 100,
+  y: 100,
+  w: 100,
+  h: 80,
+  fill: 'transparent',
+  stroke: 'transparent',
+  strokeWidth: 0,
+  src: 'data:image/png;base64,x',
+});
+const inkMediaSticky = store.addShape({
+  type: 'sticky',
+  x: 102,
+  y: 300,
+  w: 40,
+  h: 40,
+  fill: '#ffe27a',
+  stroke: '#d9b64d',
+  strokeWidth: 2,
+});
+const inkMediaSnap = engine.computeSnapForMove(
+  new Map([[inkMediaSticky, engine.views.get(inkMediaSticky)]]),
+  0,
+  0
+);
+assert.ok(Math.abs(inkMediaSnap.dx + 2) < 1e-6, 'snap still locks to media container edges');
+engine.setSelection([inkMediaSticky]);
+engine.alignSelection('left');
+store.flushPendingPatches();
+assert.ok(
+  Math.abs(engine.views.get(inkMediaSticky).x - engine.views.get(inkMedia).x) < 1e-6,
+  'single-select align still targets media containers'
+);
+engine.setSelection([]);
+store.setCurrentPage(alignTargetPage);
+store.flushPendingPatches();
+
 const darkArrow = shapesToSvg(
   [
     {

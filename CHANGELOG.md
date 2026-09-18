@@ -8,6 +8,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.43
+
+### Fix
+- **Align / snap targets**: guide and single-select align references are limited to media containers (`image`, `doc`, `table`, `frame`); freehand pen ink and ordinary shapes are no longer snap/align anchors. Multi-select align-within-selection is unchanged.
+
 ## 0.15.42
 
 ### Fix
