@@ -2560,17 +2560,24 @@ function drawCalculator(
   ctx.stroke();
 
   // Header — Win-calc ≡ + mode title (+ memory). Nav/stamp live only in the open overlay.
+  // Metrics from layout.chrome so closed canvas matches open CSS overlay 1:1.
   if (!hideOverlayOwned) {
+    const { chrome } = layout;
     const hx = v.x + layout.header.x;
     const hy = v.y + layout.header.y + layout.header.h * 0.5;
     ctx.fillStyle = ink.text;
-    ctx.font = `500 ${Math.round(fonts.header * 1.15)}px ${BOARD_TYPEFACE}`;
-    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('≡', hx, hy);
-    const glyphW = ctx.measureText('≡').width;
-    ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
-    ctx.fillText(modeLabel, hx + glyphW + Math.max(4, 6 * layout.scale), hy, layout.header.w * 0.72);
+    ctx.font = `500 ${Math.round(chrome.glyphPx)}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('≡', hx + chrome.navW * 0.5, hy + chrome.glyphNudgeY);
+    ctx.font = `600 ${Math.round(chrome.titlePx)}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'left';
+    ctx.fillText(
+      modeLabel,
+      hx + chrome.navW + chrome.navGap,
+      hy,
+      Math.max(8, layout.header.w - chrome.navW - chrome.navGap)
+    );
     if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
       ctx.textAlign = 'right';
       ctx.fillStyle = ink.text;

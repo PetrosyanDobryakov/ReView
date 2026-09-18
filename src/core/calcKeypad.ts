@@ -131,6 +131,22 @@ export type CalcRect = { x: number; y: number; w: number; h: number };
 
 export type CalcKeyRect = CalcKeyDef & CalcRect;
 
+/** Shared ≡ + mode-title metrics (canvas paint + open overlay must match 1:1). */
+export type CalcHeaderChrome = {
+  /** World width of the nav (hamburger) hit/glyph cell. */
+  navW: number;
+  /** World gap between nav cell and mode title. */
+  navGap: number;
+  /** World height of nav / title controls (vertically centered in header). */
+  controlH: number;
+  /** ≡ font size (world px). */
+  glyphPx: number;
+  /** Mode title font size (world px). */
+  titlePx: number;
+  /** Optical Y nudge for ≡ (glyph sits high in Space Grotesk). */
+  glyphNudgeY: number;
+};
+
 export type CalcFaceLayout = {
   scale: number;
   pad: number;
@@ -138,6 +154,8 @@ export type CalcFaceLayout = {
   gap: number;
   cols: number;
   header: CalcRect;
+  /** Nav ≡ + mode title — single source for canvas + CSS overlay. */
+  chrome: CalcHeaderChrome;
   display: CalcRect;
   padArea: CalcRect;
   keys: CalcKeyRect[];
@@ -169,8 +187,17 @@ export function buildCalcFaceLayout(
   const cols = sci ? 5 : 4;
 
   // Win-calc chrome row: nav ≡ + mode title (+ DEG) — same scale family as keys.
-  const headerH = Math.max(36, 44 * scale);
-  const header: CalcRect = { x: pad, y: pad * 0.4, w: Math.max(20, w - pad * 2), h: headerH };
+  // Design px (34 / 32 / 20 / 16 / 6) × frame scale — CSS uses the same via --calc-zoom.
+  const chrome: CalcHeaderChrome = {
+    navW: Math.max(28, 34 * scale),
+    navGap: Math.max(4, 6 * scale),
+    controlH: Math.max(28, 32 * scale),
+    glyphPx: Math.max(16, 20 * scale),
+    titlePx: Math.max(14, 16 * scale),
+    glyphNudgeY: Math.max(0.4, 0.55 * scale),
+  };
+  const headerH = Math.max(chrome.controlH + 8 * scale, 44 * scale);
+  const header: CalcRect = { x: pad, y: pad * 0.5, w: Math.max(20, w - pad * 2), h: headerH };
 
   // Generous display plane (Win Standard puts a tall result above the pad).
   const dispH = Math.max(78, Math.min(h * 0.22, 112 * scale));
@@ -216,12 +243,13 @@ export function buildCalcFaceLayout(
     gap,
     cols,
     header,
+    chrome,
     display,
     padArea,
     keys,
     fonts: {
-      // Match Win title-bar weight vs keypad (not a shrunk foreign toolbar).
-      header: Math.max(14, 16 * scale),
+      // Mode title size — kept in sync with chrome.titlePx for callers that still read fonts.header.
+      header: chrome.titlePx,
       expr: Math.max(11, 13 * scale),
       display: Math.min(48, Math.max(20, 30 * scale)),
       // Further bump vs 0.15.6 so glyphs fill spacious wells (Standard + Scientific).

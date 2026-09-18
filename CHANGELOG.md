@@ -5,6 +5,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.39
+
+### Fix
+- **Calculator header align**: shared `layout.chrome` metrics so canvas (unfocused) and open overlay (focused) paint ≡ + mode title 1:1 — fixed nav cell, gap, type sizes, optical ≡ nudge; selection chrome no longer fights a divergent header layout.
+
 ## 0.15.38
 
 ### Fix
