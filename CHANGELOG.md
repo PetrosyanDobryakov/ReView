@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.34 — unreleased
+
+### Fix
+- **DO billable-duration spike (solo awareness wakes)**: y-protocols still renewed local awareness every ~15s over WS even on solo boards; each renew was a hibernation wake (cheap after 0.15.29/30, but volume × wall time blew the billable chart). Solo tabs now skip awareness WS fan-out and use a text keepalive answered by Durable Object `setWebSocketAutoResponse` (no isolate wake). Peer renews move to ~25s. Worker still echoes awareness for multi-peer / older clients.
+
 ## 0.15.33 — unreleased
 
 ### Fix

@@ -19,6 +19,14 @@ import {
 const messageSync = 0;
 const messageAwareness = 1;
 
+/**
+ * Text WebSocket keepalive that Cloudflare can auto-answer without waking the
+ * Durable Object (setWebSocketAutoResponse). Solo clients use this instead of
+ * awareness renewals so idle boards bill ~zero DO duration.
+ */
+export const WS_KEEPALIVE_REQUEST = 'review-ka';
+export const WS_KEEPALIVE_RESPONSE = 'review-ka-ack';
+
 export const EMPTY_GC_MS = 90 * 1000;
 /**
  * Tail persist trails mutations instead of running inside the message handler:
@@ -121,12 +129,45 @@ export class BoardRoom implements DurableObject {
    * never encode an empty stub over persisted blobs on close/flush.
    */
   private docHydrated = false;
+  /** Armed once — auto-response survives hibernation for all sockets on this DO. */
+  private keepaliveAutoResponseArmed = false;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     // Do NOT loadOrCreate in the constructor. Hibernation wakes for awareness
     // heartbeats were paying multi-second blob reads on every tick even though
     // presence fan-out needs no CRDT state. Accept + sync paths load lazily;
     // awareness-only uses ensureAwarenessHub() (empty in-memory stub).
+    this.armKeepaliveAutoResponse();
+  }
+
+  /**
+   * Solo idle tabs need an inbound frame every <30s (y-websocket reconnect).
+   * Auto-respond to a tiny text ping without waking this isolate — awareness
+   * echo still works for multi-peer, but solo must not pay wall time at all.
+   */
+  private armKeepaliveAutoResponse(): void {
+    if (this.keepaliveAutoResponseArmed) return;
+    try {
+      const pairCtor = (
+        globalThis as unknown as {
+          WebSocketRequestResponsePair?: new (
+            request: string,
+            response: string,
+          ) => unknown;
+        }
+      ).WebSocketRequestResponsePair;
+      const arm = (
+        this.state as DurableObjectState & {
+          setWebSocketAutoResponse?: (pair: unknown) => void;
+        }
+      ).setWebSocketAutoResponse;
+      if (typeof pairCtor === 'function' && typeof arm === 'function') {
+        arm.call(this.state, new pairCtor(WS_KEEPALIVE_REQUEST, WS_KEEPALIVE_RESPONSE));
+        this.keepaliveAutoResponseArmed = true;
+      }
+    } catch (err) {
+      console.error('[BoardRoom] keepalive auto-response arm failed', err);
+    }
   }
 
   /** Empty in-memory doc+awareness for awareness fan-out — no storage I/O. */
@@ -496,6 +537,7 @@ export class BoardRoom implements DurableObject {
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    this.armKeepaliveAutoResponse();
     this.state.acceptWebSocket(server);
     writeAttachment(server, { clients: [] });
 
@@ -522,9 +564,23 @@ export class BoardRoom implements DurableObject {
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
     try {
+      // Fallback when auto-response is unavailable (tests / older runtime): still
+      // answer the solo keepalive without touching CRDT/storage. Prefer the
+      // hibernation auto-response path — that does not invoke this handler.
+      if (typeof message === 'string') {
+        if (message === WS_KEEPALIVE_REQUEST) {
+          try {
+            ws.send(WS_KEEPALIVE_RESPONSE);
+          } catch {
+            /* sender gone */
+          }
+          return;
+        }
+        return;
+      }
+
       let uint8: Uint8Array;
-      if (typeof message === 'string') uint8 = new TextEncoder().encode(message);
-      else if (message instanceof Uint8Array) uint8 = message;
+      if (message instanceof Uint8Array) uint8 = message;
       else uint8 = new Uint8Array(message);
 
       if (uint8.byteLength > MAX_WS_MESSAGE) {

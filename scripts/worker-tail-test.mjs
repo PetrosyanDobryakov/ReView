@@ -252,6 +252,29 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
   } catch {}
 }
 
+// Solo text keepalive must not touch CRDT/storage (fallback path when
+// setWebSocketAutoResponse is unavailable in the test harness).
+{
+  const kaStorage = makeStorage();
+  const kaSocket = makeSocket();
+  const kaState = {
+    storage: kaStorage,
+    getWebSockets: () => [kaSocket],
+    blockConcurrencyWhile: async (fn) => {
+      await fn();
+    },
+    waitUntil(p) {
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    },
+  };
+  const kaRoom = new BoardRoom(kaState, { REVIEW_COMPACT_TOKEN: 'test-token' });
+  const getsBefore = kaStorage.ops.gets;
+  await kaRoom.webSocketMessage(kaSocket, 'review-ka');
+  assert.equal(kaStorage.ops.gets, getsBefore, 'keepalive must not read storage');
+  assert.equal(kaRoom.doc, null, 'keepalive must not create awareness hub');
+  assert.deepEqual(kaSocket.sent, ['review-ka-ack'], 'keepalive replies with ack text');
+}
+
 // Upgrade during an in-flight wipe must 503 — clearing the latch mid-deleteAll
 // would let resetRoom run under a newly accepted socket.
 {
