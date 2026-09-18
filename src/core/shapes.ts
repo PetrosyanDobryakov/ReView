@@ -978,6 +978,33 @@ type ArrowGeom = {
 const arrowGeomCache = new Map<string, ArrowGeom>();
 const ARROW_GEOM_CACHE_MAX = 4096;
 
+/**
+ * Camera zoom for the current paint/hit frame. Engine sets this before render so
+ * LOD (bloom / calc keypad) can use screen-space thresholds without threading zoom
+ * through every draw helper.
+ */
+let paintZoom = 1;
+
+export function setPaintZoom(zoom: number): void {
+  paintZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
+export function getPaintZoom(): number {
+  return paintZoom;
+}
+
+/** Cached wrapText results — measureText + wrap dominates when many stickies/labels stay dirty. */
+const wrapTextCache = new Map<string, string[]>();
+const WRAP_TEXT_CACHE_MAX = 2048;
+
+export function wrapTextCacheSizeForTest(): number {
+  return wrapTextCache.size;
+}
+
+export function clearWrapTextCacheForTest(): void {
+  wrapTextCache.clear();
+}
+
 function arrowGeomFingerprint(v: ShapeView): string {
   const pts = v.points ?? [];
   return `${pts.length}:${pts.join(',')}|${v.strokeWidth}|${v.arrowHead ?? ''}|${v.fromId ?? ''}|${v.toId ?? ''}|${v.fromPort ?? ''}|${v.toPort ?? ''}`;
@@ -1148,7 +1175,12 @@ export function arrowHitPolyline(v: ShapeView): number[] {
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
   // Pens/arrows store world-space points; rotation is baked in when applied.
   if (v.type === 'pen') {
-    return pointNearPolyline(v.points ?? [], px, py, v.strokeWidth / 2 + 3);
+    const tol = v.strokeWidth / 2 + 3;
+    // Spatial box already pads stroke; reject before walking dense polylines.
+    if (px < v.x - tol || px > v.x + v.w + tol || py < v.y - tol || py > v.y + v.h + tol) {
+      return false;
+    }
+    return pointNearPolyline(v.points ?? [], px, py, tol);
   }
   if (v.type === 'arrow') {
     const geom = getArrowGeom(v);
@@ -1471,7 +1503,10 @@ export function drawPenStroke(
   pressures?: number[],
   opts?: { bloom?: boolean }
 ): void {
-  if (opts?.bloom && alpha > 0.04 && pts.length >= 2) {
+  // Orbit bloom paints the stroke 3×. Skip when the glow is sub-pixel on screen —
+  // same look at readable zoom, much cheaper with dense ink / zoomed-out boards.
+  const bloomPx = width * paintZoom;
+  if (opts?.bloom && alpha > 0.04 && pts.length >= 2 && bloomPx >= 1.25) {
     paintPenStroke(ctx, pts, width * 2.6, color, Math.min(1, alpha * 0.2), pressures);
     paintPenStroke(ctx, pts, width * 1.45, color, Math.min(1, alpha * 0.35), pressures);
   }
@@ -1512,7 +1547,21 @@ function paintPenStroke(
 export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const sizeMatch = /([\d.]+)px/.exec(ctx.font);
   const fontSize = sizeMatch ? Number(sizeMatch[1]) : 16;
-  return wrapLinesByWidth(text, maxWidth, (s) => measureMixedLine(ctx, s, fontSize));
+  // Quantize width so tiny float jitter from resize/zoom does not thrash the cache.
+  const widthKey = Math.round(maxWidth * 4) / 4;
+  const fp = `${widthKey}\0${ctx.font}\0${text}`;
+  const cached = wrapTextCache.get(fp);
+  if (cached) return cached;
+  const lines = wrapLinesByWidth(text, maxWidth, (s) => measureMixedLine(ctx, s, fontSize));
+  if (wrapTextCache.size >= WRAP_TEXT_CACHE_MAX) {
+    let drop = (WRAP_TEXT_CACHE_MAX / 4) | 0;
+    for (const key of wrapTextCache.keys()) {
+      wrapTextCache.delete(key);
+      if (--drop <= 0) break;
+    }
+  }
+  wrapTextCache.set(fp, lines);
+  return lines;
 }
 
 /** Inner wrap width for a shape's title / label. Overlay padding and SVG export share this. */
@@ -1609,11 +1658,13 @@ export function drawShape(
   boardBg: string = COLORS.background,
   hideText = false,
   /** Table only: hide just this cell's text (the overlay covers it while editing). */
-  hideCell?: { row: number; col: number }
+  hideCell?: { row: number; col: number },
+  /** When true, caller already applied `withShapeRotation` — avoid per-frame `{...v}` clones. */
+  skipRotation = false
 ): void {
-  if (shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
+  if (!skipRotation && shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
     withShapeRotation(ctx, v, () =>
-      drawShape(ctx, { ...v, rotation: 0 }, textColor, boardBg, hideText, hideCell)
+      drawShape(ctx, v, textColor, boardBg, hideText, hideCell, true)
     );
     return;
   }
@@ -2547,27 +2598,38 @@ function drawCalculator(
   ctx.textBaseline = 'bottom';
   ctx.fillText(display, dx + dw - pad * 0.6, dy + dh - pad * 0.55, dw - pad);
 
-  // Full-fidelity labeled keypad (same layout module as the open overlay hit targets).
-  for (const key of layout.keys) {
-    const x = v.x + key.x;
-    const y = v.y + key.y;
-    const rr = Math.max(4, Math.min(key.w, key.h) * 0.22);
-    const isEq = key.cls?.includes('eq');
-    const isOp = key.cls?.includes('op');
-    const isFn = key.cls?.includes('fn') || key.cls?.includes('mem');
+  // Full-fidelity labeled keypad when keys are readable on screen.
+  // Below ~7 CSS px, glyphs are noise — paint one pad fill (same color language).
+  const keySample = layout.keys[0];
+  const keyScreenH = keySample ? keySample.h * paintZoom : 0;
+  if (!keySample || keyScreenH >= 7) {
+    for (const key of layout.keys) {
+      const x = v.x + key.x;
+      const y = v.y + key.y;
+      const rr = Math.max(4, Math.min(key.w, key.h) * 0.22);
+      const isEq = key.cls?.includes('eq');
+      const isOp = key.cls?.includes('op');
+      const isFn = key.cls?.includes('fn') || key.cls?.includes('mem');
+      ctx.beginPath();
+      ctx.roundRect(x, y, key.w, key.h, rr);
+      ctx.fillStyle = isEq ? ink.eq : ink.key;
+      ctx.fill();
+      ctx.strokeStyle = isEq ? 'transparent' : ink.keyBorder;
+      ctx.lineWidth = Math.max(0.6, 0.75 * layout.scale);
+      if (!isEq) ctx.stroke();
+      ctx.fillStyle = isOp || isEq ? ink.op : isFn ? ink.muted : ink.keyInk;
+      const px = Math.round(isFn ? fonts.keyFn : fonts.key);
+      ctx.font = `${isOp || isEq ? '600' : '500'} ${px}px ${BOARD_TYPEFACE}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(key.label, x + key.w / 2, y + key.h / 2, key.w - 2);
+    }
+  } else {
+    const pad = layout.padArea;
     ctx.beginPath();
-    ctx.roundRect(x, y, key.w, key.h, rr);
-    ctx.fillStyle = isEq ? ink.eq : ink.key;
+    ctx.roundRect(v.x + pad.x, v.y + pad.y, pad.w, pad.h, Math.max(4, radius * 0.55));
+    ctx.fillStyle = ink.key;
     ctx.fill();
-    ctx.strokeStyle = isEq ? 'transparent' : ink.keyBorder;
-    ctx.lineWidth = Math.max(0.6, 0.75 * layout.scale);
-    if (!isEq) ctx.stroke();
-    ctx.fillStyle = isOp || isEq ? ink.op : isFn ? ink.muted : ink.keyInk;
-    const px = Math.round(isFn ? fonts.keyFn : fonts.key);
-    ctx.font = `${isOp || isEq ? '600' : '500'} ${px}px ${BOARD_TYPEFACE}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(key.label, x + key.w / 2, y + key.h / 2, key.w - 2);
   }
   ctx.restore();
 }

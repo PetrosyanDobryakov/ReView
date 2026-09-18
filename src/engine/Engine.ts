@@ -23,6 +23,7 @@ import {
   normalizeBox,
   measureMixedLine,
   arrowHitPolyline,
+  setPaintZoom,
 } from '../core/shapes';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import {
@@ -561,6 +562,9 @@ export class Engine {
   private observedOrder: Y.Array<string> | null = null;
   private offPageChange: () => void = () => {};
   private boundPageId: string | null = null;
+  /** Stacking index into `store.order` — rebuilt on order changes for O(k log k) hit/paint sorts. */
+  private orderIndex = new Map<string, number>();
+  private orderIndexDirty = true;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -722,6 +726,7 @@ export class Engine {
     this.shapeObs.clear();
     this.views.clear();
     this.grid.rebuild([]);
+    this.orderIndexDirty = true;
     this.selection.clear();
     this.erasing.clear();
     this.partialErase.clear();
@@ -1092,10 +1097,13 @@ export class Engine {
   hitTest(x: number, y: number): string | null {
     const box = { x: x - 1, y: y - 1, w: 2, h: 2 };
     const candidates = this.grid.query(box);
-    const ord = store.order;
-    for (let i = ord.length - 1; i >= 0; i--) {
-      const id = ord.get(i);
-      if (!candidates.has(id)) continue;
+    if (!candidates.size) return null;
+    this.ensureOrderIndex();
+    // Top-most first. Sort only the spatial candidates — not the full board order.
+    const ranked = [...candidates].sort(
+      (a, b) => (this.orderIndex.get(b) ?? -1) - (this.orderIndex.get(a) ?? -1)
+    );
+    for (const id of ranked) {
       if (!store.isOnActivePage(id)) continue;
       const v = this.views.get(id);
       if (v && pointInShape(v, x, y)) return id;
@@ -3195,8 +3203,19 @@ export class Engine {
   };
 
   private onOrder = (): void => {
+    this.orderIndexDirty = true;
     this.dirty = true;
   };
+
+  private ensureOrderIndex(): void {
+    if (!this.orderIndexDirty) return;
+    this.orderIndex.clear();
+    const ord = store.order;
+    for (let i = 0; i < ord.length; i++) {
+      this.orderIndex.set(ord.get(i), i);
+    }
+    this.orderIndexDirty = false;
+  }
 
   private onStore = (ev: Y.YMapEvent<Y.Map<unknown>>): void => {
     const deleted: string[] = [];
@@ -4673,7 +4692,15 @@ export class Engine {
     if (store.metaGrid()) {
       this.drawGrid(ctx, orbitLive ? orbitGridColor() : theme.grid);
     }
-    const vis: ShapeBox = { x: cx - w / 2 / z, y: cy - h / 2 / z, w: w / z, h: h / z };
+    setPaintZoom(z);
+    // Slight pad so AA / stroke caps at the viewport edge are not clipped by cull.
+    const pad = 4 / z;
+    const vis: ShapeBox = {
+      x: cx - w / 2 / z - pad,
+      y: cy - h / 2 / z - pad,
+      w: w / z + pad * 2,
+      h: h / z + pad * 2,
+    };
     const visible = this.grid.query(vis);
     const pageId = store.currentPageId();
     const peerWhole = new Set<string>();
@@ -4751,14 +4778,25 @@ export class Engine {
         drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
       }
     };
-    const ord = store.order;
-    // Single pass in stacking order so highlighters respect bring-to-front / send-to-back.
-    for (let i = 0; i < ord.length; i++) {
-      const id = ord.get(i);
-      if (!visible.has(id) || !store.isOnActivePage(id)) continue;
+    // Paint in stacking order without scanning the whole board order when most
+    // shapes are off-screen. Cell query + AABB refine → sort by order index.
+    this.ensureOrderIndex();
+    const drawList: ShapeView[] = [];
+    for (const id of visible) {
+      if (!store.isOnActivePage(id)) continue;
+      const box = this.grid.getBox(id);
+      // Cell query is coarse (512²); drop true off-screen hits. Skip sub-pixel blobs.
+      if (box) {
+        if (!intersects(box, vis)) continue;
+        if (box.w * z < 0.55 && box.h * z < 0.55) continue;
+      }
       const v = this.views.get(id);
-      if (v) draw(v);
+      if (v) drawList.push(v);
     }
+    drawList.sort(
+      (a, b) => (this.orderIndex.get(a.id) ?? 0) - (this.orderIndex.get(b.id) ?? 0)
+    );
+    for (const v of drawList) draw(v);
     this.drawSelection(ctx);
     this.drawAlignGuides(ctx);
     this.drawPorts(ctx);

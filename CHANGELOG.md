@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.35 — unreleased
+
+### Perf (invisible)
+- **Many visible shapes**: cache `wrapText` measure/wrap results; skip Orbit pen bloom when glow is sub-pixel; LOD calculator keypad (solid pad when keys < ~7 CSS px); AABB-refine grid culling + skip sub-pixel blobs; paint only sorted visible shapes (no full-order scan); hit-test ranks spatial candidates by order index; pen hit AABB reject; no per-frame `{...v}` clone for rotated shapes.
+
 ## 0.15.34 — unreleased
 
 ### Fix
