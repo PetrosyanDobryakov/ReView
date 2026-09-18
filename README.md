@@ -48,7 +48,7 @@ npm run build
 
 ## Deploy
 
-- **Vercel / Cloudflare Pages (static, no server):** push to Vercel or Pages — it builds `dist/` and serves as SPA. Boards stay in the browser (IndexedDB). P2P (WebRTC) starts on these hosts automatically via `wss://signaling.yjs.dev` (room `review-<boardId>`). Use **Export** / **Import** for file share. LAN/self-host still treats P2P as opt-in.
+- **Vercel / Cloudflare Pages (static, no server):** push to Vercel or Pages — it builds `dist/` and serves as SPA. Boards stay in the browser (IndexedDB). Without a dedicated sync worker URL, P2P (WebRTC) defaults on via `wss://signaling.yjs.dev` (room `review-<boardId>`). The canonical Cloudflare Workers tip (`review` + `review-sync`) uses the Durable Object websocket instead and **disables P2P** on `*.workers.dev` / `*.pages.dev`. Use **Export** / **Import** for file share. LAN/self-host still treats P2P as opt-in.
 - **Self-hosted with sync:** `npm run server` or `node server.mjs`. Set `VITE_SYNC_URL` to point browsers at your `wss://` server.
 
 Production / VM hosting: see [docs/DEPLOY.md](docs/DEPLOY.md). Optional env: `VITE_SYNC_URL`, `VITE_P2P_SIGNALING`.

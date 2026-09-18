@@ -30,7 +30,7 @@ Desktop browser first. Chrome floats over a full-bleed canvas: file island (name
 - **Chrome theme and canvas theme are independent.** Separate controls; mixing them into one “skin” is wrong.
 - Board background is canvas-side, not chrome-side.
 - Locales to build: `ru`, `en`, `zh`. Default first launch: Russian.
-- IndexedDB key `review-v1` and WS room `review` stay unless a migration is explicit.
+- IndexedDB key `review-v1-<boardId>` and WS room `review-<boardId>` stay unless a migration is explicit.
 
 ## Brand Commitments
 

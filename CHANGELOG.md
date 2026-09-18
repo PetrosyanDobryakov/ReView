@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.47
+
+### Docs
+- **Agent onboarding alignment**: tip-only / no-PR rule and never-touch `dev-petrosyan` in `AGENTS.md`; clarify doc-only ships (bump+push, deploy optional); fix P2P vs `review-sync` on `*.workers.dev`; Node 5m vs DO 90s room GC; observability sampling note; refresh Workers Builds status; drop ephemeral Builds probe stubs from `docs/DEPLOY.md`; README.ru/zh and `PRODUCT.md` room/IndexedDB keys `review-<id>` / `review-v1-<id>`.
+
 ### Ops
 - **Workers Builds Deploy:** dashboard Deploy command for Worker **review** must be `bash scripts/deploy.sh all` (not `echo done`). Name-mismatch banner suggesting root `name = 'review-sync'` is a **wrong-Worker / wrong Root directory** signal — do not rename the SPA Worker; see `docs/DEPLOY.md`.
 
