@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.51
+
+### Fix
+- **Tray hosts select before they move**: a press on an unselected table / photo / video / PDF / frame now selects it and starts marquee (riders on top stay rubber-band selectable); dragging the host needs it pre-selected. Tap keeps the fresh selection; shift flow unchanged.
+
 ## 0.15.50
 
 ### Fix
