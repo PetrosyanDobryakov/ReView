@@ -6,6 +6,10 @@ export class Grid {
   private boxes = new Map<string, ShapeBox>();
   private cells = new Map<string, Set<string>>();
 
+  getBox(id: string): ShapeBox | undefined {
+    return this.boxes.get(id);
+  }
+
   upsert(id: string, box: ShapeBox): void {
     this.remove(id);
     this.boxes.set(id, box);
