@@ -139,11 +139,11 @@ export type CalcHeaderChrome = {
   navGap: number;
   /** World height of nav / title controls (vertically centered in header). */
   controlH: number;
-  /** ≡ font size (world px). */
+  /** Reserved (drawn bars replace ≡ — kept for layout callers / tests). */
   glyphPx: number;
   /** Mode title font size (world px). */
   titlePx: number;
-  /** Optical Y nudge for ≡ (glyph sits high in Space Grotesk). */
+  /** Unused when bars are drawn; kept 0 for stable chrome shape. */
   glyphNudgeY: number;
 };
 
@@ -187,17 +187,23 @@ export function buildCalcFaceLayout(
   const cols = sci ? 5 : 4;
 
   // Win-calc chrome row: nav ≡ + mode title (+ DEG) — same scale family as keys.
-  // Design px (34 / 32 / 20 / 16 / 6) × frame scale — CSS uses the same via --calc-zoom.
+  // Design px (34 / 32 / 20 / 16 / 8) × frame scale — CSS uses the same via --calc-zoom.
   const chrome: CalcHeaderChrome = {
     navW: Math.max(28, 34 * scale),
-    navGap: Math.max(4, 6 * scale),
+    navGap: Math.max(6, 8 * scale),
     controlH: Math.max(28, 32 * scale),
     glyphPx: Math.max(16, 20 * scale),
     titlePx: Math.max(14, 16 * scale),
-    glyphNudgeY: Math.max(0.4, 0.55 * scale),
+    glyphNudgeY: 0,
   };
-  const headerH = Math.max(chrome.controlH + 8 * scale, 44 * scale);
-  const header: CalcRect = { x: pad, y: pad * 0.5, w: Math.max(20, w - pad * 2), h: headerH };
+  const headerH = Math.max(chrome.controlH + 14 * scale, 52 * scale);
+  // Keep header clear of the top stroke / selection ring — same inset focused or not.
+  const header: CalcRect = {
+    x: pad,
+    y: Math.max(pad, 14 * scale),
+    w: Math.max(20, w - pad * 2),
+    h: headerH,
+  };
 
   // Generous display plane (Win Standard puts a tall result above the pad).
   const dispH = Math.max(78, Math.min(h * 0.22, 112 * scale));
