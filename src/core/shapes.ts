@@ -2530,7 +2530,7 @@ function calcInkOn(fill: string, boardBg: string): {
 /**
  * Canvas paints the calculator face (peers, export, unfocused, open session).
  * When `hideOverlayOwned` is true (local keypad open), skip header chrome the
- * overlay owns (mode row) so “Standard” is not double-painted under the tabs.
+ * overlay owns (≡ + mode title) so labels are not double-painted under the nav.
  * Display + keypad stay on canvas; closed/unfocused still shows the full face.
  */
 function drawCalculator(
@@ -2559,17 +2559,22 @@ function drawCalculator(
   ctx.lineWidth = Math.max(1, 1.5);
   ctx.stroke();
 
-  // Header — mode label (+ memory). Tabs/stamp live only in the open overlay.
+  // Header — Win-calc ≡ + mode title (+ memory). Nav/stamp live only in the open overlay.
   if (!hideOverlayOwned) {
-    ctx.fillStyle = ink.muted;
-    ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
+    const hx = v.x + layout.header.x;
+    const hy = v.y + layout.header.y + layout.header.h * 0.5;
+    ctx.fillStyle = ink.text;
+    ctx.font = `500 ${Math.round(fonts.header * 1.15)}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(modeLabel, v.x + layout.header.x, v.y + layout.header.y + layout.header.h * 0.45, layout.header.w * 0.7);
+    ctx.fillText('≡', hx, hy);
+    const glyphW = ctx.measureText('≡').width;
+    ctx.font = `600 ${Math.round(fonts.header)}px ${BOARD_TYPEFACE}`;
+    ctx.fillText(modeLabel, hx + glyphW + Math.max(4, 6 * layout.scale), hy, layout.header.w * 0.72);
     if (v.calcMemory != null && Number.isFinite(v.calcMemory)) {
       ctx.textAlign = 'right';
       ctx.fillStyle = ink.text;
-      ctx.fillText('M', v.x + layout.header.x + layout.header.w, v.y + layout.header.y + layout.header.h * 0.45);
+      ctx.fillText('M', hx + layout.header.w, hy);
     }
   }
 

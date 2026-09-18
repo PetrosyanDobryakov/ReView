@@ -28,9 +28,9 @@ function shapeToPersisted(engine: Engine, id: string): CalcPersisted {
 
 /**
  * Open calculator session: interaction layer only.
- * Canvas paints display + keypad; this panel supplies mode/stamp chrome and
- * invisible key hit targets. While open, canvas skips header mode text so it
- * does not ghost under the overlay tabs.
+ * Canvas paints display + keypad; this panel supplies Win-calc chrome (nav +
+ * mode title) and invisible key hit targets. While open, canvas skips header
+ * mode text so it does not ghost under the overlay.
  */
 export function CalculatorPanel({
   target,
@@ -42,13 +42,13 @@ export function CalculatorPanel({
   onDone: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
   const locale = readLocale();
   const [tick, setTick] = useState(0);
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const actionsOpenRef = useRef(false);
-  actionsOpenRef.current = actionsOpen;
+  const [navOpen, setNavOpen] = useState(false);
+  const navOpenRef = useRef(false);
+  navOpenRef.current = navOpen;
   const live = engine.views.get(target.id);
   const persisted = useMemo(
     () => shapeToPersisted(engine, target.id),
@@ -88,9 +88,9 @@ export function CalculatorPanel({
       if (doneRef.current) return;
       const el = e.target;
       if (!(el instanceof Element)) return;
-      // Close overflow first when tapping elsewhere inside the panel.
-      if (actionsOpenRef.current && actionsRef.current && !actionsRef.current.contains(el)) {
-        setActionsOpen(false);
+      // Close nav first when tapping elsewhere inside the panel.
+      if (navOpenRef.current && navRef.current && !navRef.current.contains(el)) {
+        setNavOpen(false);
       }
       if (rootRef.current?.contains(el)) return;
       const kind = graphChromeKind(el);
@@ -136,8 +136,8 @@ export function CalculatorPanel({
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        if (actionsOpenRef.current) {
-          setActionsOpen(false);
+        if (navOpenRef.current) {
+          setNavOpen(false);
           return;
         }
         // Close keypad session (resize/undo access). CE remains an on-pad key.
@@ -182,6 +182,9 @@ export function CalculatorPanel({
   const muted = /^#[0-9a-fA-F]{6}$/i.test(inkHex) ? withAlpha(inkHex, 0.5) : lightBody ? 'rgba(28, 28, 26, 0.5)' : 'rgba(236, 234, 228, 0.5)';
   const fw = Math.max(1, live?.w ?? target.w);
   const fh = Math.max(1, live?.h ?? target.h);
+  const modeLabel = pub.mode === 'scientific' ? t(locale, 'calcScientific') : t(locale, 'calcStandard');
+
+  const closeNav = () => setNavOpen(false);
 
   return (
     <div
@@ -213,61 +216,74 @@ export function CalculatorPanel({
           height: `${(layout.header.h / fh) * 100}%`,
         }}
       >
-        <div className="calc-modes" role="tablist">
+        <div className={`calc-nav${navOpen ? ' is-open' : ''}`} ref={navRef}>
           <button
             type="button"
-            className={pub.mode === 'standard' ? 'is-on' : ''}
-            onClick={() => {
-              setActionsOpen(false);
-              press('mode-standard');
-            }}
-          >
-            {t(locale, 'calcStandard')}
-          </button>
-          <button
-            type="button"
-            className={pub.mode === 'scientific' ? 'is-on' : ''}
-            onClick={() => {
-              setActionsOpen(false);
-              press('mode-scientific');
-            }}
-          >
-            {t(locale, 'calcScientific')}
-          </button>
-          {pub.mode === 'scientific' && (
-            <button
-              type="button"
-              className={`calc-angle${pub.angle === 'rad' ? ' is-on' : ''}`}
-              onClick={() => {
-                setActionsOpen(false);
-                press(pub.angle === 'rad' ? 'DEG' : 'RAD');
-              }}
-              title={pub.angle === 'rad' ? 'RAD' : 'DEG'}
-            >
-              {pub.angle === 'rad' ? 'RAD' : 'DEG'}
-            </button>
-          )}
-        </div>
-        <div className={`calc-actions${actionsOpen ? ' is-open' : ''}`} ref={actionsRef}>
-          <button
-            type="button"
-            className={`calc-actions-trigger${actionsOpen ? ' is-on' : ''}`}
+            className={`calc-nav-trigger${navOpen ? ' is-on' : ''}`}
             aria-haspopup="menu"
-            aria-expanded={actionsOpen}
-            title={t(locale, 'more')}
-            aria-label={t(locale, 'more')}
-            onClick={() => setActionsOpen((o) => !o)}
+            aria-expanded={navOpen}
+            title={t(locale, 'calcNavMenu')}
+            aria-label={t(locale, 'calcNavMenu')}
+            onClick={() => setNavOpen((o) => !o)}
           >
-            {t(locale, 'calcActionsMenu')}
+            {t(locale, 'calcNavGlyph')}
           </button>
-          {actionsOpen && (
-            <div className="calc-actions-menu" role="menu">
+          <button
+            type="button"
+            className="calc-mode-title"
+            aria-haspopup="menu"
+            aria-expanded={navOpen}
+            title={modeLabel}
+            onClick={() => setNavOpen((o) => !o)}
+          >
+            {modeLabel}
+          </button>
+          {navOpen && (
+            <div className="calc-nav-menu" role="menu">
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={pub.mode === 'standard'}
+                className={pub.mode === 'standard' ? 'is-on' : ''}
+                onClick={() => {
+                  press('mode-standard');
+                  closeNav();
+                }}
+              >
+                {t(locale, 'calcStandard')}
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={pub.mode === 'scientific'}
+                className={pub.mode === 'scientific' ? 'is-on' : ''}
+                onClick={() => {
+                  press('mode-scientific');
+                  closeNav();
+                }}
+              >
+                {t(locale, 'calcScientific')}
+              </button>
+              {pub.mode === 'scientific' && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`calc-angle${pub.angle === 'rad' ? ' is-on' : ''}`}
+                  onClick={() => {
+                    press(pub.angle === 'rad' ? 'DEG' : 'RAD');
+                    closeNav();
+                  }}
+                >
+                  {pub.angle === 'rad' ? 'RAD' : 'DEG'}
+                </button>
+              )}
+              <div className="calc-nav-sep" role="separator" />
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   engine.copyCalculatorDisplay(target.id);
-                  setActionsOpen(false);
+                  closeNav();
                 }}
               >
                 {t(locale, 'calcCopy')}
@@ -277,7 +293,7 @@ export function CalculatorPanel({
                 role="menuitem"
                 onClick={() => {
                   engine.stampCalculatorResult(target.id, 'result' satisfies CalcStampKind);
-                  setActionsOpen(false);
+                  closeNav();
                 }}
               >
                 {t(locale, 'calcStampResultShort')}
@@ -287,7 +303,7 @@ export function CalculatorPanel({
                 role="menuitem"
                 onClick={() => {
                   engine.stampCalculatorResult(target.id, 'expression' satisfies CalcStampKind);
-                  setActionsOpen(false);
+                  closeNav();
                 }}
               >
                 {t(locale, 'calcStampExprShort')}
@@ -295,6 +311,16 @@ export function CalculatorPanel({
             </div>
           )}
         </div>
+        {pub.mode === 'scientific' && (
+          <button
+            type="button"
+            className={`calc-angle-chip${pub.angle === 'rad' ? ' is-on' : ''}`}
+            onClick={() => press(pub.angle === 'rad' ? 'DEG' : 'RAD')}
+            title={pub.angle === 'rad' ? 'RAD' : 'DEG'}
+          >
+            {pub.angle === 'rad' ? 'RAD' : 'DEG'}
+          </button>
+        )}
       </div>
 
       {/* Live display is canvas-painted; keep a polite aria mirror for AT. */}
