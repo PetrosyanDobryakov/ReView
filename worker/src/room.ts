@@ -131,6 +131,11 @@ export class BoardRoom implements DurableObject {
   private docHydrated = false;
   /** Armed once — auto-response survives hibernation for all sockets on this DO. */
   private keepaliveAutoResponseArmed = false;
+  /**
+   * True after setAlarm until deleteAlarm. Avoids a storage write on every
+   * accept when no empty-room GC alarm was scheduled.
+   */
+  private alarmScheduled = false;
 
   constructor(private state: DurableObjectState, private env: unknown) {
     // Do NOT loadOrCreate in the constructor. Hibernation wakes for awareness
@@ -351,6 +356,11 @@ export class BoardRoom implements DurableObject {
   private async flushFullUnlocked(): Promise<void> {
     // Never encode an awareness-only stub over real blobs after a cheap wake.
     if (this.suppressPersist || !this.doc || !this.docHydrated) return;
+    // Clean close / reconnect must not rewrite multi-MB chunked blobs.
+    // Each writeBlob bills per key (gen flip + chunks + delete prev gen) and
+    // was the idle "storage operations" spike: accept reload + close rewrite
+    // on every reconnect with zero board edits.
+    if (!this.dirty && !this.pending.length) return;
     await this.flushTailUnlocked();
     if (this.suppressPersist) return;
     try {
@@ -541,7 +551,11 @@ export class BoardRoom implements DurableObject {
     this.state.acceptWebSocket(server);
     writeAttachment(server, { clients: [] });
 
-    await this.state.storage.deleteAlarm().catch(() => {});
+    // Only pay a storage write when an empty-room GC alarm was actually armed.
+    if (this.alarmScheduled) {
+      await this.state.storage.deleteAlarm().catch(() => {});
+      this.alarmScheduled = false;
+    }
 
     const syncEncoder = encoding.createEncoder();
     encoding.writeVarUint(syncEncoder, messageSync);
@@ -643,20 +657,23 @@ export class BoardRoom implements DurableObject {
         }
       }
     }
-    // Awareness-only stub: storage already holds the last flush — do not rewrite.
-    if (this.docHydrated) await this.flushFull();
+    // Flush only when CRDT mutated — clean disconnect must not rewrite blobs.
+    if (this.docHydrated && (this.dirty || this.pending.length)) await this.flushFull();
     if (this.suppressPersist) return;
     if (this.state.getWebSockets().length === 0) {
       await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
+      this.alarmScheduled = true;
     }
   }
 
   async alarm(): Promise<void> {
+    this.alarmScheduled = false;
     if (this.suppressPersist) return;
     if (this.docHydrated && (this.dirty || this.pending.length)) await this.flushFull();
     if (!canGcEmptyRoom(this.state.getWebSockets().length, this.dirty, this.pending.length)) {
       if (this.state.getWebSockets().length === 0) {
         await this.state.storage.setAlarm(Date.now() + EMPTY_GC_MS);
+        this.alarmScheduled = true;
       }
       return;
     }

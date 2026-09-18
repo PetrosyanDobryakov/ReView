@@ -10,11 +10,14 @@
  * - y-protocols auto-renew (~15s) is replaced: peer renew ~25s; solo uses the
  *   hibernation auto-response ping (no DO wake) under the 30s reconnect limit.
  * - 45s awareness heartbeat: one setLocalState snapshot; skipped when alone.
- * - Periodic resync heals rare stuck states without constant full dumps.
+ * - Periodic resync (peers only) heals rare stuck states; solo skips it so
+ *   idle boards do not cold-load chunked blobs every 2 minutes.
  * - Reconnect backoff caps at 60s so free-tier / 5xx outages do not storm.
  */
 
 import * as Y from 'yjs';
+import * as encoding from 'lib0/encoding';
+import * as syncProtocol from 'y-protocols/sync';
 import { WebsocketProvider } from 'y-websocket';
 import { removeAwarenessStates } from 'y-protocols/awareness';
 import type { UserInfo } from '../core/user';
@@ -327,13 +330,15 @@ export class SyncClient {
       console.warn('[review:net] opening websocket', { url, room, boardId: this.boardId });
     }
     const provider = new WebsocketProvider(url, room, this.doc, {
-      resyncInterval: RESYNC_INTERVAL_MS,
+      // Managed in syncResyncIntervalToPeers — solo must not cold-load blobs.
+      resyncInterval: -1,
       maxBackoffTime: MAX_BACKOFF_MS,
     });
     this.provider = provider;
     this.providerUrl = url;
     this.providerRoom = room;
     this.bindProvider(provider);
+    this.syncResyncIntervalToPeers(provider);
     this.republishAwareness();
 
     this.emitStatus();
@@ -798,6 +803,7 @@ export class SyncClient {
       this.hadOtherAwarenessClients = hasPeers;
       // First remote peer joined — push our local snapshot over WS (was gated).
       if (!hadPeers && hasPeers) this.republishAwareness();
+      this.syncResyncIntervalToPeers(provider);
       this.emitPeers();
     };
     const onSync = (isSynced: boolean) => {
@@ -840,6 +846,44 @@ export class SyncClient {
     // Socket may already be open when bind runs.
     this.hookWsTraffic(provider);
     this.hookKeepaliveAck(provider);
+  }
+
+  /**
+   * Peer-only periodic sync step1. Solo idle + DO hibernation made every
+   * resync a full chunked blob reload (dozens of SQLite row reads per tick).
+   */
+  private syncResyncIntervalToPeers(provider: WebsocketProvider): void {
+    const p = provider as WebsocketProvider & {
+      _resyncInterval?: ReturnType<typeof setInterval> | 0;
+    };
+    const wantPeers = this.hasOtherAwarenessClients();
+    if (!wantPeers) {
+      if (p._resyncInterval) {
+        clearInterval(p._resyncInterval);
+        p._resyncInterval = 0;
+      }
+      return;
+    }
+    if (p._resyncInterval) return;
+    const doc = this.doc;
+    if (!doc) return;
+    p._resyncInterval = setInterval(() => {
+      if (this.provider !== provider) return;
+      if (!this.hasOtherAwarenessClients()) {
+        this.syncResyncIntervalToPeers(provider);
+        return;
+      }
+      const ws = provider.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, 0);
+        syncProtocol.writeSyncStep1(encoder, doc);
+        ws.send(encoding.toUint8Array(encoder));
+      } catch (err) {
+        netLog.warn('peer resync send failed', () => ({ err }));
+      }
+    }, RESYNC_INTERVAL_MS);
   }
 
   /**
@@ -1026,6 +1070,15 @@ export class SyncClient {
     if (this.awarenessCheckTimer) {
       clearInterval(this.awarenessCheckTimer);
       this.awarenessCheckTimer = null;
+    }
+    if (this.provider) {
+      const p = this.provider as WebsocketProvider & {
+        _resyncInterval?: ReturnType<typeof setInterval> | 0;
+      };
+      if (p._resyncInterval) {
+        clearInterval(p._resyncInterval);
+        p._resyncInterval = 0;
+      }
     }
     this.lastSoloKeepaliveAt = 0;
     this.hadOtherAwarenessClients = false;
