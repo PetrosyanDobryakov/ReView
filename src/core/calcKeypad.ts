@@ -168,8 +168,8 @@ export function buildCalcFaceLayout(
   const sci = mode === 'scientific';
   const cols = sci ? 5 : 4;
 
-  // Two chrome rows (modes + actions) so open-session overlay does not wrap into the display.
-  const headerH = Math.max(40, 44 * scale);
+  // Single chrome row: mode segment + quiet overflow (Copy/Sticky/Text).
+  const headerH = Math.max(22, 26 * scale);
   const header: CalcRect = { x: pad, y: pad * 0.55, w: Math.max(20, w - pad * 2), h: headerH };
 
   const dispH = Math.max(52, 64 * scale);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.36 — unreleased
+
+### Polish
+- **Calculator header declutter**: single-row chrome — mode segment (Standard/Scientific + DEG) on the left, Copy/Sticky/Text behind a quiet ··· overflow so secondary actions no longer crowd under Scientific.
+
 ## 0.15.35 — unreleased
 
 ### Perf (invisible)

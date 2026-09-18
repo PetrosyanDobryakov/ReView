@@ -3687,7 +3687,8 @@ button.brand {
   .pages-trigger:active,
   .members-trigger:active,
   .calc-modes button:active,
-  .calc-actions button:active {
+  .calc-actions-trigger:active,
+  .calc-actions-menu button:active {
     transform: scale(0.94);
     background: var(--chrome-active-bg);
     box-shadow: inset 0 0 0 1.5px var(--chrome-active-ring);
@@ -4059,6 +4060,8 @@ h3 .swap-text,
   background: transparent;
   border-color: transparent !important;
   box-shadow: none;
+  /* Allow the quiet actions overflow to drop over the display. */
+  overflow: visible;
 }
 .calc-panel .calc-toolbar,
 .calc-panel .calc-key {
@@ -4077,18 +4080,18 @@ h3 .swap-text,
 }
 .calc-toolbar {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: calc(3px * var(--calc-zoom, 1));
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(6px * var(--calc-zoom, 1));
   flex-wrap: nowrap;
   box-sizing: border-box;
-  overflow: hidden;
-  /* Frosted strip so mode/stamp chrome stays readable over the canvas header. */
+  overflow: visible;
+  /* Frosted strip so mode chrome stays readable over the canvas header. */
   background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 82%, transparent);
   border-radius: calc(8px * var(--calc-zoom, 1));
   border: 1px solid var(--chrome-border-soft);
-  padding: calc(2px * var(--calc-zoom, 1)) calc(4px * var(--calc-zoom, 1));
+  padding: calc(2px * var(--calc-zoom, 1)) calc(3px * var(--calc-zoom, 1));
 }
 .calc-panel.is-light .calc-toolbar {
   background: color-mix(in srgb, #f0eee8 88%, transparent);
@@ -4097,28 +4100,41 @@ h3 .swap-text,
 .calc-actions {
   display: flex;
   align-items: center;
-  gap: calc(3px * var(--calc-zoom, 1));
+  gap: calc(2px * var(--calc-zoom, 1));
   flex-wrap: nowrap;
   min-width: 0;
 }
 .calc-modes {
-  width: 100%;
+  flex: 0 1 auto;
+  max-width: calc(100% - 28px * var(--calc-zoom, 1));
+  /* Segmented track — modes read as one control, not competing pills. */
+  padding: calc(1px * var(--calc-zoom, 1));
+  border-radius: calc(7px * var(--calc-zoom, 1));
+  background: color-mix(in srgb, var(--chrome-panel-2, #2a2a27) 55%, transparent);
+  border: 1px solid var(--chrome-border-soft);
+}
+.calc-panel.is-light .calc-modes {
+  background: color-mix(in srgb, #fff 55%, transparent);
 }
 .calc-modes button {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
+  padding: 0 calc(8px * var(--calc-zoom, 1));
 }
 .calc-actions {
+  position: relative;
+  flex: 0 0 auto;
   justify-content: flex-end;
-  width: 100%;
+  z-index: 2;
 }
 .calc-modes button,
-.calc-actions button {
+.calc-actions-trigger,
+.calc-actions-menu button {
   appearance: none;
-  border: 1px solid var(--chrome-border-soft);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--calc-muted, var(--chrome-text-dim));
-  border-radius: calc(7px * var(--calc-zoom, 1));
+  border-radius: calc(6px * var(--calc-zoom, 1));
   height: calc(18px * var(--calc-zoom, 1));
   padding: 0 calc(6px * var(--calc-zoom, 1));
   font: 500 calc(9px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
@@ -4128,7 +4144,7 @@ h3 .swap-text,
   text-overflow: ellipsis;
 }
 .calc-modes button.is-on,
-.calc-actions button.is-on,
+.calc-actions-trigger.is-on,
 .calc-modes button.calc-angle.is-on {
   background: var(--chrome-active-bg);
   color: var(--chrome-accent-strong);
@@ -4139,13 +4155,46 @@ h3 .swap-text,
   min-width: calc(32px * var(--calc-zoom, 1));
 }
 .calc-modes button:hover,
-.calc-actions button:hover {
+.calc-actions-trigger:hover,
+.calc-actions-menu button:hover {
   background: var(--chrome-panel-2);
   color: var(--chrome-text);
 }
-.calc-actions button {
-  flex: 0 1 auto;
-  max-width: 34%;
+.calc-actions-trigger {
+  flex: 0 0 auto;
+  width: calc(22px * var(--calc-zoom, 1));
+  min-width: calc(22px * var(--calc-zoom, 1));
+  padding: 0;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--chrome-border-soft);
+}
+.calc-actions-menu {
+  position: absolute;
+  top: calc(100% + 4px * var(--calc-zoom, 1));
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--calc-zoom, 1));
+  min-width: calc(88px * var(--calc-zoom, 1));
+  padding: calc(4px * var(--calc-zoom, 1));
+  border-radius: calc(8px * var(--calc-zoom, 1));
+  border: 1px solid var(--chrome-border-soft);
+  background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 94%, transparent);
+  box-shadow: 0 calc(6px * var(--calc-zoom, 1)) calc(18px * var(--calc-zoom, 1)) rgba(0, 0, 0, 0.28);
+  z-index: 3;
+}
+.calc-panel.is-light .calc-actions-menu {
+  background: color-mix(in srgb, #f7f5ef 96%, transparent);
+  box-shadow: 0 calc(6px * var(--calc-zoom, 1)) calc(18px * var(--calc-zoom, 1)) rgba(28, 28, 26, 0.12);
+}
+.calc-actions-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  height: calc(22px * var(--calc-zoom, 1));
+  padding: 0 calc(8px * var(--calc-zoom, 1));
+  text-align: left;
+  overflow: visible;
+  text-overflow: clip;
 }
 .calc-key--hit {
   appearance: none;
