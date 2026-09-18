@@ -7,3 +7,8 @@ scripts/core-bundle.mjs
 logs/
 .DS_Store
 Thumbs.db
+
+# Local secrets / env (keep .env.example tracked if present)
+.env
+.env.*
+!.env.example
