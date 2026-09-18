@@ -42,7 +42,7 @@ if (asset) {
 
 if (!meta && !metaVer) {
   console.log(
-    'HINT: Workers Builds deployCommand is currently "echo done" — builds succeed but never upload. Set Deploy command to: npx wrangler deploy'
+    'HINT: Workers Builds deployCommand may still be "echo done" — builds succeed but never upload. Set Deploy command to: bash scripts/deploy.sh all'
   );
 }
 
