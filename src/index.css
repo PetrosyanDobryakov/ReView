@@ -3686,9 +3686,10 @@ button.brand {
   .board-row:active,
   .pages-trigger:active,
   .members-trigger:active,
-  .calc-modes button:active,
-  .calc-actions-trigger:active,
-  .calc-actions-menu button:active {
+  .calc-nav-trigger:active,
+  .calc-mode-title:active,
+  .calc-angle-chip:active,
+  .calc-nav-menu button:active {
     transform: scale(0.94);
     background: var(--chrome-active-bg);
     box-shadow: inset 0 0 0 1.5px var(--chrome-active-ring);
@@ -4060,7 +4061,7 @@ h3 .swap-text,
   background: transparent;
   border-color: transparent !important;
   box-shadow: none;
-  /* Allow the quiet actions overflow to drop over the display. */
+  /* Allow the Win-style nav flyout to drop over the display. */
   overflow: visible;
 }
 .calc-panel .calc-toolbar,
@@ -4078,6 +4079,7 @@ h3 .swap-text,
   white-space: nowrap;
   border: 0;
 }
+/* Win-calc title strip: ≡ + mode name (+ DEG), same scale as pad chrome. */
 .calc-toolbar {
   display: flex;
   flex-direction: row;
@@ -4087,114 +4089,113 @@ h3 .swap-text,
   flex-wrap: nowrap;
   box-sizing: border-box;
   overflow: visible;
-  /* Frosted strip so mode chrome stays readable over the canvas header. */
-  background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 82%, transparent);
-  border-radius: calc(8px * var(--calc-zoom, 1));
-  border: 1px solid var(--chrome-border-soft);
-  padding: calc(2px * var(--calc-zoom, 1)) calc(3px * var(--calc-zoom, 1));
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
-.calc-panel.is-light .calc-toolbar {
-  background: color-mix(in srgb, #f0eee8 88%, transparent);
-}
-.calc-modes,
-.calc-actions {
+.calc-nav {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: calc(2px * var(--calc-zoom, 1));
-  flex-wrap: nowrap;
+  gap: calc(4px * var(--calc-zoom, 1));
   min-width: 0;
-}
-.calc-modes {
-  flex: 0 1 auto;
-  max-width: calc(100% - 28px * var(--calc-zoom, 1));
-  /* Segmented track — modes read as one control, not competing pills. */
-  padding: calc(1px * var(--calc-zoom, 1));
-  border-radius: calc(7px * var(--calc-zoom, 1));
-  background: color-mix(in srgb, var(--chrome-panel-2, #2a2a27) 55%, transparent);
-  border: 1px solid var(--chrome-border-soft);
-}
-.calc-panel.is-light .calc-modes {
-  background: color-mix(in srgb, #fff 55%, transparent);
-}
-.calc-modes button {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 0 calc(8px * var(--calc-zoom, 1));
-}
-.calc-actions {
-  position: relative;
-  flex: 0 0 auto;
-  justify-content: flex-end;
+  flex: 1 1 auto;
   z-index: 2;
 }
-.calc-modes button,
-.calc-actions-trigger,
-.calc-actions-menu button {
+.calc-nav-trigger,
+.calc-mode-title,
+.calc-angle-chip,
+.calc-nav-menu button {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--calc-muted, var(--chrome-text-dim));
+  color: var(--calc-ink, var(--chrome-text));
   border-radius: calc(6px * var(--calc-zoom, 1));
-  height: calc(18px * var(--calc-zoom, 1));
-  padding: 0 calc(6px * var(--calc-zoom, 1));
-  font: 500 calc(9px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
+  height: calc(32px * var(--calc-zoom, 1));
+  padding: 0 calc(8px * var(--calc-zoom, 1));
+  font: 600 calc(15px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.calc-modes button.is-on,
-.calc-actions-trigger.is-on,
-.calc-modes button.calc-angle.is-on {
+.calc-nav-trigger {
+  flex: 0 0 auto;
+  width: calc(34px * var(--calc-zoom, 1));
+  min-width: calc(34px * var(--calc-zoom, 1));
+  padding: 0;
+  font-weight: 500;
+  font-size: calc(20px * var(--calc-zoom, 1));
+  letter-spacing: -0.04em;
+  color: var(--calc-ink, var(--chrome-text));
+}
+.calc-mode-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 70%;
+  padding-left: calc(2px * var(--calc-zoom, 1));
+  text-align: left;
+  color: var(--calc-ink, var(--chrome-text));
+  font-size: calc(16px * var(--calc-zoom, 1));
+}
+.calc-angle-chip {
+  flex: 0 0 auto;
+  min-width: calc(40px * var(--calc-zoom, 1));
+  color: var(--calc-muted, var(--chrome-text-dim));
+  font-weight: 500;
+  font-size: calc(12px * var(--calc-zoom, 1));
+}
+.calc-nav-trigger:hover,
+.calc-mode-title:hover,
+.calc-angle-chip:hover,
+.calc-nav-menu button:hover {
+  background: color-mix(in srgb, var(--chrome-panel-2, #2a2a27) 70%, transparent);
+  color: var(--chrome-text);
+}
+.calc-nav-trigger.is-on,
+.calc-angle-chip.is-on,
+.calc-nav-menu button.is-on {
   background: var(--chrome-active-bg);
   color: var(--chrome-accent-strong);
   border-color: transparent;
 }
-.calc-modes button.calc-angle {
-  flex: 0 0 auto;
-  min-width: calc(32px * var(--calc-zoom, 1));
-}
-.calc-modes button:hover,
-.calc-actions-trigger:hover,
-.calc-actions-menu button:hover {
-  background: var(--chrome-panel-2);
-  color: var(--chrome-text);
-}
-.calc-actions-trigger {
-  flex: 0 0 auto;
-  width: calc(22px * var(--calc-zoom, 1));
-  min-width: calc(22px * var(--calc-zoom, 1));
-  padding: 0;
-  letter-spacing: 0.05em;
-  border: 1px solid var(--chrome-border-soft);
-}
-.calc-actions-menu {
+.calc-nav-menu {
   position: absolute;
   top: calc(100% + 4px * var(--calc-zoom, 1));
-  right: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   gap: calc(2px * var(--calc-zoom, 1));
-  min-width: calc(88px * var(--calc-zoom, 1));
-  padding: calc(4px * var(--calc-zoom, 1));
+  min-width: calc(148px * var(--calc-zoom, 1));
+  max-width: calc(220px * var(--calc-zoom, 1));
+  padding: calc(6px * var(--calc-zoom, 1));
   border-radius: calc(8px * var(--calc-zoom, 1));
   border: 1px solid var(--chrome-border-soft);
-  background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 94%, transparent);
-  box-shadow: 0 calc(6px * var(--calc-zoom, 1)) calc(18px * var(--calc-zoom, 1)) rgba(0, 0, 0, 0.28);
+  background: color-mix(in srgb, var(--chrome-panel, #1c1c1a) 96%, transparent);
+  box-shadow: 0 calc(8px * var(--calc-zoom, 1)) calc(22px * var(--calc-zoom, 1)) rgba(0, 0, 0, 0.32);
   z-index: 3;
 }
-.calc-panel.is-light .calc-actions-menu {
+.calc-panel.is-light .calc-nav-menu {
   background: color-mix(in srgb, #f7f5ef 96%, transparent);
-  box-shadow: 0 calc(6px * var(--calc-zoom, 1)) calc(18px * var(--calc-zoom, 1)) rgba(28, 28, 26, 0.12);
+  box-shadow: 0 calc(8px * var(--calc-zoom, 1)) calc(22px * var(--calc-zoom, 1)) rgba(28, 28, 26, 0.12);
 }
-.calc-actions-menu button {
+.calc-nav-menu button {
   justify-content: flex-start;
   width: 100%;
-  height: calc(22px * var(--calc-zoom, 1));
-  padding: 0 calc(8px * var(--calc-zoom, 1));
+  height: calc(32px * var(--calc-zoom, 1));
+  padding: 0 calc(10px * var(--calc-zoom, 1));
   text-align: left;
   overflow: visible;
   text-overflow: clip;
+  font-weight: 500;
+  font-size: calc(14px * var(--calc-zoom, 1));
+  color: var(--calc-ink, var(--chrome-text));
+}
+.calc-nav-sep {
+  height: 1px;
+  margin: calc(4px * var(--calc-zoom, 1)) calc(4px * var(--calc-zoom, 1));
+  background: var(--chrome-border-soft);
 }
 .calc-key--hit {
   appearance: none;
