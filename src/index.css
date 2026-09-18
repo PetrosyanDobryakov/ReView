@@ -4105,8 +4105,9 @@ h3 .swap-text,
   min-width: 0;
 }
 .calc-modes {
-  flex: 1 1 auto;
-  /* Segmented track — modes read as one control, not three competing pills. */
+  flex: 0 1 auto;
+  max-width: calc(100% - 28px * var(--calc-zoom, 1));
+  /* Segmented track — modes read as one control, not competing pills. */
   padding: calc(1px * var(--calc-zoom, 1));
   border-radius: calc(7px * var(--calc-zoom, 1));
   background: color-mix(in srgb, var(--chrome-panel-2, #2a2a27) 55%, transparent);
@@ -4116,8 +4117,9 @@ h3 .swap-text,
   background: color-mix(in srgb, #fff 55%, transparent);
 }
 .calc-modes button {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
+  padding: 0 calc(8px * var(--calc-zoom, 1));
 }
 .calc-actions {
   position: relative;
