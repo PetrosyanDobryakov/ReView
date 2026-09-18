@@ -211,3 +211,7 @@ Enable **P2P (WebRTC)** in Settings → System → Connection on each device. Bo
 ## Builds deploy probe (2026-09-18T16:10Z)
 
 Tip push to capture post-verification Workers Builds `deployCommand` on Worker **review** (agent bc-eddd62e2).
+
+## Builds deploy probe (post non-prod Deploy fix)
+
+Tip push after Warexpor JR set Non-production branch deploy command to `bash scripts/deploy.sh all` (agent bc-d70c5623). Expect log: `Executing user deploy command: bash scripts/deploy.sh all`.
