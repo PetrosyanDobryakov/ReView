@@ -5,6 +5,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.40
+
+### Fix
+- **Calculator header optical center**: three-bar nav + mode title share one ink optical centerline (`iconAlignY` + `calcTitleBaselineY` / CSS twin) so burger and “Standard” are pixel-aligned; focused / unfocused / open overlay stay 1:1 via `layout.chrome`.
+
 ## 0.15.39
 
 ### Fix

@@ -218,9 +218,10 @@ export function CalculatorPanel({
           ['--calc-nav-gap' as string]: `${(layout.chrome.navGap / layout.header.w) * 100}%`,
           ['--calc-control-h' as string]: `${(layout.chrome.controlH / layout.header.h) * 100}%`,
           ['--calc-title-px' as string]: `${layout.chrome.titlePx * z}px`,
-          ['--calc-bar-h' as string]: `${Math.max(1.25, 1.75 * layout.scale) * z}px`,
-          ['--calc-bar-gap' as string]: `${Math.max(2.5, 3 * layout.scale) * z}px`,
-          ['--calc-bar-w' as string]: `${(layout.chrome.navW * 0.42 * z).toFixed(2)}px`,
+          ['--calc-bar-h' as string]: `${layout.chrome.barH * z}px`,
+          ['--calc-bar-gap' as string]: `${layout.chrome.barGap * z}px`,
+          ['--calc-bar-w' as string]: `${(layout.chrome.navW * layout.chrome.barWFrac * z).toFixed(2)}px`,
+          ['--calc-icon-align-y' as string]: `${layout.chrome.iconAlignY * z}px`,
         }}
       >
         <div className={`calc-nav${navOpen ? ' is-open' : ''}`} ref={navRef}>
@@ -247,7 +248,7 @@ export function CalculatorPanel({
             title={modeLabel}
             onClick={() => setNavOpen((o) => !o)}
           >
-            {modeLabel}
+            <span className="calc-mode-label">{modeLabel}</span>
           </button>
           {navOpen && (
             <div className="calc-nav-menu" role="menu">

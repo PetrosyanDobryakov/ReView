@@ -4145,7 +4145,8 @@ h3 .swap-text,
   width: var(--calc-bar-w, 42%);
   height: auto;
   box-sizing: border-box;
-  transform: none;
+  /* Match canvas: bars sit on opticalY + iconAlignY. */
+  transform: translateY(var(--calc-icon-align-y, 0px));
 }
 .calc-nav-bar {
   display: block;
@@ -4167,6 +4168,12 @@ h3 .swap-text,
   font-size: var(--calc-title-px, calc(16px * var(--calc-zoom, 1)));
   line-height: 1;
   transform: none;
+}
+/* Ink optical mid ≈ flex center for Space Grotesk (pairs with canvas measureText). */
+.calc-mode-label {
+  display: block;
+  line-height: 1;
+  transform: translateY(0.04em);
 }
 .calc-angle-chip {
   flex: 0 0 auto;
