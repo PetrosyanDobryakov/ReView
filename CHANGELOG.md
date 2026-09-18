@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.15.49
+
+### Fix
+- **Table outer-border resize**: dragging a selected table's border anywhere (not just the center dots) resizes the edge row/column — the box grows/shrinks and the edge cells absorb the delta while other cells keep absolute size (28px edge-cell floor, riders stay glued, rotation-safe). Center dots keep whole-table resize (handles hit-test first); `ew`/`ns-resize` cursors on hover.
+
+## 0.15.48
+
+### Fix
+- **Smooth peer cursors default ON**: `smoothPeerCursors` now defaults to `true` (`src/core/prefs.ts`, `src/engine/Engine.ts`), so remote cursors use spring follow for fresh profiles. Stored explicit `false` is still respected; toggle remains in Settings.
+
 ## 0.15.47
 
 ### Docs

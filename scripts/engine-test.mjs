@@ -837,6 +837,108 @@ assert.ok(
 assert.equal(dv.x, 3000, 'divider drag does not move the table');
 engine.setSelection([]);
 
+// outer table border drag resizes the edge row/column (dots keep whole-table resize)
+const eKey = store.addShape({
+  type: 'table', x: 5000, y: 5000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+engine.setSelection([eKey]);
+const edgeHit = engine.hitTableEdge(5398, 5050);
+assert.deepEqual(
+  edgeHit ? { edge: edgeHit.edge } : null,
+  { edge: 'e' },
+  'right border hits as edge'
+);
+assert.equal(engine.hitTableEdge(5200, 5100), null, 'table interior is not an edge');
+assert.equal(engine.hitTablePlus(5398, 5050), null, 'border point is not a pill');
+// grab off-center so the middle dot (whole-table resize) does not win
+selectTool.onDown(engine, pinfo(5398, 5050));
+selectTool.onMove(engine, pinfo(5458, 5050));
+selectTool.onUp(engine, pinfo(5458, 5050));
+const ev = store.readShape(store.board.get(eKey));
+assert.equal(ev.x, 5000, 'edge drag does not move the table x');
+assert.equal(ev.w, 460, 'right edge drag widens the table');
+assert.ok(
+  Math.abs(ev.colW[0] - 200 / 460) < 1e-9 && Math.abs(ev.colW[1] - 260 / 460) < 1e-9,
+  'right edge drag grows only the last column'
+);
+assert.equal(ev.h, 200, 'right edge drag keeps height');
+engine.setSelection([]);
+
+// left border: table origin follows, first column absorbs
+const wKey = store.addShape({
+  type: 'table', x: 6000, y: 6000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+engine.setSelection([wKey]);
+assert.equal(engine.hitTableEdge(6002, 6050)?.edge, 'w', 'left border hits as edge');
+selectTool.onDown(engine, pinfo(6002, 6050));
+selectTool.onMove(engine, pinfo(6042, 6050));
+selectTool.onUp(engine, pinfo(6042, 6050));
+const wv = store.readShape(store.board.get(wKey));
+assert.equal(wv.x, 6040, 'left edge drag moves the table origin');
+assert.equal(wv.w, 360, 'left edge drag narrows the table');
+assert.ok(
+  Math.abs(wv.colW[0] - 160 / 360) < 1e-9 && Math.abs(wv.colW[1] - 200 / 360) < 1e-9,
+  'left edge drag shrinks only the first column'
+);
+engine.setSelection([]);
+
+// bottom / top borders resize rows
+const sKey = store.addShape({
+  type: 'table', x: 7000, y: 7000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+engine.setSelection([sKey]);
+assert.equal(engine.hitTableEdge(7100, 7198)?.edge, 's', 'bottom border hits as edge');
+selectTool.onDown(engine, pinfo(7100, 7198));
+selectTool.onMove(engine, pinfo(7100, 7228));
+selectTool.onUp(engine, pinfo(7100, 7228));
+const sv = store.readShape(store.board.get(sKey));
+assert.equal(sv.h, 230, 'bottom edge drag grows the table');
+assert.ok(
+  Math.abs(sv.rowH[0] - 100 / 230) < 1e-9 && Math.abs(sv.rowH[1] - 130 / 230) < 1e-9,
+  'bottom edge drag grows only the last row'
+);
+engine.setSelection([]);
+const nKey = store.addShape({
+  type: 'table', x: 8000, y: 8000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+engine.setSelection([nKey]);
+assert.equal(engine.hitTableEdge(8100, 8002)?.edge, 'n', 'top border hits as edge');
+selectTool.onDown(engine, pinfo(8100, 8002));
+selectTool.onMove(engine, pinfo(8100, 8032));
+selectTool.onUp(engine, pinfo(8100, 8032));
+const nv = store.readShape(store.board.get(nKey));
+assert.equal(nv.y, 8030, 'top edge drag moves the table origin');
+assert.equal(nv.h, 170, 'top edge drag shrinks the table');
+assert.ok(
+  Math.abs(nv.rowH[0] - 70 / 170) < 1e-9 && Math.abs(nv.rowH[1] - 100 / 170) < 1e-9,
+  'top edge drag shrinks only the first row'
+);
+engine.setSelection([]);
+
+// edge drag clamps at the 28px edge-cell floor and keeps riders glued
+const cKey = store.addShape({
+  type: 'table', x: 9000, y: 9000, w: 400, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,
+  cols: 2, rows: 2, cells: [],
+});
+const cRiderKey = store.addShape({ type: 'sticky', x: 9050, y: 9050, w: 60, h: 40, fill: '#ffe27a', stroke: '#d9b64d', strokeWidth: 2 });
+engine.setSelection([cKey]);
+selectTool.onDown(engine, pinfo(9398, 9050));
+selectTool.onMove(engine, pinfo(9000, 9050));
+selectTool.onUp(engine, pinfo(9000, 9050));
+const cv = store.readShape(store.board.get(cKey));
+assert.equal(cv.w, 228, 'edge drag clamps so the last column keeps 28px');
+assert.ok(
+  Math.abs(cv.colW[0] - 200 / 228) < 1e-9 && Math.abs(cv.colW[1] - 28 / 228) < 1e-9,
+  'clamped drag keeps the fixed column absolute'
+);
+assert.equal(store.readShape(store.board.get(cRiderKey)).x, 9050, 'rider in the fixed column stays');
+assert.equal(store.readShape(store.board.get(cRiderKey)).y, 9050, 'rider in the fixed column stays y');
+engine.setSelection([]);
+
 // mouse-drag carries riders exactly (sticky + rect on a table)
 const mKey = store.addShape({
   type: 'table', x: 30000, y: 30000, w: 300, h: 200, fill: '#ffffff', stroke: '#000000', strokeWidth: 2,

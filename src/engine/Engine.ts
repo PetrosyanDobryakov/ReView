@@ -416,8 +416,8 @@ export class Engine {
   private peerLerp = new Map<number, PeerMotionState>();
   private peersAnimating = false;
   private frameDt = 1 / 60;
-  /** Spring-follow remote cursors; default off = snap to latest awareness sample. */
-  private smoothPeerCursors = false;
+  /** Spring-follow remote cursors; default on = smooth follow, off snaps to latest sample. */
+  private smoothPeerCursors = true;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -2938,6 +2938,30 @@ export class Engine {
       acc += g.rowH[i - 1]!;
       if (Math.abs(p.y - acc * v.h) <= slop) return { shapeId: id, kind: 'row', index: i };
     }
+    return null;
+  }
+
+  /**
+   * Outer border of the single selected table (drag resizes the edge row/column;
+   * the center dots keep whole-table resize since handles hit-test first).
+   */
+  hitTableEdge(wx: number, wy: number): { shapeId: string; edge: 'n' | 's' | 'w' | 'e' } | null {
+    if (this.editing || this.selection.size !== 1) return null;
+    const id = [...this.selection][0];
+    const v = this.views.get(id);
+    if (!v || v.type !== 'table' || v.locked) return null;
+    const p = worldToLocal(v, wx, wy);
+    const slop = 6 / this.camera.zoom;
+    if (p.x < -slop || p.x > v.w + slop || p.y < -slop || p.y > v.h + slop) return null;
+    const onW = Math.abs(p.x) <= slop;
+    const onE = Math.abs(p.x - v.w) <= slop;
+    const onN = Math.abs(p.y) <= slop;
+    const onS = Math.abs(p.y - v.h) <= slop;
+    // vertical edges win the corner overlap (deterministic); dots cover true corners first.
+    if (onE) return { shapeId: id, edge: 'e' };
+    if (onW) return { shapeId: id, edge: 'w' };
+    if (onS) return { shapeId: id, edge: 's' };
+    if (onN) return { shapeId: id, edge: 'n' };
     return null;
   }
 
