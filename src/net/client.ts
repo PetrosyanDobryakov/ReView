@@ -3,9 +3,9 @@
  *
  * Traffic posture:
  * - Doc updates: coalesced in store writeGate; polylines stored local-space.
- * - Cursors / live drafts / erase previews: awareness-only, rAF-batched into
- *   one setLocalState per frame so drawing does not emit cursor+draft as two
- *   WS messages (DO floods → jagged peers). Solo boards skip the WS fan-out
+ * - Cursors / live drafts / erase previews: awareness-only, rAF-batched then
+ *   rate-floored (~20 Hz) into one setLocalState so drawing does not flood the
+ *   hibernatable DO at display refresh. Solo boards skip the WS fan-out
  *   entirely (no peer to see the cursor) and use a text keepalive instead.
  * - y-protocols auto-renew (~15s) is replaced: peer renew ~25s; solo uses the
  *   hibernation auto-response ping (no DO wake) under the 30s reconnect limit.
@@ -122,7 +122,7 @@ export class SyncClient {
   private lastConfetti: PeerConfettiBurst | null = null;
   private confettiClearTimer: ReturnType<typeof setTimeout> | null = null;
   private confettiSeq = 0;
-  /** High-freq awareness (cursor/draft/erase) — one WS frame per rAF. */
+  /** High-freq awareness (cursor/draft/erase) — rAF coalesce + ~20 Hz floor. */
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
   private lastEmittedStatus: SyncStatus | null = null;
