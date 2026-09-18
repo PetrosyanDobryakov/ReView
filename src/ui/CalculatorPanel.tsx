@@ -19,6 +19,8 @@ import { readChromeCssColor } from '../core/chromeTheme';
 import { readLocale } from '../core/locale';
 import { t } from './i18n';
 
+type CalcStampKind = 'result' | 'expression';
+
 function shapeToPersisted(engine: Engine, id: string): CalcPersisted {
   const v = engine.views.get(id);
   return persistedFromShape(v ?? {});
@@ -40,9 +42,13 @@ export function CalculatorPanel({
   onDone: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
   const locale = readLocale();
   const [tick, setTick] = useState(0);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsOpenRef = useRef(false);
+  actionsOpenRef.current = actionsOpen;
   const live = engine.views.get(target.id);
   const persisted = useMemo(
     () => shapeToPersisted(engine, target.id),
@@ -82,6 +88,10 @@ export function CalculatorPanel({
       if (doneRef.current) return;
       const el = e.target;
       if (!(el instanceof Element)) return;
+      // Close overflow first when tapping elsewhere inside the panel.
+      if (actionsOpenRef.current && actionsRef.current && !actionsRef.current.contains(el)) {
+        setActionsOpen(false);
+      }
       if (rootRef.current?.contains(el)) return;
       const kind = graphChromeKind(el);
       if (kind === 'keep') return;
@@ -126,6 +136,10 @@ export function CalculatorPanel({
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+        if (actionsOpenRef.current) {
+          setActionsOpen(false);
+          return;
+        }
         // Close keypad session (resize/undo access). CE remains an on-pad key.
         finishRef.current();
         return;
@@ -203,14 +217,20 @@ export function CalculatorPanel({
           <button
             type="button"
             className={pub.mode === 'standard' ? 'is-on' : ''}
-            onClick={() => press('mode-standard')}
+            onClick={() => {
+              setActionsOpen(false);
+              press('mode-standard');
+            }}
           >
             {t(locale, 'calcStandard')}
           </button>
           <button
             type="button"
             className={pub.mode === 'scientific' ? 'is-on' : ''}
-            onClick={() => press('mode-scientific')}
+            onClick={() => {
+              setActionsOpen(false);
+              press('mode-scientific');
+            }}
           >
             {t(locale, 'calcScientific')}
           </button>
@@ -218,23 +238,62 @@ export function CalculatorPanel({
             <button
               type="button"
               className={`calc-angle${pub.angle === 'rad' ? ' is-on' : ''}`}
-              onClick={() => press(pub.angle === 'rad' ? 'DEG' : 'RAD')}
+              onClick={() => {
+                setActionsOpen(false);
+                press(pub.angle === 'rad' ? 'DEG' : 'RAD');
+              }}
               title={pub.angle === 'rad' ? 'RAD' : 'DEG'}
             >
               {pub.angle === 'rad' ? 'RAD' : 'DEG'}
             </button>
           )}
         </div>
-        <div className="calc-actions">
-          <button type="button" onClick={() => engine.copyCalculatorDisplay(target.id)} title={t(locale, 'calcCopy')}>
-            {t(locale, 'calcCopy')}
+        <div className={`calc-actions${actionsOpen ? ' is-open' : ''}`} ref={actionsRef}>
+          <button
+            type="button"
+            className={`calc-actions-trigger${actionsOpen ? ' is-on' : ''}`}
+            aria-haspopup="menu"
+            aria-expanded={actionsOpen}
+            title={t(locale, 'more')}
+            aria-label={t(locale, 'more')}
+            onClick={() => setActionsOpen((o) => !o)}
+          >
+            {t(locale, 'calcActionsMenu')}
           </button>
-          <button type="button" onClick={() => engine.stampCalculatorResult(target.id, 'result')} title={t(locale, 'calcStampResult')}>
-            {t(locale, 'calcStampResultShort')}
-          </button>
-          <button type="button" onClick={() => engine.stampCalculatorResult(target.id, 'expression')} title={t(locale, 'calcStampExpr')}>
-            {t(locale, 'calcStampExprShort')}
-          </button>
+          {actionsOpen && (
+            <div className="calc-actions-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  engine.copyCalculatorDisplay(target.id);
+                  setActionsOpen(false);
+                }}
+              >
+                {t(locale, 'calcCopy')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  engine.stampCalculatorResult(target.id, 'result' satisfies CalcStampKind);
+                  setActionsOpen(false);
+                }}
+              >
+                {t(locale, 'calcStampResultShort')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  engine.stampCalculatorResult(target.id, 'expression' satisfies CalcStampKind);
+                  setActionsOpen(false);
+                }}
+              >
+                {t(locale, 'calcStampExprShort')}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
