@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.29 — unreleased
+
+### Fix
+- **DO wake wall time**: hibernation no longer reloads the full board blob on awareness-only messages (or when the in-memory doc is already warm). Accept + real sync still `loadOrCreate` and sync-step1 the waking socket.
+
 ## 0.15.28 — unreleased
 
 ### Fix
