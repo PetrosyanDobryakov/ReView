@@ -1426,7 +1426,7 @@ export class Engine {
       moved.add(id);
       patches.push([id, { x: v.x + dx, y: v.y + dy }]);
     }
-    const riderIds = hostRiderIds([...this.views.values()], moved);
+    const riderIds = this.ridersOfHosts(moved);
     for (const rid of riderIds) {
       const rv = this.views.get(rid);
       if (!rv || rv.locked || moved.has(rid)) continue;
@@ -1480,7 +1480,7 @@ export class Engine {
     const box = groupBox(movingViews);
     if (!box) return { dx, dy, guides: [] };
     const movedBox: ShapeBox = { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
-    const riderSkip = new Set(hostRiderIds([...this.views.values()], [...originals.keys()]));
+    const riderSkip = new Set(this.ridersOfHosts([...originals.keys()]));
     const otherBoxes: ShapeBox[] = [];
     for (const [id, v] of this.views) {
       if (originals.has(id) || riderSkip.has(id)) continue;
@@ -1530,7 +1530,7 @@ export class Engine {
         const ddx = (patch.x ?? host.x) - host.x;
         const ddy = (patch.y ?? host.y) - host.y;
         if (!ddx && !ddy) continue;
-        for (const rid of hostRiderIds([...this.views.values()], [id])) {
+        for (const rid of this.ridersOfHosts([id])) {
           if (claimed.has(rid)) continue;
           const rv = this.views.get(rid);
           if (!rv || rv.locked) continue;
@@ -1702,7 +1702,7 @@ export class Engine {
   private idsWithRidersInOrder(ids: Iterable<string>): string[] {
     const set = new Set(ids);
     if (!set.size) return [];
-    for (const rid of hostRiderIds([...this.views.values()], set)) set.add(rid);
+    for (const rid of this.ridersOfHosts(set)) set.add(rid);
     for (const [id, v] of this.views) {
       if (v.type !== 'arrow' || set.has(id) || !v.fromId || !v.toId) continue;
       if (set.has(v.fromId) && set.has(v.toId)) set.add(id);
@@ -1927,7 +1927,7 @@ export class Engine {
       const next = { x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh, rotation: v.rotation };
       batch.push([id, { x: next.x, y: next.y, w: nw, h: nh }]);
       touched.add(id);
-      for (const rid of hostRiderIds([...this.views.values()], [id])) {
+      for (const rid of this.ridersOfHosts([id])) {
         if (touched.has(rid)) continue;
         const rv = this.views.get(rid);
         if (!rv || rv.locked) continue;
@@ -2285,7 +2285,7 @@ export class Engine {
   ): void {
     const batch: Array<[string, Partial<ShapeView>]> = [[id, hostPatch]];
     const touched = new Set([id]);
-    for (const rid of hostRiderIds([...this.views.values()], [id])) {
+    for (const rid of this.ridersOfHosts([id])) {
       if (touched.has(rid)) continue;
       const rv = this.views.get(rid);
       if (!rv || rv.locked) continue;
@@ -2630,7 +2630,7 @@ export class Engine {
     };
     const batch: Array<[string, Partial<ShapeView>]> = [[id, tablePatch]];
     const moved = new Set<string>([id]);
-    for (const rid of hostRiderIds([...this.views.values()], [id])) {
+    for (const rid of this.ridersOfHosts([id])) {
       const rv = this.views.get(rid);
       if (!rv || rv.locked) continue;
       const mapped = mapShapeThroughLocalMap(rv, orig, next, mapLocal, 1);
@@ -3215,6 +3215,12 @@ export class Engine {
       this.orderIndex.set(ord.get(i), i);
     }
     this.orderIndexDirty = false;
+  }
+
+  /** Photo/PDF/frame/table riders for hosts; photo notes only when above in z-order. */
+  private ridersOfHosts(hostIds: Set<string> | string[]): string[] {
+    this.ensureOrderIndex();
+    return hostRiderIds([...this.views.values()], hostIds, this.orderIndex);
   }
 
   private onStore = (ev: Y.YMapEvent<Y.Map<unknown>>): void => {

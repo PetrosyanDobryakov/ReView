@@ -5,6 +5,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.42
+
+### Fix
+- **Photo magnet z-order**: notes / stickies / pens magnetize to a photo or PDF only when they sit above it in board stacking order; shapes under the photo no longer ride moves/rotates/resizes.
+
 ## 0.15.41
 
 ### Perf
