@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.28 — unreleased
+
+### Fix
+- **DO traffic / free-tier duration bleed**: stop hibernation-wake sync-step1 fan-out (each awareness tick was reloading the full board blob then forcing N client sync replies). Solo boards skip the 45s awareness heartbeat; reconnect backoff caps at 60s; client resync every 120s. Worker observability head-sample 10%.
+
 ## 0.15.27 — unreleased
 
 ### Polish

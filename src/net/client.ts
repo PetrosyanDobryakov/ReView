@@ -6,8 +6,10 @@
  * - Cursors / live drafts / erase previews: awareness-only, rAF-batched into
  *   one setLocalState per frame so drawing does not emit cursor+draft as two
  *   WS messages (DO floods → jagged peers).
- * - 20s awareness heartbeat: one setLocalState snapshot (not multipublish).
+ * - 45s awareness heartbeat: one setLocalState snapshot; skipped when alone
+ *   (solo idle boards must not wake the DO just to republish presence).
  * - Periodic resync heals rare stuck states without constant full dumps.
+ * - Reconnect backoff caps at 60s so free-tier / 5xx outages do not storm.
  */
 
 import * as Y from 'yjs';
@@ -51,9 +53,15 @@ const ERASE_MAX_PARTIAL_VERTS = 64;
  */
 const CURSOR_QUANT = 0.05;
 /** Self-heal rare desync without hammering the hub. */
-const RESYNC_INTERVAL_MS = 60_000;
-/** Re-publish presence so a hibernating hub that dropped in-memory awareness recovers. */
-const AWARENESS_HEARTBEAT_MS = 20_000;
+const RESYNC_INTERVAL_MS = 120_000;
+/** Cap y-websocket reconnect backoff — short caps storm DO upgrades when the hub is down. */
+const MAX_BACKOFF_MS = 60_000;
+/**
+ * Re-publish presence so a hibernating hub that dropped in-memory awareness
+ * recovers for peers. Solo clients skip (no peer to heal). Keep under the
+ * y-websocket receive/outdated timeout (~45s default × 1.5).
+ */
+const AWARENESS_HEARTBEAT_MS = 45_000;
 
 function quantizeCursor(pos: CursorPos): CursorPos {
   return {
@@ -295,7 +303,7 @@ export class SyncClient {
     }
     const provider = new WebsocketProvider(url, room, this.doc, {
       resyncInterval: RESYNC_INTERVAL_MS,
-      maxBackoffTime: 10_000,
+      maxBackoffTime: MAX_BACKOFF_MS,
     });
     this.provider = provider;
     this.providerUrl = url;
@@ -680,7 +688,7 @@ export class SyncClient {
 
   private republishAwareness(): void {
     // Drop coalesced pendings — snapshot below is authoritative.
-    // One setLocalState (via applyHotAwareness) so the 20s heartbeat is a
+    // One setLocalState (via applyHotAwareness) so the awareness heartbeat is a
     // single WS frame — not writePresence/tool/page/viewing + hot (≤5 frames).
     this.hotAwareness.clear();
     const user = this.lastUser ?? loadUser();
@@ -785,7 +793,11 @@ export class SyncClient {
       this.awarenessHeartbeat = null;
     }
     this.awarenessHeartbeat = setInterval(() => {
-      if (this.provider?.ws?.readyState === WebSocket.OPEN) this.republishAwareness();
+      if (this.provider?.ws?.readyState !== WebSocket.OPEN) return;
+      // Solo idle boards: heartbeat only burns DO duration (full blob reload on
+      // every hibernation wake). Peers need the republish to refill hub memory.
+      if (!this.hasOtherAwarenessClients()) return;
+      this.republishAwareness();
     }, AWARENESS_HEARTBEAT_MS);
 
     if (!this.offPeerDisplay) {

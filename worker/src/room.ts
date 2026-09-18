@@ -119,12 +119,12 @@ export class BoardRoom implements DurableObject {
   constructor(private state: DurableObjectState, private env: unknown) {
     this.state.blockConcurrencyWhile(async () => {
       await this.loadOrCreate();
-      const sockets = this.state.getWebSockets();
-      if (sockets.length > 0) {
-        // Hibernation restore: in-memory doc/awareness were empty. Force a
-        // state-vector round-trip so clients send anything the tail missed.
-        this.sendSyncStep1ToAll(sockets);
-      }
+      // Do NOT sendSyncStep1ToAll on every hibernation wake. loadOrCreate already
+      // restores doc+tail from storage; forcing sync-step1 here makes every
+      // awareness heartbeat spawn N client sync replies → another wake → full
+      // blob reload (~seconds of DO wall time each). Client resyncInterval and
+      // accept-time sync-step1 cover rare desync. Mid-message loadOrCreate still
+      // sends sync-step1 to the waking socket only.
     });
   }
 
@@ -216,10 +216,6 @@ export class BoardRoom implements DurableObject {
     } catch {
       /* */
     }
-  }
-
-  private sendSyncStep1ToAll(sockets: WebSocket[]): void {
-    for (const ws of sockets) this.sendSyncStep1(ws);
   }
 
   private sendAwarenessSnapshot(ws: WebSocket): void {

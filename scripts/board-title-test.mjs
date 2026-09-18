@@ -196,7 +196,7 @@ console.log('board-title empty-pages heal: ok');
 }
 console.log('board-title awareness batch: ok');
 
-// --- 20s heartbeat: one setLocalState, not multipublish ---
+// --- Awareness heartbeat: one setLocalState; solo skip; 45s interval ---
 {
   const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
   const start = clientSrc.indexOf('private republishAwareness');
@@ -211,5 +211,20 @@ console.log('board-title awareness batch: ok');
   assert.match(body, /applyHotAwareness/, 'heartbeat uses single setLocalState path');
   assert.match(body, /user[,:\s]/, 'heartbeat snapshot includes presence');
   assert.match(body, /viewing/, 'heartbeat snapshot includes viewing');
+  assert.match(
+    clientSrc,
+    /AWARENESS_HEARTBEAT_MS\s*=\s*45_000/,
+    'idle heartbeat must be 45s (not 20s) to cut DO wake rate'
+  );
+  assert.match(
+    clientSrc,
+    /MAX_BACKOFF_MS\s*=\s*60_000/,
+    'reconnect backoff must cap at 60s to avoid upgrade storms'
+  );
+  assert.match(
+    clientSrc,
+    /hasOtherAwarenessClients\(\)\s*\)\s*return/,
+    'solo boards must skip awareness heartbeat'
+  );
 }
 console.log('board-title awareness heartbeat single-frame: ok');
