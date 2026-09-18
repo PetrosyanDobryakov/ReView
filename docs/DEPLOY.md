@@ -60,13 +60,15 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 
 ### Workers Builds — deploy must actually deploy
 
-Preview was stuck on old builds while git tip moved because Worker **review** Builds **Deploy command** was `echo done` (build uploads nothing). Re-confirmed on tip `442924b` Builds (`deployCommand: echo done`, build UUID `53ec9a69-3064-45a7-802c-4ac12ff3f055`). Live can still match tip when someone runs `bash scripts/deploy.sh all` manually — Builds green-check alone does **not** ship. The Builds MCP/API available to agents is **read-only** — Warexpor must change this in the dashboard once.
+**Status (2026-09-18):** Warexpor JR set Worker **review** Builds **Deploy command** to `bash scripts/deploy.sh all`. Tip builds through `fbf39ab` (`0.15.42`) still recorded `deployCommand: echo done` (build UUID `1a416c8e-2034-49ad-bc7b-6f1f8b7e4c03`); live stayed `0.15.38+442924b` until a post-fix tip push retriggered Builds. Prior `echo done` confirmation: tip `442924b`, build UUID `53ec9a69-3064-45a7-802c-4ac12ff3f055`. Builds MCP/API remains **read-only** for agents — dashboard config only.
+
+If live again lags tip while Builds is green, check that Deploy is still `bash scripts/deploy.sh all` (not `echo done`). Manual fallback: `bash scripts/deploy.sh all` with Wrangler auth.
 
 **Dashboard click path (Zpro account `3058d81da41b02e06744d5d058570aab`):**
 
 1. Cloudflare dashboard → Workers & Pages → Worker **`review`**
 2. **Settings** → **Builds** (or Build configuration)
-3. Edit **Deploy command** from `echo done` → `bash scripts/deploy.sh all`
+3. Confirm **Deploy command** is `bash scripts/deploy.sh all` (restore if it drifted back to `echo done`)
 4. Save; next push to the watched branch should deploy both **review** and **review-sync**
 
 **Worker `review`** → Settings → Builds:
@@ -81,7 +83,7 @@ Preview was stuck on old builds while git tip moved because Worker **review** Bu
 
 That single Builds project publishes **both** Workers after each tip push. Alternative: Deploy command `npx wrangler deploy` (SPA only) **and** enable a second Builds trigger on Worker **review-sync** with Install `cd worker && npm ci`, Build empty/`true`, Deploy `cd worker && npx wrangler deploy`.
 
-After the next green build:
+After a green build with the real Deploy command:
 
 ```bash
 node scripts/check-live-version.mjs
