@@ -14,8 +14,8 @@
 - 矩形、椭圆、箭头、便利贴、文字
 - 图片：文件、粘贴、拖放、裁剪
 - 撤销 / 重做、图层顺序、锁定、套索、框选
-- IndexedDB 持久化（`review-v1`）
-- 可选 Yjs 房间 `review`，地址 `ws://<host>:1234`
+- IndexedDB 持久化（`review-v1-<id>`）
+- 可选 Yjs 房间 `review-<id>`，地址 `ws://<host>:1234`
 - 界面语言：俄语（默认）、英语、中文
 - 面板外观和画纸背景是两套设置
 
@@ -32,7 +32,7 @@ npm run dev
 
 Vite 应用在 [http://localhost:5173](http://localhost:5173)，同步服务在 `ws://localhost:1234`。打开页面，画几笔，刷新后画板还在。
 
-同步是可选的。只跑 websocket 用 `npm run server`。同一台机器上的两个浏览器，或局域网里另一台设备用主机 IP 而不是 `localhost`，会进入房间 `review`。
+同步是可选的。只跑 websocket 用 `npm run server`。同一台机器上的两个浏览器，或局域网里另一台设备用主机 IP 而不是 `localhost`，会进入房间 `review-<id>`。
 
 `localhost` 和 `127.0.0.1` 是不同 origin。IndexedDB 不会跟着你换地址。选定一个用到底。
 

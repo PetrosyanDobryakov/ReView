@@ -7,7 +7,7 @@ ReView is a static Vite build plus optional sync. It runs on Vercel **and Cloudf
 1. Import the repo on Vercel — it runs `npm run build` and serves `dist/` (see `vercel.json` for SPA rewrites).
 2. Open `https://your-app.vercel.app/` — create boards, draw, refresh to confirm persistence (IndexedDB `review-v1-<boardId>`).
 3. Share a board: on the board header click the download icon (or Home → per-board export) to get a `.review.json` file; send it to a friend who uses **Home → Import** to open it as a new local board.
-4. P2P: both sides open the same board URL (same `<boardId>`). On Pages/Vercel, y-webrtc starts on its own via `wss://signaling.yjs.dev`. Override with `VITE_P2P_SIGNALING` or Settings → Signaling. LAN/self-host still needs **Settings → System → Connection → P2P (WebRTC)** turned on.
+4. P2P: both sides open the same board URL (same `<boardId>`). On many static hosts without a dedicated sync worker (typical `vercel.app`), y-webrtc starts on its own via `wss://signaling.yjs.dev`. On `*.workers.dev` / `*.pages.dev` (including the canonical tip SPA), P2P is **off** and sync uses `review-sync` instead. Override signaling with `VITE_P2P_SIGNALING` or Settings → Signaling where P2P applies. LAN/self-host still needs **Settings → System → Connection → P2P (WebRTC)** turned on.
 
 No backend storage is used on Vercel. The public board is the static SPA; each browser keeps its own copies and shares via files.
 
@@ -60,7 +60,7 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 
 ### Workers Builds — deploy must actually deploy
 
-**Status (2026-09-18):** Tip `e51661d` (`0.15.45`) — Worker **review** Builds still records `deployCommand: echo done` (e.g. build UUID `9465ccce-3a3b-4202-9540-100985b14ecd`); live stays `0.15.38+442924b`. Builds MCP/API remains **read-only** for agents — dashboard config only. Manual fallback: `bash scripts/deploy.sh all` with Wrangler auth.
+**Status (2026-09-18 audit):** Tip and live can match after **manual** `bash scripts/deploy.sh all` (verified `0.15.46+4e1e96b` on https://review.zpro-driftman.workers.dev/). Worker **review** Builds has repeatedly recorded `deployCommand: echo done` on tip pushes — Builds green-checks without publishing. Builds MCP/API remains **read-only** for agents — dashboard config only. Until Deploy / non-prod Deploy are both `bash scripts/deploy.sh all`, treat Builds as non-authoritative and ship with the script + Wrangler auth.
 
 #### Preferred: one Builds project on Worker **review**
 
@@ -114,7 +114,7 @@ Home header shows `v{version}+{sha}`. HTML includes `<meta name="review-build" c
 1. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
 2. Manual / agent ship: `bash scripts/deploy.sh all` (or `npm run cf:deploy:all`). Partial: `cf:deploy:spa` / `cf:deploy:sync`. Legacy: `npx wrangler deploy` (SPA) and `cd worker && npx wrangler deploy` (sync).
 3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable` and HTML routes stay `no-cache`.
-4. Open the Worker URL — persistence, file share and P2P work as on Vercel. `workers.dev` / `pages.dev` are in `STATIC_HOSTS`, so LAN `ws://host:1234` is not attempted, and P2P is on unless the user turns it off.
+4. Open the Worker URL — persistence and file share work as on Vercel. Canonical tip SPA uses built-in `wss://review-sync.zpro-driftman.workers.dev` (not LAN `:1234`). On `*.workers.dev` / `*.pages.dev`, **P2P is forced off** in `src/net/config.ts` so clients do not also hit `signaling.yjs.dev`. Pure static hosts without that DO URL (e.g. many `vercel.app` deploys) still default P2P on.
 
 
 ## Self-hosted
@@ -207,11 +207,3 @@ Enable **P2P (WebRTC)** in Settings → System → Connection on each device. Bo
   - the home toggle «Save others’ boards» is on, or
   - the user clicks «Save locally».
 - Board list weight on `/` is the approximate IndexedDB size for that board.
-
-## Builds deploy probe (2026-09-18T16:10Z)
-
-Tip push to capture post-verification Workers Builds `deployCommand` on Worker **review** (agent bc-eddd62e2).
-
-## Builds deploy probe (post non-prod Deploy fix)
-
-Tip push after Warexpor JR set Non-production branch deploy command to `bash scripts/deploy.sh all` (agent bc-d70c5623). Expect log: `Executing user deploy command: bash scripts/deploy.sh all`.
