@@ -80,7 +80,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -3403,6 +3403,29 @@ assert.deepEqual(b0, b1, 'cached arrow bounds stay stable');
 assert.strictEqual(poly0, poly1, 'cached hit polyline is the same array reference');
 assert.equal(pointInShape(cacheWarm, 209100, 209009), true, 'cached arrow hit-test still follows the painted bow');
 assert.equal(pointInShape(cacheWarm, 209100, 209080), false, 'cached arrow misses far from the shaft');
+
+// Wrap-text cache: identical font+width+text reuses lines; miss outside pen AABB is cheap.
+clearWrapTextCacheForTest();
+ctxProxy.font = '16px sans-serif';
+const wrapA = wrapTextLines(ctxProxy, 'hello many shapes wrap cache', 80);
+const wrapB = wrapTextLines(ctxProxy, 'hello many shapes wrap cache', 80);
+assert.equal(wrapTextCacheSizeForTest(), 1, 'wrapText warms a single cache entry');
+assert.strictEqual(wrapA, wrapB, 'wrapText returns the same cached lines array');
+const densePen = {
+  id: 'pen-aabb',
+  type: 'pen',
+  x: 300000,
+  y: 300000,
+  w: 40,
+  h: 10,
+  fill: 'transparent',
+  stroke: '#fff',
+  strokeWidth: 2,
+  points: [300000, 300005, 300040, 300005],
+};
+assert.equal(pointInShape(densePen, 300020, 300005), true, 'pen hit on shaft');
+assert.equal(pointInShape(densePen, 300020, 300080), false, 'pen AABB rejects far miss');
+setPaintZoom(1);
 
 engine.setSelection([]);
 engine.setTool('select');
