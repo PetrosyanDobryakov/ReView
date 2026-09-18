@@ -1,6 +1,7 @@
 /**
  * Live websocket sync + awareness smoke test.
- * Requires: npm run server (or npm run dev) on :1234
+ * Reuses REVIEW_SYNC_URL / ws://127.0.0.1:1234 when healthy; otherwise boots
+ * an ephemeral `server.mjs` so `npm test` stays green in CI without a daemon.
  */
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -15,7 +16,104 @@ import WebSocket from 'ws';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const URL = process.env.REVIEW_SYNC_URL || 'ws://127.0.0.1:1234';
+function httpBase(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = createNetServer();
+    s.listen(0, '127.0.0.1', () => {
+      const addr = s.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      s.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    s.on('error', reject);
+  });
+}
+
+async function waitHealth(port, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${httpBase(port)}/health`);
+      if (res.ok) return;
+      lastErr = new Error(`health ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw lastErr ?? new Error(`health timeout :${port}`);
+}
+
+function startSyncServer({ port, netLog, token, host = '127.0.0.1' }) {
+  return spawn(process.execPath, ['server.mjs'], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      REVIEW_SYNC_PORT: String(port),
+      REVIEW_HOST: host,
+      REVIEW_NET_LOG: netLog ? '1' : '0',
+      ...(token
+        ? { REVIEW_COMPACT_TOKEN: token }
+        : { REVIEW_COMPACT_TOKEN: '', REVIEW_ROOM_DELETE_TOKEN: '' }),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+async function stopChild(child) {
+  if (!child || child.killed) return;
+  child.kill('SIGTERM');
+  await new Promise((resolve) => {
+    const t = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      resolve();
+    }, 2000);
+    child.once('exit', () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+/** Prefer an already-running sync server; otherwise spawn one on a free port. */
+async function ensureLiveSync() {
+  const preferred = process.env.REVIEW_SYNC_URL || 'ws://127.0.0.1:1234';
+  const healthUrl = preferred.replace(/^ws/i, 'http').replace(/\/$/, '') + '/health';
+  try {
+    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(800) });
+    if (res.ok) return { url: preferred, child: null };
+  } catch {
+    /* boot ephemeral */
+  }
+  const port = await freePort();
+  const child = startSyncServer({ port, netLog: false });
+  try {
+    await waitHealth(port);
+  } catch (err) {
+    await stopChild(child);
+    throw err;
+  }
+  return { url: `ws://127.0.0.1:${port}`, child };
+}
+
+const { url: URL, child: liveServerChild } = await ensureLiveSync();
+process.on('exit', () => {
+  if (liveServerChild && !liveServerChild.killed) {
+    try {
+      liveServerChild.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
+});
 const ROOM = 'sync-test-' + Date.now();
 
 const docA = new Y.Doc();
@@ -204,54 +302,6 @@ const liveLanBody = await liveLan.json();
 assert.equal(liveLanBody.ok, true, 'GET /lan body ok');
 assert.ok(Array.isArray(liveLanBody.addresses), 'GET /lan addresses array');
 
-function httpBase(port) {
-  return `http://127.0.0.1:${port}`;
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const s = createNetServer();
-    s.listen(0, '127.0.0.1', () => {
-      const addr = s.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      s.close((err) => (err ? reject(err) : resolve(port)));
-    });
-    s.on('error', reject);
-  });
-}
-
-async function waitHealth(port, timeoutMs = 8000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${httpBase(port)}/health`);
-      if (res.ok) return;
-      lastErr = new Error(`health ${res.status}`);
-    } catch (err) {
-      lastErr = err;
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw lastErr ?? new Error(`health timeout :${port}`);
-}
-
-function startSyncServer({ port, netLog, token, host = '127.0.0.1' }) {
-  return spawn(process.execPath, ['server.mjs'], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      REVIEW_SYNC_PORT: String(port),
-      REVIEW_HOST: host,
-      REVIEW_NET_LOG: netLog ? '1' : '0',
-      ...(token
-        ? { REVIEW_COMPACT_TOKEN: token }
-        : { REVIEW_COMPACT_TOKEN: '', REVIEW_ROOM_DELETE_TOKEN: '' }),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
 async function withServer({ netLog, token, host }, fn) {
   const port = await freePort();
   const child = startSyncServer({ port, netLog, token, host });
@@ -259,21 +309,7 @@ async function withServer({ netLog, token, host }, fn) {
     await waitHealth(port);
     await fn(port);
   } finally {
-    child.kill('SIGTERM');
-    await new Promise((resolve) => {
-      const t = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
-        resolve();
-      }, 2000);
-      child.once('exit', () => {
-        clearTimeout(t);
-        resolve();
-      });
-    });
+    await stopChild(child);
   }
 }
 
@@ -515,4 +551,5 @@ await withServer({ netLog: false }, async (port) => {
 });
 
 console.log('sync-test: health + room validation verified');
+await stopChild(liveServerChild);
 process.exit(0);

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fix
+- **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
+
 ## 0.15.38
 
 ### Fix
