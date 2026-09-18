@@ -922,7 +922,8 @@ export class SelectTool extends Tool {
     };
     const batch: Array<[string, Partial<ShapeView>]> = [[hostId, patch]];
     for (const [id, o] of this.stuck) {
-      const mapped = mapShapeThroughHostResize(o, orig, next, minSize);
+      // table hosts: riders only translate (notes/ink/photos keep size)
+      const mapped = mapShapeThroughHostResize(o, orig, next, minSize, orig.type === 'table');
       if (mapped) batch.push([id, bakedArrowGeom(o, mapped)]);
     }
     store.patchShapes(batch);
