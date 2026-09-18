@@ -5,15 +5,18 @@
  * - Doc updates: coalesced in store writeGate; polylines stored local-space.
  * - Cursors / live drafts / erase previews: awareness-only, rAF-batched into
  *   one setLocalState per frame so drawing does not emit cursor+draft as two
- *   WS messages (DO floods → jagged peers).
- * - 45s awareness heartbeat: one setLocalState snapshot; skipped when alone
- *   (solo idle boards must not wake the DO just to republish presence).
+ *   WS messages (DO floods → jagged peers). Solo boards skip the WS fan-out
+ *   entirely (no peer to see the cursor) and use a text keepalive instead.
+ * - y-protocols auto-renew (~15s) is replaced: peer renew ~25s; solo uses the
+ *   hibernation auto-response ping (no DO wake) under the 30s reconnect limit.
+ * - 45s awareness heartbeat: one setLocalState snapshot; skipped when alone.
  * - Periodic resync heals rare stuck states without constant full dumps.
  * - Reconnect backoff caps at 60s so free-tier / 5xx outages do not storm.
  */
 
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { removeAwarenessStates } from 'y-protocols/awareness';
 import type { UserInfo } from '../core/user';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
@@ -62,6 +65,23 @@ const MAX_BACKOFF_MS = 60_000;
  * y-websocket receive/outdated timeout (~45s default × 1.5).
  */
 const AWARENESS_HEARTBEAT_MS = 45_000;
+/**
+ * y-protocols Awareness renews local state every ~15s by default — each renew
+ * is a hibernation wake even after the cheap stub path. Peer renews stay under
+ * the 30s outdated timeout; solo never renews over WS.
+ */
+const AWARENESS_PEER_RENEW_MS = 25_000;
+/** Match y-protocols outdatedTimeout — drop stale remote clients. */
+const AWARENESS_OUTDATED_MS = 30_000;
+/** How often we scan for outdated remotes / decide renew vs solo keepalive. */
+const AWARENESS_CHECK_MS = 3_000;
+/**
+ * Solo keepalive via text ping answered by DO setWebSocketAutoResponse (no
+ * wake). Must stay under y-websocket messageReconnectTimeout (30s).
+ */
+const SOLO_KEEPALIVE_MS = 25_000;
+const WS_KEEPALIVE_REQUEST = 'review-ka';
+const WS_KEEPALIVE_RESPONSE = 'review-ka-ack';
 
 function quantizeCursor(pos: CursorPos): CursorPos {
   return {
@@ -116,7 +136,12 @@ export class SyncClient {
   private offAwareness: (() => void) | null = null;
   private offPeerDisplay: (() => void) | null = null;
   private awarenessHeartbeat: ReturnType<typeof setInterval> | null = null;
+  /** Replaces y-protocols Awareness._checkInterval (peer GC + gated renew). */
+  private awarenessCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private lastSoloKeepaliveAt = 0;
+  private hadOtherAwarenessClients = false;
   private offWsTraffic: (() => void) | null = null;
+  private offKeepaliveMessage: (() => void) | null = null;
 
   constructor() {
     registerNetDebugPeek(() => {
@@ -739,6 +764,8 @@ export class SyncClient {
   }
 
   private bindProvider(provider: WebsocketProvider): void {
+    this.installSoloGatedAwarenessBroadcast(provider);
+    this.installAwarenessCheckLoop(provider);
     const onStatus = (e: { status: string }) => {
       netLog.info('ws status', () => ({
         status: e.status,
@@ -748,6 +775,7 @@ export class SyncClient {
       }));
       if (e.status === 'connected') {
         this.hookWsTraffic(provider);
+        this.hookKeepaliveAck(provider);
         this.republishAwareness();
       }
       this.emitStatus();
@@ -765,6 +793,11 @@ export class SyncClient {
       if (localId != null && changes && awarenessChangeIsLocalOnly(changes, localId)) {
         return;
       }
+      const hadPeers = this.hadOtherAwarenessClients;
+      const hasPeers = this.hasOtherAwarenessClients();
+      this.hadOtherAwarenessClients = hasPeers;
+      // First remote peer joined — push our local snapshot over WS (was gated).
+      if (!hadPeers && hasPeers) this.republishAwareness();
       this.emitPeers();
     };
     const onSync = (isSynced: boolean) => {
@@ -777,6 +810,7 @@ export class SyncClient {
       }));
       if (isSynced) {
         this.hookWsTraffic(provider);
+        this.hookKeepaliveAck(provider);
         this.republishAwareness();
       }
     };
@@ -805,6 +839,127 @@ export class SyncClient {
     }
     // Socket may already be open when bind runs.
     this.hookWsTraffic(provider);
+    this.hookKeepaliveAck(provider);
+  }
+
+  /**
+   * y-websocket always WS-broadcasts awareness updates. Solo boards have no
+   * audience — skip the send so hibernation stays asleep. Peer joins trigger
+   * republish via the awareness change handler.
+   */
+  private installSoloGatedAwarenessBroadcast(provider: WebsocketProvider): void {
+    const raw = provider as WebsocketProvider & {
+      _awarenessUpdateHandler?: (
+        changes: { added: number[]; updated: number[]; removed: number[] },
+        origin: unknown,
+      ) => void;
+    };
+    const original = raw._awarenessUpdateHandler;
+    if (!original) return;
+    try {
+      provider.awareness.off('update', original);
+    } catch {
+      /* already unbound */
+    }
+    const gated = (
+      changes: { added: number[]; updated: number[]; removed: number[] },
+      origin: unknown,
+    ) => {
+      if (!this.hasOtherAwarenessClients()) return;
+      original.call(provider, changes, origin);
+    };
+    raw._awarenessUpdateHandler = gated;
+    provider.awareness.on('update', gated);
+  }
+
+  /**
+   * Replace y-protocols' ~15s local renew (always WS) with: peer renew at 25s,
+   * solo text keepalive (auto-answered, no DO wake), and remote timeout GC.
+   */
+  private installAwarenessCheckLoop(provider: WebsocketProvider): void {
+    const awareness = provider.awareness as typeof provider.awareness & {
+      _checkInterval?: ReturnType<typeof setInterval>;
+      meta: Map<number, { clock: number; lastUpdated: number }>;
+    };
+    if (awareness._checkInterval) {
+      clearInterval(awareness._checkInterval);
+      awareness._checkInterval = undefined;
+    }
+    if (this.awarenessCheckTimer) {
+      clearInterval(this.awarenessCheckTimer);
+      this.awarenessCheckTimer = null;
+    }
+    this.awarenessCheckTimer = setInterval(() => {
+      if (this.provider !== provider) return;
+      const now = Date.now();
+      const removed: number[] = [];
+      awareness.meta.forEach((meta, clientId) => {
+        if (clientId === awareness.clientID) return;
+        if (now - meta.lastUpdated > AWARENESS_OUTDATED_MS && awareness.getStates().has(clientId)) {
+          removed.push(clientId);
+        }
+      });
+      if (removed.length) {
+        try {
+          removeAwarenessStates(awareness, removed, 'timeout');
+        } catch {
+          /* best-effort GC */
+        }
+      }
+      if (this.provider?.ws?.readyState !== WebSocket.OPEN) return;
+      if (this.hasOtherAwarenessClients()) {
+        const localMeta = awareness.meta.get(awareness.clientID);
+        if (
+          awareness.getLocalState() !== null &&
+          localMeta &&
+          now - localMeta.lastUpdated >= AWARENESS_PEER_RENEW_MS
+        ) {
+          try {
+            awareness.setLocalState(awareness.getLocalState());
+          } catch {
+            /* */
+          }
+        }
+        return;
+      }
+      if (now - this.lastSoloKeepaliveAt >= SOLO_KEEPALIVE_MS) {
+        this.sendSoloKeepalive(provider);
+      }
+    }, AWARENESS_CHECK_MS);
+  }
+
+  private sendSoloKeepalive(provider: WebsocketProvider): void {
+    const ws = provider.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(WS_KEEPALIVE_REQUEST);
+      this.lastSoloKeepaliveAt = Date.now();
+    } catch (err) {
+      netLog.warn('solo keepalive send failed', () => ({ err }));
+    }
+  }
+
+  /**
+   * Auto-response acks are plain text — y-websocket would throw decoding them.
+   * Wrap onmessage so text acks bump the reconnect clock and skip readMessage.
+   */
+  private hookKeepaliveAck(provider: WebsocketProvider): void {
+    this.offKeepaliveMessage?.();
+    this.offKeepaliveMessage = null;
+    const ws = provider.ws;
+    if (!ws) return;
+    const prev = ws.onmessage;
+    ws.onmessage = (event: MessageEvent) => {
+      if (typeof event.data === 'string' && event.data === WS_KEEPALIVE_RESPONSE) {
+        const p = provider as WebsocketProvider & { wsLastMessageReceived?: number };
+        p.wsLastMessageReceived = Math.floor(Date.now() / 1000);
+        return;
+      }
+      if (typeof prev === 'function') prev.call(ws, event);
+    };
+    this.offKeepaliveMessage = () => {
+      ws.onmessage = prev;
+    };
   }
 
   private hookWsTraffic(provider: WebsocketProvider): void {
@@ -856,6 +1011,8 @@ export class SyncClient {
     this.hotAwareness.clear();
     this.offWsTraffic?.();
     this.offWsTraffic = null;
+    this.offKeepaliveMessage?.();
+    this.offKeepaliveMessage = null;
     this.offProviderStatus?.();
     this.offAwareness?.();
     this.offProviderStatus = null;
@@ -866,6 +1023,12 @@ export class SyncClient {
       clearInterval(this.awarenessHeartbeat);
       this.awarenessHeartbeat = null;
     }
+    if (this.awarenessCheckTimer) {
+      clearInterval(this.awarenessCheckTimer);
+      this.awarenessCheckTimer = null;
+    }
+    this.lastSoloKeepaliveAt = 0;
+    this.hadOtherAwarenessClients = false;
     if (this.provider) {
       netLog.info('provider destroy', () => ({
         url: this.providerUrl,
