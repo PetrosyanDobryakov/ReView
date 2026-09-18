@@ -83,6 +83,13 @@ assert.ok(std.fonts.header >= 14, `header font too small: ${std.fonts.header}`);
 assert.ok(std.fonts.display >= 20, `display font too small: ${std.fonts.display}`);
 // Header text should not be a shrunk foreign toolbar vs keyFn.
 assert.ok(std.fonts.header + 0.5 >= std.fonts.keyFn - 1, 'header font far below keyFn');
+// Shared chrome metrics — canvas + overlay use the same nav cell / gap / type sizes.
+assert.equal(std.chrome.navW, 34);
+assert.equal(std.chrome.navGap, 6);
+assert.equal(std.chrome.controlH, 32);
+assert.equal(std.chrome.glyphPx, 20);
+assert.equal(std.chrome.titlePx, std.fonts.header);
+assert.ok(std.chrome.glyphNudgeY > 0);
 
 assert.equal(calcKeypadRows('standard').length, 8);
 assert.equal(calcKeypadRows('scientific').length, 9);

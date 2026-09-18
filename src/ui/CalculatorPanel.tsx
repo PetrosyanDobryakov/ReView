@@ -214,6 +214,12 @@ export function CalculatorPanel({
           top: `${(layout.header.y / fh) * 100}%`,
           width: `${(layout.header.w / fw) * 100}%`,
           height: `${(layout.header.h / fh) * 100}%`,
+          ['--calc-nav-w' as string]: `${(layout.chrome.navW / layout.header.w) * 100}%`,
+          ['--calc-nav-gap' as string]: `${(layout.chrome.navGap / layout.header.w) * 100}%`,
+          ['--calc-control-h' as string]: `${(layout.chrome.controlH / layout.header.h) * 100}%`,
+          ['--calc-glyph-px' as string]: `${layout.chrome.glyphPx * z}px`,
+          ['--calc-title-px' as string]: `${layout.chrome.titlePx * z}px`,
+          ['--calc-glyph-nudge' as string]: `${layout.chrome.glyphNudgeY * z}px`,
         }}
       >
         <div className={`calc-nav${navOpen ? ' is-open' : ''}`} ref={navRef}>

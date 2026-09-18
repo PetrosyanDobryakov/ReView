@@ -4079,7 +4079,7 @@ h3 .swap-text,
   white-space: nowrap;
   border: 0;
 }
-/* Win-calc title strip: ≡ + mode name (+ DEG), same scale as pad chrome. */
+/* Win-calc title strip: ≡ + mode name (+ DEG). Sizes from layout.chrome via CSS vars. */
 .calc-toolbar {
   display: flex;
   flex-direction: row;
@@ -4093,14 +4093,16 @@ h3 .swap-text,
   border: 0;
   border-radius: 0;
   padding: 0;
+  margin: 0;
 }
 .calc-nav {
   position: relative;
   display: flex;
   align-items: center;
-  gap: calc(4px * var(--calc-zoom, 1));
+  gap: var(--calc-nav-gap, calc(6px * var(--calc-zoom, 1)));
   min-width: 0;
   flex: 1 1 auto;
+  height: 100%;
   z-index: 2;
 }
 .calc-nav-trigger,
@@ -4108,11 +4110,16 @@ h3 .swap-text,
 .calc-angle-chip,
 .calc-nav-menu button {
   appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
   border: 1px solid transparent;
   background: transparent;
   color: var(--calc-ink, var(--chrome-text));
   border-radius: calc(6px * var(--calc-zoom, 1));
-  height: calc(32px * var(--calc-zoom, 1));
+  height: var(--calc-control-h, calc(32px * var(--calc-zoom, 1)));
   padding: 0 calc(8px * var(--calc-zoom, 1));
   font: 600 calc(15px * var(--calc-zoom, 1)) / 1 "Space Grotesk", Onest, system-ui, sans-serif;
   cursor: pointer;
@@ -4122,22 +4129,27 @@ h3 .swap-text,
 }
 .calc-nav-trigger {
   flex: 0 0 auto;
-  width: calc(34px * var(--calc-zoom, 1));
-  min-width: calc(34px * var(--calc-zoom, 1));
+  width: var(--calc-nav-w, calc(34px * var(--calc-zoom, 1)));
+  min-width: var(--calc-nav-w, calc(34px * var(--calc-zoom, 1)));
   padding: 0;
   font-weight: 500;
-  font-size: calc(20px * var(--calc-zoom, 1));
+  font-size: var(--calc-glyph-px, calc(20px * var(--calc-zoom, 1)));
   letter-spacing: -0.04em;
   color: var(--calc-ink, var(--chrome-text));
+  /* Optical center: ≡ sits high in the em-box. */
+  padding-top: var(--calc-glyph-nudge, calc(0.55px * var(--calc-zoom, 1)));
 }
 .calc-mode-title {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 70%;
-  padding-left: calc(2px * var(--calc-zoom, 1));
+  justify-content: flex-start;
+  padding: 0;
   text-align: left;
   color: var(--calc-ink, var(--chrome-text));
-  font-size: calc(16px * var(--calc-zoom, 1));
+  font-weight: 600;
+  font-size: var(--calc-title-px, calc(16px * var(--calc-zoom, 1)));
+  line-height: 1;
 }
 .calc-angle-chip {
   flex: 0 0 auto;
