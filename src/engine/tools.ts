@@ -535,6 +535,17 @@ export class SelectTool extends Tool {
     }
   }
 
+  /** Drop marquee / idle-hover gesture chrome without touching the selection set. */
+  clearTransient(): void {
+    this.mode = 'idle';
+    this.marquee = null;
+    this.resizing = null;
+    this.groupResizing = null;
+    this.groupOrigBox = null;
+    this.tableDiv = null;
+    this.moved = 0;
+  }
+
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.marquee) return;
     const s = 1 / engine.camera.zoom;
@@ -1277,17 +1288,16 @@ export class CalculatorTool extends BoxTool {
     const box = this.commitDrawnBox(p);
     if (!box) return;
     const size = clampCalcSize(box.w, box.h);
-    // Same creation defaults as other filled shapes — StyleBar fill/stroke tokens.
-    // Untouched fill still paints via resolveCalcBodyFill → --chrome-panel.
+    // Theme-owned face — ignore StyleBar / peer tool fill+stroke (see resolveCalcBodyFill).
     const id = store.addShape({
       type: 'calculator',
       x: box.x,
       y: box.y,
       w: size.w,
       h: size.h,
-      fill: shapeFillValue(),
-      stroke: settings.shape.stroke,
-      strokeWidth: settings.shape.strokeWidth,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 1.5,
       cornerRadius: 14,
       ...fields,
     });
@@ -1298,16 +1308,15 @@ export class CalculatorTool extends BoxTool {
     const drawBox = this.previewBox();
     if (!drawBox) return;
     const s = 1 / engine.camera.zoom;
-    const fill = shapeFillValue();
     ctx.save();
-    ctx.strokeStyle = settings.shape.stroke;
-    ctx.fillStyle = hasFill(fill) ? (fill.length === 7 ? fill + '22' : withAlpha(fill, 0.13)) : 'transparent';
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = withAlpha(COLORS.selection, 0.1);
     ctx.globalAlpha = 0.9;
     ctx.lineWidth = 1.5 * s;
     ctx.setLineDash([5 * s, 4 * s]);
     ctx.beginPath();
     ctx.roundRect(drawBox.x, drawBox.y, drawBox.w, drawBox.h, 12);
-    if (hasFill(fill)) ctx.fill();
+    ctx.fill();
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 0.4;
@@ -1971,11 +1980,15 @@ export class LassoTool extends Tool {
 
   onUp(engine: Engine): void {
     if (!this.active) return;
+    // Snapshot then clear preview before tool swap — otherwise select re-entry
+    // can keep a stale polygon / marquee / toolbar focus ring ("selecting" halo).
+    const pts = this.pts;
     this.active = false;
-    if (this.pts.length >= 3) {
-      engine.setSelection(engine.selectByPolygon(this.pts));
-    }
     this.pts = [];
+    if (pts.length >= 3) {
+      engine.setSelection(engine.selectByPolygon(pts));
+    }
+    engine.clearToolTransientChrome();
     engine.setTool('select');
   }
 

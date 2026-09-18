@@ -993,6 +993,7 @@ export class Engine {
     // write-gate, and a half-drawn connector stays armed.
     // Crop and export-region pick are modal layers; leave those alone.
     if (this.pointerDown || this.connecting) this.abortPointerGesture();
+    const prev = this.active;
     this.active = id;
     // Keep Space temp-pan armed across toolbar/keyboard tool swaps while Space
     // is still held; only clear the override when Space is up.
@@ -1003,10 +1004,38 @@ export class Engine {
     if (id !== 'select' && id !== 'pan' && id !== 'lasso' && this.selection.size) {
       this.setSelection([]);
     }
+    // Lasso (OSO) auto-swaps back to select — drop preview/hover/focus chrome so
+    // the pointer tool does not keep a leftover "selecting" ring.
+    if (prev === 'lasso' || id === 'lasso') {
+      this.clearToolTransientChrome();
+    }
     this.setCursor(this.toolCursor());
     publishTool(id);
     this.events.onTool?.(id);
     this.dirty = true;
+  }
+
+  /**
+   * Clear transient select/lasso/hover/toolbar chrome without changing selection.
+   * Used when lasso finishes (and on lasso enter/leave) so auto-reactivated
+   * select does not inherit a sticky marquee, port hover, or focus ring.
+   */
+  clearToolTransientChrome(): void {
+    this.hoverPort = null;
+    this.clearSnapGuides();
+    this.tools.select.clearTransient();
+    this.tools.lasso.cancel(this);
+    try {
+      const ae = document.activeElement;
+      if (ae instanceof HTMLElement && ae.closest('.toolbelt, .tool-btn, .style-island')) {
+        ae.blur();
+      }
+      document.querySelectorAll('.orbit-tactile-pulse').forEach((el) => {
+        el.classList.remove('orbit-tactile-pulse');
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   setCursor(cursor: string): void {
