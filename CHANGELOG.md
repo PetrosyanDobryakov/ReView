@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-### Ops
-- **`sync-github.sh`**: resolves GitHub via `github` remote or `origin` when it already points at `PetrosyanDobryakov/ReView` (no extra remote required on GitHub-primary checkouts).
-- **Wrangler `account_id`**: set in root + `worker/wrangler.toml` so non-interactive deploy picks Zpro without an interactive account prompt.
-
 ## 0.15.38
 
 ### Fix
@@ -16,28 +12,30 @@
 - **Tip → `main` sync**: `bash scripts/sync-github.sh` (or `npm run sync:github`) pushes tip to `dev-warexpor` and `main`.
 - **Persistent Wrangler deploy:** `scripts/deploy.sh` (+ `npm run cf:deploy:all`) deploys `review-sync` then `review` from tip.
 - **Cloud Agent snapshot**: tip env uses validated 2026-09-18 snapshot.
+- **`sync-github.sh`**: resolves GitHub via `github` remote or `origin` when it already points at `PetrosyanDobryakov/ReView` (no extra remote required on GitHub-primary checkouts).
+- **Wrangler `account_id`**: set in root + `worker/wrangler.toml` so non-interactive deploy picks Zpro without an interactive account prompt.
 
 ## 0.15.37
 
 ### Polish
 - **Calculator Windows redesign**: Win-calc chrome — ≡ nav + mode title (same scale as keypad), generous display, modes/DEG/Copy/Sticky/Text in the nav flyout. Drops the tiny ··· overflow toolbar from 0.15.36.
 
-## 0.15.36 — unreleased
+## 0.15.36
 
 ### Polish
 - **Calculator header declutter**: single-row chrome — mode segment (Standard/Scientific + DEG) on the left, Copy/Sticky/Text behind a quiet ··· overflow so secondary actions no longer crowd under Scientific.
 
-## 0.15.35 — unreleased
+## 0.15.35
 
 ### Perf (invisible)
 - **Many visible shapes**: cache `wrapText` measure/wrap results; skip Orbit pen bloom when glow is sub-pixel; LOD calculator keypad (solid pad when keys < ~7 CSS px); AABB-refine grid culling + skip sub-pixel blobs; paint only sorted visible shapes (no full-order scan); hit-test ranks spatial candidates by order index; pen hit AABB reject; no per-frame `{...v}` clone for rotated shapes.
 
-## 0.15.34 — unreleased
+## 0.15.34
 
 ### Fix
 - **DO billable-duration spike (solo awareness wakes)**: y-protocols still renewed local awareness every ~15s over WS even on solo boards; each renew was a hibernation wake (cheap after 0.15.29/30, but volume × wall time blew the billable chart). Solo tabs now skip awareness WS fan-out and use a text keepalive answered by Durable Object `setWebSocketAutoResponse` (no isolate wake). Peer renews move to ~25s. Worker still echoes awareness for multi-peer / older clients.
 
-## 0.15.33 — unreleased
+## 0.15.33
 
 ### Fix
 - **Lasso (OSO) leftover select ring**: clear marquee/hover/focus/tactile chrome when lasso finishes and auto-swaps back to select so the pointer tool does not keep a stale "selecting" halo.
@@ -45,94 +43,94 @@
 - **Calculator theme-only colors**: calc body/bezel/ink follow `--chrome-panel` / theme tokens only — no longer inherit StyleBar or selected-shape stroke/fill (e.g. red table).
 - **Calculator phone chrome**: two-row toolbar (modes / actions), no wrap overflow, taller header slot so open-session controls stop colliding with the display.
 
-## 0.15.32 — unreleased
+## 0.15.32
 
 ### Fix
 - **Arrow canvas lag**: cache tessellated shaft/head/bounds per arrow id (invalidate on geometry fingerprint), drop per-arrow `shadowBlur` paint, and adaptive sample counts so hover/snap/pan stay smooth as arrow count grows. Hit-test still follows the painted curve.
 
-## 0.15.31 — unreleased
+## 0.15.31
 
 ### Fix
 - **Context menu overflow**: cap height to the remaining viewport (safe-area aware) and allow touch/mouse scroll so Align (and long menus) no longer clip off-screen.
 
-## 0.15.30 — unreleased
+## 0.15.30
 
 ### Fix
 - **Solo DO reconnect storm**: echo awareness frames back to the sending socket (matches y-websocket reference server). Without the echo, solo tabs receive no inbound traffic and force-reconnect every 30s → accept/sync reloads the full board blob (~5s wall) even after the 0.15.29 awareness-skip path.
 
-## 0.15.29 — unreleased
+## 0.15.29
 
 ### Fix
 - **DO wake wall time**: hibernation no longer reloads the full board blob on awareness-only messages (or when the in-memory doc is already warm). Accept + real sync still `loadOrCreate` and sync-step1 the waking socket.
 
-## 0.15.28 — unreleased
+## 0.15.28
 
 ### Fix
 - **DO traffic / free-tier duration bleed**: stop hibernation-wake sync-step1 fan-out (each awareness tick was reloading the full board blob then forcing N client sync replies). Solo boards skip the 45s awareness heartbeat; reconnect backoff caps at 60s; client resync every 120s. Worker observability head-sample 10%.
 
-## 0.15.27 — unreleased
+## 0.15.27
 
 ### Polish
 - **Align submenu close feel**: 320ms ease-in-out roll + reverse-stagger opacity (verifier caught ~60ms snap with `--chrome-ease`).
 
-## 0.15.26 — unreleased
+## 0.15.26
 
 ### Polish
 - **Align submenu close**: keep children mounted and roll `0fr↔1fr` so close matches the open animation (was unmounting and snapping shut).
 
-## 0.15.25 — unreleased
+## 0.15.25
 
 ### Feature
 - **Confetti spam frenzy**: repeated rotate triple-press within ~1.6s escalates power (more bits, wider cone, multi-cannon) and stacks; peers get the same `power` via awareness. Cap ~900 live particles.
 
-## 0.15.24 — unreleased
+## 0.15.24
 
 ### Feature
 - **Confetti lasts longer (~10s)** so bits can fall through the floor / off the bottom of the view.
 - **Peer-visible confetti**: awareness broadcasts burst origin+seed so other users see your triple-press cannon (was local-only).
 
-## 0.15.23 — unreleased
+## 0.15.23
 
 ### Polish
 - **Selection context menu**: group with separators; Align moves into a submenu (incl. distribute). Long-press on coarse pointers already opened the menu — move-slop hardened so holds cancel less often.
 
-## 0.15.22 — unreleased
+## 0.15.22
 
 ### Polish
 - **Rotate handle icon at low zoom**: stroke stays Lucide viewBox-stable (no s² fattening) so the knob stays a clean rotate-cw, not a blob.
 
-## 0.15.21 — unreleased
+## 0.15.21
 
 ### Polish
 - **Confetti cannon feel**: faster launch speed, lighter gravity + drag so bits pop up quick then drift down slowly (lifetime unchanged).
 
-## 0.15.20 — unreleased
+## 0.15.20
 
 ### Phone layout
 - **Top chrome vertical tighten (≤720)**: file/meta islands ~42–46px (was ~60); icons 36, brand/title 32, zoom chip 32; style island pad-block 6. Board title floor kept. Toolbelt stays 44.
 
-## 0.15.19 — unreleased
+## 0.15.19
 
 ### Polish
 - **Confetti cannon physics**: always shoots upward; lighter gravity; longer particle lifetime (~3s).
 
-## 0.15.18 — unreleased
+## 0.15.18
 
 ### Feature
 - **Rotate triple-press confetti cannon**: replaces glow-bubble fireworks with noticeable paper confetti bursting from the live rotate knob.
 - **Knob origin fix**: spawn uses `rotateHandleWorldPos` (same geometry as paint/hit-test, including rotate-handle-on-top + shape rotation) instead of a hardcoded bottom-left AABB corner.
 
-## 0.15.17 — unreleased
+## 0.15.17
 
 ### Polish
 - **More shelf row hover**: keep the row hit box fixed — slide/scale live on icon + label only. Stops the intermittent highlight flash on the previous tool when moving across Calculator / Table / Graph rows (translateX on the button itself re-entered `:hover` on leave).
 
-## 0.15.16 — unreleased
+## 0.15.16
 
 ### Sync (invisible)
 - **Awareness heartbeat is one WebSocket frame**: the 20s `republishAwareness` path now builds one snapshot (`user` / `tool` / `page` / `viewing` / hot fields) and calls `setLocalState` once instead of up to five `setLocalStateField` publishes. Idle overnight floor ~5× quieter; cursor/draft rAF rates and heartbeat interval unchanged.
 
-## 0.15.15 — unreleased
+## 0.15.15
 
 ### Phone layout
 - **Board file-island title floor**: ≤720 / tablet brand keeps `min-width: 5.5em` so `overflow: hidden` cannot crush the title to a sliver between Home and Pages; Home product name stays `flex: 0`.
@@ -140,7 +138,7 @@
 - **Board rows denser**: ≤520 container — tighter pad/gap, `align-items: start`, narrower idx, auto actions; ≤400 hides date + header; Home main “New board” + list padding compact on ≤720.
 - **Host-offline CTA-only** on ≤720 (long copy stays for `title` where set).
 
-## 0.15.14 — unreleased
+## 0.15.14
 
 ### Perf (invisible)
 - **Stop idle Orbit paper ambient dirty**: the rAF loop no longer forces a full-board paint every ~80ms while Orbit paper is live. Pin field is already off (`if (false)`) and the screen vignette is static — idle boards no longer repaint ~12.5fps for nothing.
@@ -148,20 +146,20 @@
 - **Realtime peer hold** tightened to `REALTIME_LEAD_SEC + 1/60` (smooth spring path keeps 0.14s) so snapped realtime glyphs do not force extra full-board paints.
 - **Pause Warp when covered**: on a board with solid/non-Orbit paper the opaque canvas fill covers Warp — shader speed goes to 0. Home and Orbit paper keep the live atmosphere. No backdrop-filter / quality / DPR changes.
 
-## 0.15.13 — unreleased
+## 0.15.13
 
 ### Polish
 - **Calculator key glyphs**: larger shared-face `key` / `keyFn` sizes (Standard + Scientific) so symbols fill spacious wells better.
 - **Phone scroll edge fades**: toolbelt + style island `mask-image` stops + inline padding so the slide-thumb selection ring is not eaten at the edges.
 - **More on phone**: portal the More shelf (like Pages/Members) so ≤720 `toolbelt-scroll` overflow/mask no longer clips the popover — tap opens Calculator / Table / etc.
 
-## 0.15.12 — unreleased
+## 0.15.12
 
 ### Space → temp pan
 - **First Space after tool pick** arms temporary pan even when focus is still on the toolbar button (was early-returning on `button` / `role=switch`).
 - **Tool swap while Space held** keeps temp pan armed until keyup.
 
-## 0.15.11 — unreleased
+## 0.15.11
 
 ### Phone / tablet visual hierarchy
 - **Zoom overflow chip**: ≤720 / tablet collision / ≤1024 coarse show a `%` chip that opens an island zoom menu (in/out/reset/fit) instead of scroll-only or pinch-only.
@@ -170,7 +168,7 @@
 - **Tablet band 721–1024**: island pad 7px; brand ellipsis 36vw; JS collision collapse → same overflow chip (hysteresis).
 - **Coarse ctx / zoom menu rows**: min-height 44px; ui-hidden hint respects safe-area.
 
-## 0.15.10 — unreleased
+## 0.15.10
 
 ### Phone / tablet support
 - **Touch context menu**: long-press (~500ms, small move) opens the board context menu (desktop still uses right-click).
@@ -181,14 +179,14 @@
 - **Overlays**: GraphEditor and TextOverlay clamp into `visualViewport` (soft keyboard / URL bar).
 - **Polish**: outside-dismiss uses `pointerdown`; invite prefers Web Share then clipboard; tool reorder disabled on coarse pointers; Settings Gestures documents pinch / long-press / double-tap.
 
-## 0.15.9 — unreleased
+## 0.15.9
 
 ### Stylus / graphical tablet
 - **Palm reject while inking**: ignore touch contacts while a pen pointer is active so a palm does not cancel the stroke into pinch-pan.
 - **Eraser tip**: stylus button 5 temporarily overrides to eraser without `setTool` abort; restores prior tool on up/cancel.
 - **Coalesced pen samples**: pen `pointermove` folds `getCoalescedEvents()` into the polyline/pressure path for smoother high-rate ink.
 
-## 0.15.8 — unreleased
+## 0.15.8
 
 ### UI polish
 - **Export dialog**: vertical option groups (source / scale / format) with chip rows so labels and chips no longer wrap unevenly; source chips stacked full-width for long RU labels; preview + Download unchanged.
@@ -197,45 +195,45 @@
 - **StyleBar**: hide Fill/Stroke (and outline width) for calculator tool and calculator-only selections — calc keeps its own face theme.
 - **More shelf**: subtle hover slide + icon scale on Calculator / Table / Graph rows (and other more-rows); respects reduced motion.
 
-## 0.15.7 — unreleased
+## 0.15.7
 
 ### Multiplayer
 - **Peer-visible selection**: Select-tool shape ids publish via awareness (`selection: string[]`); remotes draw a soft peer-colored outline/ring (no handles). Clears on empty selection, tool switch, board leave, and disconnect. Same batching path as cursor/draft/erase — not written to the Yjs doc. Calc keypad `focus` ring kept; duplicate ring skipped when both apply to the same calculator.
 
-## 0.15.6 — unreleased
+## 0.15.6
 
 ### Selection / calculator polish
 - **Rotate handle default off**: Customize → Rotate handle on top now defaults to **off** (legacy bottom-left corner). One-shot migrate clears the 0.15.2–0.15.5 default-on for existing installs.
 - **No ghost “Standard”**: while the keypad overlay is open, canvas skips header mode chrome the overlay owns (mode row / M) so tabs are not double-painted.
 - **Bigger key glyphs**: modest bump to shared face key/fn label sizes so symbols fill spacious wells better (Standard + Scientific; canvas paint).
 
-## 0.15.5 — unreleased
+## 0.15.5
 
 ### Selection chrome
 - **Rotate icon a bit bigger**: same Lucide-style `rotate-cw` SVG; modest size bump for top-middle and corner placements (`ROTATE_CW_ICON_RADIUS_SCALE` / disc scale in `rotateIcon.ts`).
 
-## 0.15.4 — unreleased
+## 0.15.4
 
 ### Selection / calculator / canvas quality
 - **Rotate icon from scratch**: abandoned legacy swirl / hand-arc glyph. New Lucide-style `rotate-cw` SVG (`src/core/rotateIcon.ts`) for both top-middle and legacy corner placements.
 - **Calculator theme defaults**: creation uses StyleBar fill/stroke like other shapes; untouched body paints `--chrome-panel` + chrome/theme ink (no cream/`#2a2a27` special palette). Explicit StyleBar fills keep their color. Canvas dirty on chrome theme change.
 - **Zoom-out crunch fixed**: restore `devicePixelRatio` backing store (was forced `dpr = 1` for “perf”) so far-zoom strokes are not artificially undersampled.
 
-## 0.15.3 — unreleased
+## 0.15.3
 
 ### Board calculator — one paint path
 - **Canvas is the only face**: shared `buildCalcFaceLayout` drives labeled keypad for peers, export, unfocused, and open session. Open overlay is a transparent hit layer (mode/stamp chrome + key targets) — no separate low-res silhouette vs high-res panel.
 - **Labels track frame, not zoom floor**: removed `CALC_CSS_ZOOM_FLOOR` / screen-px label floors. Key/display type scales with object geometry like other board content; far zoom shrinks with the board.
 - **Rotate icon redesign**: same curved rotate-cw arrow for top-middle and legacy corner placements (no swirl “C” blob). Customize toggle for placement kept.
 
-## 0.15.2 — unreleased
+## 0.15.2
 
 ### Board calculator + selection chrome
 - **Closed/unfocused silhouette** paints full labeled keys (shared keypad layout with the overlay) — no hollow gray wells.
 - **Label zoom floor**: overlay `--calc-zoom` and canvas key/display type share one readability floor so open/closed stop shrinking together when zoomed far out.
 - **Customize → Rotate handle on top** (default on): top-middle rotate control with a normal rotate arrow; off keeps legacy bottom-left swirl.
 
-## 0.15.1 — unreleased
+## 0.15.1
 
 ### Board calculator fixes
 - **Resize/scale** works while the keypad is open (selection chrome + handle hit-through; min size 240×360).
@@ -243,19 +241,19 @@
 - Overlay chrome scales with **frame size × zoom** and follows rotation; matches silhouette better.
 - Overlay ink adapts to StyleBar fill (no light-on-light); silhouette row counts match pad; scientific includes memory keys.
 
-## 0.15.0 — unreleased
+## 0.15.0
 
 ### Release
 - Version bump to **0.15.0** (minor after board calculator and 0.14.x sync/cursor work).
 
-## 0.14.41 — unreleased
+## 0.14.41
 
 ### Board calculator
 - First-class **calculator** board object (More shelf): Standard + Scientific modes with Windows-parity engine (precedence, memory, CE/C/⌫, error states, deg/rad, 2nd functions).
 - On-object keypad overlay (shape-aligned, StyleBar fill/stroke) — not a floating OS dialog. Canvas silhouette for peers/export.
 - Board actions: stamp result as sticky, stamp expression as text, copy display. Live Yjs sync of calc state; peer focus ring while in use.
 
-## 0.14.40 — unreleased
+## 0.14.40
 
 ### Sync smoothness
 - **User-rejected 0.14.39** (`PEER_MOTION_STALE_SEC = 0.2` zero-velocity reset): mid-move stalls looked like new jaggers and the idle→move slingshot remained incomplete.
@@ -263,12 +261,12 @@
 - `sampleDeltaSec` no longer ceilings at 0.12s (floor-only for bursts), so brief stalls do not invent `(delta / 0.12)` speeds.
 - Continuous realtime motion keeps velocity under the resume gap; smooth toggle still optional (default realtime).
 
-## 0.14.39 — unreleased (user-rejected)
+## 0.14.39 (user-rejected)
 
 ### Sync smoothness
 - Idle → first-move observer snap: after a long awareness gap (`PEER_MOTION_STALE_SEC`), `pushPeerSample` resets velocity instead of inventing speed via `sampleDeltaSec`'s 0.12s ceiling. Realtime dead-reckon no longer slingshots on cold start after a stale peer, then snaps back on the next packet. Smooth toggle unchanged. **Live: worse — new mid-move jaggers + old snap; superseded by 0.14.40.**
 
-## 0.14.38 — unreleased
+## 0.14.38
 
 ### Sync smoothness
 - Cut random remote-cursor hitches from **React setState storms**: `onSyncStatus` no longer re-emits on every awareness/cursor packet (status-field dedupe only); PageBar gates `setPeerPages` on page-id fingerprint.
@@ -277,19 +275,19 @@
 - Sync DO postpones full-doc encode while awareness traffic is recent (`AWARENESS_QUIET_BEFORE_FULL_MS`), so O(board) persist CPU is less likely to stall cursor relay.
 - netDebug: awareness receive-gap histogram + longtask + slow peer-paint warns (`?netDebug=1`).
 
-## 0.14.37 — unreleased
+## 0.14.37
 
 ### Sync smoothness
 - Realtime peer cursors (default) bridge brief awareness/WS gaps with short dead-reckon + frame-hold — no spring trail, smooth toggle unchanged. Stops freeze-then-jump micro-stutters when packets arrive irregularly.
 - `setPeers` no longer snap-backs display pose on unrelated awareness emits (that was killing between-packet extrapolation).
 - Live draft tip changes at a fixed vertex count dirty the canvas again; erase-preview compare drops `JSON.stringify` on the hot path.
 
-## 0.14.36 — unreleased
+## 0.14.36
 
 ### Sync smoothness
 - Peer cursors default to **realtime**: display pose snaps to the latest awareness sample (no spring trail). Optional **Smooth peer cursors** toggle in Settings → Customize restores the previous spring/lerp follow. Preference persists with other customise settings. Send path unchanged (batching / quant).
 
-## 0.14.35 — unreleased
+## 0.14.35
 
 ### Deploy / version visibility
 - Home always shows `v{version}+{sha}` (no more version-less “dev build” label). Production HTML gets `<meta name="review-build">` for curl checks (`scripts/check-live-version.mjs`).
@@ -298,12 +296,12 @@
 ### Sync smoothness (wire)
 - Cursor awareness quantization `0.5` → **`0.05`** world units so zoomed remotes do not stair-step (periodic micromovements that are not lag). Live **0.14.25** also still double-steps the peer spring (glyph+pill); that fix is already in tip since 0.14.29 and will land once deploy actually uploads.
 
-## 0.14.34 — unreleased
+## 0.14.34
 
 ### Sync smoothness
 - Remote cursors no longer micro-jerk at awareness packet rate. Dead-reckon aim used to jump ahead on each sample then *retract* toward the last point (`leadSec - age×0.5`) until the next packet — periodic micromovements that looked like stutter, not lag. Aim now advances with sample age only, soft spring (`smoothTime` 0.1) absorbs corrections, and samples never snap the rendered pose.
 
-## 0.14.33 — unreleased
+## 0.14.33
 
 ### Net debug visibility
 - Boot prints a hard-to-miss Console line: **`[review:net] review net debug ON`** (warn-level so Chrome Default filters show it). Heartbeat every 5s with live WS readyState. `window.reviewNetDebug(true|false)`.
@@ -311,7 +309,7 @@
 - Connect path logs `opening websocket` / `websocket open` / errors. Traffic still summarized as `ws traffic 1s` while drawing.
 - SPA `_headers`: HTML routes `Cache-Control: no-cache` so a stale index.html cannot hide the new logger.
 
-## 0.14.32 — unreleased
+## 0.14.32
 
 ### Sync smoothness
 - Live draft downsampling is tip-stable: over-budget strokes keep a fixed live tip and only re-sample the older prefix. Re-picking indices across the *whole* polyline on every append made midpoints jump every frame — remote ink (and the shared paint/WS load) looked jagged even after rAF awareness batching.
@@ -319,50 +317,50 @@
 ### Net debug
 - `[review:net]` console logs include **WS traffic 1s** summaries (in/out bytes, sync vs awareness frame counts, max frame). Enable: `?netLog=1`, `?netDebug=1`, `localStorage.REVIEW_NET_DEBUG=1`, or Settings → Net debug log. Default off.
 
-## 0.14.31 — unreleased
+## 0.14.31
 
 ### Sync smoothness
 - Live freehand + cursors no longer emit two awareness WebSocket frames per tick: cursor, draft, and erase coalesce into one `setLocalState` per animation frame (`AwarenessBatch`). While drawing, the dual cursor+draft flood was jamming the Durable Object and arriving as jagged bursts on peers.
 - Draft polyline budget raised to 96 vertices; heavy gesture doc flushes ~60 Hz (16 ms) for mid-gesture point rewrites.
 
-## 0.14.30 — unreleased
+## 0.14.30
 
 ### Sync smoothness
 - Remote cursors keep the paint loop alive between awareness samples (`peerMotionShouldAnimate`): the spring used to settle in 1–2 frames, clear `peersAnimating`, and freeze the glyph until the next packet — packet-rate stutter even when the socket was fine. Drawings were unaffected (doc updates paint immediately).
 - Cursor send rate ~50 Hz (20 ms), softer smooth-damp, clamped sample dt (burst arrivals no longer explode aim velocity), and settle only after the hold window.
 
-## 0.14.29 — unreleased
+## 0.14.29
 
 ### Sync smoothness
 - Remote cursors no longer double-step the spring each frame (glyph + edge pill both advanced the same pose) — that 2× catch-up looked like stutter even when packets arrived on time.
 - Sync room full-doc encode is no longer armed from awareness (cursor/draft) frames, and waits for a short sync idle before running. Mid-flood `Y.encodeStateAsUpdate` on a photo board was freezing the Durable Object and bursting every queued cursor/stroke.
 
-## 0.14.28 — unreleased
+## 0.14.28
 
 ### Fix
 - Concurrent peer page deletes that empty the Y `pages` array now restore `main` via `ensurePages` inside `healActivePageToList`, so the engine is not stuck filtering on a deleted active id (blank canvas).
 - `.review` import strips foreign `ownerId` / synced title the same way clone does, so the importer can rename a local board in the header.
 - Draft stroke and erase-preview awareness use a trailing flush (like cursors), so peers see the last vertices / hover instead of a truncated preview.
 
-## 0.14.27 — unreleased
+## 0.14.27
 
 ### Fix
 - Worker wipe rejects websocket Upgrade with 503 while `wipeInFlight`, runs deleteAll/resetRoom under `blockConcurrencyWhile`, and keeps a separate post-wipe persist latch until the next accept — an Upgrade can no longer clear the latch mid-wipe and land on a reset doc.
 - `compactBoard` calls `closeWriteGate()` before snapshotting so pending heavy gesture fields (points/pressures/src) land in the live doc instead of flushing into the discarded one.
 
-## 0.14.26 — unreleased
+## 0.14.26
 
 ### Fix
 - Worker room DELETE / empty-room GC cancels the debounced tail timer, drains the persist gate, and latches a wipe flag so late `waitUntil` flushes and `webSocketClose` handlers cannot rewrite doc/tail blobs after `deleteAll` (compact/GC no longer resurrects a cleared room).
 
-## 0.14.25 — unreleased
+## 0.14.25
 
 ### Sync smoothness
 - Dragged photos and PDFs paint full again — the placeholder that hid them mid-drag is gone.
 - Peers see moves at pointer rate again: light fields (x/y/…) flush immediately even while heavy fields (points/…) coalesce — dragging no longer arrives as 30 Hz teleports.
 - Sync room no longer runs storage round-trips inside the message handler: relay stays synchronous, the tail persist trails ~150 ms behind via waitUntil (plus flush-on-close/alarm). Floods stop queueing behind blob writes, so strokes and moves stop arriving in bursts.
 
-## 0.14.24 — unreleased
+## 0.14.24
 
 ### Fix
 - Enter in the rich overlay keeps the line break when contentEditable wraps the next line in a `<div>` after a bare text node.
@@ -443,7 +441,7 @@
 - A deleted page heals onto a remaining page that still has shapes, not always `pages[0]`.
 - SVG text without `textColor` follows the export paper via `displayInk` / `themeFor` (light paper is dark ink, not `#eceae4`).
 
-## 0.14.23 — unreleased
+## 0.14.23
 
 ### Fix
 - Compact no longer rebuilds a board that is not actually smaller. The old 8MB force path compacted clean photo boards, then a hidden tab's replica merged duplicates back in.
@@ -461,7 +459,7 @@
 - Deleting a board from Home no longer drops it from the list when IndexedDB delete is blocked or fails.
 - Worker room persist serializes blob writes so overlapping flush/tail cannot drop the newer document.
 
-## 0.14.22 — unreleased
+## 0.14.22
 
 ### Fix
 - Importing a .review file no longer leaves an empty orphan board when the IndexedDB write fails.
@@ -475,14 +473,14 @@
 - Restoring a keybind profile cannot rebind H (UI-hide is reserved). Pan copy no longer claims H.
 - Flowchart nodes persist the 16px shape font, matching what the canvas already draws.
 
-## 0.14.21 — unreleased
+## 0.14.21
 
 ### Fix
 - Deleting the page under your feet no longer leaves an empty canvas until reload: it is a real page switch now, the engine reloads the landing page at once.
 - Peers stranded on a deleted page auto-follow to a live page with content instead of sitting on an empty one.
 - Page delete no longer rewrites the whole order array: entries drop by index ranges, so the sync update stays O(deleted) and always fits the wire.
 
-## 0.14.20 — unreleased
+## 0.14.20
 
 ### UI
 - H hides the interface again (session-only, resets on board switch / reload). No pill, no cooldown, no buttons — just a passive hint; H brings everything back. Pan is unbound from H (H is reserved for UI-hide).
@@ -497,95 +495,95 @@
 - Node sync server: 32 MB websocket payload (matches `.review` export), room-name validation, max rooms, HEAD `/health`, richer health JSON, CORS Max-Age, SIGTERM drain, unique-local IPv6 in `/lan`.
 - Clients republish awareness on sync and on a 20s heartbeat so a sleeping hub does not strand cursors.
 
-## 0.14.19 — unreleased
+## 0.14.19
 
 ### Perf
 - Dragged photos and PDFs paint as cheap placeholders until drop (no per-frame multi-MP rescale), so moving them no longer stutters.
 
-## 0.14.18 — unreleased
+## 0.14.18
 
 ### Sync worker
 - Throttled room persist (first write immediate, then ≤1/s): full-doc encode+put on every message stalled the room under drag floods.
 
-## 0.14.17 — unreleased
+## 0.14.17
 
 ### Rollback
 - Reverted to the 0.14.13 code (H-hide UI, rejoin banner, and pill cooldown removed) after breakage in production.
 
-## 0.14.13 — unreleased
+## 0.14.13
 
 ### Presence
 - Fixed ghost peers after tab hide/show: the socket now suspends on the live provider instead of destroying it (recreating reset awareness clocks on the same client ID, so the hub dropped every update as stale). Both sides reappear within ~1s.
 - Cursor smoothing: dead-reckoning lead is capped (no hook past the final point on abrupt stops), zigzag corners kill slingshot velocity, and the cursor settles straight onto the target when samples stop.
 
-## 0.14.12 — unreleased
+## 0.14.12
 
 ### Sync cost
 - Sync rooms hibernate now: idle-but-open boards bill ~zero Durable Objects duration instead of ticking every second. Hidden tabs drop their socket and reconnect on return; empty rooms are GC'd after 90s; resync every 60s.
 
-## 0.14.11 — unreleased
+## 0.14.11
 
 ### PDF
 - Ink sticks to PDFs now: pen, sticky, and text drawn on a PDF page move with it when dragged, same as photos. Ink off the page stays put.
 
-## 0.14.10 — unreleased
+## 0.14.10
 
 ### Eraser
 - Only ink erases now: photos, PDF docs, tables, graphs, frames, and all 8 flowchart nodes are immune in both eraser modes, while pen strokes drawn on top of them still wipe off.
 
-## 0.14.9 — unreleased
+## 0.14.9
 
 ### Toolbar
 - Block-scheme fly-out no longer collapses while reaching for it (it sat 10px off the row, tripping mouseleave in the gap — now overlaps by 2px).
 
-## 0.14.8 — unreleased
+## 0.14.8
 
 ### Toolbar
 - Fixed toolbar dying after shelf drag-and-drop: a cross-group drop unmounts the source button, losing its dragend and sticking the click guard — the guard is now shared, released on every drop, and backed by a window-level dragend.
 - Switching to a drawing tool now clears the selection (select/pan/lasso keep it): no more stale style island with a hidden frame, and the new tool's own panel always appears.
 
-## 0.14.7 — unreleased
+## 0.14.7
 
 ### Board files
 - Fixed .review export failing with a bare error on photo boards: file/update/base64 limits raised 8 → 32 MB (import accepts them back, so friend handoff keeps working).
 - Oversized boards now report honestly ("too large") instead of a generic error.
 
-## 0.14.6 — unreleased
+## 0.14.6
 
 ### Export
 - One bad shape no longer kills the whole export (per-shape isolation in PNG/JPEG and SVG paths, culprit logged to console).
 - Export failures now log the real error to the console instead of failing silently.
 
-## 0.14.5 — unreleased
+## 0.14.5
 
 ### Eraser
 - Size is now a slider in points (2–96, like the pen brush) instead of three fixed slots — small precise erasing for 1–3pt handwriting is possible.
 
-## 0.14.4 — unreleased
+## 0.14.4
 
 ### Tables
 - Creating a table no longer opens the first cell for typing — it drops back to the select tool with nothing selected, so you stay free to move around the board.
 
-## 0.14.3 — unreleased
+## 0.14.3
 
 ### Eraser
 - Tables and photos are never erasable (both eraser modes, including peers' previews).
 - Dots erase: single-tap pen dots are hittable in whole mode, and pen hit-testing is now brush-radius aware (was: stroke-width precision, so dots needed pixel-perfect aim).
 
-## 0.14.2 — unreleased
+## 0.14.2
 
 ### Tables
 - Fixed riders freezing mid-drag: carried objects are now re-patched on every move frame (was: only the first ~zero-delta move applied, so nothing visibly followed).
 - Rider rule is now marks-vs-sheets: pen, arrow, sticky and text ride by center alone; rect, ellipse, image, frame, doc, graph and nested tables must also fit — huge backgrounds underneath stay put.
 - Regression tests use incremental drag moves (a single jump masked the freeze).
 
-## 0.14.1 — unreleased
+## 0.14.1
 
 ### Tables
 - Insert row/column now GROWS the table by the donor size (was: split the last cell in half); delete shrinks it back. Existing cells keep their size.
 - Riders hardened: tray rule is now center-on-table + not-bigger (casually placed objects hanging off the edge ride along, huge backgrounds stay), rotated tables included. Verified exact in unit tests (mouse drag, nudge) and end-to-end in the browser.
 
-## 0.14.0 — unreleased
+## 0.14.0
 
 ### Tables
 - `[−]` pills next to `[+]`: pop the last row / column (insert/delete at the active cell stays in the context menu).
@@ -594,7 +592,7 @@
 - Cell editing no longer traps dragging: Enter commits and EXITS (Tab keeps fast entry to the next cell); double-clicking another cell of the same table commits the current one first (was silently lost).
 - Objects placed on a table ride along when it moves (mouse drag and arrow nudge, nested tables cascade); riders stay individually movable.
 
-## 0.13.0 — unreleased
+## 0.13.0
 
 ### Tables
 - New `table` tool (More shelf, parkable): drag to size (cols/rows derived from the box), click for a 3×4 default.
@@ -604,7 +602,7 @@
 - Style island covers tables (fill, stroke, text, size); color keys paint fill+stroke; SVG export draws grid + cells; info dialog shows grid dims.
 - Fixes: labels now contrast against the shape fill (was invisible light-on-white), canvas hides only the edited table cell while typing.
 
-## 0.12.6 — unreleased
+## 0.12.6
 
 ### Toolbar
 - Customizable toolbar: any strip tool can be parked in the "More" shelf and dragged back out; shelf rows reorder by drag. Order persists in prefs (`toolbarOrder.more`).
@@ -612,23 +610,23 @@
 - Block-scheme shapes stay in the nested fly-out submenu (not individually movable).
 - New pure-logic module `core/toolbarOrder.ts` + `toolbar-order-test` in the suite.
 
-## 0.12.5 — unreleased
+## 0.12.5
 
 ### Sync / presence
 - Away peers (alt-tab, home, minimized) no longer leave a frozen cursor: `Engine` skips `viewing=false` peers when painting cursors. They stay in the members roster while the tab is open.
 - Regression test: `engine-test` asserts only viewing peers paint (`Viewer`+legacy shown, `Away` hidden).
 
-## 0.12.4 — unreleased
+## 0.12.4
 
 ### Toolbar
 - More shelf: "Block-scheme" row spans full popover width like "Graph" (root cause was `align-items:center` inherited from `.island` shrink-wrapping the `.more-sub` wrapper).
 
-## 0.12.3 — unreleased
+## 0.12.3
 
 ### Toolbar
 - More-shelf rows use an explicit grid layout so labels always align left.
 
-## 0.12.2 — unreleased
+## 0.12.2
 
 ### Toolbar
 - Graph moved into the new "More" shelf (sparkles button); block-schemes live in a nested fly-out submenu. No more strip duplicates.
@@ -647,13 +645,13 @@
 ### Engine
 - Multi-select resizes via the group bbox only — invisible per-member handles no longer hijack drags.
 
-## 0.12.1 — unreleased
+## 0.12.1
 
 ### Board titles
 - Switching boards no longer leaks the previous board's synced title onto the newly opened board (title effects ran before `initBoard`; reconcile/mirror now apply only to the current board).
 - "Save as my board" copies no longer inherit the source title/owner — the copy keeps its "(copy)" name.
 
-## 0.12.0 — unreleased
+## 0.12.0
 
 ### Security
 - Sync server no longer creates `logs/net/` or accepts `GET`/`POST /net-log` unless `REVIEW_NET_LOG=1`. When enabled, `/net-log` returns relative paths only.
@@ -727,7 +725,7 @@
 - Theme `color-scheme` for native controls; nick input and error banner follow chrome tokens.
 - Deploy notes in `docs/DEPLOY.md`; optional `VITE_SYNC_URL` for the websocket.
 
-## 0.11.0 — unreleased
+## 0.11.0
 
 ### Theming
 - Object selection on the board now follows the active UI theme color.
