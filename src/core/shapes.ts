@@ -783,17 +783,36 @@ export function containedInShape(
 
 const IMAGE_RIDER_TYPES = new Set(['text', 'sticky', 'pen']);
 
+/** Build stacking ranks from board order (later index = painted on top). */
+export function stackOrderIndex(order: readonly string[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 0; i < order.length; i++) m.set(order[i]!, i);
+  return m;
+}
+
 /**
  * Shapes that should translate/rotate with a moved host: table trays (cascading),
  * annotations glued to a photo/PDF, and anything nested in a frame.
+ *
+ * Photo/PDF notes magnetize only when they sit *above* the host in stacking order
+ * (`orderIndex` or, if omitted, position in `shapes`: later = on top). Notes under
+ * a photo do not ride. Frames still use containment only.
  */
 export function hostRiderIds(
   shapes: Array<Pick<ShapeView, 'id' | 'x' | 'y' | 'w' | 'h' | 'type' | 'locked'> & { rotation?: number }>,
-  hostIds: Set<string> | string[]
+  hostIds: Set<string> | string[],
+  orderIndex?: ReadonlyMap<string, number>
 ): string[] {
   const byId = new Map(shapes.map((s) => [s.id, s]));
   const skip = new Set([...hostIds]);
   const riding = new Set<string>();
+  const z =
+    orderIndex ??
+    (() => {
+      const m = new Map<string, number>();
+      for (let i = 0; i < shapes.length; i++) m.set(shapes[i]!.id, i);
+      return m;
+    })();
 
   const addFrom = (host: (typeof shapes)[number]) => {
     if (host.type === 'table') {
@@ -803,9 +822,11 @@ export function hostRiderIds(
       return;
     }
     if (host.type !== 'image' && host.type !== 'doc' && host.type !== 'frame') return;
+    const hostZ = z.get(host.id) ?? -1;
     for (const s of shapes) {
       if (skip.has(s.id) || riding.has(s.id) || s.locked) continue;
       if ((host.type === 'image' || host.type === 'doc') && !IMAGE_RIDER_TYPES.has(s.type)) continue;
+      if ((host.type === 'image' || host.type === 'doc') && (z.get(s.id) ?? -1) <= hostZ) continue;
       if (containedInShape(s, host)) riding.add(s.id);
     }
   };

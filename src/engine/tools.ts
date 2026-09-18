@@ -2,7 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, tableGrid, mapAlongTableFractions } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -527,7 +527,11 @@ export class SelectTool extends Tool {
   private snapshotRiders(engine: Engine): void {
     const hostIds = [...this.originals.keys()];
     if (!hostIds.length) return;
-    for (const rid of hostRiderIds([...engine.views.values()], hostIds)) {
+    for (const rid of hostRiderIds(
+      [...engine.views.values()],
+      hostIds,
+      stackOrderIndex(store.order.toArray())
+    )) {
       if (this.originals.has(rid) || this.stuck.has(rid)) continue;
       const sv = engine.views.get(rid);
       if (!sv) continue;

@@ -80,7 +80,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -1660,11 +1660,93 @@ assert.deepEqual(
   [imgNote, imgPen].sort(),
   'photo riders include the sticky and pen glued to it'
 );
+assert.deepEqual(
+  hostRiderIds(
+    [
+      { id: 'n', type: 'sticky', x: 10, y: 10, w: 20, h: 20 },
+      { id: 'p', type: 'image', x: 0, y: 0, w: 100, h: 80 },
+    ],
+    ['p']
+  ),
+  [],
+  'sticky under a photo (lower z) does not magnetize'
+);
+assert.deepEqual(
+  hostRiderIds(
+    [
+      { id: 'p', type: 'image', x: 0, y: 0, w: 100, h: 80 },
+      { id: 'n', type: 'sticky', x: 10, y: 10, w: 20, h: 20 },
+    ],
+    ['p']
+  ),
+  ['n'],
+  'sticky on top of a photo magnetizes'
+);
 engine.setSelection([imgHost]);
 engine.translateSelection(15, 10);
 store.flushPendingPatches();
 assert.equal(store.readShape(store.board.get(imgNote)).x, 90055, 'sticky follows a keyboard-nudged photo');
 assert.equal(store.readShape(store.board.get(imgPen)).x, 90075, 'pen follows a keyboard-nudged photo');
+engine.setSelection([]);
+
+const underNote = store.addShape({
+  type: 'sticky',
+  x: 93040,
+  y: 93040,
+  w: 40,
+  h: 40,
+  fill: '#ffe27a',
+  stroke: '#d9b64d',
+  strokeWidth: 2,
+});
+const underHost = store.addShape({
+  type: 'image',
+  x: 93000,
+  y: 93000,
+  w: 200,
+  h: 150,
+  fill: 'transparent',
+  stroke: 'transparent',
+  strokeWidth: 0,
+  src: 'data:image/png;base64,x',
+});
+// Photo added after sticky → photo is on top; sticky must not ride.
+assert.ok(
+  !hostRiderIds(
+    [underNote, underHost].map((k) => ({ ...store.readShape(store.board.get(k)), id: k })),
+    [underHost],
+    stackOrderIndex(store.order.toArray())
+  ).includes(underNote),
+  'board-order sticky under photo is not a rider'
+);
+const underX0 = store.readShape(store.board.get(underNote)).x;
+engine.setSelection([underHost]);
+engine.translateSelection(20, 0);
+store.flushPendingPatches();
+assert.equal(
+  store.readShape(store.board.get(underNote)).x,
+  underX0,
+  'nudging a photo does not drag a sticky that sits under it'
+);
+assert.equal(store.readShape(store.board.get(underHost)).x, 93020, 'photo itself still nudges');
+engine.setSelection([]);
+store.moveOrderToFront([underNote]);
+assert.ok(
+  hostRiderIds(
+    [underNote, underHost].map((k) => ({ ...store.readShape(store.board.get(k)), id: k })),
+    [underHost],
+    stackOrderIndex(store.order.toArray())
+  ).includes(underNote),
+  'bringing the sticky above the photo restores magnetize'
+);
+engine.setSelection([underHost]);
+engine.translateSelection(10, 0);
+store.flushPendingPatches();
+assert.equal(
+  store.readShape(store.board.get(underNote)).x,
+  underX0 + 10,
+  'sticky on top of photo follows a nudge'
+);
 engine.setSelection([]);
 
 const rotImg = store.addShape({
