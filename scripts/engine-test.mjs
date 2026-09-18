@@ -2662,6 +2662,89 @@ store.flushPendingPatches();
 assert.ok(store.readShape(store.board.get(divNote)).x > 116250, 'dragging a column divider moves notes in the cell');
 engine.setSelection([]);
 
+// Cell-divider must not stretch ink / photos glued to the table.
+const stretchTbl = store.addShape({
+  type: 'table',
+  x: 130000,
+  y: 116000,
+  w: 400,
+  h: 200,
+  fill: '#ffffff',
+  stroke: '#000000',
+  strokeWidth: 2,
+  cols: 2,
+  rows: 2,
+  cells: [],
+});
+const stretchPen = store.addShape({
+  type: 'pen',
+  x: 130020,
+  y: 116040,
+  w: 60,
+  h: 0,
+  stroke: '#111111',
+  strokeWidth: 2,
+  points: [130020, 116040, 130080, 116040],
+});
+const stretchImg = store.addShape({
+  type: 'image',
+  x: 130010,
+  y: 116020,
+  w: 60,
+  h: 40,
+  fill: 'transparent',
+  stroke: 'transparent',
+  strokeWidth: 0,
+  src: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+});
+const stretchPen0 = store.readShape(store.board.get(stretchPen));
+const stretchImg0 = store.readShape(store.board.get(stretchImg));
+const stretchLen0 = Math.hypot(
+  stretchPen0.points[2] - stretchPen0.points[0],
+  stretchPen0.points[3] - stretchPen0.points[1]
+);
+engine.setTool('select');
+engine.setSelection([stretchTbl]);
+const stretchDivWorld = localToWorld(engine.views.get(stretchTbl), 200, 100);
+const stretchDivScr = engine.worldToScreen(stretchDivWorld.x, stretchDivWorld.y);
+engine.onPointerDown({
+  clientX: stretchDivScr.x,
+  clientY: stretchDivScr.y,
+  button: 0,
+  pointerId: 150,
+  shiftKey: false,
+  altKey: false,
+});
+const stretchDivScr2 = engine.worldToScreen(stretchDivWorld.x + 60, stretchDivWorld.y);
+engine.onPointerMove({
+  clientX: stretchDivScr2.x,
+  clientY: stretchDivScr2.y,
+  button: 0,
+  pointerId: 150,
+  shiftKey: false,
+  altKey: false,
+});
+engine.onPointerUp({
+  clientX: stretchDivScr2.x,
+  clientY: stretchDivScr2.y,
+  button: 0,
+  pointerId: 150,
+  shiftKey: false,
+  altKey: false,
+});
+store.flushPendingPatches();
+const stretchPen1 = store.readShape(store.board.get(stretchPen));
+const stretchImg1 = store.readShape(store.board.get(stretchImg));
+const stretchLen1 = Math.hypot(
+  stretchPen1.points[2] - stretchPen1.points[0],
+  stretchPen1.points[3] - stretchPen1.points[1]
+);
+assert.ok(Math.abs(stretchLen1 - stretchLen0) < 1e-6, 'column divider does not stretch glued pen length');
+assert.equal(stretchImg1.w, stretchImg0.w, 'column divider does not stretch glued image width');
+assert.equal(stretchImg1.h, stretchImg0.h, 'column divider does not stretch glued image height');
+assert.ok(stretchImg1.x > stretchImg0.x, 'column divider still moves the image with the cell');
+engine.setSelection([]);
+
 const beforePagePen = store.order.length;
 engine.setTool('pen');
 engine.onPointerDown({ clientX: 90, clientY: 90, button: 0, pointerId: 51, shiftKey: false, altKey: false });
