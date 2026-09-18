@@ -55,6 +55,13 @@ ensure_worker_deps() {
   fi
 }
 
+ensure_root_deps() {
+  if [[ ! -d node_modules/typescript ]] || [[ ! -x node_modules/.bin/tsc ]]; then
+    echo "deploy: installing root deps"
+    npm ci --no-audit --no-fund
+  fi
+}
+
 deploy_sync() {
   echo "==> review-sync (Durable Object)"
   ensure_worker_deps
@@ -63,6 +70,7 @@ deploy_sync() {
 
 deploy_spa() {
   echo "==> review (SPA Assets)"
+  ensure_root_deps
   # Root wrangler.toml [build] runs `npm run build` before upload.
   npx wrangler deploy
 }
