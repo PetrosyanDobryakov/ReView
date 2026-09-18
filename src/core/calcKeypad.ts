@@ -168,12 +168,13 @@ export function buildCalcFaceLayout(
   const sci = mode === 'scientific';
   const cols = sci ? 5 : 4;
 
-  // Single chrome row: mode segment + quiet overflow (Copy/Sticky/Text).
-  const headerH = Math.max(22, 26 * scale);
-  const header: CalcRect = { x: pad, y: pad * 0.55, w: Math.max(20, w - pad * 2), h: headerH };
+  // Win-calc chrome row: nav ≡ + mode title (+ DEG) — same scale family as keys.
+  const headerH = Math.max(36, 44 * scale);
+  const header: CalcRect = { x: pad, y: pad * 0.4, w: Math.max(20, w - pad * 2), h: headerH };
 
-  const dispH = Math.max(52, 64 * scale);
-  const dispY = header.y + header.h + pad * 0.35;
+  // Generous display plane (Win Standard puts a tall result above the pad).
+  const dispH = Math.max(78, Math.min(h * 0.22, 112 * scale));
+  const dispY = header.y + header.h + pad * 0.2;
   const display: CalcRect = {
     x: pad,
     y: dispY,
@@ -181,7 +182,7 @@ export function buildCalcFaceLayout(
     h: dispH,
   };
 
-  const gridTop = display.y + display.h + pad * 0.7;
+  const gridTop = display.y + display.h + pad * 0.5;
   const gridH = Math.max(40, h - pad - gridTop);
   const padArea: CalcRect = { x: display.x, y: gridTop, w: display.w, h: gridH };
 
@@ -219,9 +220,10 @@ export function buildCalcFaceLayout(
     padArea,
     keys,
     fonts: {
-      header: Math.max(9, 11 * scale),
-      expr: Math.max(9, 11 * scale),
-      display: Math.min(36, Math.max(14, 22 * scale)),
+      // Match Win title-bar weight vs keypad (not a shrunk foreign toolbar).
+      header: Math.max(14, 16 * scale),
+      expr: Math.max(11, 13 * scale),
+      display: Math.min(48, Math.max(20, 30 * scale)),
       // Further bump vs 0.15.6 so glyphs fill spacious wells (Standard + Scientific).
       key: Math.max(12, 17 * scale),
       keyFn: Math.max(11, 15 * scale),

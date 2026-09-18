@@ -4728,7 +4728,7 @@ export class Engine {
     const draw = (v: ShapeView) => {
       // hide canvas text of the shape being edited — the overlay renders it.
       // Calculator: keep display+keys on canvas; hide only overlay-owned header
-      // chrome (mode label) so open tabs do not ghost a second “Standard”.
+      // chrome (≡ + mode title) so open nav does not ghost a second mode label.
       const hideText =
         (this.editing && this.editId === v.id) ||
         (v.type === 'calculator' && this.calcEditId === v.id);
