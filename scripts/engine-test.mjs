@@ -5150,6 +5150,167 @@ document.createElement = prevCreateEl;
 globalThis.FileReader = prevFileReader;
 globalThis.Image = prevImage;
 
+// GIF import keeps original bytes (no canvas freeze-to-PNG).
+const gifReaders = [];
+const gifPrevFR = globalThis.FileReader;
+const gifPrevImg = globalThis.Image;
+const gifPrevCE = document.createElement;
+const gifDataUrl = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+let gifCanvasEncode = 0;
+globalThis.FileReader = class {
+  result = gifDataUrl;
+  onload = null;
+  readAsDataURL() {
+    gifReaders.push(this);
+  }
+};
+globalThis.Image = class {
+  onload = null;
+  naturalWidth = 80;
+  naturalHeight = 40;
+  set src(_v) {
+    this.onload && this.onload();
+  }
+};
+document.createElement = (tag) => {
+  if (tag === 'canvas') {
+    return {
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage() {} }),
+      toDataURL: () => {
+        gifCanvasEncode += 1;
+        return 'data:image/png;base64,should-not';
+      },
+    };
+  }
+  return gifPrevCE(tag);
+};
+const gifBefore = store.board.size;
+engine.insertImageFile(new File([new Uint8Array([1, 2, 3])], 'a.gif', { type: 'image/gif' }));
+gifReaders[0].onload();
+assert.equal(store.board.size, gifBefore + 1, 'GIF import inserts an image shape');
+{
+  let gifId = null;
+  for (const [id, m] of store.board.entries()) {
+    const v = store.readShape(m);
+    if (v.type === 'image' && v.src && v.src.startsWith('data:image/gif')) gifId = id;
+  }
+  assert.ok(gifId, 'GIF shape stores data:image/gif src');
+  assert.equal(gifCanvasEncode, 0, 'GIF import skips canvas re-encode');
+  const gv = store.readShape(store.board.get(gifId));
+  assert.ok(gv.w <= 600 && gv.h <= 600, 'GIF display size is capped');
+  store.removeShapes([gifId]);
+  store.flushPendingPatches();
+}
+document.createElement = gifPrevCE;
+globalThis.FileReader = gifPrevFR;
+globalThis.Image = gifPrevImg;
+
+// Video import creates type:video with data:video src.
+const vidReaders = [];
+const vidPrevFR = globalThis.FileReader;
+const vidPrevCE = document.createElement;
+const vidDataUrl = 'data:video/mp4;base64,AAAA';
+globalThis.FileReader = class {
+  result = vidDataUrl;
+  onload = null;
+  readAsDataURL() {
+    vidReaders.push(this);
+  }
+};
+document.createElement = (tag) => {
+  if (tag === 'video') {
+    const el = {
+      muted: false,
+      preload: '',
+      videoWidth: 320,
+      videoHeight: 180,
+      onerror: null,
+      onloadedmetadata: null,
+      addEventListener() {},
+      setAttribute() {},
+      pause() {},
+      play() { return Promise.resolve(); },
+      load() {},
+      removeAttribute() {},
+      readyState: 0,
+      paused: true,
+      ended: false,
+      set src(_v) {
+        queueMicrotask(() => this.onloadedmetadata && this.onloadedmetadata());
+      },
+    };
+    return el;
+  }
+  return vidPrevCE(tag);
+};
+const vidBefore = store.board.size;
+engine.insertVideoFile(new File([new Uint8Array([1, 2, 3, 4])], 'clip.mp4', { type: 'video/mp4' }));
+vidReaders[0].onload();
+// onloadedmetadata is queued microtask
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(store.board.size, vidBefore + 1, 'video import inserts a shape');
+{
+  let vidId = null;
+  for (const [id, m] of store.board.entries()) {
+    const v = store.readShape(m);
+    if (v.type === 'video') vidId = id;
+  }
+  assert.ok(vidId, 'inserted shape has type video');
+  const vv = store.readShape(store.board.get(vidId));
+  assert.ok(vv.src && vv.src.startsWith('data:video/mp4'), 'video stores data:video src');
+  assert.ok(
+    hostRiderIds(
+      [
+        { id: 'v', type: 'video', x: 0, y: 0, w: 100, h: 80 },
+        { id: 'n', type: 'sticky', x: 10, y: 10, w: 20, h: 20 },
+      ],
+      ['v']
+    ).includes('n'),
+    'sticky above a video magnetizes'
+  );
+  const svgVid = shapesToSvg(
+    [
+      {
+        id: 'vx',
+        type: 'video',
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 60,
+        fill: 'transparent',
+        stroke: 'transparent',
+        strokeWidth: 0,
+        src: vidDataUrl,
+      },
+    ],
+    { background: '#ffffff' }
+  );
+  assert.ok(svgVid.svg.includes('video'), 'SVG export placeholders video shapes');
+  store.removeShapes([vidId]);
+  store.flushPendingPatches();
+}
+document.createElement = vidPrevCE;
+globalThis.FileReader = vidPrevFR;
+
+// Oversize media rejected.
+{
+  let overErr = null;
+  const prevErr = engine.events.onError;
+  engine.events.onError = (m) => {
+    overErr = m;
+  };
+  const big = new Uint8Array(8 * 1024 * 1024 + 1);
+  engine.insertImageFile(new File([big], 'big.gif', { type: 'image/gif' }));
+  assert.ok(overErr, 'GIF over 8MB is rejected');
+  overErr = null;
+  engine.insertVideoFile(new File([big], 'big.mp4', { type: 'video/mp4' }));
+  assert.ok(overErr, 'video over 8MB is rejected');
+  engine.events.onError = prevErr;
+}
+
 const ctxFailReaders = [];
 const ctxFailPrevFR = globalThis.FileReader;
 const ctxFailPrevImg = globalThis.Image;

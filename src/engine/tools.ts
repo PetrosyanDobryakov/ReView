@@ -634,7 +634,7 @@ export class SelectTool extends Tool {
       }
     }
 
-    if (orig.type === 'image') {
+    if (orig.type === 'image' || orig.type === 'video') {
       const corner = r.handle === 'nw' || r.handle === 'ne' || r.handle === 'se' || r.handle === 'sw';
       if (corner && orig.w > 0 && orig.h > 0) {
         const aspect = orig.w / orig.h;

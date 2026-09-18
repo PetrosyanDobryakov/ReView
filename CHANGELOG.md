@@ -8,6 +8,11 @@
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).
 
+## 0.15.45
+
+### Feature
+- **GIF and video on the board**: paste / drop / file insert keep animated GIF bytes (no canvas freeze-to-PNG); new `video` shapes for mp4/webm/mov (8 MB cap, same data-URL persistence as photos). Double-click or context menu toggles play/pause; GIF and playing video keep the paint loop alive. Videos magnetize notes like photos and join align/snap media targets.
+
 ## 0.15.44
 
 ### Fix

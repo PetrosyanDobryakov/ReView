@@ -402,8 +402,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     }
     const e = engineRef.current;
     if (!e) return;
-    if (file.type.startsWith('image/')) {
+    if (file.type.startsWith('image/') || /\.(gif|png|jpe?g|webp)$/i.test(file.name)) {
       e.insertImageFile(file, at);
+      return;
+    }
+    if (file.type.startsWith('video/') || /\.(mp4|webm|mov|ogv)$/i.test(file.name)) {
+      e.insertVideoFile(file, at);
       return;
     }
     const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
@@ -879,6 +883,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           });
         }
       }
+      if (menuView.type === 'video') {
+        typeExtras.push(
+          {
+            label: t(locale, 'ctxVideoToggle'),
+            run: () => {
+              e?.setSelection([shapeId]);
+              e?.toggleVideoSelected(shapeId);
+            },
+          },
+          { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() },
+          { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
+        );
+      }
       if (menuView.type === 'pen') {
         typeExtras.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
@@ -1314,7 +1331,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,.pdf,application/pdf,.txt,text/plain,.review,.json,application/json"
+        accept="image/*,video/*,.gif,.mp4,.webm,.mov,.pdf,application/pdf,.txt,text/plain,.review,.json,application/json"
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];

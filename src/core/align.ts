@@ -4,10 +4,11 @@ import { rotatedAabb } from './transform';
 
 /**
  * Snap / single-select align guides only use media-like containers
- * (photos, PDFs, tables, frames) — not freehand ink or ordinary shapes.
+ * (photos, video, PDFs, tables, frames) — not freehand ink or ordinary shapes.
  */
 export const ALIGN_SNAP_TARGET_TYPES: ReadonlySet<ShapeType> = new Set([
   'image',
+  'video',
   'doc',
   'table',
   'frame',
