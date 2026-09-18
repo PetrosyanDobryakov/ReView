@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.30 — unreleased
+
+### Fix
+- **Solo DO reconnect storm**: echo awareness frames back to the sending socket (matches y-websocket reference server). Without the echo, solo tabs receive no inbound traffic and force-reconnect every 30s → accept/sync reloads the full board blob (~5s wall) even after the 0.15.29 awareness-skip path.
+
 ## 0.15.29 — unreleased
 
 ### Fix

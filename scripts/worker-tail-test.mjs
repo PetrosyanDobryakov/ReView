@@ -225,6 +225,10 @@ assert.equal(doc.getMap('b').get('m19'), 19, 'burst tail survives the round-trip
     'stub must not contain persisted board state',
   );
   assert.ok(coldSockets[1].sent.length > 0, 'awareness still relays to peers');
+  assert.ok(
+    coldSockets[0].sent.length > 0,
+    'awareness echoes to sender (y-websocket 30s keepalive)',
+  );
   // Real sync after stub still loads blobs and syncs the waking socket.
   const syncGetsBefore = coldStorage.ops.gets;
   coldSockets[0].sent.length = 0;

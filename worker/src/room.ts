@@ -220,7 +220,19 @@ export class BoardRoom implements DurableObject {
           encoder,
           awarenessProtocol.encodeAwarenessUpdate(awareness, changed),
         );
-        this.broadcast(encoding.toUint8Array(encoder), origin);
+        const msg = encoding.toUint8Array(encoder);
+        this.broadcast(msg, origin);
+        // y-websocket clients force-reconnect after 30s with no inbound frame.
+        // The reference server echoes awareness to every conn including the
+        // sender; without that, solo tabs never receive anything and reconnect
+        // → accept/sync reloads the full board blob every ~30s (~5s wall).
+        if (origin && typeof (origin as WebSocket).send === 'function') {
+          try {
+            (origin as WebSocket).send(msg);
+          } catch {
+            /* sender gone */
+          }
+        }
       },
     );
   }
