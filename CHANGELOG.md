@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Ops
+- **GitHub primary tip**: day-to-day work on `PetrosyanDobryakov/ReView` `dev-warexpor`; Cursor Origin demoted (not repo owner / admin). Remotes: `origin` → GitHub.
+
+### Ops
 - **Origin → GitHub sync**: `bash scripts/sync-github.sh` (or `npm run sync:github`) pushes tip to GitHub `dev-warexpor` and `main` in one shot.
 
 ## Unreleased

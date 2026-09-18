@@ -6,9 +6,11 @@ Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and opt
 
 ## Git operations
 
-- Use WSL for Git operations only when the remote URL is hosted on `origin.cursor.com`.
-- For GitHub (`github.com`) and all other remotes, use native Windows Git from this workspace; do not route the operation through WSL.
-- Check `git remote -v` before choosing the Git environment. Do not infer the host from the repository name or apply the Cursor Origin rule to GitHub.
+- **Primary remote is GitHub:** `https://github.com/PetrosyanDobryakov/ReView` on tip branch **`dev-warexpor`**. Day-to-day `git push` goes there. Cursor Origin is **not** primary (Project Origin ownership / admin is unreliable for Warexpor).
+- Use WSL for Git only if a remote is still on `origin.cursor.com`. For `github.com`, use native Git / `gh`.
+- Check `git remote -v` before choosing the Git environment.
+- Optional GitHub `main` catch-up: `bash scripts/sync-github.sh` (pushes tip to `dev-warexpor` + `main`).
+- Live deploy from tip: `bash scripts/deploy.sh all` (coordinator Wrangler OAuth; no API-token nag).
 
 ## Versioning
 
