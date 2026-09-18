@@ -207,3 +207,7 @@ Enable **P2P (WebRTC)** in Settings → System → Connection on each device. Bo
   - the home toggle «Save others’ boards» is on, or
   - the user clicks «Save locally».
 - Board list weight on `/` is the approximate IndexedDB size for that board.
+
+## Builds deploy probe (2026-09-18T16:10Z)
+
+Tip push to capture post-verification Workers Builds `deployCommand` on Worker **review** (agent bc-eddd62e2).
