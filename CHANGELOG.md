@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.31 — unreleased
+
+### Fix
+- **Context menu overflow**: cap height to the remaining viewport (safe-area aware) and allow touch/mouse scroll so Align (and long menus) no longer clip off-screen.
+
 ## 0.15.30 — unreleased
 
 ### Fix
