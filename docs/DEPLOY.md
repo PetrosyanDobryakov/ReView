@@ -60,7 +60,14 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 
 ### Workers Builds — deploy must actually deploy
 
-Preview was stuck on old builds while git tip moved because Worker **review** Builds **Deploy command** was `echo done` (build uploads nothing). Confirmed still `echo done` on tip `cb9833f` Builds. The Builds MCP/API available to agents is **read-only** — Warexpor must change this in the dashboard once.
+Preview was stuck on old builds while git tip moved because Worker **review** Builds **Deploy command** was `echo done` (build uploads nothing). Re-confirmed on tip `442924b` Builds (`deployCommand: echo done`, build UUID `53ec9a69-3064-45a7-802c-4ac12ff3f055`). Live can still match tip when someone runs `bash scripts/deploy.sh all` manually — Builds green-check alone does **not** ship. The Builds MCP/API available to agents is **read-only** — Warexpor must change this in the dashboard once.
+
+**Dashboard click path (Zpro account `3058d81da41b02e06744d5d058570aab`):**
+
+1. Cloudflare dashboard → Workers & Pages → Worker **`review`**
+2. **Settings** → **Builds** (or Build configuration)
+3. Edit **Deploy command** from `echo done` → `bash scripts/deploy.sh all`
+4. Save; next push to the watched branch should deploy both **review** and **review-sync**
 
 **Worker `review`** → Settings → Builds:
 
