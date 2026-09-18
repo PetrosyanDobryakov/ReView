@@ -217,9 +217,9 @@ export function buildCalcFaceLayout(
     controlH: Math.max(28, 32 * scale),
     glyphPx: Math.max(16, 20 * scale),
     titlePx: Math.max(14, 16 * scale),
-    // Short bar stack tops near the S cap when centers share the em mid — drop
-    // bars onto the title ink optical center (tight crops, 0.15.39).
-    iconAlignY: Math.max(1.4, 1.75 * scale),
+    // Short bar stack: a hair below em mid so mid-bar meets title ink optical center
+    // (tight crops: 1.75 overshot low; 0 keeps bars high vs Standard).
+    iconAlignY: Math.max(0.55, 0.7 * scale),
     barH: Math.max(1.25, 1.75 * scale),
     barGap: Math.max(2.5, 3 * scale),
     barWFrac: 0.42,
