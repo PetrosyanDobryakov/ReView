@@ -1,3 +1,6 @@
+# Durable Object Worker **review-sync** — https://review-sync.zpro-driftman.workers.dev/
+# Builds Root directory for this Worker must be `worker` (this folder), not repo root.
+# Repo-root wrangler.toml is the SPA (**review**); do not change its name to match this file.
 name = "review-sync"
 account_id = "3058d81da41b02e06744d5d058570aab"
 main = "src/index.ts"

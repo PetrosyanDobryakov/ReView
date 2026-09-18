@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Ops
-- **Workers Builds Deploy:** dashboard Deploy command for Worker **review** is `bash scripts/deploy.sh all` (was `echo done`). Docs note in `docs/DEPLOY.md`; tip push retriggers a real publish of **review** + **review-sync**.
+- **Workers Builds Deploy:** dashboard Deploy command for Worker **review** must be `bash scripts/deploy.sh all` (not `echo done`). Name-mismatch banner suggesting root `name = 'review-sync'` is a **wrong-Worker / wrong Root directory** signal — do not rename the SPA Worker; see `docs/DEPLOY.md`.
 
 ### Fix
 - **CI sync-test**: `scripts/sync-test.mjs` boots an ephemeral sync server when `REVIEW_SYNC_URL` / `:1234` is not healthy, so `npm test` is green on GitHub Actions without a pre-started daemon (still reuses a live server when present).

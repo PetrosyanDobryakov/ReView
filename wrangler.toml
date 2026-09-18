@@ -1,9 +1,14 @@
+# SPA Worker **review** — https://review.zpro-driftman.workers.dev/
+# Do NOT rename to "review-sync". That name belongs to worker/wrangler.toml.
+# If Workers Builds shows "Update wrangler.toml … name = 'review-sync'", you are
+# on the wrong Worker (or Root directory). Fix dashboard settings — see docs/DEPLOY.md.
 name = "review"
 account_id = "3058d81da41b02e06744d5d058570aab"
 compatibility_date = "2026-08-29"
 
 # Wrangler runs this before `wrangler deploy` and `wrangler versions upload`.
 # Without it, Cloudflare uploads a stale/empty dist/.
+# Workers Builds does NOT honor this [build] block — set Build/Deploy in the dashboard.
 [build]
 command = "npm run build"
 
