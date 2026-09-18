@@ -12,3 +12,5 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+.tmp-artifacts/
