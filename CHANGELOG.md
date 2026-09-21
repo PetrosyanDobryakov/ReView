@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.15.51
+
+### Fix
+- **Tray hosts select before they move**: a press on an unselected table / photo / video / PDF / frame now selects it and starts marquee (riders on top stay rubber-band selectable); dragging the host needs it pre-selected. Tap keeps the fresh selection; shift flow unchanged.
+
+## 0.15.50
+
+### Fix
+- **Table riders keep size on whole-table resize**: handle-resize of a table now only translates glued notes, ink and photos (`keepSize` in `mapShapeThroughHostResize`, enabled for table hosts) instead of squeezing them. Same rigid behavior the 0.15.44 fix gave divider drags.
+
+## 0.15.49
+
+### Fix
+- **Table outer-border resize**: dragging a selected table's border anywhere (not just the center dots) resizes the edge row/column — the box grows/shrinks and the edge cells absorb the delta while other cells keep absolute size (28px edge-cell floor, riders stay glued, rotation-safe). Center dots keep whole-table resize (handles hit-test first); `ew`/`ns-resize` cursors on hover.
+
+## 0.15.48
+
+### Fix
+- **Smooth peer cursors default ON**: `smoothPeerCursors` now defaults to `true` (`src/core/prefs.ts`, `src/engine/Engine.ts`), so remote cursors use spring follow for fresh profiles. Stored explicit `false` is still respected; toggle remains in Settings.
+
 ## 0.15.47
 
 ### Docs
