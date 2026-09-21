@@ -1,7 +1,7 @@
 /**
  * Live websocket sync + awareness smoke test.
  * Reuses REVIEW_SYNC_URL / ws://127.0.0.1:1234 when healthy; otherwise boots
- * an ephemeral `server.mjs` so `npm test` stays green in CI without a daemon.
+ * an ephemeral Rust `review-sync` binary so `npm test` stays green in CI without a daemon.
  */
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -12,7 +12,10 @@ import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { isLoopbackAddress, isRoomDeleteAuthorized, compactTokenFromHeaders } from '../room-delete-auth.mjs';
+import { binPath, ensureRustServer } from './rust-server.mjs';
 import WebSocket from 'ws';
+
+await ensureRustServer();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,7 +52,7 @@ async function waitHealth(port, timeoutMs = 8000) {
 }
 
 function startSyncServer({ port, netLog, token, host = '127.0.0.1' }) {
-  return spawn(process.execPath, ['server.mjs'], {
+  return spawn(binPath, [], {
     cwd: ROOT,
     env: {
       ...process.env,

@@ -14,7 +14,7 @@ const withNetLog = process.argv.includes('--log') || process.argv.includes('--ne
 const serverEnv = { ...process.env, REVIEW_SYNC_PORT: syncPort, REVIEW_HOST: host, ...(withNetLog ? { REVIEW_NET_LOG: '1' } : {}) };
 const viteEnv = { ...process.env, VITE_SYNC_PORT: syncPort, ...(withNetLog ? { VITE_NET_LOG: '1', REVIEW_NET_LOG: '1' } : {}) };
 
-const server = spawn(process.execPath, ['server.mjs'], {
+const server = spawn(process.execPath, ['scripts/rust-server.mjs'], {
   cwd: root,
   stdio: 'inherit',
   env: serverEnv,

@@ -1,0 +1,20 @@
+[package]
+name = "review-sync"
+version = "0.1.0"
+edition = "2021"
+description = "ReView Yjs sync server (Node personality and worker personality)"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+http = "1"
+if-addrs = "0.13"
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time", "net", "sync", "io-util"] }
+yrs = { version = "0.28", features = ["sync"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+tokio-tungstenite = "0.28"

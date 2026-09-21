@@ -30,7 +30,7 @@ VITE_SYNC_URL=wss://review-sync.<subdomain>.workers.dev
 # optional: VITE_SYNC_PORT not needed when VITE_SYNC_URL set
 ```
 
-Локально: без env фронт падает на `ws://host:1234` (dev `server.mjs`).
+Локально: без env фронт падает на `ws://host:1234` (Rust `review-sync`, `npm run server`). Worker-режим того же бинаря: `REVIEW_SYNC_MODE=worker`.
 
 ## Локальная отладка воркера
 
