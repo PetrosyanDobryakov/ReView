@@ -2,7 +2,7 @@ import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
-import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions } from '../core/shapes';
+import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
@@ -112,7 +112,7 @@ function rotatedHandleCursor(handle: HandleId, rotDeg: number): string {
 export class SelectTool extends Tool {
   readonly id = 'select';
   cursor = 'default';
-  private mode: 'idle' | 'move' | 'marquee' | 'rotate' | 'tablediv' = 'idle';
+  private mode: 'idle' | 'move' | 'marquee' | 'rotate' | 'tablediv' | 'tableedge' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
   private groupResizing: HandleId | null = null;
   private groupOrigBox: ShapeBox | null = null;
@@ -134,6 +134,24 @@ export class SelectTool extends Tool {
     startX: number;
     startY: number;
   } | null = null;
+  /**
+   * Dragging a table's outer border (resizes the edge row/column + the box;
+   * other cells keep absolute size). Local frame is frozen at drag start.
+   */
+  private tableEdge: {
+    shapeId: string;
+    edge: 'n' | 's' | 'w' | 'e';
+    orig: { x: number; y: number; w: number; h: number; rotation?: number };
+    colW: number[];
+    rowH: number[];
+    startX: number;
+    startY: number;
+  } | null = null;
+  /**
+   * Press landed on an unselected tray host (table / photo / PDF / frame):
+   * it got selected and the drag marquees — a tap must not clear the selection.
+   */
+  private downSelectedContainer = false;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
@@ -154,6 +172,11 @@ export class SelectTool extends Tool {
     const div = engine.hitTableDivider(p.world.x, p.world.y);
     if (div) {
       engine.setCursor(div.kind === 'col' ? 'ew-resize' : 'ns-resize');
+      return;
+    }
+    const edge = engine.hitTableEdge(p.world.x, p.world.y);
+    if (edge) {
+      engine.setCursor(edge.edge === 'e' || edge.edge === 'w' ? 'ew-resize' : 'ns-resize');
       return;
     }
     const port = engine.hitPort(p.screen.x, p.screen.y);
@@ -255,6 +278,28 @@ export class SelectTool extends Tool {
           return;
         }
       }
+      // outer table border (past the divider check): drag resizes the edge row/column
+      const edge = engine.hitTableEdge(p.world.x, p.world.y);
+      if (edge) {
+        const v = engine.views.get(edge.shapeId);
+        if (v && v.type === 'table' && !v.locked) {
+          const grid = tableGrid(v);
+          const local = worldToLocal(v, p.world.x, p.world.y);
+          this.tableEdge = {
+            shapeId: edge.shapeId,
+            edge: edge.edge,
+            orig: { x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation },
+            colW: [...grid.colW],
+            rowH: [...grid.rowH],
+            startX: local.x,
+            startY: local.y,
+          };
+          this.originals.set(edge.shapeId, { ...v, points: v.points ? [...v.points] : undefined });
+          this.snapshotRiders(engine);
+          this.mode = 'tableedge';
+          return;
+        }
+      }
     }
     const hit = engine.hitTest(p.world.x, p.world.y);
     const bounds = engine.selectionBounds();
@@ -267,6 +312,7 @@ export class SelectTool extends Tool {
     // ponytail: click anywhere inside selection bbox drags the whole group
     const hitTarget = hit ?? (insideBounds && engine.selection.size ? [...engine.selection][0] : null);
     if (hit || insideBounds) {
+      const wasSelected = hit ? engine.selection.has(hit) : false;
       if (hit) {
         if (p.shift && engine.selection.has(hit)) {
           engine.setSelection([...engine.selection].filter((id) => id !== hit));
@@ -274,6 +320,18 @@ export class SelectTool extends Tool {
           engine.setSelection([...engine.selection, hit]);
         } else if (!engine.selection.has(hit)) {
           engine.setSelection([hit]);
+        }
+      }
+      // Tray hosts (tables / photos / PDFs / frames) select on first press and
+      // marquee from there, so riders sitting on them stay selectable. Moving
+      // a host needs it pre-selected — press again and drag.
+      if (hit && !p.shift && !wasSelected) {
+        const hv = engine.views.get(hit);
+        if (hv && RIDER_HOST_TYPES.has(hv.type) && !hv.locked) {
+          this.mode = 'marquee';
+          this.marquee = { x: p.world.x, y: p.world.y, w: 0, h: 0 };
+          this.downSelectedContainer = true;
+          return;
         }
       }
       for (const id of engine.selection) {
@@ -323,6 +381,93 @@ export class SelectTool extends Tool {
       ];
       for (const [id, o] of this.stuck) {
         const mapped = mapShapeThroughLocalMap(o, host, host, mapLocal, 1);
+        if (mapped) batch.push([id, mapped]);
+      }
+      store.patchShapes(batch);
+      engine.updateConnectedArrows(new Set([t.shapeId, ...this.stuck.keys()]));
+      return;
+    }
+    if (this.mode === 'tableedge' && this.tableEdge) {
+      const t = this.tableEdge;
+      const v = engine.views.get(t.shapeId);
+      if (!v || v.type !== 'table') return;
+      const o = t.orig;
+      const local = worldToLocal(o, p.world.x, p.world.y);
+      const dx = local.x - t.startX;
+      const dy = local.y - t.startY;
+      // same 28px floor as interior divider drags
+      const MIN_E = 28;
+      let patch: Partial<ShapeView>;
+      let mapLocal: (lx: number, ly: number) => { x: number; y: number };
+      if (t.edge === 'e' || t.edge === 'w') {
+        const n = t.colW.length;
+        const last = n - 1;
+        if (t.edge === 'e') {
+          const lastW = Math.max(1e-6, t.colW[last]! * o.w);
+          const fixed = o.w - lastW;
+          const newW = Math.max(fixed + MIN_E, o.w + dx);
+          const newLastW = newW - fixed;
+          const next = t.colW.map((f, i) => (i === last ? newLastW / newW : (f * o.w) / newW));
+          patch = { w: newW, colW: next };
+          mapLocal = (lx, ly) => ({
+            x: lx <= fixed ? lx : fixed + ((lx - fixed) * newLastW) / lastW,
+            y: ly,
+          });
+        } else {
+          const firstW = Math.max(1e-6, t.colW[0]! * o.w);
+          const d = Math.min(dx, firstW - MIN_E);
+          const newW = Math.max(MIN_E, o.w - d);
+          const newFirstW = Math.max(MIN_E, firstW - d);
+          const next = t.colW.map((f, i) => (i === 0 ? newFirstW / newW : (f * o.w) / newW));
+          // shift along the local x-axis (exact for rotated tables too)
+          const a = localToWorld(o, d, 0);
+          const b = localToWorld(o, 0, 0);
+          patch = { x: o.x + (a.x - b.x), y: o.y + (a.y - b.y), w: newW, colW: next };
+          mapLocal = (lx, ly) => ({
+            x: lx <= firstW ? (lx * newFirstW) / firstW : lx - d,
+            y: ly,
+          });
+        }
+      } else {
+        const n = t.rowH.length;
+        const last = n - 1;
+        if (t.edge === 's') {
+          const lastH = Math.max(1e-6, t.rowH[last]! * o.h);
+          const fixed = o.h - lastH;
+          const newH = Math.max(fixed + MIN_E, o.h + dy);
+          const newLastH = newH - fixed;
+          const next = t.rowH.map((f, i) => (i === last ? newLastH / newH : (f * o.h) / newH));
+          patch = { h: newH, rowH: next };
+          mapLocal = (lx, ly) => ({
+            x: lx,
+            y: ly <= fixed ? ly : fixed + ((ly - fixed) * newLastH) / lastH,
+          });
+        } else {
+          const firstH = Math.max(1e-6, t.rowH[0]! * o.h);
+          const d = Math.min(dy, firstH - MIN_E);
+          const newH = Math.max(MIN_E, o.h - d);
+          const newFirstH = Math.max(MIN_E, firstH - d);
+          const next = t.rowH.map((f, i) => (i === 0 ? newFirstH / newH : (f * o.h) / newH));
+          const a = localToWorld(o, 0, d);
+          const b = localToWorld(o, 0, 0);
+          patch = { x: o.x + (a.x - b.x), y: o.y + (a.y - b.y), h: newH, rowH: next };
+          mapLocal = (lx, ly) => ({
+            x: lx,
+            y: ly <= firstH ? (ly * newFirstH) / firstH : ly - d,
+          });
+        }
+      }
+      const host = this.originals.get(t.shapeId) ?? v;
+      const nextBox = {
+        x: (patch.x as number | undefined) ?? host.x,
+        y: (patch.y as number | undefined) ?? host.y,
+        w: (patch.w as number | undefined) ?? host.w,
+        h: (patch.h as number | undefined) ?? host.h,
+        rotation: host.rotation,
+      };
+      const batch: Array<[string, Partial<ShapeView>]> = [[t.shapeId, patch]];
+      for (const [id, st] of this.stuck) {
+        const mapped = mapShapeThroughLocalMap(st, host, nextBox, mapLocal, 1);
         if (mapped) batch.push([id, mapped]);
       }
       store.patchShapes(batch);
@@ -441,7 +586,8 @@ export class SelectTool extends Tool {
           if (intersects(b, this.marquee)) ids.push(id);
         }
         engine.setSelection(p.shift ? [...new Set([...engine.selection, ...ids])] : ids);
-      } else if (!p.shift) {
+      } else if (!p.shift && !this.downSelectedContainer) {
+        // tap on empty space clears; tap that selected a tray host keeps it
         engine.setSelection([]);
       }
     }
@@ -450,6 +596,9 @@ export class SelectTool extends Tool {
     }
     if (this.mode === 'tablediv' && this.tableDiv) {
       engine.updateConnectedArrows(new Set([this.tableDiv.shapeId, ...this.stuck.keys()]));
+    }
+    if (this.mode === 'tableedge' && this.tableEdge) {
+      engine.updateConnectedArrows(new Set([this.tableEdge.shapeId, ...this.stuck.keys()]));
     }
     if (this.groupResizing && this.groupOrigBox) {
       engine.updateConnectedArrows(new Set([...this.originals.keys(), ...this.stuck.keys()]));
@@ -463,6 +612,8 @@ export class SelectTool extends Tool {
     this.groupOrigBox = null;
     this.marquee = null;
     this.tableDiv = null;
+    this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
@@ -472,9 +623,33 @@ export class SelectTool extends Tool {
   cancel(engine: Engine): void {
     const touched = new Set([...this.originals.keys(), ...this.stuck.keys()]);
     if (this.tableDiv) {
-      const t = this.tableDiv;
+      const t2 = this.tableDiv;
+      touched.add(t2.shapeId);
+      store.patchShape(t2.shapeId, t2.kind === 'col' ? { colW: [...t2.fracs] } : { rowH: [...t2.fracs] });
+    }
+    if (this.tableEdge) {
+      const te = this.tableEdge;
+      touched.add(te.shapeId);
+      store.patchShape(te.shapeId, {
+        x: te.orig.x,
+        y: te.orig.y,
+        w: te.orig.w,
+        h: te.orig.h,
+        colW: [...te.colW],
+        rowH: [...te.rowH],
+      });
+    }
+    if (this.tableEdge) {
+      const t = this.tableEdge;
       touched.add(t.shapeId);
-      store.patchShape(t.shapeId, t.kind === 'col' ? { colW: [...t.fracs] } : { rowH: [...t.fracs] });
+      store.patchShape(t.shapeId, {
+        x: t.orig.x,
+        y: t.orig.y,
+        w: t.orig.w,
+        h: t.orig.h,
+        colW: [...t.colW],
+        rowH: [...t.rowH],
+      });
     }
     if (this.originals.size) {
       const patches: Array<[string, Partial<ShapeView>]> = [];
@@ -518,6 +693,8 @@ export class SelectTool extends Tool {
     this.groupOrigBox = null;
     this.marquee = null;
     this.tableDiv = null;
+    this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
     engine.clearSnapGuides();
@@ -547,6 +724,8 @@ export class SelectTool extends Tool {
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.tableDiv = null;
+    this.tableEdge = null;
+    this.downSelectedContainer = false;
     this.moved = 0;
   }
 
@@ -765,7 +944,8 @@ export class SelectTool extends Tool {
     };
     const batch: Array<[string, Partial<ShapeView>]> = [[hostId, patch]];
     for (const [id, o] of this.stuck) {
-      const mapped = mapShapeThroughHostResize(o, orig, next, minSize);
+      // table hosts: riders only translate (notes/ink/photos keep size)
+      const mapped = mapShapeThroughHostResize(o, orig, next, minSize, orig.type === 'table');
       if (mapped) batch.push([id, bakedArrowGeom(o, mapped)]);
     }
     store.patchShapes(batch);

@@ -36,8 +36,8 @@ export interface AppPrefs {
    */
   rotateHandleTop: boolean;
   /**
-   * When true, remote cursors use spring/lerp follow (can trail the wire).
-   * Default false = snap display pose to the latest awareness sample (realtime).
+   * When true (default), remote cursors use spring/lerp follow (can trail the wire).
+   * When false, snap display pose to the latest awareness sample (realtime).
    */
   smoothPeerCursors: boolean;
   /**
@@ -77,7 +77,7 @@ const DEFAULTS: AppPrefs = {
   recognizeShapes: false,
   rotateSnap: true,
   rotateHandleTop: false,
-  smoothPeerCursors: false,
+  smoothPeerCursors: true,
   syncUrl: null,
   syncEnabled: true,
   orbitUnlocked: false,

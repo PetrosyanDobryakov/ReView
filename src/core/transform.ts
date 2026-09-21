@@ -369,12 +369,17 @@ export function mapShapeThroughLocalMap(
   return { x: o.x + dx, y: o.y + dy };
 }
 
-/** Keep a glued rider in the host's local frame while the host's unrotated box changes. */
+/**
+ * Keep a glued rider in the host's local frame while the host's unrotated box changes.
+ * `keepSize` (table hosts): riders only translate — never scale — so notes, ink
+ * and photos glued to a table keep size when the whole table is resized.
+ */
 export function mapShapeThroughHostResize(
   o: GroupResizeMember,
   origHost: ShapeBox & { rotation?: number },
   nextHost: ShapeBox & { rotation?: number },
-  minSize: number
+  minSize: number,
+  keepSize = false
 ): { x: number; y: number; w?: number; h?: number; points?: number[] } | null {
   if (o.locked) return null;
   const sx = origHost.w !== 0 ? nextHost.w / origHost.w : 1;
@@ -390,9 +395,27 @@ export function mapShapeThroughHostResize(
     const lp = worldToLocal(origHost, px, py);
     return localToWorld(nextFrame, lp.x * sx, lp.y * sy);
   };
-  if (o.type === 'text' || o.type === 'sticky') {
-    const c = mapPt(o.x + o.w / 2, o.y + o.h / 2);
-    return { x: c.x - o.w / 2, y: c.y - o.h / 2 };
+  if (keepSize || o.type === 'text' || o.type === 'sticky') {
+    const cx = o.x + o.w / 2;
+    const cy = o.y + o.h / 2;
+    const nc = mapPt(cx, cy);
+    if (keepSize && o.points && o.points.length >= 2) {
+      // rigid translate: ink keeps every stroke, only follows the table
+      const dx = nc.x - cx;
+      const dy = nc.y - cy;
+      const pts: number[] = [];
+      for (let i = 0; i < o.points.length; i += 2) {
+        pts.push(o.points[i]! + dx, o.points[i + 1]! + dy);
+      }
+      return {
+        x: o.x + dx,
+        y: o.y + dy,
+        w: Math.max(minSize, o.w),
+        h: Math.max(minSize, o.h),
+        points: pts,
+      };
+    }
+    return { x: nc.x - o.w / 2, y: nc.y - o.h / 2 };
   }
   if (o.points && o.points.length >= 2) {
     const pts: number[] = [];
