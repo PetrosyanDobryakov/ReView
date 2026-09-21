@@ -63,8 +63,10 @@ ensure_root_deps() {
 }
 
 deploy_sync() {
-  echo "==> review-sync (Durable Object)"
+  echo "==> review-sync (Rust Durable Object)"
   ensure_worker_deps
+  # wrangler [build] runs scripts/build-sync-worker.sh (worker-build).
+  # The uploaded module is worker/build/index.js + index_bg.wasm, not worker/src/index.ts.
   (cd worker && npx wrangler deploy)
 }
 

@@ -100,7 +100,7 @@ Only if you want a separate trigger (not required when **review** runs `deploy.s
 | Root directory | **`worker`** (not `/`) |
 | Install | `npm ci` |
 | Build | empty / `true` |
-| Deploy | `npx wrangler deploy` — not SPA `npm run build` |
+| Deploy | `npx wrangler deploy` — builds the Rust Durable Object (`scripts/build-sync-worker.sh`), not SPA `npm run build` |
 
 After a green **review** build with the real Deploy command:
 
@@ -112,7 +112,7 @@ node scripts/check-live-version.mjs
 Home header shows `v{version}+{sha}`. HTML includes `<meta name="review-build" content="…">`.
 
 1. Repo-root `wrangler.toml` has `[build] command = "npm run build"`, `[assets] directory = "./dist"`, and `not_found_handling = "single-page-application"`. That SPA fallback serves `/board/:id`. Do not also put a `/* /index.html` redirect in wrangler.
-2. Manual / agent ship: `bash scripts/deploy.sh all` (or `npm run cf:deploy:all`). Partial: `cf:deploy:spa` / `cf:deploy:sync`. Legacy: `npx wrangler deploy` (SPA) and `cd worker && npx wrangler deploy` (sync).
+2. Manual / agent ship: `bash scripts/deploy.sh all` (or `npm run cf:deploy:all`). Partial: `cf:deploy:spa` / `cf:deploy:sync`. Legacy: `npx wrangler deploy` (SPA) and `cd worker && npx wrangler deploy` (sync). Sync deploy compiles `worker/` with `worker-build` and uploads the Rust wasm Durable Object. `worker/src/index.ts` is not the wrangler entry.
 3. Vite still copies `public/_headers` to `dist/` so `/assets/*` gets `Cache-Control: immutable` and HTML routes stay `no-cache`.
 4. Open the Worker URL — persistence and file share work as on Vercel. Canonical tip SPA uses built-in `wss://review-sync.zpro-driftman.workers.dev` (not LAN `:1234`). On `*.workers.dev` / `*.pages.dev`, **P2P is forced off** in `src/net/config.ts` so clients do not also hit `signaling.yjs.dev`. Pure static hosts without that DO URL (e.g. many `vercel.app` deploys) still default P2P on.
 

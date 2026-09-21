@@ -1,6 +1,8 @@
 # ReView Sync Worker (Cloudflare Worker + Durable Object)
 
-`BOARD_ROOM` — одна DO-комната на `review-<boardId>`. Реле Yjs (sync + awareness) как в `server.mjs`. Пустые комнаты GC через **90 с**.
+The published worker is the Rust crate in this folder (`review-sync-do`, workers-rs). `npx wrangler deploy` runs `scripts/build-sync-worker.sh` and uploads `build/index.js` plus `build/index_bg.wasm`. `src/*.ts` is kept for the Node unit tests and is not the deploy entry.
+
+`BOARD_ROOM` — одна DO-комната на `review-<boardId>`. Реле Yjs (sync + awareness). Пустые комнаты GC через alarm **90 с**. Hibernation: `acceptWebSocket` и `setWebSocketAutoResponse` (`review-ka` / `review-ka-ack`).
 
 Документ пишется чанками (`doc:n` + `doc:0…`): SQLite `put()` не больше 2 МиБ на ключ, фото-доски иначе молча терялись. Хвост апдейтов (`tail`) пишется на каждое сообщение (безопасно при hibernation); полный encode — не чаще раза в секунду.
 
