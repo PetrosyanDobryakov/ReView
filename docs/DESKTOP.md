@@ -27,20 +27,33 @@ That runs `tsc --noEmit && vite build`, then the release shell.
 
 ## Android
 
-Initialize once, after the Android SDK, NDK, and Java are installed and `ANDROID_HOME` / `NDK_HOME` are set:
+Tauri CLI 2.11.5 looks for Android SDK platform 36 and NDK `29.0.13846066`. Java 21 was already on this machine (`JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`). These commands installed the command-line SDK and NDK, then generated `src-tauri/gen/android`:
 
 ```bash
-npm run tauri android init
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+mkdir -p "$ANDROID_HOME/cmdline-tools"
+curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+sdkmanager --sdk_root="$ANDROID_HOME" --install "platform-tools" "platforms;android-36" "ndk;29.0.13846066"
+export NDK_HOME="$ANDROID_HOME/ndk/29.0.13846066"
+npm run tauri -- android init --ci
 ```
 
-That writes `src-tauri/gen/android`. Then:
+`sdkmanager` here was `$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager` (package 19.0). Init also installed the Rust targets `aarch64-linux-android`, `armv7-linux-androideabi`, `i686-linux-android`, and `x86_64-linux-android`. `src-tauri/gen/android/local.properties` is machine-specific and gitignored.
+
+After that, dev and a release APK would be:
 
 ```bash
 npm run android
 npm run android:build
 ```
 
-Those are `tauri android dev` and `tauri android build`. Dev still uses the Vite server. The CLI rewrites the dev host so an emulator can reach the machine. A release Android build embeds `dist/`.
+Those are `tauri android dev` and `tauri android build`. Dev still uses the Vite server. The CLI rewrites the dev host so an emulator can reach the machine. A release Android build embeds `dist/`. Neither command was run here.
 
 ## What this machine actually built
 
@@ -49,7 +62,10 @@ Linux x86_64, Tauri CLI 2.11.5:
 - `cargo build --manifest-path src-tauri/Cargo.toml` finished the debug shell.
 - `npx tauri build` finished the release shell and wrote `ReView_0.1.0_amd64.deb`, `ReView-0.1.0-1.x86_64.rpm`, and `ReView_0.1.0_amd64.AppImage` under `src-tauri/target/release/bundle/`. Those bundles are gitignored. The window was not opened.
 
+Initialized here, not packaged:
+
+- Android project `src-tauri/gen/android` from `tauri android init --ci` after the SDK and NDK install above. No emulator was present, and no APK was built.
+
 Not built here:
 
 - Windows and macOS. The project targets them; this host is Linux.
-- Android. `tauri android init --ci` exited 1 before creating `src-tauri/gen/android`: `Android SDK not found`. `ANDROID_HOME` and `NDK_HOME` were unset. Java 21 is installed. No emulator was present, and no APK was produced.
