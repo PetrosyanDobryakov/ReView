@@ -10,6 +10,11 @@
     "server:log": "node scripts/rust-server.mjs --log",
     "dev": "node scripts/dev.mjs",
     "dev:log": "node scripts/dev.mjs --log",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "desktop:build": "tauri build",
+    "android": "tauri android dev",
+    "android:build": "tauri android build",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cf:deploy": "npx wrangler deploy",
@@ -38,6 +43,7 @@
     "yjs": "^13.6.25"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
