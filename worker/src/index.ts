@@ -1,3 +1,8 @@
+/**
+ * Not the published worker. `wrangler.toml` builds `review-sync-do` (Rust wasm)
+ * and uploads that shim. These modules stay so Node tests can import them:
+ * scripts/worker-tail-test.mjs, scripts/sync-persist-test.mjs, scripts/room-name-test.mjs.
+ */
 import { BoardRoom, EMPTY_GC_MS } from './room';
 export { BoardRoom, EMPTY_GC_MS };
 

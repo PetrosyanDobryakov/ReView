@@ -3,12 +3,22 @@
 # Repo-root wrangler.toml is the SPA (**review**); do not change its name to match this file.
 name = "review-sync"
 account_id = "3058d81da41b02e06744d5d058570aab"
-main = "src/index.ts"
+# Rust wasm Durable Object. worker-build 0.8 writes build/index.js + index_bg.wasm.
+# src/index.ts is not uploaded. build/worker/shim.mjs only re-exports index.js.
+main = "build/index.js"
 compatibility_date = "2024-10-01"
 # Auto-reply Close frames so half-open sockets do not linger as dashboard
 # "client disconnected" / responseStreamDisconnected noise (also safe with
 # explicit ws.close in BoardRoom.webSocketClose).
 compatibility_flags = ["nodejs_compat", "web_socket_auto_reply_to_close"]
+
+[build]
+command = "bash ../scripts/build-sync-worker.sh"
+
+[[rules]]
+globs = ["**/*.wasm"]
+type = "CompiledWasm"
+fallthrough = false
 
 # Destructive DELETE /room/<name> requires a Worker secret:
 #   wrangler secret put REVIEW_COMPACT_TOKEN
