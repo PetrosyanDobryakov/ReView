@@ -51,6 +51,10 @@ export default defineConfig({
     port: 5173,
     // LAN / mesh friends hit us by IP; keep host check off for local collab.
     allowedHosts: true,
+    // The Tauri shell writes into src-tauri/target. Do not let Vite restart on that.
+    watch: {
+      ignored: ['**/src-tauri/**'],
+    },
   },
   preview: {
     host: true,
