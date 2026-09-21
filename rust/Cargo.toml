@@ -1,0 +1,3 @@
+[workspace]
+members = ["review-sync"]
+resolver = "2"

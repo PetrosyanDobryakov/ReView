@@ -160,7 +160,7 @@ If the page is served over HTTPS, the client uses `wss://`. Put a reverse proxy 
 1. Install Node 20+.
 2. Clone the repo, `npm ci && npm run build`.
 3. Serve `dist/` on port 80/443 (nginx example below).
-4. Run `node server.mjs` under systemd or pm2 for sync.
+4. Run `npm run server` (the Rust `review-sync` binary) under systemd or pm2 for sync. `REVIEW_SYNC_MODE=worker` is the disk-backed personality; the default mode matches the old in-memory Node server.
 5. Open `https://your-host/` — home at `/`, boards at `/board/:id`.
 
 ### nginx

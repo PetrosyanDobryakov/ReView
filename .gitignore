@@ -14,3 +14,7 @@ Thumbs.db
 !.env.example
 
 .tmp-artifacts/
+
+# Rust sync server
+rust/target/
+data/sync-rooms/

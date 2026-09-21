@@ -6,8 +6,8 @@
   "description": "ReView — local-first whiteboard with optional Yjs sync (LAN websocket or P2P WebRTC) and file share; static/Vercel-ready",
   "type": "module",
   "scripts": {
-    "server": "node server.mjs",
-    "server:log": "node server.mjs --log",
+    "server": "node scripts/rust-server.mjs",
+    "server:log": "node scripts/rust-server.mjs --log",
     "dev": "node scripts/dev.mjs",
     "dev:log": "node scripts/dev.mjs --log",
     "build": "tsc --noEmit && vite build",

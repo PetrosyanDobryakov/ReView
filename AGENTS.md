@@ -38,7 +38,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 | --- | --- |
 | Install dependencies | `npm ci` |
 | Dev server (Vite + sync) | `npm run dev` |
-| Sync server only | `npm run server` |
+| Sync server only | `npm run server` (Rust `review-sync` binary; `scripts/rust-server.mjs`) |
 | Run tests | `npm test` |
 | Production build | `npm run build` |
 | Preview production build | `npm run preview` |
