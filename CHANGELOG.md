@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.55
+
+### Ops
+- **worker-build OpenSSL:** compiling `worker-build` needs OpenSSL headers (`ureq` / `native-tls`). The Builds image preinstalls `libssl-dev` but not necessarily `pkg-config`. `scripts/build-sync-worker.sh` uses `pkg-config` when it can see openssl, otherwise points `openssl-sys` at the system headers and libs, and `apt-get install pkg-config libssl-dev` only when those files are missing.
+
 ## 0.15.54
 
 ### Ops

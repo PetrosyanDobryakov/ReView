@@ -80,7 +80,7 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 | **Deploy command** | **`bash scripts/deploy.sh all`** |
 | **Non-production branch deploy command** | **`bash scripts/deploy.sh all`** (or set production branch to `dev-warexpor`) |
 
-Leave the install command as the npm install (default `npm clean-install` is enough). Do not add rustup there: `scripts/build-sync-worker.sh` installs it during the deploy step.
+Leave the install command as the npm install (default `npm clean-install` is enough). Do not add rustup or OpenSSL there: `scripts/build-sync-worker.sh` installs rustup during deploy, and the image already has `libssl-dev` for `worker-build`.
 
 #### Do NOT accept the “name = 'review-sync'” banner on root `wrangler.toml`
 
