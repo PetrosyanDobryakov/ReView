@@ -29,7 +29,14 @@ export const CONFETTI_STREAK_WINDOW_MS = 1600;
 export const CONFETTI_MAX_POWER = 8;
 
 /** Hard cap on live particles — recycle oldest so FPS survives a frenzy. */
-export const CONFETTI_MAX_LIVE = 900;
+export const CONFETTI_MAX_LIVE = 1400;
+/**
+ * Spam power (5th rapid triple-press in one streak) that unlocks the finale:
+ * a continuous confetti eruption, or the Starship on the Orbit theme.
+ */
+export const CONFETTI_FRENZY_POWER = 5;
+/** How long one frenzy spam keeps the eruption going (each spam extends it). */
+export const CONFETTI_ERUPT_MS = 3200;
 
 /** Clamp / default power from awareness or local streak. */
 export function clampConfettiPower(raw: unknown): number {

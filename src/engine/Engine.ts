@@ -57,6 +57,8 @@ import type { PeerCursor } from '../net';
 import { sendCursor, publishTool, publishFocus, publishSelection, publishConfetti } from '../net';
 import { samePeerSelection } from '../net/peerSelection';
 import {
+  CONFETTI_ERUPT_MS,
+  CONFETTI_FRENZY_POWER,
   CONFETTI_MAX_LIVE,
   CONFETTI_STALE_MS,
   confettiBurstParams,
@@ -103,8 +105,10 @@ import {
 } from '../core/peerMotion';
 import { notePeerRenderDt } from '../net/hitchDebug';
 import { onPrefsChange, readPrefs } from '../core/prefs';
-import { ORBIT_PAPER } from '../core/orbit';
-import { drawOrbitPaperField, drawOrbitPaperScreen, orbitGridColor, orbitPaperActive } from './orbitField';
+import { clearOrbitView, ORBIT_COLORS, setOrbitView } from '../core/orbit';
+import { ORBIT_DRAW } from '../core/orbitDraw';
+import { drawOrbitDotGrid, drawOrbitEraseMark, drawOrbitLock, ORBIT_LOCK_MS, orbitPaperActive } from './orbitField';
+import { OrbitFx } from './orbitFx';
 import type { PeerDraft, PeerErasePreview } from '../net/types';
 
 /** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
@@ -148,6 +152,11 @@ function samePeerErasePreview(a: PeerErasePreview | null | undefined, b: PeerEra
   }
   return true;
 }
+
+/** Paper-like saturated confetti bits that read on light/dark board chrome (no glow orbs). */
+const CONFETTI_COLORS = ['#e03131', '#f08c00', '#fab005', '#37b24d', '#1c7ed6', '#ae3ec9', '#f06595', '#212529', '#f8f9fa'];
+/** Confetti bits per second while a frenzy eruption is on. */
+const ERUPT_RATE = 420;
 
 function isOrbitChromeLive(): boolean {
   return typeof document !== 'undefined' && document.documentElement.dataset.chromeTheme === 'orbit';
@@ -507,8 +516,16 @@ export class Engine {
   private lastT = 0;
   private lastCam = { x: 0, y: 0, z: 1 };
   private dirty = true;
-  /** Last Warp-cover signal sent to OrbitAtmosphere (board solid paper → pause). */
-  private orbitWarpCovered: boolean | null = null;
+  /** Last cover signal sent to OrbitSpace (board solid paper → pause shader). */
+  private orbitCovered: boolean | null = null;
+  /** Orbit target lock: selection key + when it last changed. */
+  private orbitSelKey = '';
+  private orbitSelT0 = 0;
+  private orbitLockLive = false;
+  /** Orbit particles (pen stars, burn-up on delete, create sparks). */
+  readonly orbitFx = new OrbitFx();
+  /** Set while a partial erase rewrites strokes so onStore does not burn whole strokes. */
+  private orbitFxMuted = false;
   private paperFrom = '';
   private paperTo = '';
   private paperFill = '';
@@ -578,6 +595,11 @@ export class Engine {
   private confettiPower = 1;
   /** performance.now() of last local confetti trigger (for streak window). */
   private lastConfettiBurstAt = 0;
+  /** Confetti frenzy: erupt from (eruptX, eruptY) until this performance.now(). */
+  private eruptUntil = 0;
+  private eruptX = 0;
+  private eruptY = 0;
+  private eruptCarry = 0;
 
   private observedBoard: Y.Map<Y.Map<unknown>> | null = null;
   private observedMeta: Y.Map<unknown> | null = null;
@@ -649,10 +671,10 @@ export class Engine {
     });
     // Untouched calc bodies follow --chrome-panel; repaint when Customize theme flips.
     window.addEventListener('review-chrome-theme', this.onChromeTheme);
-    // Solid (non-Orbit) paper fills the canvas opaquely — pause Warp while covered.
+    // Solid (non-Orbit) paper fills the canvas opaquely — pause the space shader while covered.
     {
       const paper = store.viewPaperBg();
-      this.syncOrbitWarpCovered(!(orbitPaperActive(paper, paper) && isOrbitChromeLive()));
+      this.syncOrbitCovered(!(orbitPaperActive(paper, paper) && isOrbitChromeLive()));
     }
     this.rafId = requestAnimationFrame(this.loop);
   }
@@ -662,17 +684,17 @@ export class Engine {
   };
 
   /**
-   * Tell OrbitAtmosphere when the board canvas fully covers Warp (solid paper).
-   * Home has no Engine → attribute cleared on destroy so Warp keeps animating.
-   * Orbit paper (`orbitLive`) leaves Warp visible — never pause then.
+   * Tell OrbitSpace when the board canvas fully covers it (solid paper).
+   * Home has no Engine → attribute cleared on destroy so the field keeps drifting.
+   * Orbit paper (`orbitLive`) leaves the shader visible — never pause then.
    */
-  private syncOrbitWarpCovered(covered: boolean): void {
-    if (this.orbitWarpCovered === covered) return;
-    this.orbitWarpCovered = covered;
+  private syncOrbitCovered(covered: boolean): void {
+    if (this.orbitCovered === covered) return;
+    this.orbitCovered = covered;
     if (typeof document === 'undefined') return;
-    if (covered) document.documentElement.dataset.orbitWarpCovered = '1';
-    else delete document.documentElement.dataset.orbitWarpCovered;
-    window.dispatchEvent(new CustomEvent('review-orbit-warp-cover', { detail: { covered } }));
+    if (covered) document.documentElement.dataset.orbitCovered = '1';
+    else delete document.documentElement.dataset.orbitCovered;
+    window.dispatchEvent(new CustomEvent('review-orbit-cover', { detail: { covered } }));
   }
 
   /** Watch the live store maps (rebind after initBoard replaces the Y.Doc). */
@@ -852,7 +874,7 @@ export class Engine {
         opts.background !== undefined
           ? opts.background
           : orbitPaperActive(paper, paper)
-            ? ORBIT_PAPER
+            ? ORBIT_COLORS.void
             : null;
       if (bgFill) {
         ctx.fillStyle = bgFill;
@@ -953,7 +975,8 @@ export class Engine {
   destroy(): void {
     this.alive = false;
     this.cancelTransientUi();
-    this.syncOrbitWarpCovered(false);
+    this.syncOrbitCovered(false);
+    clearOrbitView();
     cancelAnimationFrame(this.rafId);
     this.resizer.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -1061,9 +1084,6 @@ export class Engine {
       if (ae instanceof HTMLElement && ae.closest('.toolbelt, .tool-btn, .style-island')) {
         ae.blur();
       }
-      document.querySelectorAll('.orbit-tactile-pulse').forEach((el) => {
-        el.classList.remove('orbit-tactile-pulse');
-      });
     } catch {
       /* ignore */
     }
@@ -1306,18 +1326,7 @@ export class Engine {
     broadcast = true,
     remotePower?: number
   ): void {
-    // Paper-like saturated bits that read on light/dark board chrome (no glow orbs).
-    const colors = [
-      '#e03131',
-      '#f08c00',
-      '#fab005',
-      '#37b24d',
-      '#1c7ed6',
-      '#ae3ec9',
-      '#f06595',
-      '#212529',
-      '#f8f9fa',
-    ];
+    const colors = CONFETTI_COLORS;
     const invZ = 1 / Math.max(this.camera.zoom, 0.05);
     const reduce = this.reduceMotion;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -1334,6 +1343,18 @@ export class Engine {
     // Cannon always points world −y (screen up), not away-from-selection-center.
     const aim = -Math.PI / 2;
     const useSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
+    // Orbit: a launch instead of paper confetti (same streak power and seed).
+    // A frenzy streak also launches the Starship from a pad at the bottom of the view.
+    if (this.orbitFxOn()) {
+      this.orbitFx.launch(wx, wy, this.camera.zoom, power, useSeed);
+      if (power >= CONFETTI_FRENZY_POWER && !this.orbitFx.starshipLive) {
+        const z = this.camera.zoom;
+        this.orbitFx.starship(this.camera.x, this.camera.y + this.h / 2 / z, this.w, this.h, z, useSeed);
+      }
+      this.dirty = true;
+      if (broadcast) publishConfetti({ x: wx, y: wy, seed: useSeed, power });
+      return;
+    }
     const rand = mulberry32(useSeed);
     const perCannon = Math.max(1, Math.ceil(count / cannons));
     for (let c = 0; c < cannons; c++) {
@@ -1368,12 +1389,54 @@ export class Engine {
     if (this.confetti.length > CONFETTI_MAX_LIVE) {
       this.confetti.splice(0, this.confetti.length - CONFETTI_MAX_LIVE);
     }
+    // Frenzy: the cannon keeps erupting; every further spam extends it.
+    if (power >= CONFETTI_FRENZY_POWER && !reduce) {
+      this.eruptUntil = Math.max(this.eruptUntil, now) + CONFETTI_ERUPT_MS;
+      this.eruptUntil = Math.min(this.eruptUntil, now + CONFETTI_ERUPT_MS * 3);
+      this.eruptX = wx;
+      this.eruptY = wy;
+    }
     this.dirty = true;
     // Awareness-only FX — remotes replay the same origin/seed/power; never write particles to the doc.
     if (broadcast) publishConfetti({ x: wx, y: wy, seed: useSeed, power });
   }
 
+  /** Continuous eruption while a confetti frenzy is on: a geyser of paper from the knob. */
+  private eruptConfetti(dt: number): void {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now >= this.eruptUntil) return;
+    const invZ = 1 / Math.max(this.camera.zoom, 0.05);
+    // Ramp down over the last second so it sputters out instead of cutting off.
+    const tail = Math.min(1, (this.eruptUntil - now) / 1000);
+    this.eruptCarry += dt * ERUPT_RATE * tail;
+    let n = Math.floor(this.eruptCarry);
+    this.eruptCarry -= n;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 90);
+    while (n-- > 0) {
+      // Wobbling nozzle + wide, pulsing fan straight up.
+      const ang = -Math.PI / 2 + Math.sin(now / 240) * 0.25 + (Math.random() - 0.5) * (1.4 + 0.8 * pulse);
+      const speed = (900 + Math.random() * 900) * invZ;
+      this.confetti.push({
+        x: this.eruptX + (Math.random() - 0.5) * 14 * invZ,
+        y: this.eruptY + (Math.random() - 0.5) * 6 * invZ,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        life: 1,
+        color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+        w: (6 + Math.random() * 10) * invZ,
+        h: (3 + Math.random() * 4.5) * invZ,
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 30,
+      });
+    }
+    if (this.confetti.length > CONFETTI_MAX_LIVE) {
+      this.confetti.splice(0, this.confetti.length - CONFETTI_MAX_LIVE);
+    }
+    this.dirty = true;
+  }
+
   private updateConfetti(dt: number): void {
+    this.eruptConfetti(dt);
     if (!this.confetti.length) return;
     const invZ = 1 / Math.max(this.camera.zoom, 0.05);
     // Low-ish g + strong vertical drag → snappy pop, then terminal float (not a slam).
@@ -3398,8 +3461,12 @@ export class Engine {
 
   private onStore = (ev: Y.YMapEvent<Y.Map<unknown>>): void => {
     const deleted: string[] = [];
+    const fx = !this.orbitFxMuted && this.orbitFxOn();
+    let sparks = 0;
     ev.changes.keys.forEach((change, key) => {
       if (change.action === 'delete') {
+        const gone = fx ? this.views.get(key) : undefined;
+        if (gone) this.orbitFx.burnUp(gone, this.camera.zoom);
         this.detachShape(key);
         this.views.delete(key);
         this.grid.remove(key);
@@ -3412,6 +3479,10 @@ export class Engine {
           this.views.set(key, v);
           this.grid.upsert(key, this.spatialBox(v));
           this.attachShape(key, m);
+          // Local creations only (not sync / load); pen ink already sprinkles.
+          if (fx && change.action === 'add' && ev.transaction.local && v.type !== 'pen' && sparks++ < 8) {
+            this.orbitFx.spark(v, this.camera.zoom);
+          }
         }
       }
     });
@@ -4205,6 +4276,29 @@ export class Engine {
 
   private applyPartialErase(): void {
     if (!this.partialErase.size && !this.erasing.size) return;
+    if (this.orbitFxOn()) {
+      for (const id of this.erasing) {
+        const v = this.views.get(id);
+        if (v) this.orbitFx.burnUp(v, this.camera.zoom);
+      }
+      for (const [id, indices] of this.partialErase) {
+        const v = this.views.get(id);
+        const pts = v?.points;
+        if (!v || !pts) continue;
+        const cut: number[] = [];
+        for (const i of indices) if (i * 2 + 1 < pts.length) cut.push(pts[i * 2], pts[i * 2 + 1]);
+        if (cut.length >= 2) this.orbitFx.burnUp({ ...v, points: cut }, this.camera.zoom);
+      }
+    }
+    this.orbitFxMuted = true;
+    try {
+      this.applyPartialEraseNow();
+    } finally {
+      this.orbitFxMuted = false;
+    }
+  }
+
+  private applyPartialEraseNow(): void {
     store.transact(() => {
       for (const id of this.erasing) {
         if (store.board.has(id)) store.removeShapes([id]);
@@ -4793,15 +4887,14 @@ export class Engine {
       this.frameDt = dt;
       this.camera.update(dt);
       this.updateConfetti(dt);
+      this.orbitFx.update(dt);
       const moved =
         Math.abs(this.camera.x - this.lastCam.x) > 0.0005 ||
         Math.abs(this.camera.y - this.lastCam.y) > 0.0005 ||
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
-      // Pin field is disabled (`if (false && orbitLive)` in render). Do not
-      // dirty on a timer for the static screen vignette — that forced full-board
-      // paints ~12.5fps while idle on Orbit paper. Re-enable a pulse only
-      // together with drawOrbitPaperField.
-      if (moved || this.dirty || this.peersAnimating || boardNeedsMediaPaint(this.views.values())) {
+      // Orbit ambience (stars, nebula, vignette) lives in the OrbitSpace shader,
+      // so an idle Orbit board never repaints on a timer.
+      if (moved || this.dirty || this.peersAnimating || this.orbitFx.alive || boardNeedsMediaPaint(this.views.values())) {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
@@ -4849,13 +4942,16 @@ export class Engine {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const orbitPaper = orbitPaperActive(this.paperTo, paperBg);
     const orbitLive = orbitPaper && isOrbitChromeLive();
-    // Transparent only when Warp atmosphere is under the canvas; otherwise solid void / paper.
+    // Transparent only when the space shader is under the canvas; otherwise solid void / paper.
     if (orbitLive) {
       ctx.clearRect(0, 0, w, h);
+      setOrbitView(cx, cy, z);
     } else if (orbitPaper) {
-      ctx.fillStyle = ORBIT_PAPER;
+      clearOrbitView();
+      ctx.fillStyle = ORBIT_COLORS.void;
       ctx.fillRect(0, 0, w, h);
     } else {
+      clearOrbitView();
       ctx.fillStyle = paperBg;
       ctx.fillRect(0, 0, w, h);
     }
@@ -4863,20 +4959,10 @@ export class Engine {
     ctx.translate(w / 2, h / 2);
     ctx.scale(z, z);
     ctx.translate(-cx, -cy);
-     if (false && orbitLive && this.frameDt < 0.05) {
-      drawOrbitPaperField(ctx, {
-        cx,
-        cy,
-        zoom: z,
-        viewW: w,
-        viewH: h,
-        now: performance.now(),
-        reduceMotion: reduce,
-      });
-    }
-    // Grid stays optional via meta — Orbit only retints the lines.
+    // Grid stays optional via meta — Orbit paper swaps lines for a dot lattice.
     if (store.metaGrid()) {
-      this.drawGrid(ctx, orbitLive ? orbitGridColor() : theme.grid);
+      if (orbitPaper) this.drawOrbitGrid(ctx);
+      else this.drawGrid(ctx, theme.grid);
     }
     setPaintZoom(z);
     // Slight pad so AA / stroke caps at the viewport edge are not clipped by cull.
@@ -4938,14 +5024,18 @@ export class Engine {
         if (cur.length >= 2) segments.push(cur);
         for (const seg of segments) {
           if (seg.length >= 2) {
-            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1, undefined, {
-              bloom: orbitLive,
-            });
+            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1);
           }
         }
         return;
       }
-      if (wholeErase) {
+      if (wholeErase && orbitLive) {
+        ctx.save();
+        ctx.globalAlpha = 0.28;
+        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
+        ctx.restore();
+        withShapeRotation(ctx, v, () => drawOrbitEraseMark(ctx, v, zInv));
+      } else if (wholeErase) {
         ctx.save();
         ctx.globalAlpha = 0.32;
         drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
@@ -5008,15 +5098,13 @@ export class Engine {
       ctx.restore();
     }
     this.drawConfetti(ctx);
+    if (orbitLive) this.orbitFx.draw(ctx);
     ctx.restore();
-    if (orbitLive) {
-      drawOrbitPaperScreen(ctx, w, h, performance.now(), reduce);
-    }
     this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
-    // Opaque paper fill covers Warp; Orbit live clears and must keep shader running.
-    this.syncOrbitWarpCovered(!orbitLive);
-    this.dirty = u < 1 || this.peersAnimating;
+    // Opaque paper fill covers the shader; Orbit live clears and must keep it running.
+    this.syncOrbitCovered(!orbitLive);
+    this.dirty = u < 1 || this.peersAnimating || this.orbitLockLive;
   }
 
   private drawPeers(ctx: CanvasRenderingContext2D): void {
@@ -5053,9 +5141,7 @@ export class Engine {
           d.points,
           d.strokeWidth,
           displayInk(d.stroke, boardBg),
-          d.alpha ?? 0.85,
-          undefined,
-          { bloom: orbitPaperActive(boardBg, boardBg) }
+          d.alpha ?? 0.85
         );
         // Do not set peersAnimating from a static draft — setPeers already
         // dirties when tip/geometry changes (peerDraftPaintDirty). Keeping the
@@ -5289,17 +5375,93 @@ export class Engine {
     ctx.stroke();
   }
 
+  /** Orbit look for tool overlays (lasso, marquee): live Orbit paper, motion or not. */
+  orbitStyleOn(): boolean {
+    const paper = this.paperTo || store.viewPaperBg();
+    return orbitPaperActive(paper, paper) && isOrbitChromeLive();
+  }
+
+  /** Orbit board effects run only on live Orbit paper and never under reduced motion. */
+  orbitFxOn(): boolean {
+    const paper = this.paperTo || store.viewPaperBg();
+    return !this.reduceMotion && orbitPaperActive(paper, paper) && isOrbitChromeLive();
+  }
+
+  /** Pen tip moved: shed a little stardust (Orbit only). */
+  orbitSprinkle(x0: number, y0: number, x1: number, y1: number, color: string): void {
+    if (!this.orbitFxOn()) return;
+    this.orbitFx.sprinkle(x0, y0, x1, y1, this.camera.zoom, color);
+    this.dirty = true;
+  }
+
+  private drawOrbitGrid(ctx: CanvasRenderingContext2D): void {
+    const { x: cx, y: cy, zoom: z } = this.camera;
+    drawOrbitDotGrid(ctx, { cx, cy, zoom: z, viewW: this.w, viewH: this.h });
+  }
+
+  /**
+   * Orbit: when the selection changes, corner brackets lock onto it with a size
+   * readout (ORBIT_LOCK_MS), then fade. Keeps the RAF dirty only while it runs.
+   */
+  private drawSelectionLock(ctx: CanvasRenderingContext2D, orbit: boolean): void {
+    this.orbitLockLive = false;
+    const key = this.selection.size ? [...this.selection].join('|') : '';
+    const now = performance.now();
+    if (key !== this.orbitSelKey) {
+      this.orbitSelKey = key;
+      this.orbitSelT0 = now;
+    }
+    if (!orbit || !key || this.reduceMotion || !isOrbitChromeLive()) return;
+    const t = (now - this.orbitSelT0) / ORBIT_LOCK_MS;
+    if (t >= 1) return;
+    const s = 1 / this.camera.zoom;
+    const pad = 6 * s;
+    const label = (w: number, h: number, n: number) =>
+      `${n > 1 ? `${n} OBJ \u00b7 ` : ''}${Math.round(w)} \u00d7 ${Math.round(h)}`;
+    const box = this.selection.size > 1 ? this.selectionBounds() : null;
+    const one = this.selection.size === 1 ? this.views.get(key) : undefined;
+    if (box) {
+      drawOrbitLock(
+        ctx,
+        { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 },
+        t,
+        s,
+        label(box.w, box.h, this.selection.size)
+      );
+    } else if (one) {
+      withShapeRotation(ctx, one, () => {
+        drawOrbitLock(
+          ctx,
+          { x: one.x - pad, y: one.y - pad, w: one.w + pad * 2, h: one.h + pad * 2 },
+          t,
+          s,
+          label(one.w, one.h, 1)
+        );
+      });
+    } else {
+      return;
+    }
+    this.orbitLockLive = true;
+  }
+
   private drawSelection(ctx: CanvasRenderingContext2D): void {
+    const orbit = orbitPaperActive(this.paperTo || store.viewPaperBg(), this.paperFill || store.viewPaperBg());
     // Text/graph editors hide selection chrome; calculator keeps it so the
     // on-object keypad can still be resized/rotated like other board shapes.
-    if (this.editing && !this.calcGeometryInteractive()) return;
-    if (this.active !== 'select' && this.override !== 'select') return;
+    if (this.editing && !this.calcGeometryInteractive()) {
+      this.orbitLockLive = false;
+      return;
+    }
+    if (this.active !== 'select' && this.override !== 'select') {
+      this.orbitLockLive = false;
+      return;
+    }
+    this.drawSelectionLock(ctx, orbit);
     const s = 1 / this.camera.zoom;
     const pad = 2 * s;
     const line = 1.5 * s;
     const hr = handleDrawRadiusScale() * s;
-    const orbit = orbitPaperActive(this.paperTo || store.viewPaperBg(), this.paperFill || store.viewPaperBg());
-    const handleFill = orbit ? '#04052E' : '#ffffff';
+    const handleFill = orbit ? ORBIT_DRAW.handleFill : '#ffffff';
     ctx.save();
     ctx.lineJoin = 'round';
     // ponytail: multi-select → thick group + thin solid per-object, same color, zoom-stable
@@ -5323,7 +5485,7 @@ export class Engine {
         const y = box.y - pad;
         const w = box.w + pad * 2;
         const h = box.h + pad * 2;
-        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.75)' : 'rgba(28, 28, 26, 0.7)';
+        ctx.strokeStyle = orbit ? ORBIT_DRAW.selectionUnder : 'rgba(28, 28, 26, 0.7)';
         ctx.lineWidth = 3.2 * s;
         ctx.strokeRect(x, y, w, h);
         ctx.strokeStyle = COLORS.selection;
@@ -5359,7 +5521,7 @@ export class Engine {
         const y = v.y - pad;
         const w = v.w + pad * 2;
         const h = v.h + pad * 2;
-        ctx.strokeStyle = orbit ? 'rgba(4, 5, 46, 0.65)' : 'rgba(28, 28, 26, 0.5)';
+        ctx.strokeStyle = orbit ? ORBIT_DRAW.selectionUnder : 'rgba(28, 28, 26, 0.5)';
         ctx.lineWidth = line + 1.25 * s;
         ctx.strokeRect(x, y, w, h);
         ctx.strokeStyle = COLORS.selection;

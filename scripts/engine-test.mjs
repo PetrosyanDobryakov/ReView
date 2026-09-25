@@ -80,7 +80,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, ORBIT_COLORS, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -5039,12 +5039,12 @@ try {
   const emptyBox = { x: 245500, y: 245500, w: 20, h: 20 };
   engine.exportCanvas(emptyBox, { scale: 1, format: 'png', background: null });
   assert.ok(
-    !exportFills.includes(ORBIT_PAPER),
+    !exportFills.includes(ORBIT_COLORS.void),
     'transparent PNG on Orbit paper does not fill the Orbit void'
   );
   exportFills.length = 0;
   engine.exportCanvas(emptyBox, { scale: 1, format: 'png', background: undefined });
-  assert.ok(exportFills.includes(ORBIT_PAPER), 'omitting background still fills Orbit paper');
+  assert.ok(exportFills.includes(ORBIT_COLORS.void), 'omitting background still fills the Orbit void');
 } finally {
   document.createElement = prevCreate;
   store.setMeta({ bg: prevPaper });

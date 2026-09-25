@@ -1,0 +1,667 @@
+import { useEffect, useRef } from 'react';
+import { orbitView } from '../core/orbit';
+
+/**
+ * Orbit deep-space backdrop under the transparent board canvas. Four parallax
+ * star layers and the sky behind them (galactic band, dust lanes, faint haze)
+ * follow the board camera (see `orbitView`) in screen px with their own depth;
+ * the sky also drifts on the wall clock. Offsets persist across remounts, so
+ * nothing jumps. A dim work light follows the pointer and the edges fall off
+ * into the void. On Home the field drifts.
+ *
+ * Stars are modeled, not decorated: pin-sharp point spread in device pixels,
+ * heavy-tailed magnitudes (mostly faint, few bright), black-body-ish tints and
+ * only a trace of scintillation.
+ *
+ * Cost control: the soft sky renders at quarter size, stars at a capped full
+ * size; repaint only when the camera or pointer moved, otherwise ~10fps for
+ * drift; paused when hidden or covered by solid paper. Reduced motion freezes time and paints only on change.
+ */
+
+/**
+ * Parallax depth per layer: 0 = infinitely far, 1 = glued to the board.
+ * `bright` scales the heavy-tailed magnitude curve: far layers are dust, only the
+ * nearest layer carries the few bright stars.
+ */
+const LAYERS = [
+  { depth: 0.04, cell: 24, density: 0.5, bright: 0.45, seed: 5.7 },
+  { depth: 0.12, cell: 54, density: 0.42, bright: 0.75, seed: 11.3 },
+  { depth: 0.3, cell: 118, density: 0.34, bright: 1.0, seed: 47.9 },
+  { depth: 0.55, cell: 230, density: 0.26, bright: 1.25, seed: 83.1 },
+] as const;
+/** Sky (band, dust, haze) breathes a little with zoom. */
+const NEBULA_ZOOM = 0.03;
+/** Sky parallax: slides this share of the on-screen pan, like the far star layers. */
+const NEBULA_DEPTH = 0.1;
+/** Cloud drift in sky units per second, driven by the wall clock. */
+const NEBULA_DRIFT = { x: 1.2, y: 0.4 };
+/** Galactic band repeat distance on the nebula layer. */
+const BAND_PERIOD = 6000;
+/** Hash lattice period in cells; offsets wrap at `cell * PERIOD` to keep float precision. */
+const PERIOD = 512;
+const MAX_PIXELS = 2_400_000;
+/** Idle repaint interval: only slow scintillation + nebula drift move while idle. */
+const IDLE_FRAME_MS = 100;
+const HOME_DRIFT = { x: 6, y: 2.5 };
+/** Warp jump length (Home <-> board, see navTransition) and when it peaks (0..1). */
+const WARP_MS = 1000;
+const WARP_PEAK = 0.3;
+/**
+ * Range (sky units) a jump re-rolls the cloud / band offset across: several
+ * band periods and far past the cloud features, so every arrival looks new.
+ */
+const SKY_RESEED_SPAN = 60_000;
+
+/** Warp strength over the jump: fast surge in, long ease back out. */
+function warpEnvelope(u: number): number {
+  if (u <= 0 || u >= 1) return 0;
+  if (u < WARP_PEAK) {
+    const k = u / WARP_PEAK;
+    return k * k;
+  }
+  const k = (u - WARP_PEAK) / (1 - WARP_PEAK);
+  return 1 - k * k * (3 - 2 * k);
+}
+/**
+ * The sky (base, band, dust, haze) is soft, so it renders into a buffer at
+ * 1/NEBULA_DIV of CSS size and is upscaled. The fbm there is the expensive
+ * part; at full resolution a zoom on a modest GPU drops to a few frames and
+ * the clouds visibly jump.
+ */
+const NEBULA_DIV = 4;
+
+/**
+ * Star layer offsets (x, y per layer) plus the sky offset (last pair) live at
+ * module scope and in sessionStorage, so a remount or reload of the backdrop
+ * (Home <-> board, hot reload) resumes the same sky instead of snapping back
+ * to the origin.
+ */
+const SKY_KEY = 'review-orbit-sky';
+const SKY_I = LAYERS.length * 2;
+const skyOff = (() => {
+  const off = new Float64Array(SKY_I + 2);
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(SKY_KEY) || 'null');
+    if (Array.isArray(raw) && raw.length === off.length && raw.every((v) => Number.isFinite(v))) off.set(raw);
+  } catch {
+    /* private mode / bad data: start at the origin */
+  }
+  return off;
+})();
+
+function saveSky(): void {
+  try {
+    sessionStorage.setItem(SKY_KEY, JSON.stringify(Array.from(skyOff)));
+  } catch {
+    /* ignore */
+  }
+}
+
+const VERT = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const NOISE = `
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+`;
+
+/** Sky pass (low-res): base gradient, galactic band with dust lanes, haze. Alpha = band. */
+const NEB_FRAG = `
+precision highp float;
+uniform vec2 uNebRes;
+uniform vec2 uCss;
+uniform vec2 uOffN;
+uniform vec2 uBand;
+uniform float uZoomN;
+uniform float uWarp;
+${NOISE}
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(mod(i, ${PERIOD}.0));
+  float b = hash21(mod(i + vec2(1.0, 0.0), ${PERIOD}.0));
+  float c = hash21(mod(i + vec2(0.0, 1.0), ${PERIOD}.0));
+  float d = hash21(mod(i + vec2(1.0, 1.0), ${PERIOD}.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+  float s = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    s += a * noise(p);
+    p = p * 2.03 + vec2(17.1, 9.4);
+    a *= 0.5;
+  }
+  return s;
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uNebRes;
+  // CSS px from screen center, y down like the board.
+  vec2 css = (uv - 0.5) * uCss;
+  css.y = -css.y;
+  // Warp jump: the sky surges toward the viewer and settles back.
+  css *= 1.0 - 0.14 * uWarp;
+
+  vec3 col = mix(vec3(0.02, 0.02, 0.023), vec3(0.01, 0.01, 0.012), uv.y);
+
+  // Galactic band on the deepest layer: a soft diagonal glow with dust lanes,
+  // plus a very faint blue / ember haze elsewhere.
+  vec2 q = uOffN + css / uZoomN;
+  // The band follows the sky parallax and repeats every ${BAND_PERIOD} units.
+  float across = dot(uBand + css / uZoomN, vec2(0.52, 0.85)) + 180.0;
+  across = mod(across + ${BAND_PERIOD / 2}.0, ${BAND_PERIOD}.0) - ${BAND_PERIOD / 2}.0;
+  float band = exp(-pow(across / 380.0, 2.0));
+  float dust = fbm(q * 0.0022 + 7.0);
+  float lanes = smoothstep(0.45, 0.72, fbm(q * 0.004 + 31.0));
+  vec3 milky = vec3(0.16, 0.16, 0.19) * band * (0.35 + 0.65 * dust) * (1.0 - 0.75 * lanes);
+  col += milky * 0.7;
+  float n = fbm(q * 0.0009);
+  float m = fbm(q * 0.0005 + 23.0);
+  vec3 tint = mix(vec3(0.09, 0.11, 0.16), vec3(0.16, 0.11, 0.08), smoothstep(0.35, 0.75, m));
+  col += tint * smoothstep(0.45, 0.95, n) * 0.45;
+  gl_FragColor = vec4(col, band);
+}
+`;
+
+/** Full-res pass: upscaled sky + parallax stars, pointer light, vignette, dither. */
+const FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uScale;
+uniform float uTime;
+uniform sampler2D uNeb;
+uniform vec2 uOff[${LAYERS.length}];
+uniform float uZoom[${LAYERS.length}];
+uniform float uCell[${LAYERS.length}];
+uniform float uDensity[${LAYERS.length}];
+uniform float uBright[${LAYERS.length}];
+uniform float uSeed[${LAYERS.length}];
+uniform float uDepth[${LAYERS.length}];
+uniform vec3 uPointer;
+uniform float uWarp;
+${NOISE}
+// Black-body-ish tint from a 0..1 temperature draw: mostly white / warm white,
+// some blue-white, few orange, rare red. Low saturation like a real sky.
+vec3 starTint(float t) {
+  vec3 c = mix(vec3(0.68, 0.78, 1.0), vec3(0.88, 0.92, 1.0), smoothstep(0.0, 0.14, t));
+  c = mix(c, vec3(1.0, 0.98, 0.95), smoothstep(0.14, 0.45, t));
+  c = mix(c, vec3(1.0, 0.9, 0.76), smoothstep(0.62, 0.86, t));
+  c = mix(c, vec3(1.0, 0.74, 0.56), smoothstep(0.93, 1.0, t));
+  return c;
+}
+
+vec3 stars(vec2 css, vec2 off, float zoom, float cell, float density, float bright, float seed) {
+  vec2 p = off + css / zoom;
+  vec2 id = mod(floor(p / cell), ${PERIOD}.0);
+  float h = hash21(id + seed);
+  if (h > density) return vec3(0.0);
+  vec2 f = p - floor(p / cell) * cell;
+  vec2 pos = (0.1 + 0.8 * vec2(hash21(id + seed * 1.7), hash21(id + seed * 2.3))) * cell;
+  float dPx = length(f - pos) * zoom;
+  // Heavy-tailed magnitudes: most stars sit near the visibility floor.
+  float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
+  float amp = 0.05 + 1.5 * b;
+  // Point spread in device pixels, so stars stay pin-sharp at any DPR.
+  float sigma = (0.5 + 0.45 * min(b, 1.0)) / uScale;
+  float psf = exp(-(dPx * dPx) / (2.0 * sigma * sigma));
+  // Only the brightest get a faint scattered-light skirt.
+  psf += smoothstep(0.35, 1.0, b) * 0.035 * exp(-dPx / (2.2 / uScale));
+  // Barely-there scintillation on bright stars only.
+  float sc = 1.0 + 0.06 * smoothstep(0.3, 1.0, b) * sin(uTime * (1.1 + 2.0 * hash21(id + seed * 4.7)) + h * 61.0);
+  // Fade a layer out once its cells shrink on screen (deep zoom-out).
+  float fade = smoothstep(10.0, 36.0, cell * zoom);
+  return starTint(hash21(id + seed * 5.9)) * psf * amp * sc * fade;
+}
+
+// Warp streaks: each star smeared from its position toward the screen center
+// by \`k\` of its distance (bright head, dimmer tail), capped at about one cell
+// so the 3x3 neighborhood always contains the whole streak. Only runs while a
+// warp jump is on.
+vec3 starsWarp(vec2 css, vec2 off, float zoom, float cell, float density, float bright, float seed, float k) {
+  vec2 p = off + css / zoom;
+  vec2 base = floor(p / cell);
+  vec3 acc = vec3(0.0);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 c = base + vec2(float(i), float(j));
+      vec2 id = mod(c, ${PERIOD}.0);
+      float h = hash21(id + seed);
+      if (h > density) continue;
+      vec2 pos = (0.1 + 0.8 * vec2(hash21(id + seed * 1.7), hash21(id + seed * 2.3))) * cell;
+      vec2 s = (c * cell + pos - off) * zoom;
+      float len = min(k * length(s), cell * zoom * 0.95);
+      vec2 tail = s - normalize(s + 1e-4) * len;
+      vec2 pa = css - tail;
+      vec2 ba = s - tail;
+      float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+      float d = length(pa - ba * t);
+      float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
+      float amp = 0.12 + 1.5 * b;
+      float sigma = (0.55 + 0.45 * min(b, 1.0)) / uScale;
+      float psf = exp(-(d * d) / (2.0 * sigma * sigma)) * mix(0.25, 1.0, t);
+      acc += starTint(hash21(id + seed * 5.9)) * psf * amp;
+    }
+  }
+  return acc * smoothstep(10.0, 36.0, cell * zoom);
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  vec2 uv = frag / uRes;
+  // CSS px from screen center, y down like the board.
+  vec2 css = (frag - 0.5 * uRes) / uScale;
+  css.y = -css.y;
+
+  vec4 sky = texture2D(uNeb, uv);
+  // The clouds dip toward black at the warp peak so the swap to a new patch
+  // of sky is never seen as a pop.
+  vec3 col = sky.rgb * (1.0 - 0.85 * uWarp);
+
+  // Faint work light around the pointer (does not touch the stars).
+  if (uPointer.z > 0.0) {
+    vec2 pd = (frag - uPointer.xy) / uScale;
+    col += vec3(0.34, 0.34, 0.36) * exp(-dot(pd, pd) / (2.0 * 260.0 * 260.0)) * uPointer.z * 0.035;
+  }
+
+  // Denser, brighter star population inside the band.
+  float crowd = 1.0 + sky.a * 0.9;
+  if (uWarp > 0.001) {
+    for (int i = 0; i < ${LAYERS.length}; i++) {
+      float k = uWarp * (0.12 + 0.6 * uDepth[i]);
+      col += starsWarp(css, uOff[i], uZoom[i], uCell[i], uDensity[i] * crowd, uBright[i], uSeed[i], k) * (1.0 + 0.6 * uWarp);
+    }
+  } else {
+    for (int i = 0; i < ${LAYERS.length}; i++) {
+      col += stars(css, uOff[i], uZoom[i], uCell[i], uDensity[i] * crowd, uBright[i], uSeed[i]);
+    }
+  }
+
+  // Edges fall into the void.
+  vec2 v = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  col *= mix(1.0, 0.55, smoothstep(0.4, 1.1, length(v)));
+
+  // Dither so the dark gradients do not band.
+  col += (hash21(frag) - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLShader | null {
+  const sh = gl.createShader(type);
+  if (!sh) return null;
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    console.warn('[orbit] shader compile failed:', gl.getShaderInfoLog(sh));
+    gl.deleteShader(sh);
+    return null;
+  }
+  return sh;
+}
+
+function wrap(v: number, period: number): number {
+  return ((v % period) + period) % period;
+}
+
+function readCovered(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.orbitCovered === '1';
+}
+
+export function OrbitSpace() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const gl = canvas.getContext('webgl', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: false,
+      powerPreference: 'low-power',
+    });
+    if (!gl) return;
+
+    const link = (frag: string): { prog: WebGLProgram; vs: WebGLShader; fs: WebGLShader } | null => {
+      const vs = compile(gl, gl.VERTEX_SHADER, VERT);
+      const fs = compile(gl, gl.FRAGMENT_SHADER, frag);
+      const prog = gl.createProgram();
+      if (!vs || !fs || !prog) return null;
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.bindAttribLocation(prog, 0, 'aPos');
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[orbit] shader link failed:', gl.getProgramInfoLog(prog));
+        return null;
+      }
+      return { prog, vs, fs };
+    };
+    const nebP = link(NEB_FRAG);
+    const starP = link(FRAG);
+    if (!nebP || !starP) return;
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Low-res sky target, linearly upscaled by the star pass.
+    const nebTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, nebTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const nebFb = gl.createFramebuffer();
+    let nebW = 1;
+    let nebH = 1;
+
+    const n = {
+      res: gl.getUniformLocation(nebP.prog, 'uNebRes'),
+      css: gl.getUniformLocation(nebP.prog, 'uCss'),
+      offN: gl.getUniformLocation(nebP.prog, 'uOffN'),
+      band: gl.getUniformLocation(nebP.prog, 'uBand'),
+      zoomN: gl.getUniformLocation(nebP.prog, 'uZoomN'),
+      warp: gl.getUniformLocation(nebP.prog, 'uWarp'),
+    };
+    const u = {
+      res: gl.getUniformLocation(starP.prog, 'uRes'),
+      scale: gl.getUniformLocation(starP.prog, 'uScale'),
+      time: gl.getUniformLocation(starP.prog, 'uTime'),
+      neb: gl.getUniformLocation(starP.prog, 'uNeb'),
+      off: gl.getUniformLocation(starP.prog, 'uOff'),
+      zoom: gl.getUniformLocation(starP.prog, 'uZoom'),
+      cell: gl.getUniformLocation(starP.prog, 'uCell'),
+      density: gl.getUniformLocation(starP.prog, 'uDensity'),
+      bright: gl.getUniformLocation(starP.prog, 'uBright'),
+      seed: gl.getUniformLocation(starP.prog, 'uSeed'),
+      depth: gl.getUniformLocation(starP.prog, 'uDepth'),
+      pointer: gl.getUniformLocation(starP.prog, 'uPointer'),
+      warp: gl.getUniformLocation(starP.prog, 'uWarp'),
+    };
+
+    const reduceMq = matchMedia('(prefers-reduced-motion: reduce)');
+    let reduce = reduceMq.matches;
+    let covered = readCovered();
+    let visible = !document.hidden;
+
+    let scale = 1;
+    let cssSize: [number, number] = [1, 1];
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const cssW = window.innerWidth;
+      const cssH = window.innerHeight;
+      scale = Math.min(dpr, Math.sqrt(MAX_PIXELS / Math.max(1, cssW * cssH)));
+      canvas.width = Math.max(1, Math.round(cssW * scale));
+      canvas.height = Math.max(1, Math.round(cssH * scale));
+      nebW = Math.max(1, Math.ceil(cssW / NEBULA_DIV));
+      nebH = Math.max(1, Math.ceil(cssH / NEBULA_DIV));
+      gl.bindTexture(gl.TEXTURE_2D, nebTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, nebW, nebH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, nebFb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nebTex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      cssSize = [cssW, cssH];
+      dirty = true;
+    };
+
+    // Layer offsets are integrated from camera deltas measured in SCREEN px, so
+    // a layer always slides `depth` x the on-screen pan whatever the zoom.
+    // (Integrating world deltas made the sky jump at low zoom: a zoom toward
+    // the cursor at 10% moves the camera thousands of world units.) Switching
+    // Home <-> board never jumps either.
+    const layerOff = skyOff;
+    const advance = (sx: number, sy: number, z: number) => {
+      LAYERS.forEach((layer, i) => {
+        const k = layer.depth / Math.pow(z, layer.depth);
+        layerOff[i * 2] += sx * k;
+        layerOff[i * 2 + 1] += sy * k;
+      });
+      const kn = NEBULA_DEPTH / Math.pow(z, NEBULA_ZOOM);
+      layerOff[SKY_I] += sx * kn;
+      layerOff[SKY_I + 1] += sy * kn;
+    };
+    // On top of the parallax, the cloud drift follows the wall clock, so it is
+    // identical across remounts and reloads (a per-mount timer made the clouds
+    // jump by hundreds of px whenever the backdrop remounted). Frozen under
+    // reduced motion.
+    const frozenAt = Date.now();
+    let lastSave = 0;
+    let lastLive = false;
+    let lastX = 0;
+    let lastY = 0;
+    let zoom = 1;
+
+    let pointerX = -1;
+    let pointerY = -1;
+    let pointerA = 0;
+    let pointerTarget = 0;
+
+    // Warp jump (Home <-> board): -1 when idle, else its start time.
+    let warpT0 = -1;
+    let warp = 0;
+    let reseedPending = false;
+    /** Jump every star layer and the clouds / band to a random spot in the field. */
+    const reseedSky = () => {
+      LAYERS.forEach((layer, i) => {
+        const period = layer.cell * PERIOD;
+        layerOff[i * 2] = Math.random() * period;
+        layerOff[i * 2 + 1] = Math.random() * period;
+      });
+      // Random clouds, but nudge y so the galactic band (across = 0.52x + 0.85y
+      // + 180, repeating every BAND_PERIOD) crosses the view within +-450 of
+      // center: a fresh sky that is never an empty one.
+      const x = Math.random() * SKY_RESEED_SPAN;
+      const y0 = Math.random() * SKY_RESEED_SPAN;
+      const want = -180 + (Math.random() - 0.5) * 900;
+      const d = 0.52 * x + 0.85 * y0;
+      const delta = (((want - d) % BAND_PERIOD) + BAND_PERIOD) % BAND_PERIOD;
+      layerOff[SKY_I] = x;
+      layerOff[SKY_I + 1] = y0 + delta / 0.85;
+      saveSky();
+      dirty = true;
+    };
+
+    let dirty = true;
+    let raf = 0;
+    let lastPaint = 0;
+    let lastT = performance.now();
+    let clock = 0;
+
+    const offs = new Float32Array(LAYERS.length * 2);
+    const zooms = new Float32Array(LAYERS.length);
+    gl.useProgram(starP.prog);
+    gl.uniform1fv(u.cell, LAYERS.map((l) => l.cell));
+    gl.uniform1fv(u.density, LAYERS.map((l) => l.density));
+    gl.uniform1fv(u.bright, LAYERS.map((l) => l.bright));
+    gl.uniform1fv(u.seed, LAYERS.map((l) => l.seed));
+    gl.uniform1fv(u.depth, LAYERS.map((l) => l.depth));
+    gl.uniform1i(u.neb, 0);
+
+    const frame = (t: number) => {
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.1, (t - lastT) / 1000);
+      lastT = t;
+      if (!visible || covered) return;
+
+      if (orbitView.live) {
+        if (!lastLive) {
+          lastX = orbitView.x;
+          lastY = orbitView.y;
+        }
+        const dx = orbitView.x - lastX;
+        const dy = orbitView.y - lastY;
+        if (dx !== 0 || dy !== 0 || orbitView.zoom !== zoom) dirty = true;
+        advance(dx * orbitView.zoom, dy * orbitView.zoom, Math.max(0.01, orbitView.zoom));
+        lastX = orbitView.x;
+        lastY = orbitView.y;
+        zoom = orbitView.zoom;
+      } else if (!reduce) {
+        advance(HOME_DRIFT.x * dt, HOME_DRIFT.y * dt, Math.max(0.01, zoom));
+        if (zoom !== 1) {
+          zoom += (1 - zoom) * Math.min(1, dt * 3);
+          if (Math.abs(zoom - 1) < 0.002) zoom = 1;
+          dirty = true;
+        }
+      }
+      lastLive = orbitView.live;
+
+      if (pointerA !== pointerTarget) {
+        const k = Math.min(1, dt * 6);
+        pointerA += (pointerTarget - pointerA) * k;
+        if (Math.abs(pointerA - pointerTarget) < 0.01) pointerA = pointerTarget;
+        dirty = true;
+      }
+
+      if (warpT0 >= 0) {
+        warp = warpEnvelope((t - warpT0) / WARP_MS);
+        // Arrive somewhere new: swap the sky at the peak, hidden in the streaks.
+        if (reseedPending && t - warpT0 >= WARP_MS * WARP_PEAK) {
+          reseedPending = false;
+          reseedSky();
+        }
+        if (t - warpT0 >= WARP_MS) {
+          warpT0 = -1;
+          warp = 0;
+        }
+        dirty = true;
+      }
+
+      if (!reduce) clock += dt;
+      const idleDue = !reduce && t - lastPaint >= IDLE_FRAME_MS;
+      if (!dirty && !idleDue) return;
+      dirty = false;
+      lastPaint = t;
+
+      const z = Math.max(0.01, zoom);
+      LAYERS.forEach((layer, i) => {
+        const period = layer.cell * PERIOD;
+        offs[i * 2] = wrap(layerOff[i * 2], period);
+        offs[i * 2 + 1] = wrap(layerOff[i * 2 + 1], period);
+        zooms[i] = Math.pow(z, layer.depth);
+      });
+      // Sky pass into the low-res target.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, nebFb);
+      gl.viewport(0, 0, nebW, nebH);
+      gl.useProgram(nebP.prog);
+      gl.uniform2f(n.res, nebW, nebH);
+      gl.uniform2f(n.css, cssSize[0], cssSize[1]);
+      // Nebula noise runs at 0.0011/unit; wrap well past its lattice period.
+      const nPeriod = PERIOD / 0.0006;
+      const wall = (reduce ? frozenAt : Date.now()) / 1000;
+      const skyX = layerOff[SKY_I];
+      const skyY = layerOff[SKY_I + 1];
+      gl.uniform2f(n.offN, wrap(skyX + wall * NEBULA_DRIFT.x, nPeriod), wrap(skyY + wall * NEBULA_DRIFT.y, nPeriod));
+      // The band slides with the parallax only (no drift); it repeats every
+      // BAND_PERIOD so panning far always finds another one.
+      gl.uniform2f(n.band, skyX, skyY);
+      gl.uniform1f(n.zoomN, Math.pow(z, NEBULA_ZOOM));
+      gl.uniform1f(n.warp, warp);
+      if (t - lastSave > 1000) {
+        lastSave = t;
+        saveSky();
+      }
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // Stars at full resolution over the upscaled sky.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(starP.prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, nebTex);
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+      gl.uniform1f(u.scale, scale);
+      gl.uniform1f(u.time, clock);
+      gl.uniform2fv(u.off, offs);
+      gl.uniform1fv(u.zoom, zooms);
+      gl.uniform3f(u.pointer, pointerX * scale, canvas.height - pointerY * scale, pointerA);
+      gl.uniform1f(u.warp, warp);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      pointerX = e.clientX;
+      pointerY = e.clientY;
+      pointerTarget = 1;
+      dirty = true;
+    };
+    const onPointerOut = (e: PointerEvent) => {
+      if (e.relatedTarget) return;
+      pointerTarget = 0;
+    };
+    const onReduce = () => {
+      reduce = reduceMq.matches;
+      dirty = true;
+    };
+    const onVis = () => {
+      visible = !document.hidden;
+      dirty = true;
+    };
+    const onWarp = () => {
+      dirty = true;
+      if (reduce) {
+        reseedSky();
+        return;
+      }
+      warpT0 = performance.now();
+      reseedPending = true;
+    };
+    const onCover = () => {
+      covered = readCovered();
+      dirty = true;
+    };
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      cancelAnimationFrame(raf);
+    };
+
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    document.addEventListener('pointerout', onPointerOut);
+    reduceMq.addEventListener('change', onReduce);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('review-orbit-cover', onCover);
+    window.addEventListener('review-orbit-warp', onWarp);
+    canvas.addEventListener('webglcontextlost', onLost);
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      saveSky();
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerout', onPointerOut);
+      reduceMq.removeEventListener('change', onReduce);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('review-orbit-cover', onCover);
+      window.removeEventListener('review-orbit-warp', onWarp);
+      canvas.removeEventListener('webglcontextlost', onLost);
+      gl.deleteBuffer(buf);
+      gl.deleteFramebuffer(nebFb);
+      gl.deleteTexture(nebTex);
+      for (const p of [nebP, starP]) {
+        gl.deleteProgram(p.prog);
+        gl.deleteShader(p.vs);
+        gl.deleteShader(p.fs);
+      }
+    };
+  }, []);
+
+  return (
+    <div className="orbit-space" aria-hidden="true">
+      <canvas ref={canvasRef} className="orbit-space-canvas" />
+    </div>
+  );
+}

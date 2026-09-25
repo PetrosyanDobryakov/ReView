@@ -13,7 +13,7 @@ import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
 import { bootNetLog } from './net/log';
-import { OrbitAtmosphere } from './ui/OrbitAtmosphere';
+import { OrbitSpace } from './ui/OrbitSpace';
 import { OrbitTactile } from './ui/OrbitTactile';
 import { navigateThemed } from './ui/navTransition';
 import '@fontsource/space-grotesk/400.css';
@@ -24,6 +24,7 @@ import '@fontsource/onest/cyrillic-400.css';
 import '@fontsource/onest/cyrillic-500.css';
 import '@fontsource/onest/cyrillic-600.css';
 import '@fontsource/onest/cyrillic-700.css';
+// Orbit chrome font. Files load only when the Orbit theme uses them.
 import './index.css';
 
 loadUser();
@@ -96,7 +97,7 @@ function OrbitChrome() {
   if (theme !== 'orbit') return null;
   return (
     <>
-      <OrbitAtmosphere />
+      <OrbitSpace />
       <OrbitTactile />
     </>
   );
