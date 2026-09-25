@@ -5,7 +5,8 @@ import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
-import { ORBIT_DRAW, shouldUseOrbitDraw } from '../core/orbitDraw';
+import { ORBIT_DRAW } from '../core/orbitDraw';
+import { drawOrbitEraser, drawOrbitLasso, drawOrbitMarquee } from './orbitField';
 import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue } from '../core/settings';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
@@ -732,6 +733,10 @@ export class SelectTool extends Tool {
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.marquee) return;
     const s = 1 / engine.camera.zoom;
+    if (engine.orbitStyleOn()) {
+      drawOrbitMarquee(ctx, this.marquee, s);
+      return;
+    }
     ctx.save();
     ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;
@@ -1045,6 +1050,7 @@ export class PenTool extends Tool {
     this.last = p.world;
     this.active = true;
     this.shift = p.shift;
+    _engine.orbitFx.resetSprinkle();
     store.beginGesture();
   }
 
@@ -1061,6 +1067,7 @@ export class PenTool extends Tool {
     this.pts.push(p.world.x, p.world.y);
     if (this.capturePressure) this.pressures.push(clampPressure(p.pressure));
     const pen = effectivePen();
+    if (n >= 2) engine.orbitSprinkle(this.pts[n - 2], this.pts[n - 1], p.world.x, p.world.y, pen.color);
     publishDraft({
       kind: 'pen',
       points: this.pts,
@@ -1201,8 +1208,7 @@ export class PenTool extends Tool {
       pen.width,
       displayInk(pen.color, bg),
       pen.alpha * 0.9,
-      this.shift || !this.capturePressure ? undefined : this.pressures,
-      { bloom: shouldUseOrbitDraw(bg) }
+      this.shift || !this.capturePressure ? undefined : this.pressures
     );
   }
 
@@ -2001,10 +2007,14 @@ export class EraserTool extends Tool {
   private pos: { x: number; y: number } | null = null;
   private wholeHits = new Set<string>();
   private partialHits = new Map<string, Set<number>>();
+  /** Orbit reticle tick rotation (radians), advanced by eraser travel. */
+  private turn = 0;
+  private lastPos = { x: 0, y: 0 };
 
   onDown(engine: Engine, p: PointerInfo): void {
     this.active = true;
     this.pos = p.world;
+    this.lastPos = p.world;
     this.wholeHits.clear();
     this.partialHits.clear();
     this.eraseAt(engine, p.world);
@@ -2038,6 +2048,14 @@ export class EraserTool extends Tool {
     if (!this.pos || !this.active) return;
     const r = settings.eraser.size;
     const s = 1 / engine.camera.zoom;
+    if (engine.orbitFxOn()) {
+      const hot = this.wholeHits.size > 0 || [...this.partialHits.values()].some((set) => set.size > 0);
+      // Ticks turn with distance travelled, not time — no idle repaint needed.
+      this.turn = (this.turn + Math.hypot(this.pos.x - this.lastPos.x, this.pos.y - this.lastPos.y) / r) % (Math.PI * 2);
+      this.lastPos = this.pos;
+      drawOrbitEraser(ctx, this.pos.x, this.pos.y, r, s, hot, this.turn);
+      return;
+    }
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 2 * s;
@@ -2184,6 +2202,10 @@ export class LassoTool extends Tool {
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
     if (!this.active || this.pts.length < 2) return;
     const s = 1 / engine.camera.zoom;
+    if (engine.orbitStyleOn()) {
+      drawOrbitLasso(ctx, this.pts, s);
+      return;
+    }
     ctx.save();
     ctx.fillStyle = withAlpha(COLORS.selection, 0.12);
     ctx.strokeStyle = COLORS.selection;

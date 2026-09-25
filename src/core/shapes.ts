@@ -4,7 +4,7 @@ import { readPrefs } from './prefs';
 import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
 import { drawRichBlock, parseStoredRich } from './richText';
 import { wrapLinesByWidth } from './textLayout';
-import { isOrbitPaper } from './orbit';
+import { isOrbitPaper, ORBIT_COLORS } from './orbit';
 import {
   isClassicStickyText,
   ORBIT_DRAW,
@@ -1011,7 +1011,7 @@ const ARROW_GEOM_CACHE_MAX = 4096;
 
 /**
  * Camera zoom for the current paint/hit frame. Engine sets this before render so
- * LOD (bloom / calc keypad) can use screen-space thresholds without threading zoom
+ * LOD (calc keypad) can use screen-space thresholds without threading zoom
  * through every draw helper.
  */
 let paintZoom = 1;
@@ -1531,16 +1531,8 @@ export function drawPenStroke(
   width: number,
   color: string,
   alpha: number,
-  pressures?: number[],
-  opts?: { bloom?: boolean }
+  pressures?: number[]
 ): void {
-  // Orbit bloom paints the stroke 3×. Skip when the glow is sub-pixel on screen —
-  // same look at readable zoom, much cheaper with dense ink / zoomed-out boards.
-  const bloomPx = width * paintZoom;
-  if (opts?.bloom && alpha > 0.04 && pts.length >= 2 && bloomPx >= 1.25) {
-    paintPenStroke(ctx, pts, width * 2.6, color, Math.min(1, alpha * 0.2), pressures);
-    paintPenStroke(ctx, pts, width * 1.45, color, Math.min(1, alpha * 0.35), pressures);
-  }
   paintPenStroke(ctx, pts, width, color, alpha, pressures);
 }
 
@@ -1888,21 +1880,25 @@ export function drawShape(
         orbit && v.stroke.trim().toLowerCase() === COLORS.stickyStroke.toLowerCase()
           ? ORBIT_DRAW.stickyStroke
           : v.stroke;
-      if (orbit) {
-        ctx.save();
-        ctx.strokeStyle = withAlpha(ORBIT_DRAW.lilac, 0.28);
-        ctx.lineWidth = Math.max(v.strokeWidth + 2.5, 3.5);
-        ctx.beginPath();
-        ctx.roundRect(v.x, v.y, v.w, v.h, 8);
-        ctx.stroke();
-        ctx.restore();
-      }
       ctx.fillStyle = drawFill;
       ctx.strokeStyle = drawStroke;
       ctx.lineWidth = v.strokeWidth;
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, 8);
       ctx.fill();
+      if (orbit && drawFill === ORBIT_DRAW.sticky) {
+        // Orbit sticky: hairline hull + warm band on top instead of a yellow body.
+        ctx.save();
+        ctx.clip();
+        ctx.fillStyle = ORBIT_DRAW.stickyBand;
+        ctx.fillRect(v.x, v.y, v.w, Math.min(4, v.h * 0.08));
+        ctx.restore();
+        ctx.save();
+        ctx.strokeStyle = ORBIT_DRAW.stickyStroke;
+        ctx.lineWidth = 1 / Math.max(paintZoom, 0.05);
+        ctx.stroke();
+        ctx.restore();
+      }
       // ponytail: classic yellow sticky is borderless (like a real sticky note);
       // stroke only when the user picked a custom border color.
       if (v.stroke.trim().toLowerCase() !== COLORS.stickyStroke.toLowerCase()) ctx.stroke();
@@ -2017,8 +2013,7 @@ export function drawShape(
         v.strokeWidth,
         displayInk(v.stroke, boardBg),
         v.alpha ?? 1,
-        v.pressures,
-        { bloom: shouldUseOrbitDraw(boardBg) }
+        v.pressures
       );
       break;
     case 'arrow':
@@ -2243,19 +2238,92 @@ function stepForSpan(valueSpan: number, spanPx: number, targetPx: number): numbe
   return niceStep(valueSpan / slots);
 }
 
+/**
+ * Orbit instrument faces (graph + calculator): graphite hull on the void,
+ * steel hairlines, white corner brackets, one status light.
+ */
+const ORBIT_PANEL = {
+  hull: '#0A0A0C',
+  well: '#040405',
+  line: 'rgba(169, 175, 185, 0.24)',
+  lineSoft: 'rgba(169, 175, 185, 0.12)',
+  dot: 'rgba(169, 175, 185, 0.34)',
+  axis: 'rgba(169, 175, 185, 0.5)',
+  label: 'rgba(169, 175, 185, 0.82)',
+  bracket: 'rgba(242, 244, 247, 0.7)',
+} as const;
+
+/** Hairline L-brackets on the four corners of an Orbit instrument card. */
+function orbitCornerBrackets(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  len: number,
+  inset: number,
+  lw: number
+): void {
+  const l = x + inset;
+  const t = y + inset;
+  const r = x + w - inset;
+  const b = y + h - inset;
+  ctx.strokeStyle = ORBIT_PANEL.bracket;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.moveTo(l, t + len);
+  ctx.lineTo(l, t);
+  ctx.lineTo(l + len, t);
+  ctx.moveTo(r - len, t);
+  ctx.lineTo(r, t);
+  ctx.lineTo(r, t + len);
+  ctx.moveTo(r, b - len);
+  ctx.lineTo(r, b);
+  ctx.lineTo(r - len, b);
+  ctx.moveTo(l + len, b);
+  ctx.lineTo(l, b);
+  ctx.lineTo(l, b - len);
+  ctx.stroke();
+}
+
+/** Small status light: halo + solid core. */
+function orbitStatusLight(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string): void {
   const chrome = graphChrome(v);
-  const { labelSize, pad, tickLen, axisW, borderW, radius, titlePad, targetTickPx } = chrome;
+  const { labelSize, pad, tickLen, axisW, borderW, titlePad, targetTickPx } = chrome;
+  // Orbit: a telemetry plot — graphite card, dotted lattice, glowing trace.
+  const orbit = shouldUseOrbitDraw(boardBg);
+  const radius = orbit ? Math.max(1, 2 * chrome.scale) : chrome.radius;
   const plot = {
     x: v.x + pad.left,
     y: v.y + pad.top,
     w: Math.max(20, v.w - pad.left - pad.right),
     h: Math.max(20, v.h - pad.top - pad.bottom),
   };
-  const panel = graphPanelFill(boardBg, v.fill);
-  const ink = graphAxisInk(boardBg);
-  const curve = displayInk(v.stroke || COLORS.stroke, boardBg);
+  const panel = orbit ? ORBIT_PANEL.hull : graphPanelFill(boardBg, v.fill);
+  const ink = orbit
+    ? { grid: ORBIT_PANEL.dot, axis: ORBIT_PANEL.axis, label: ORBIT_PANEL.label, border: ORBIT_PANEL.line }
+    : graphAxisInk(boardBg);
+  const stroke = v.stroke || COLORS.stroke;
+  const defaultStroke =
+    stroke.toLowerCase() === COLORS.stroke.toLowerCase() ||
+    stroke.toLowerCase() === ORBIT_DRAW.shapeStroke.toLowerCase();
+  const curve = orbit && defaultStroke ? ORBIT_COLORS.white : displayInk(stroke, boardBg);
   const themeText = themeFor(boardBg).text;
+  /** One screen px in world units (hairlines stay crisp at any zoom). */
+  const px = 1 / Math.max(paintZoom, 0.05);
 
   ctx.save();
   // Card
@@ -2264,20 +2332,49 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
   ctx.fillStyle = panel;
   ctx.fill();
   ctx.strokeStyle = ink.border;
-  ctx.lineWidth = borderW;
+  ctx.lineWidth = orbit ? Math.max(px, borderW * 0.8) : borderW;
   ctx.stroke();
+  if (orbit) {
+    orbitCornerBrackets(ctx, v.x, v.y, v.w, v.h, 12 * chrome.scale, 0, Math.max(px, 1.4 * chrome.scale));
+  }
 
   const compiled = compileGraph(v.expr ?? '');
   const exprLabel = `y = ${(v.expr ?? '').trim() || '…'}`;
 
   // Title chip (outside the clipped plot)
-  ctx.fillStyle = themeText;
-  ctx.globalAlpha = 0.72;
-  ctx.font = `600 ${labelSize}px ${BOARD_TYPEFACE}`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(exprLabel, v.x + titlePad, v.y + titlePad * 0.8, v.w - titlePad * 2);
+  if (orbit) {
+    // Label on the header centerline + a status light (nominal / caution).
+    const midY = v.y + pad.top * 0.52;
+    const lampR = Math.max(1.5 * px, labelSize * 0.2);
+    const ok = compiled.error === undefined && Boolean(v.expr?.trim());
+    orbitStatusLight(ctx, v.x + titlePad + lampR, midY, lampR, ok ? ORBIT_COLORS.nominal : ORBIT_COLORS.caution);
+    ctx.fillStyle = ORBIT_COLORS.white;
+    ctx.globalAlpha = 0.9;
+    ctx.font = `500 ${labelSize}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const tx = v.x + titlePad + lampR * 2 + labelSize * 0.55;
+    ctx.fillText(exprLabel, tx, midY, v.x + v.w - titlePad - tx);
+  } else {
+    ctx.fillStyle = themeText;
+    ctx.globalAlpha = 0.72;
+    ctx.font = `600 ${labelSize}px ${BOARD_TYPEFACE}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(exprLabel, v.x + titlePad, v.y + titlePad * 0.8, v.w - titlePad * 2);
+  }
   ctx.globalAlpha = 1;
+
+  if (orbit) {
+    // Recessed plot well.
+    ctx.beginPath();
+    ctx.roundRect(plot.x, plot.y, plot.w, plot.h, Math.max(2, 3 * chrome.scale));
+    ctx.fillStyle = ORBIT_PANEL.well;
+    ctx.fill();
+    ctx.strokeStyle = ORBIT_PANEL.lineSoft;
+    ctx.lineWidth = px;
+    ctx.stroke();
+  }
 
   if (compiled.error !== undefined || !v.expr?.trim()) {
     ctx.fillStyle = themeText;
@@ -2342,21 +2439,37 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
   ctx.rect(plot.x, plot.y, plot.w, plot.h);
   ctx.clip();
 
-  ctx.strokeStyle = ink.grid;
-  ctx.lineWidth = Math.max(0.75, borderW * 0.7);
-  ctx.beginPath();
-  for (let gx = Math.ceil(-GRAPH_X_RANGE / xStep) * xStep; gx <= GRAPH_X_RANGE + 1e-9; gx += xStep) {
-    const px = toPxX(gx);
-    ctx.moveTo(px, plot.y);
-    ctx.lineTo(px, plot.y + plot.h);
+  if (orbit) {
+    // Dot lattice at every half step (matches the board's dot field).
+    ctx.fillStyle = ink.grid;
+    const r = Math.max(0.9 * px, 1.1 * chrome.scale);
+    ctx.beginPath();
+    for (let gx = Math.ceil(-GRAPH_X_RANGE / (xStep / 2)) * (xStep / 2); gx <= GRAPH_X_RANGE + 1e-9; gx += xStep / 2) {
+      const dx = toPxX(gx);
+      for (let gy = Math.ceil(lo / (yStep / 2)) * (yStep / 2); gy <= hi + 1e-9; gy += yStep / 2) {
+        const dy = toPxY(gy);
+        ctx.moveTo(dx + r, dy);
+        ctx.arc(dx, dy, r, 0, Math.PI * 2);
+      }
+    }
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = ink.grid;
+    ctx.lineWidth = Math.max(0.75, borderW * 0.7);
+    ctx.beginPath();
+    for (let gx = Math.ceil(-GRAPH_X_RANGE / xStep) * xStep; gx <= GRAPH_X_RANGE + 1e-9; gx += xStep) {
+      const px = toPxX(gx);
+      ctx.moveTo(px, plot.y);
+      ctx.lineTo(px, plot.y + plot.h);
+    }
+    for (let gy = Math.ceil(lo / yStep) * yStep; gy <= hi + 1e-9; gy += yStep) {
+      const py = toPxY(gy);
+      if (py < plot.y - 0.5 || py > plot.y + plot.h + 0.5) continue;
+      ctx.moveTo(plot.x, py);
+      ctx.lineTo(plot.x + plot.w, py);
+    }
+    ctx.stroke();
   }
-  for (let gy = Math.ceil(lo / yStep) * yStep; gy <= hi + 1e-9; gy += yStep) {
-    const py = toPxY(gy);
-    if (py < plot.y - 0.5 || py > plot.y + plot.h + 0.5) continue;
-    ctx.moveTo(plot.x, py);
-    ctx.lineTo(plot.x + plot.w, py);
-  }
-  ctx.stroke();
 
   // Axes through origin when visible, else along the near edge of the plot.
   ctx.strokeStyle = ink.axis;
@@ -2393,31 +2506,87 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
   ctx.stroke();
 
   // Curve — stroke scales mildly with frame so it doesn't look hairline on huge cards.
-  ctx.strokeStyle = curve;
-  ctx.lineWidth = Math.max(1.5, (v.strokeWidth || 2) * Math.min(1.6, Math.max(0.85, chrome.scale)));
+  const curveW = Math.max(1.5, (v.strokeWidth || 2) * Math.min(1.6, Math.max(0.85, chrome.scale)));
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.beginPath();
-  let started = false;
+  // Continuous runs of samples (breaks at gaps / asymptotes).
+  const runs: number[][] = [];
+  let run: number[] | null = null;
   let prevPy = 0;
   for (let i = 0; i <= N; i++) {
     const y = ys[i];
     if (!isFinite(y)) {
-      started = false;
+      run = null;
       continue;
     }
     const py = toPxY(y);
-    if (started && Math.abs(py - prevPy) > plot.h * 2) started = false;
-    if (!started) {
-      ctx.moveTo(toPxX(ts[i]), py);
-      started = true;
-    } else {
-      ctx.lineTo(toPxX(ts[i]), py);
+    if (run && Math.abs(py - prevPy) > plot.h * 2) run = null;
+    if (!run) {
+      run = [];
+      runs.push(run);
     }
+    run.push(toPxX(ts[i]), py);
     prevPy = py;
   }
+  const traceRuns = () => {
+    ctx.beginPath();
+    for (const r of runs) {
+      ctx.moveTo(r[0], r[1]);
+      for (let j = 2; j < r.length; j += 2) ctx.lineTo(r[j], r[j + 1]);
+    }
+  };
+  if (orbit) {
+    // Soft fill down to the x axis, then a wide faint glow under a crisp core.
+    const base = Math.min(plot.y + plot.h, Math.max(plot.y, ay));
+    const glowInk = /^#[0-9a-fA-F]{6}$/.test(curve) ? curve : ORBIT_COLORS.white;
+    const fill = ctx.createLinearGradient(0, plot.y, 0, plot.y + plot.h);
+    fill.addColorStop(0, withAlpha(glowInk, 0.16));
+    fill.addColorStop(1, withAlpha(glowInk, 0.02));
+    ctx.fillStyle = fill;
+    for (const r of runs) {
+      if (r.length < 4) continue;
+      ctx.beginPath();
+      ctx.moveTo(r[0], base);
+      for (let j = 0; j < r.length; j += 2) ctx.lineTo(r[j], r[j + 1]);
+      ctx.lineTo(r[r.length - 2], base);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Blur is in device px: scale by the current transform so the glow tracks zoom.
+    const m = ctx.getTransform();
+    ctx.shadowColor = withAlpha(glowInk, 0.55);
+    ctx.shadowBlur = Math.min(40, 7 * chrome.scale * Math.hypot(m.a, m.b));
+  }
+  traceRuns();
+  ctx.strokeStyle = curve;
+  ctx.lineWidth = curveW;
   ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
   ctx.restore(); // end plot clip
+
+  if (orbit) {
+    // Vehicle marker at the leading end of the trace: ring + solid core.
+    const last = runs[runs.length - 1];
+    if (last && last.length >= 2) {
+      const mx = last[last.length - 2];
+      const my = last[last.length - 1];
+      if (my >= plot.y && my <= plot.y + plot.h) {
+        const r = Math.max(2 * px, curveW * 1.25);
+        ctx.fillStyle = curve;
+        ctx.beginPath();
+        ctx.arc(mx, my, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.45;
+        ctx.strokeStyle = curve;
+        ctx.lineWidth = Math.max(px, curveW * 0.5);
+        ctx.beginPath();
+        ctx.arc(mx, my, r * 2.4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
 
   // Tick labels — skip if too close to neighbours (protects dense large frames).
   ctx.fillStyle = ink.label;
@@ -2494,6 +2663,7 @@ function chromeCssColor(name: string): string {
  */
 export function resolveCalcBodyFill(boardBg: string, _shapeFill?: string): string {
   void _shapeFill;
+  if (shouldUseOrbitDraw(boardBg)) return ORBIT_PANEL.hull;
   const panel = chromeCssColor('--chrome-panel');
   if (panel && /^#[0-9a-fA-F]{6}$/i.test(panel)) return panel;
   // Non-hex panels (e.g. Orbit rgba): lift off paper like graph defaults.
@@ -2574,6 +2744,22 @@ function calcInkOn(fill: string, boardBg: string): {
   };
 }
 
+/** Orbit calculator palette (same slots as `calcInkOn`). */
+const ORBIT_CALC_INK: ReturnType<typeof calcInkOn> = {
+  text: 'rgba(242, 244, 247, 0.92)',
+  muted: 'rgba(169, 175, 185, 0.78)',
+  key: '#141417',
+  keyInk: 'rgba(242, 244, 247, 0.9)',
+  keyBorder: 'rgba(169, 175, 185, 0.16)',
+  display: ORBIT_PANEL.well,
+  displayInk: ORBIT_COLORS.white,
+  bezel: ORBIT_PANEL.lineSoft,
+  op: ORBIT_COLORS.white,
+  eq: ORBIT_COLORS.white,
+  eqInk: ORBIT_COLORS.void,
+};
+const ORBIT_CALC_OP_KEY = '#1D1D22';
+
 /**
  * Canvas paints the calculator face (peers, export, unfocused, open session).
  * When `hideOverlayOwned` is true (local keypad open), skip header chrome the
@@ -2590,12 +2776,16 @@ function drawCalculator(
   const scale = calcFrameScale(v.w, v.h);
   const layout = buildCalcFaceLayout(v.w, v.h, mode, Boolean(v.calcSecond), scale);
   const body = resolveCalcBodyFill(boardBg, v.fill);
-  const ink = calcInkOn(body, boardBg);
-  const stroke = resolveCalcStroke(boardBg);
+  // Orbit: a flight-computer face — graphite keys, white execute key, status light.
+  const orbit = shouldUseOrbitDraw(boardBg);
+  const ink = orbit ? ORBIT_CALC_INK : calcInkOn(body, boardBg);
+  const stroke = orbit ? ORBIT_PANEL.line : resolveCalcStroke(boardBg);
   const display = v.calcDisplay ?? '0';
   const expr = (v.calcExpr ?? '').trim();
   const modeLabel = mode === 'scientific' ? 'Scientific' : 'Standard';
-  const { pad, radius, fonts } = layout;
+  const { pad, fonts } = layout;
+  const radius = orbit ? Math.max(1, 2 * layout.scale) : layout.radius;
+  const onePx = 1 / Math.max(paintZoom, 0.05);
 
   ctx.save();
   ctx.beginPath();
@@ -2603,8 +2793,11 @@ function drawCalculator(
   ctx.fillStyle = body;
   ctx.fill();
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = Math.max(1, 1.5);
+  ctx.lineWidth = orbit ? Math.max(onePx, 1.1 * layout.scale) : Math.max(1, 1.5);
   ctx.stroke();
+  if (orbit) {
+    orbitCornerBrackets(ctx, v.x, v.y, v.w, v.h, 12 * layout.scale, 0, Math.max(onePx, 1.4 * layout.scale));
+  }
 
   // Header — Win-calc nav bars + mode title (+ memory). Overlay owns interactive nav.
   // Metrics from layout.chrome so closed canvas matches open CSS overlay 1:1.
@@ -2650,8 +2843,14 @@ function drawCalculator(
   ctx.fillStyle = ink.display;
   ctx.fill();
   ctx.strokeStyle = ink.bezel;
-  ctx.lineWidth = Math.max(0.75, layout.scale);
+  ctx.lineWidth = orbit ? Math.max(onePx, 0.9 * layout.scale) : Math.max(0.75, layout.scale);
   ctx.stroke();
+  if (orbit) {
+    // Status light in the display corner: nominal, or abort on an error readout.
+    const bad = /error|nan|∞|infinity|ошибка|错误/i.test(display);
+    const r = Math.max(1.5 * onePx, 2.6 * layout.scale);
+    orbitStatusLight(ctx, dx + pad * 0.6 + r, dy + pad * 0.45 + r * 1.6, r, bad ? ORBIT_COLORS.abort : ORBIT_COLORS.nominal);
+  }
 
   if (expr) {
     ctx.fillStyle = ink.muted;
@@ -2674,18 +2873,25 @@ function drawCalculator(
     for (const key of layout.keys) {
       const x = v.x + key.x;
       const y = v.y + key.y;
-      const rr = Math.max(4, Math.min(key.w, key.h) * 0.22);
+      const rr = orbit ? Math.max(3, Math.min(key.w, key.h) * 0.14) : Math.max(4, Math.min(key.w, key.h) * 0.22);
       const isEq = key.cls?.includes('eq');
       const isOp = key.cls?.includes('op');
       const isFn = key.cls?.includes('fn') || key.cls?.includes('mem');
       ctx.beginPath();
       ctx.roundRect(x, y, key.w, key.h, rr);
-      ctx.fillStyle = isEq ? ink.eq : ink.key;
+      // Orbit: function keys are outline-only, operators a step lighter than digits.
+      ctx.fillStyle = isEq
+        ? ink.eq
+        : orbit && isFn
+          ? 'transparent'
+          : orbit && isOp
+            ? ORBIT_CALC_OP_KEY
+            : ink.key;
       ctx.fill();
       ctx.strokeStyle = isEq ? 'transparent' : ink.keyBorder;
-      ctx.lineWidth = Math.max(0.6, 0.75 * layout.scale);
+      ctx.lineWidth = orbit ? Math.max(onePx, 0.8 * layout.scale) : Math.max(0.6, 0.75 * layout.scale);
       if (!isEq) ctx.stroke();
-      ctx.fillStyle = isOp || isEq ? ink.op : isFn ? ink.muted : ink.keyInk;
+      ctx.fillStyle = isEq ? ink.eqInk : isOp ? ink.op : isFn ? ink.muted : ink.keyInk;
       const px = Math.round(isFn ? fonts.keyFn : fonts.key);
       ctx.font = `${isOp || isEq ? '600' : '500'} ${px}px ${BOARD_TYPEFACE}`;
       ctx.textAlign = 'center';

@@ -21,14 +21,6 @@ function vibrate(pattern: number | number[]): void {
   }
 }
 
-function pulseTarget(el: HTMLElement): void {
-  el.classList.remove('orbit-tactile-pulse');
-  // force reflow so the animation can restart
-  void el.offsetWidth;
-  el.classList.add('orbit-tactile-pulse');
-  window.setTimeout(() => el.classList.remove('orbit-tactile-pulse'), 320);
-}
-
 function findInteractive(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   const hit = target.closest(INTERACTIVE);
@@ -36,8 +28,9 @@ function findInteractive(target: EventTarget | null): HTMLElement | null {
 }
 
 /**
- * Orbit-only tactile layer: press pulse + optional device vibrate on any UI action.
- * Mount once while chromeTheme === 'orbit'. Honors prefers-reduced-motion (no pulse/vibrate).
+ * Orbit-only tactile layer: short device vibrate on any UI action (the visual
+ * press is CSS). Mount once while chromeTheme === 'orbit'. Honors
+ * prefers-reduced-motion (no vibrate).
  */
 export function OrbitTactile() {
   useEffect(() => {
@@ -46,8 +39,6 @@ export function OrbitTactile() {
       if (e.button !== 0 && e.pointerType !== 'touch') return;
       const el = findInteractive(e.target);
       if (!el || el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') return;
-
-      pulseTarget(el);
 
       const role = el.getAttribute('role');
       const isToggle =
@@ -65,7 +56,6 @@ export function OrbitTactile() {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const el = findInteractive(e.target);
       if (!el) return;
-      pulseTarget(el);
       vibrate(8);
     };
 

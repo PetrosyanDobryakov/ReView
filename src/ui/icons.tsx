@@ -94,11 +94,15 @@ const HOME_DOOR = 'M9 21v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8';
 const PAN_FIT = 'translate(12 12) scale(0.88) translate(-13 -12.5)';
 const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
 
-/** Translate glyphs so their ink sits in the center of the 24² viewBox (tool circle). */
+/**
+ * Translate glyphs so their ink sits in the center of the 24² viewBox (tool circle).
+ * Lopsided glyphs (select arrow, eraser + baseline) split the difference between
+ * box center and ink center of mass so they read centered in the round thumb.
+ */
 export const ICON_NUDGE: Partial<Record<IconName, readonly [number, number]>> = {
-  select: [-0.75, 0],
+  select: [-0.2, 0.45],
   lasso: LASSO_NUDGE,
-  eraser: [-0.25, -0.75],
+  eraser: [-0.55, -1.6],
   sticky: [-0.5, 0],
   text: [0, -0.5],
   triangle: [0, 0.5],

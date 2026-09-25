@@ -3,33 +3,36 @@ import { settings, updatePenSettings, updateShapeSettings, updateTextSettings } 
 import { DEFAULT_SLOTS, readPenSlots, writePenSlot } from './penColors';
 
 /**
- * Orbit board drawing tokens — Violet Swirl ink language.
+ * Orbit board drawing tokens — mission palette on the void.
  * Display/defaults only; never rewrite synced shape colors.
  */
 export const ORBIT_DRAW = {
-  ink: '#E8F0FF',
-  inkDim: '#B8A0E8',
-  lilac: ORBIT_COLORS.lilac,
-  violet: ORBIT_COLORS.violet,
-  cyan: ORBIT_COLORS.cyan,
-  indigo: ORBIT_COLORS.indigo,
-  shapeFill: '#1A1240',
-  shapeStroke: '#916BBF',
-  sticky: '#24184A',
-  stickyStroke: '#916BBF',
-  stickyText: '#E8F0FF',
-  text: '#E8F0FF',
-  grid: 'rgba(145, 107, 191, 0.1)',
-  handleFill: '#04052E',
+  ink: ORBIT_COLORS.white,
+  steel: ORBIT_COLORS.steel,
+  dragon: ORBIT_COLORS.dragon,
+  merlin: ORBIT_COLORS.merlin,
+  abort: ORBIT_COLORS.abort,
+  shapeFill: '#131315',
+  shapeStroke: ORBIT_COLORS.steel,
+  sticky: '#151517',
+  stickyStroke: 'rgba(169, 175, 185, 0.24)',
+  stickyText: ORBIT_COLORS.white,
+  /** Plume-orange band across the top of a sticky — reads as "note" on a dark board. */
+  stickyBand: ORBIT_COLORS.merlin,
+  text: ORBIT_COLORS.white,
+  /** Grid tint (Orbit paper draws a dot lattice, see drawOrbitDotGrid). */
+  grid: 'rgba(169, 175, 185, 0.18)',
+  handleFill: ORBIT_COLORS.void,
+  selectionUnder: 'rgba(5, 5, 6, 0.72)',
 } as const;
 
 /** Quick pen slots when Orbit paper is active (local slots only). */
 export const ORBIT_PEN_SLOTS: string[] = [
   ORBIT_DRAW.ink,
-  ORBIT_DRAW.lilac,
-  ORBIT_DRAW.violet,
-  ORBIT_DRAW.cyan,
-  '#FF6B8A',
+  ORBIT_DRAW.steel,
+  ORBIT_DRAW.dragon,
+  ORBIT_DRAW.merlin,
+  ORBIT_DRAW.abort,
 ];
 
 /** Default board paper when leaving Orbit. */

@@ -1,6 +1,9 @@
 import { readPrefs, writePrefs } from './prefs';
 
-/** Orbit paper — Violet Swirl void (`#02010A`). */
+/**
+ * Orbit paper id. Boards store this exact value, so it never changes even though
+ * the rendered void is `ORBIT_COLORS.void` (see `isOrbitPaper`).
+ */
 export const ORBIT_PAPER = '#02010A';
 
 /** Pre-rewrite OKI navy; still treated as Orbit paper for existing boards. */
@@ -12,14 +15,22 @@ export const ORBIT_PAPER_OKI = '#0B1026';
  */
 export const ORBIT_PAPER_LEGACY = '#000000';
 
-/** [Violet Swirl](https://21st.dev/@serafimcloud/components/violet-swirl) Silk palette. */
+/**
+ * Mission palette (SpaceX flight hardware): white, stainless steel and neutral
+ * graphite on a near-black void. Two accents — Dragon display blue for interaction / selection, Merlin
+ * plume orange for notes and highlights — plus flight-status colors.
+ */
 export const ORBIT_COLORS = {
-  void: '#02010A',
-  deep: '#04052E',
-  indigo: '#3D2C8D',
-  lilac: '#916BBF',
-  violet: '#7C5CFF',
-  cyan: '#5B8CFF',
+  void: '#050506',
+  hull: '#101012',
+  graphite: '#1C1C1F',
+  steel: '#A9AFB9',
+  white: '#F2F4F7',
+  dragon: '#7FA7E8',
+  merlin: '#FF9A4D',
+  nominal: '#5FD39A',
+  caution: '#FFC24D',
+  abort: '#FF5F6D',
 } as const;
 
 export function isOrbitPaper(bg: string): boolean {
@@ -37,4 +48,27 @@ export function migrateLegacyOrbitPaper(chromeIsOrbit: boolean): void {
   if (typeof paper === 'string' && paper.trim().toLowerCase() === ORBIT_PAPER_LEGACY.toLowerCase()) {
     writePrefs({ paperBg: ORBIT_PAPER });
   }
+}
+
+/**
+ * Board camera as seen by the Orbit space shader. The Engine writes it on every
+ * Orbit-paper paint; the shader reads it each frame so the starfield moves with
+ * the board. `live` is false on Home / solid paper and the field drifts instead.
+ */
+export const orbitView = {
+  live: false,
+  x: 0,
+  y: 0,
+  zoom: 1,
+};
+
+export function setOrbitView(x: number, y: number, zoom: number): void {
+  orbitView.live = true;
+  orbitView.x = x;
+  orbitView.y = y;
+  orbitView.zoom = zoom;
+}
+
+export function clearOrbitView(): void {
+  orbitView.live = false;
 }
