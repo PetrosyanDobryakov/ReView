@@ -211,10 +211,13 @@ export function SettingsSheet({
   const connectionRef = useRef<HTMLElement | null>(null);
   const boardSession = Boolean(getCurrentBoardId());
   const [customBoardBg, setCustomBoardBg] = useState(() => {
-    if (!BG_PRESETS.some((p) => p.value === bg) && /^#[0-9a-fA-F]{6}$/.test(bg)) return bg;
+    // Orbit paper is its own preset, never a custom color: seeding Custom with
+    // it re-applied Orbit and made Custom unreachable from the Orbit theme.
+    const usable = (c: string) => /^#[0-9a-fA-F]{6}$/.test(c) && !isOrbitPaper(c);
+    if (!BG_PRESETS.some((p) => p.value === bg) && usable(bg)) return bg;
     try {
       const saved = localStorage.getItem('review-custom-board-bg');
-      if (saved && /^#[0-9a-fA-F]{6}$/.test(saved)) return saved;
+      if (saved && usable(saved)) return saved;
     } catch {
       /* ignore */
     }
@@ -230,15 +233,10 @@ export function SettingsSheet({
   const orbitPaperSelected = isOrbitPaper(bg);
   const isCustomBg = !orbitPaperSelected && !paperPresets.some((p) => p.value === bg);
 
-  const enterOrbit = () => {
-    onBg(ORBIT_PAPER);
-  };
-
+  // Interface theme and board paper are picked independently: Orbit chrome
+  // works over any paper and Orbit paper under any chrome.
   const leaveOrbitPaper = () => {
-    if (orbitPaperSelected) {
-      onBg(PACKET_PAPER);
-      setPrefs(writePrefs({ orbitUnlocked: false }));
-    }
+    if (orbitPaperSelected) onBg(PACKET_PAPER);
   };
 
   useEffect(() => {
@@ -985,15 +983,6 @@ export function SettingsSheet({
                       }
                       onClick={() => {
                         if (id === chromeTheme) return;
-                        if (id === 'orbit') {
-                          onChromeTheme(id);
-                          writeChromeTheme(id);
-                          enterOrbit();
-                          return;
-                        }
-                        if (chromeTheme === 'orbit' || orbitPaperSelected) {
-                          leaveOrbitPaper();
-                        }
                         onChromeTheme(id);
                         writeChromeTheme(id);
                       }}
@@ -1044,21 +1033,7 @@ export function SettingsSheet({
                         title={t(locale, p.label)}
                         aria-label={t(locale, p.label)}
                         aria-pressed={p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value}
-                        onClick={() => {
-                          if (p.value === ORBIT_PAPER) {
-                            if (chromeTheme !== 'orbit') {
-                              onChromeTheme('orbit');
-                              writeChromeTheme('orbit');
-                            }
-                            enterOrbit();
-                            return;
-                          }
-                          onBg(p.value);
-                          if (chromeTheme === 'orbit') {
-                            onChromeTheme('packet');
-                            writeChromeTheme('packet');
-                          }
-                        }}
+                        onClick={() => onBg(p.value)}
                       >
                         <span>{t(locale, p.label)}</span>
                       </button>
@@ -1071,13 +1046,7 @@ export function SettingsSheet({
                       title={t(locale, 'bgCustom')}
                       aria-label={t(locale, 'bgCustom')}
                       aria-pressed={isCustomBg}
-                      onClick={() => {
-                        onBg(customBoardBg);
-                        if (chromeTheme === 'orbit') {
-                          onChromeTheme('packet');
-                          writeChromeTheme('packet');
-                        }
-                      }}
+                      onClick={() => onBg(customBoardBg)}
                     >
                       <span>{t(locale, 'bgCustom')}</span>
                     </button>
@@ -1095,10 +1064,6 @@ export function SettingsSheet({
                         onChange={(e) => {
                           setCustomBoardBg(e.target.value);
                           onBg(e.target.value);
-                          if (chromeTheme === 'orbit') {
-                            onChromeTheme('packet');
-                            writeChromeTheme('packet');
-                          }
                         }}
                       />
                     </label>

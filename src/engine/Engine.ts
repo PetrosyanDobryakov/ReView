@@ -158,9 +158,6 @@ const CONFETTI_COLORS = ['#e03131', '#f08c00', '#fab005', '#37b24d', '#1c7ed6', 
 /** Confetti bits per second while a frenzy eruption is on. */
 const ERUPT_RATE = 420;
 
-function isOrbitChromeLive(): boolean {
-  return typeof document !== 'undefined' && document.documentElement.dataset.chromeTheme === 'orbit';
-}
 const CROP_CURSORS: Record<HandleId, string> = {
   nw: 'nwse-resize',
   se: 'nwse-resize',
@@ -518,6 +515,8 @@ export class Engine {
   private dirty = true;
   /** Last cover signal sent to OrbitSpace (board solid paper → pause shader). */
   private orbitCovered: boolean | null = null;
+  /** Last "board is on Orbit paper" signal (mounts the space backdrop under any interface theme). */
+  private orbitBoard: boolean | null = null;
   /** Orbit target lock: selection key + when it last changed. */
   private orbitSelKey = '';
   private orbitSelT0 = 0;
@@ -674,7 +673,9 @@ export class Engine {
     // Solid (non-Orbit) paper fills the canvas opaquely — pause the space shader while covered.
     {
       const paper = store.viewPaperBg();
-      this.syncOrbitCovered(!(orbitPaperActive(paper, paper) && isOrbitChromeLive()));
+      const orbit = orbitPaperActive(paper, paper);
+      this.syncOrbitBoard(orbit);
+      this.syncOrbitCovered(!orbit);
     }
     this.rafId = requestAnimationFrame(this.loop);
   }
@@ -686,7 +687,7 @@ export class Engine {
   /**
    * Tell OrbitSpace when the board canvas fully covers it (solid paper).
    * Home has no Engine → attribute cleared on destroy so the field keeps drifting.
-   * Orbit paper (`orbitLive`) leaves the shader visible — never pause then.
+   * Orbit paper leaves the shader visible — never pause then.
    */
   private syncOrbitCovered(covered: boolean): void {
     if (this.orbitCovered === covered) return;
@@ -695,6 +696,19 @@ export class Engine {
     if (covered) document.documentElement.dataset.orbitCovered = '1';
     else delete document.documentElement.dataset.orbitCovered;
     window.dispatchEvent(new CustomEvent('review-orbit-cover', { detail: { covered } }));
+  }
+
+  /**
+   * Orbit paper is independent of the interface theme: flag it on the root so
+   * the space backdrop mounts under the board whatever the chrome is.
+   */
+  private syncOrbitBoard(on: boolean): void {
+    if (this.orbitBoard === on) return;
+    this.orbitBoard = on;
+    if (typeof document === 'undefined') return;
+    if (on) document.documentElement.dataset.orbitBoard = '1';
+    else delete document.documentElement.dataset.orbitBoard;
+    window.dispatchEvent(new CustomEvent('review-orbit-board', { detail: { on } }));
   }
 
   /** Watch the live store maps (rebind after initBoard replaces the Y.Doc). */
@@ -976,6 +990,7 @@ export class Engine {
     this.alive = false;
     this.cancelTransientUi();
     this.syncOrbitCovered(false);
+    this.syncOrbitBoard(false);
     clearOrbitView();
     cancelAnimationFrame(this.rafId);
     this.resizer.disconnect();
@@ -4941,15 +4956,12 @@ export class Engine {
     const theme = themeFor(paperBg);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const orbitPaper = orbitPaperActive(this.paperTo, paperBg);
-    const orbitLive = orbitPaper && isOrbitChromeLive();
-    // Transparent only when the space shader is under the canvas; otherwise solid void / paper.
-    if (orbitLive) {
+    // Orbit paper shows the space shader under a transparent canvas, with any
+    // interface theme; solid paper covers it (and pauses it).
+    this.syncOrbitBoard(orbitPaper);
+    if (orbitPaper) {
       ctx.clearRect(0, 0, w, h);
       setOrbitView(cx, cy, z);
-    } else if (orbitPaper) {
-      clearOrbitView();
-      ctx.fillStyle = ORBIT_COLORS.void;
-      ctx.fillRect(0, 0, w, h);
     } else {
       clearOrbitView();
       ctx.fillStyle = paperBg;
@@ -5029,7 +5041,7 @@ export class Engine {
         }
         return;
       }
-      if (wholeErase && orbitLive) {
+      if (wholeErase && orbitPaper) {
         ctx.save();
         ctx.globalAlpha = 0.28;
         drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
@@ -5098,12 +5110,12 @@ export class Engine {
       ctx.restore();
     }
     this.drawConfetti(ctx);
-    if (orbitLive) this.orbitFx.draw(ctx);
+    if (orbitPaper) this.orbitFx.draw(ctx);
     ctx.restore();
     this.drawPeerMirrors(ctx);
     this.lastCam = { x: cx, y: cy, z };
-    // Opaque paper fill covers the shader; Orbit live clears and must keep it running.
-    this.syncOrbitCovered(!orbitLive);
+    // Opaque paper fill covers the shader; Orbit paper clears and must keep it running.
+    this.syncOrbitCovered(!orbitPaper);
     this.dirty = u < 1 || this.peersAnimating || this.orbitLockLive;
   }
 
@@ -5378,13 +5390,13 @@ export class Engine {
   /** Orbit look for tool overlays (lasso, marquee): live Orbit paper, motion or not. */
   orbitStyleOn(): boolean {
     const paper = this.paperTo || store.viewPaperBg();
-    return orbitPaperActive(paper, paper) && isOrbitChromeLive();
+    return orbitPaperActive(paper, paper);
   }
 
   /** Orbit board effects run only on live Orbit paper and never under reduced motion. */
   orbitFxOn(): boolean {
     const paper = this.paperTo || store.viewPaperBg();
-    return !this.reduceMotion && orbitPaperActive(paper, paper) && isOrbitChromeLive();
+    return !this.reduceMotion && orbitPaperActive(paper, paper);
   }
 
   /** Pen tip moved: shed a little stardust (Orbit only). */
@@ -5411,7 +5423,7 @@ export class Engine {
       this.orbitSelKey = key;
       this.orbitSelT0 = now;
     }
-    if (!orbit || !key || this.reduceMotion || !isOrbitChromeLive()) return;
+    if (!orbit || !key || this.reduceMotion) return;
     const t = (now - this.orbitSelT0) / ORBIT_LOCK_MS;
     if (t >= 1) return;
     const s = 1 / this.camera.zoom;

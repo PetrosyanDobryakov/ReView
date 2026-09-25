@@ -53,16 +53,21 @@ interface Rocket {
   emit: number;
 }
 
+/** Spent first stage; x, y is its middle so it turns about its own center. */
 interface Booster {
   x: number;
   y: number;
   vx: number;
   vy: number;
   ang: number;
-  spin: number;
+  /** Angular velocity (rad/s) of the attitude spring. */
+  av: number;
+  /** -1 / 1: side the boostback leans the engines toward. */
+  side: number;
   age: number;
   s: number;
   emit: number;
+  puff: number;
 }
 
 const MAX_PARTICLES = 1400;
@@ -76,7 +81,13 @@ const DEPLOY = 3.1;
 const ROCKET_END = 4.6;
 /** The upper stage fades out over this last stretch. */
 const ROCKET_FADE = 0.9;
-const BOOSTER_LIFE = 2.6;
+const BOOSTER_LIFE = 3;
+/** Booster timeline (seconds after separation). */
+const BOOSTBACK = [0.35, 1.15] as const;
+const ENTRY_BURN = [1.75, 2.15] as const;
+const LEGS_OUT = 2.1;
+/** Booster body half length (local units) and its engine end. */
+const BOOSTER_HALF = 7;
 /** Screen px/s² of ascent acceleration. */
 const THRUST = 130;
 /** Rocket hardware drawing scale (local units are ~screen px). */
@@ -305,16 +316,19 @@ export class OrbitFx {
 
       if (!rk.staged && rk.age >= STAGE_SEP) {
         rk.staged = true;
+        const k = BOOSTER_HALF * ROCKET_SCALE * s;
         this.boosters.push({
-          x: rk.x,
-          y: rk.y,
-          vx: rk.vx * 0.55,
-          vy: rk.vy * 0.55,
+          x: rk.x - Math.sin(rk.ang) * k,
+          y: rk.y + Math.cos(rk.ang) * k,
+          vx: rk.vx * 0.9,
+          vy: rk.vy * 0.9,
           ang: rk.ang,
-          spin: (rk.pitch > 0 ? -1 : 1) * rand(1.8, 2.4),
+          av: 0,
+          side: rk.vx >= 0 ? 1 : -1,
           age: 0,
           s,
           emit: 0,
+          puff: 0,
         });
         // Separation puff.
         for (let i = 0; i < 10; i++) {
@@ -345,7 +359,7 @@ export class OrbitFx {
       const tail = (rk.staged ? 6 : 16) * ROCKET_SCALE * s;
       const ex = rk.x - nx * tail;
       const ey = rk.y - ny * tail;
-      rk.emit += dt * (rk.staged ? 70 : 150);
+      rk.emit += dt * (rk.staged ? 50 : 90);
       while (rk.emit >= 1) {
         rk.emit -= 1;
         const back = rand(60, 140);
@@ -370,8 +384,8 @@ export class OrbitFx {
             vx: (-nx * back + ny * side) * s + rk.vx * 0.15,
             vy: (-ny * back - nx * side) * s + rk.vy * 0.15,
             age: 0,
-            life: rand(0.12, 0.26),
-            size: rand(2.4, 4) * s,
+            life: rand(0.14, 0.3),
+            size: rand(1.4, 2.6) * s,
             color: ORBIT_COLORS.white,
             kind: 'flame',
             phase: 0,
@@ -401,29 +415,75 @@ export class OrbitFx {
       bs.age += dt;
       if (bs.age >= BOOSTER_LIFE) continue;
       const s = bs.s;
-      // Coast, flip, fall back toward the pad.
-      bs.vy += 150 * s * dt;
-      bs.vx *= Math.exp(-0.8 * dt);
+      const t = bs.age;
+      const boostback = t >= BOOSTBACK[0] && t < BOOSTBACK[1];
+      const entry = t >= ENTRY_BURN[0] && t < ENTRY_BURN[1];
+      // Attitude: a damped spring, never a free spin. Cold gas leans the
+      // engines toward the direction of travel for the boostback, then brings
+      // the stage upright, engines down, for the fall.
+      const target = t < BOOSTBACK[1] + 0.1 ? -bs.side * 0.75 : 0;
+      const stiff = 16;
+      bs.av += (-(bs.ang - target) * stiff - bs.av * 2 * Math.sqrt(stiff)) * dt;
+      bs.ang += bs.av * dt;
+      // Gravity, a little air drag, and the burns (thrust along the body,
+      // away from the engines).
+      let ax = 0;
+      let ay = 150 * s;
+      if (boostback || entry) {
+        const thrust = (boostback ? 230 : 330) * s;
+        ax += Math.sin(bs.ang) * thrust;
+        ay -= Math.cos(bs.ang) * thrust;
+      }
+      bs.vx += ax * dt;
+      bs.vy += ay * dt;
+      const drag = Math.exp(-0.35 * dt);
+      bs.vx *= drag;
+      bs.vy *= drag;
       bs.x += bs.vx * dt;
       bs.y += bs.vy * dt;
-      bs.ang += bs.spin * dt * Math.max(0, 1 - bs.age / 1.6);
-      // Cold-gas thruster puffs while it flips.
-      bs.emit += dt * 14;
-      while (bs.emit >= 1 && bs.age < 1.5) {
-        bs.emit -= 1;
-        const side = Math.random() < 0.5 ? -1 : 1;
+
+      const k = BOOSTER_HALF * ROCKET_SCALE * s;
+      const sin = Math.sin(bs.ang);
+      const cos = Math.cos(bs.ang);
+      // Cold-gas puffs from the top while it turns.
+      bs.puff += dt * 16;
+      while (bs.puff >= 1) {
+        bs.puff -= 1;
+        if (Math.abs(bs.av) < 0.15 && t > 0.3) continue;
+        const side = bs.av > 0 ? -1 : 1;
         this.push({
-          x: bs.x - Math.sin(bs.ang) * 5 * ROCKET_SCALE * s,
-          y: bs.y + Math.cos(bs.ang) * 5 * ROCKET_SCALE * s,
-          vx: Math.cos(bs.ang) * side * rand(25, 45) * s,
-          vy: Math.sin(bs.ang) * side * rand(25, 45) * s,
+          x: bs.x + sin * k * 0.9,
+          y: bs.y - cos * k * 0.9,
+          vx: cos * side * rand(25, 45) * s + bs.vx * 0.6,
+          vy: sin * side * rand(25, 45) * s + bs.vy * 0.6,
           age: 0,
           life: rand(0.2, 0.35),
-          size: rand(1.2, 2) * s,
+          size: rand(1, 1.8) * s,
           color: ORBIT_COLORS.white,
           kind: 'smoke',
           phase: 0,
         });
+      }
+      // Engine sparks during the burns.
+      if (boostback || entry) {
+        bs.emit += dt * 60;
+        while (bs.emit >= 1) {
+          bs.emit -= 1;
+          const out = rand(60, 120);
+          const spread = rand(-12, 12);
+          this.push({
+            x: bs.x - sin * k,
+            y: bs.y + cos * k,
+            vx: (-sin * out + cos * spread) * s + bs.vx * 0.5,
+            vy: (cos * out + sin * spread) * s + bs.vy * 0.5,
+            age: 0,
+            life: rand(0.12, 0.24),
+            size: rand(1.2, 2.2) * s,
+            color: ORBIT_COLORS.white,
+            kind: 'flame',
+            phase: 0,
+          });
+        }
       }
       this.boosters[b++] = bs;
     }
@@ -506,11 +566,11 @@ export class OrbitFx {
           break;
         }
         case 'flame': {
-          // White core -> amber -> plume orange as it leaves the bell.
-          ctx.globalAlpha = (1 - t) * 0.9;
-          ctx.fillStyle = t < 0.25 ? '#FFF4E0' : t < 0.55 ? ORBIT_COLORS.caution : ORBIT_COLORS.merlin;
+          // Cools smoothly from a white-hot core through amber to deep orange.
+          ctx.globalAlpha = (1 - t) * (1 - t) * 0.85;
+          ctx.fillStyle = flameColor(t);
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * (1 - t * 0.6), 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.size * (1 - t * 0.5), 0, Math.PI * 2);
           ctx.fill();
           break;
         }
@@ -526,8 +586,8 @@ export class OrbitFx {
     }
     ctx.globalAlpha = 1;
     for (const bs of this.boosters) {
-      ctx.globalAlpha = Math.max(0, 1 - bs.age / BOOSTER_LIFE);
-      drawBooster(ctx, bs.x, bs.y, bs.ang, bs.s);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (BOOSTER_LIFE - bs.age) / 0.6));
+      drawBooster(ctx, bs);
     }
     for (const rk of this.rockets) {
       if (rk.delay > 0) continue;
@@ -608,22 +668,24 @@ function drawRocket(
     ctx.fillStyle = '#C9CDD4';
     ctx.fillRect(-w / 2 - 0.8, 11.5, 0.8, 2.5);
     ctx.fillRect(w / 2, 11.5, 0.8, 2.5);
-    // Nine-engine glow.
-    const flick = 0.75 + 0.25 * Math.sin(age * 60);
-    ctx.fillStyle = ORBIT_COLORS.caution;
-    ctx.globalAlpha *= flick;
-    ctx.beginPath();
-    ctx.ellipse(0, 15.4, w * 0.6, 1.8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha /= flick;
+    // Engine section + nine-engine sea-level plume; it lights on the pad and
+    // lengthens as the air thins.
+    ctx.fillStyle = '#3A3B40';
+    ctx.fillRect(-w / 2 + 0.2, 14, w - 0.4, 0.8);
+    const ignite = Math.min(1, age / 0.25);
+    const climb = Math.min(1, Math.max(0, age - LIFTOFF_HOLD) / 1.4);
+    drawPlume(ctx, 14.8, w * 0.9, 16 + 14 * climb, age, ignite, false);
   } else {
-    const flick = 0.7 + 0.3 * Math.sin(age * 45);
-    ctx.fillStyle = '#C9D8F4';
-    ctx.globalAlpha *= flick;
+    // Single vacuum engine: a big bell and a wide, faint plume.
+    ctx.fillStyle = '#3A3B40';
     ctx.beginPath();
-    ctx.ellipse(0, 1.6, w * 0.45, 1.3, 0, 0, Math.PI * 2);
+    ctx.moveTo(-0.7, 0);
+    ctx.lineTo(0.7, 0);
+    ctx.lineTo(1.3, 1.8);
+    ctx.lineTo(-1.3, 1.8);
+    ctx.closePath();
     ctx.fill();
-    ctx.globalAlpha /= flick;
+    drawPlume(ctx, 1.8, 2.4, 22, age, 1, true);
   }
   // Upper stage + fairing.
   ctx.fillStyle = ORBIT_COLORS.white;
@@ -639,24 +701,157 @@ function drawRocket(
   ctx.restore();
 }
 
-/** Spent first stage tumbling back, legs deployed. */
-function drawBooster(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number, s: number): void {
+/**
+ * Spent first stage, drawn about its center: interstage and grid fins up top,
+ * engines at the bottom, legs folded until the landing approach. Lit burns
+ * use the same plume as the ascent.
+ */
+function drawBooster(ctx: CanvasRenderingContext2D, bs: Booster): void {
+  const t = bs.age;
   ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(ang);
-  ctx.scale(s * ROCKET_SCALE, s * ROCKET_SCALE);
+  ctx.translate(bs.x, bs.y);
+  ctx.rotate(bs.ang);
+  ctx.scale(bs.s * ROCKET_SCALE, bs.s * ROCKET_SCALE);
   const w = 3.6;
+  const h = BOOSTER_HALF;
+  const burning = (t >= BOOSTBACK[0] && t < BOOSTBACK[1]) || (t >= ENTRY_BURN[0] && t < ENTRY_BURN[1]);
+  if (burning) {
+    const start = t < BOOSTBACK[1] ? BOOSTBACK[0] : ENTRY_BURN[0];
+    const end = t < BOOSTBACK[1] ? BOOSTBACK[1] : ENTRY_BURN[1];
+    const on = Math.min(1, (t - start) / 0.08, (end - t) / 0.08);
+    drawPlume(ctx, h + 0.8, w * 0.7, 11, t, on, false);
+  }
   ctx.fillStyle = '#D6D9DF';
-  ctx.fillRect(-w / 2, 0, w, 14);
+  ctx.fillRect(-w / 2, -h, w, h * 2);
+  // Soot from re-entry darkens the lower half.
+  ctx.fillStyle = 'rgba(40, 40, 44, 0.35)';
+  ctx.fillRect(-w / 2, 0, w, h);
   ctx.fillStyle = '#2A2A2E';
-  ctx.fillRect(-w / 2, -1.2, w, 1.6);
+  ctx.fillRect(-w / 2, -h - 1.2, w, 1.6);
+  ctx.fillStyle = '#3A3B40';
+  ctx.fillRect(-w / 2 + 0.2, h, w - 0.4, 0.8);
+  // Grid fins out.
+  ctx.fillStyle = '#9CA1AB';
+  ctx.fillRect(-w / 2 - 1.4, -h + 0.6, 1.4, 1);
+  ctx.fillRect(w / 2, -h + 0.6, 1.4, 1);
+  // Legs swing out on approach.
+  const legs = Math.max(0, Math.min(1, (t - LEGS_OUT) / 0.3));
+  const a = 0.08 + legs * 0.55;
   ctx.strokeStyle = '#C9CDD4';
   ctx.lineWidth = 0.7;
   ctx.beginPath();
-  ctx.moveTo(-w / 2, 11.5);
-  ctx.lineTo(-w / 2 - 2.4, 15);
-  ctx.moveTo(w / 2, 11.5);
-  ctx.lineTo(w / 2 + 2.4, 15);
+  ctx.moveTo(-w / 2, h - 3);
+  ctx.lineTo(-w / 2 - Math.sin(a) * 4, h - 3 + Math.cos(a) * 4);
+  ctx.moveTo(w / 2, h - 3);
+  ctx.lineTo(w / 2 + Math.sin(a) * 4, h - 3 + Math.cos(a) * 4);
   ctx.stroke();
+  ctx.restore();
+}
+
+/** Flame particle color over its life (0..1): white-hot, amber, deep orange. */
+function flameColor(t: number): string {
+  const stops: Array<[number, number, number, number]> = [
+    [0, 255, 246, 228],
+    [0.3, 255, 196, 110],
+    [0.65, 255, 138, 64],
+    [1, 190, 72, 40],
+  ];
+  let i = 0;
+  while (i < stops.length - 2 && t > stops[i + 1][0]) i++;
+  const [t0, r0, g0, b0] = stops[i];
+  const [t1, r1, g1, b1] = stops[i + 1];
+  const k = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
+  return `rgb(${Math.round(r0 + (r1 - r0) * k)}, ${Math.round(g0 + (g1 - g0) * k)}, ${Math.round(b0 + (b1 - b0) * k)})`;
+}
+
+/**
+ * Engine plume in the stage's local frame, starting at the nozzle exit `y0`
+ * and pointing down (+y). Sea level: a tight white core with shock diamonds
+ * inside an amber-to-orange sheath. Vacuum: a wide, faint, pale-blue bloom.
+ * `power` (0..1) scales it for ignition / shutdown; flicker is two
+ * incommensurate sines so it never visibly loops.
+ */
+function drawPlume(
+  ctx: CanvasRenderingContext2D,
+  y0: number,
+  w: number,
+  len: number,
+  age: number,
+  power: number,
+  vacuum: boolean
+): void {
+  if (power <= 0.01) return;
+  const flick = 1 + 0.07 * Math.sin(age * 53) + 0.05 * Math.sin(age * 97 + 1.3);
+  const L = len * flick * (0.35 + 0.65 * power);
+  const hw = w / 2;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha *= Math.min(1, power * 1.4);
+  if (vacuum) {
+    const g = ctx.createLinearGradient(0, y0, 0, y0 + L);
+    g.addColorStop(0, 'rgba(236, 242, 255, 0.75)');
+    g.addColorStop(0.25, 'rgba(190, 210, 255, 0.35)');
+    g.addColorStop(1, 'rgba(140, 170, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(-hw * 0.55, y0);
+    ctx.bezierCurveTo(-hw * 1.4, y0 + L * 0.3, -hw * 2.4, y0 + L * 0.7, -hw * 1.6, y0 + L);
+    ctx.lineTo(hw * 1.6, y0 + L);
+    ctx.bezierCurveTo(hw * 2.4, y0 + L * 0.7, hw * 1.4, y0 + L * 0.3, hw * 0.55, y0);
+    ctx.closePath();
+    ctx.fill();
+    const c = ctx.createLinearGradient(0, y0, 0, y0 + L * 0.35);
+    c.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+    c.addColorStop(1, 'rgba(210, 225, 255, 0)');
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.moveTo(-hw * 0.5, y0);
+    ctx.quadraticCurveTo(-hw * 0.7, y0 + L * 0.2, 0, y0 + L * 0.35);
+    ctx.quadraticCurveTo(hw * 0.7, y0 + L * 0.2, hw * 0.5, y0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  // Outer sheath: widens just past the nozzle, then tapers to a ragged tip.
+  const sway = Math.sin(age * 31) * 0.25;
+  const outer = ctx.createLinearGradient(0, y0, 0, y0 + L);
+  outer.addColorStop(0, 'rgba(255, 214, 150, 0.85)');
+  outer.addColorStop(0.2, 'rgba(255, 160, 70, 0.6)');
+  outer.addColorStop(0.6, 'rgba(235, 96, 36, 0.25)');
+  outer.addColorStop(1, 'rgba(200, 60, 20, 0)');
+  ctx.fillStyle = outer;
+  ctx.beginPath();
+  ctx.moveTo(-hw, y0);
+  ctx.bezierCurveTo(-hw * 1.5, y0 + L * 0.25, -hw * 1.1, y0 + L * 0.7, sway, y0 + L);
+  ctx.bezierCurveTo(hw * 1.1, y0 + L * 0.7, hw * 1.5, y0 + L * 0.25, hw, y0);
+  ctx.closePath();
+  ctx.fill();
+  // Inner core: white-hot, short.
+  const cl = L * 0.5;
+  const core = ctx.createLinearGradient(0, y0, 0, y0 + cl);
+  core.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  core.addColorStop(0.45, 'rgba(255, 240, 205, 0.85)');
+  core.addColorStop(1, 'rgba(255, 200, 120, 0)');
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.moveTo(-hw * 0.7, y0);
+  ctx.bezierCurveTo(-hw * 0.8, y0 + cl * 0.4, -hw * 0.35, y0 + cl * 0.8, 0, y0 + cl);
+  ctx.bezierCurveTo(hw * 0.35, y0 + cl * 0.8, hw * 0.8, y0 + cl * 0.4, hw * 0.7, y0);
+  ctx.closePath();
+  ctx.fill();
+  // Shock diamonds along the core.
+  for (let i = 0; i < 3; i++) {
+    const cy = y0 + L * (0.14 + i * 0.13);
+    const r = hw * (0.42 - i * 0.1);
+    ctx.fillStyle = `rgba(255, 252, 240, ${(0.6 - i * 0.16) * power})`;
+    ctx.beginPath();
+    ctx.moveTo(0, cy - r * 1.3);
+    ctx.lineTo(r, cy);
+    ctx.lineTo(0, cy + r * 1.3);
+    ctx.lineTo(-r, cy);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }

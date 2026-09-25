@@ -2240,7 +2240,7 @@ function stepForSpan(valueSpan: number, spanPx: number, targetPx: number): numbe
 
 /**
  * Orbit instrument faces (graph + calculator): graphite hull on the void,
- * steel hairlines, white corner brackets, one status light.
+ * steel hairlines, white corner brackets.
  */
 const ORBIT_PANEL = {
   hull: '#0A0A0C',
@@ -2287,19 +2287,6 @@ function orbitCornerBrackets(
   ctx.stroke();
 }
 
-/** Small status light: halo + solid core. */
-function orbitStatusLight(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.18;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-}
-
 function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string): void {
   const chrome = graphChrome(v);
   const { labelSize, pad, tickLen, axisW, borderW, titlePad, targetTickPx } = chrome;
@@ -2343,17 +2330,14 @@ function drawGraph(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg: string)
 
   // Title chip (outside the clipped plot)
   if (orbit) {
-    // Label on the header centerline + a status light (nominal / caution).
+    // Label on the header centerline.
     const midY = v.y + pad.top * 0.52;
-    const lampR = Math.max(1.5 * px, labelSize * 0.2);
-    const ok = compiled.error === undefined && Boolean(v.expr?.trim());
-    orbitStatusLight(ctx, v.x + titlePad + lampR, midY, lampR, ok ? ORBIT_COLORS.nominal : ORBIT_COLORS.caution);
     ctx.fillStyle = ORBIT_COLORS.white;
     ctx.globalAlpha = 0.9;
     ctx.font = `500 ${labelSize}px ${BOARD_TYPEFACE}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const tx = v.x + titlePad + lampR * 2 + labelSize * 0.55;
+    const tx = v.x + titlePad;
     ctx.fillText(exprLabel, tx, midY, v.x + v.w - titlePad - tx);
   } else {
     ctx.fillStyle = themeText;
@@ -2755,7 +2739,8 @@ const ORBIT_CALC_INK: ReturnType<typeof calcInkOn> = {
   displayInk: ORBIT_COLORS.white,
   bezel: ORBIT_PANEL.lineSoft,
   op: ORBIT_COLORS.white,
-  eq: ORBIT_COLORS.white,
+  // Execute key: light gray, set apart from the graphite keys without glaring.
+  eq: '#9A9FA8',
   eqInk: ORBIT_COLORS.void,
 };
 const ORBIT_CALC_OP_KEY = '#1D1D22';
@@ -2776,7 +2761,7 @@ function drawCalculator(
   const scale = calcFrameScale(v.w, v.h);
   const layout = buildCalcFaceLayout(v.w, v.h, mode, Boolean(v.calcSecond), scale);
   const body = resolveCalcBodyFill(boardBg, v.fill);
-  // Orbit: a flight-computer face — graphite keys, white execute key, status light.
+  // Orbit: a flight-computer face — graphite keys, light-gray execute key.
   const orbit = shouldUseOrbitDraw(boardBg);
   const ink = orbit ? ORBIT_CALC_INK : calcInkOn(body, boardBg);
   const stroke = orbit ? ORBIT_PANEL.line : resolveCalcStroke(boardBg);
@@ -2845,12 +2830,6 @@ function drawCalculator(
   ctx.strokeStyle = ink.bezel;
   ctx.lineWidth = orbit ? Math.max(onePx, 0.9 * layout.scale) : Math.max(0.75, layout.scale);
   ctx.stroke();
-  if (orbit) {
-    // Status light in the display corner: nominal, or abort on an error readout.
-    const bad = /error|nan|∞|infinity|ошибка|错误/i.test(display);
-    const r = Math.max(1.5 * onePx, 2.6 * layout.scale);
-    orbitStatusLight(ctx, dx + pad * 0.6 + r, dy + pad * 0.45 + r * 1.6, r, bad ? ORBIT_COLORS.abort : ORBIT_COLORS.nominal);
-  }
 
   if (expr) {
     ctx.fillStyle = ink.muted;

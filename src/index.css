@@ -238,7 +238,8 @@ html {
 }
 
 [data-chrome-theme='orbit'] .home-root,
-[data-chrome-theme='orbit'] .canvas-wrap {
+[data-chrome-theme='orbit'] .canvas-wrap,
+[data-orbit-board='1'] .canvas-wrap {
   background: transparent;
 }
 
@@ -324,16 +325,6 @@ html {
   background: rgba(255, 255, 255, 0.07);
 }
 
-[data-chrome-theme='orbit'] .sheet-switch.on .switch {
-  background: #eeeeef;
-  box-shadow: none;
-}
-
-[data-chrome-theme='orbit'] .sheet-switch.on .switch::after {
-  background: #070708;
-  box-shadow: none;
-}
-
 [data-chrome-theme='orbit'] button:focus-visible,
 [data-chrome-theme='orbit'] select:focus-visible,
 [data-chrome-theme='orbit'] .theme-card:focus-visible,
@@ -356,9 +347,9 @@ html {
   background:
     radial-gradient(1px 1px at 14% 28%, #ffffff 50%, transparent 100%),
     radial-gradient(0.8px 0.8px at 33% 62%, rgba(238, 238, 240, 0.6) 50%, transparent 100%),
-    radial-gradient(1px 1px at 58% 18%, rgba(255, 244, 230, 0.9) 50%, transparent 100%),
+    radial-gradient(1px 1px at 58% 18%, rgba(242, 242, 244, 0.9) 50%, transparent 100%),
     radial-gradient(0.8px 0.8px at 71% 44%, rgba(238, 238, 240, 0.5) 50%, transparent 100%),
-    radial-gradient(0.8px 0.8px at 87% 25%, rgba(214, 226, 255, 0.7) 50%, transparent 100%),
+    radial-gradient(0.8px 0.8px at 87% 25%, rgba(228, 228, 232, 0.7) 50%, transparent 100%),
     radial-gradient(0.6px 0.6px at 44% 38%, rgba(238, 238, 240, 0.4) 50%, transparent 100%),
     #050506;
 }
@@ -379,9 +370,13 @@ html {
   pointer-events: none;
 }
 
-/* Paper card: the limb sits lower and the label keeps its normal corner slot. */
+/* Paper card: the label keeps its bottom corner slot, so the limb runs above
+   it (flatter, so it clears the text at the edges) and the label sits on the
+   planet instead of being cut by the horizon line. */
 .bg-card[data-paper-preview='orbit']::after {
-  top: 82%;
+  left: -45%;
+  right: -45%;
+  top: 38%;
 }
 
 /* Paper cards carry an inline background color, so the stars ride on ::before. */
@@ -393,8 +388,8 @@ html {
   background:
     radial-gradient(1px 1px at 18% 30%, #ffffff 50%, transparent 100%),
     radial-gradient(0.8px 0.8px at 46% 22%, rgba(238, 238, 240, 0.6) 50%, transparent 100%),
-    radial-gradient(1px 1px at 64% 48%, rgba(255, 244, 230, 0.9) 50%, transparent 100%),
-    radial-gradient(0.8px 0.8px at 82% 20%, rgba(214, 226, 255, 0.7) 50%, transparent 100%),
+    radial-gradient(1px 1px at 64% 48%, rgba(242, 242, 244, 0.9) 50%, transparent 100%),
+    radial-gradient(0.8px 0.8px at 82% 20%, rgba(228, 228, 232, 0.7) 50%, transparent 100%),
     radial-gradient(0.6px 0.6px at 90% 56%, rgba(238, 238, 240, 0.5) 50%, transparent 100%);
   pointer-events: none;
 }
@@ -523,8 +518,7 @@ html {
 [data-chrome-theme='orbit'] .bg-card,
 [data-chrome-theme='orbit'] .home-team-btn,
 [data-chrome-theme='orbit'] .ctx-item,
-[data-chrome-theme='orbit'] .menu-item,
-[data-chrome-theme='orbit'] .sheet-switch {
+[data-chrome-theme='orbit'] .menu-item {
   transition:
     transform 70ms cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 120ms var(--chrome-ease),
@@ -532,7 +526,7 @@ html {
     color 120ms var(--chrome-ease);
 }
 
-[data-chrome-theme='orbit'] button:active:not(:disabled),
+[data-chrome-theme='orbit'] button:active:not(:disabled):not(.sheet-switch),
 [data-chrome-theme='orbit'] .board-row:active,
 [data-chrome-theme='orbit'] .theme-card:active,
 [data-chrome-theme='orbit'] .bg-card:active,
@@ -582,7 +576,8 @@ body,
 }
 
 [data-chrome-theme='orbit'] .home-root,
-[data-chrome-theme='orbit'] .app {
+[data-chrome-theme='orbit'] .app,
+[data-orbit-board='1'] .app {
   isolation: isolate;
 }
 

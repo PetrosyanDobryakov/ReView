@@ -9,15 +9,15 @@ import { orbitView } from '../core/orbit';
  * nothing jumps. A dim work light follows the pointer and the edges fall off
  * into the void. On Home the field drifts.
  *
- * Stars are modeled, not decorated: pin-sharp point spread in device pixels,
- * heavy-tailed magnitudes (mostly faint, few bright), black-body-ish tints and
- * only a trace of scintillation.
+ * Stars are plain and static: pin-sharp point spread in device pixels,
+ * heavy-tailed magnitudes (mostly faint, few bright), gray-to-white only, no
+ * halo and no twinkle.
  *
  * Cost control: the soft sky renders at quarter size, stars at a capped full
  * size. Stars and sky are cached in a float buffer; the pointer light, vignette
  * and dither are a cheap fullscreen composite, so a moving cursor does not rerun
  * the star or nebula shaders. The field repaints on camera / warp change,
- * otherwise ~10fps for drift and scintillation (the same clock as an idle view).
+ * otherwise ~10fps for the nebula drift (the same clock as an idle view).
  * Paused when hidden or covered by solid paper. Reduced motion freezes time and
  * paints only on change.
  */
@@ -44,7 +44,7 @@ const BAND_PERIOD = 6000;
 /** Hash lattice period in cells; offsets wrap at `cell * PERIOD` to keep float precision. */
 const PERIOD = 512;
 const MAX_PIXELS = 2_400_000;
-/** Idle repaint interval: only slow scintillation + nebula drift move while idle. */
+/** Idle repaint interval: only the nebula drift moves while idle. */
 const IDLE_FRAME_MS = 100;
 const HOME_DRIFT = { x: 6, y: 2.5 };
 /** Warp jump length (Home <-> board, see navTransition) and when it peaks (0..1). */
@@ -157,7 +157,7 @@ void main() {
   vec3 col = mix(vec3(0.02, 0.02, 0.023), vec3(0.01, 0.01, 0.012), uv.y);
 
   // Galactic band on the deepest layer: a soft diagonal glow with dust lanes,
-  // plus a very faint blue / ember haze elsewhere.
+  // plus a very faint neutral haze elsewhere.
   vec2 q = uOffN + css / uZoomN;
   // The band follows the sky parallax and repeats every ${BAND_PERIOD} units.
   float across = dot(uBand + css / uZoomN, vec2(0.52, 0.85)) + 180.0;
@@ -165,25 +165,20 @@ void main() {
   float band = exp(-pow(across / 380.0, 2.0));
   float dust = fbm(q * 0.0022 + 7.0);
   float lanes = smoothstep(0.45, 0.72, fbm(q * 0.004 + 31.0));
-  vec3 milky = vec3(0.16, 0.16, 0.19) * band * (0.35 + 0.65 * dust) * (1.0 - 0.75 * lanes);
+  vec3 milky = vec3(0.16, 0.16, 0.165) * band * (0.35 + 0.65 * dust) * (1.0 - 0.75 * lanes);
   col += milky * 0.7;
   float n = fbm(q * 0.0009);
   float m = fbm(q * 0.0005 + 23.0);
-  vec3 tint = mix(vec3(0.09, 0.11, 0.16), vec3(0.16, 0.11, 0.08), smoothstep(0.35, 0.75, m));
+  vec3 tint = vec3(mix(0.1, 0.13, smoothstep(0.35, 0.75, m)));
   col += tint * smoothstep(0.45, 0.95, n) * 0.45;
   gl_FragColor = vec4(col, band);
 }
 `;
 
 const STAR_LIB = `
-// Black-body-ish tint from a 0..1 temperature draw: mostly white / warm white,
-// some blue-white, few orange, rare red. Low saturation like a real sky.
+// Monochrome: every star is a neutral gray-to-white point; only brightness varies.
 vec3 starTint(float t) {
-  vec3 c = mix(vec3(0.68, 0.78, 1.0), vec3(0.88, 0.92, 1.0), smoothstep(0.0, 0.14, t));
-  c = mix(c, vec3(1.0, 0.98, 0.95), smoothstep(0.14, 0.45, t));
-  c = mix(c, vec3(1.0, 0.9, 0.76), smoothstep(0.62, 0.86, t));
-  c = mix(c, vec3(1.0, 0.74, 0.56), smoothstep(0.93, 1.0, t));
-  return c;
+  return vec3(mix(0.62, 1.0, t));
 }
 
 vec3 stars(vec2 css, vec2 off, float zoom, float cell, float density, float bright, float seed) {
@@ -196,17 +191,14 @@ vec3 stars(vec2 css, vec2 off, float zoom, float cell, float density, float brig
   float dPx = length(f - pos) * zoom;
   // Heavy-tailed magnitudes: most stars sit near the visibility floor.
   float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
-  float amp = 0.05 + 1.5 * b;
-  // Point spread in device pixels, so stars stay pin-sharp at any DPR.
-  float sigma = (0.5 + 0.45 * min(b, 1.0)) / uScale;
+  float amp = 0.05 + 0.85 * min(b, 1.0);
+  // Point spread in device pixels, so stars stay pin-sharp at any DPR. No
+  // halo, no twinkle: plain static points.
+  float sigma = (0.5 + 0.25 * min(b, 1.0)) / uScale;
   float psf = exp(-(dPx * dPx) / (2.0 * sigma * sigma));
-  // Only the brightest get a faint scattered-light skirt.
-  psf += smoothstep(0.35, 1.0, b) * 0.035 * exp(-dPx / (2.2 / uScale));
-  // Barely-there scintillation on bright stars only.
-  float sc = 1.0 + 0.06 * smoothstep(0.3, 1.0, b) * sin(uTime * (1.1 + 2.0 * hash21(id + seed * 4.7)) + h * 61.0);
   // Fade a layer out once its cells shrink on screen (deep zoom-out).
   float fade = smoothstep(10.0, 36.0, cell * zoom);
-  return starTint(hash21(id + seed * 5.9)) * psf * amp * sc * fade;
+  return starTint(hash21(id + seed * 5.9)) * psf * amp * fade;
 }
 
 // Warp streaks: each star smeared from its position toward the screen center
@@ -232,8 +224,8 @@ vec3 starsWarp(vec2 css, vec2 off, float zoom, float cell, float density, float 
       float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
       float d = length(pa - ba * t);
       float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
-      float amp = 0.12 + 1.5 * b;
-      float sigma = (0.55 + 0.45 * min(b, 1.0)) / uScale;
+      float amp = 0.12 + 0.85 * min(b, 1.0);
+      float sigma = (0.55 + 0.25 * min(b, 1.0)) / uScale;
       float psf = exp(-(d * d) / (2.0 * sigma * sigma)) * mix(0.25, 1.0, t);
       acc += starTint(hash21(id + seed * 5.9)) * psf * amp;
     }
