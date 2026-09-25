@@ -14,8 +14,12 @@ import { orbitView } from '../core/orbit';
  * only a trace of scintillation.
  *
  * Cost control: the soft sky renders at quarter size, stars at a capped full
- * size; repaint only when the camera or pointer moved, otherwise ~10fps for
- * drift; paused when hidden or covered by solid paper. Reduced motion freezes time and paints only on change.
+ * size. Stars and sky are cached in a float buffer; the pointer light, vignette
+ * and dither are a cheap fullscreen composite, so a moving cursor does not rerun
+ * the star or nebula shaders. The field repaints on camera / warp change,
+ * otherwise ~10fps for drift and scintillation (the same clock as an idle view).
+ * Paused when hidden or covered by solid paper. Reduced motion freezes time and
+ * paints only on change.
  */
 
 /**
@@ -171,23 +175,7 @@ void main() {
 }
 `;
 
-/** Full-res pass: upscaled sky + parallax stars, pointer light, vignette, dither. */
-const FRAG = `
-precision highp float;
-uniform vec2 uRes;
-uniform float uScale;
-uniform float uTime;
-uniform sampler2D uNeb;
-uniform vec2 uOff[${LAYERS.length}];
-uniform float uZoom[${LAYERS.length}];
-uniform float uCell[${LAYERS.length}];
-uniform float uDensity[${LAYERS.length}];
-uniform float uBright[${LAYERS.length}];
-uniform float uSeed[${LAYERS.length}];
-uniform float uDepth[${LAYERS.length}];
-uniform vec3 uPointer;
-uniform float uWarp;
-${NOISE}
+const STAR_LIB = `
 // Black-body-ish tint from a 0..1 temperature draw: mostly white / warm white,
 // some blue-white, few orange, rare red. Low saturation like a real sky.
 vec3 starTint(float t) {
@@ -252,7 +240,32 @@ vec3 starsWarp(vec2 css, vec2 off, float zoom, float cell, float density, float 
   }
   return acc * smoothstep(10.0, 36.0, cell * zoom);
 }
+`;
 
+/**
+ * `present` is the original full-screen pass (sky, pointer, stars, vignette, dither).
+ * The cache path renders stars only into a float buffer; compose rebuilds the same
+ * expression. Stars are stored /16 so a clamped float target still round-trips
+ * (×16 is exact in fp32) while a pixel stays under 16.
+ */
+function skyShader(present: boolean): string {
+  return `
+precision highp float;
+uniform vec2 uRes;
+uniform float uScale;
+uniform float uTime;
+uniform sampler2D uNeb;
+uniform vec2 uOff[${LAYERS.length}];
+uniform float uZoom[${LAYERS.length}];
+uniform float uCell[${LAYERS.length}];
+uniform float uDensity[${LAYERS.length}];
+uniform float uBright[${LAYERS.length}];
+uniform float uSeed[${LAYERS.length}];
+uniform float uDepth[${LAYERS.length}];
+${present ? 'uniform vec3 uPointer;' : ''}
+uniform float uWarp;
+${NOISE}
+${STAR_LIB}
 void main() {
   vec2 frag = gl_FragCoord.xy;
   vec2 uv = frag / uRes;
@@ -261,14 +274,19 @@ void main() {
   css.y = -css.y;
 
   vec4 sky = texture2D(uNeb, uv);
-  // The clouds dip toward black at the warp peak so the swap to a new patch
+  vec3 col = vec3(0.0);
+  ${
+    present
+      ? `// The clouds dip toward black at the warp peak so the swap to a new patch
   // of sky is never seen as a pop.
-  vec3 col = sky.rgb * (1.0 - 0.85 * uWarp);
+  col = sky.rgb * (1.0 - 0.85 * uWarp);
 
   // Faint work light around the pointer (does not touch the stars).
   if (uPointer.z > 0.0) {
     vec2 pd = (frag - uPointer.xy) / uScale;
     col += vec3(0.34, 0.34, 0.36) * exp(-dot(pd, pd) / (2.0 * 260.0 * 260.0)) * uPointer.z * 0.035;
+  }`
+      : ''
   }
 
   // Denser, brighter star population inside the band.
@@ -284,11 +302,45 @@ void main() {
     }
   }
 
-  // Edges fall into the void.
+  ${
+    present
+      ? `// Edges fall into the void.
   vec2 v = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
   col *= mix(1.0, 0.55, smoothstep(0.4, 1.1, length(v)));
 
   // Dither so the dark gradients do not band.
+  col += (hash21(frag) - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);`
+      : `// Stars only. Sky, pointer, vignette and dither are applied in the compose pass
+  // so a cursor move does not rerun this shader.
+  gl_FragColor = vec4(col * (1.0 / 16.0), 1.0);`
+  }
+}
+`;
+}
+
+/** Same tail as the full pass: sky, pointer light, cached stars, vignette, dither. */
+const COMPOSE = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uScale;
+uniform sampler2D uNeb;
+uniform sampler2D uField;
+uniform vec3 uPointer;
+uniform float uWarp;
+${NOISE}
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  vec2 uv = frag / uRes;
+  vec4 sky = texture2D(uNeb, uv);
+  vec3 col = sky.rgb * (1.0 - 0.85 * uWarp);
+  if (uPointer.z > 0.0) {
+    vec2 pd = (frag - uPointer.xy) / uScale;
+    col += vec3(0.34, 0.34, 0.36) * exp(-dot(pd, pd) / (2.0 * 260.0 * 260.0)) * uPointer.z * 0.035;
+  }
+  col += texture2D(uField, uv).rgb * 16.0;
+  vec2 v = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  col *= mix(1.0, 0.55, smoothstep(0.4, 1.1, length(v)));
   col += (hash21(frag) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -347,8 +399,38 @@ export function OrbitSpace() {
       return { prog, vs, fs };
     };
     const nebP = link(NEB_FRAG);
-    const starP = link(FRAG);
+    const starP = link(skyShader(true));
     if (!nebP || !starP) return;
+
+    // Float star cache: cursor motion composites the light without rerunning stars.
+    // Fall back to the single full pass when a float color buffer is unavailable.
+    const floatTexExt = gl.getExtension('OES_texture_float');
+    const floatBufExt = gl.getExtension('WEBGL_color_buffer_float');
+    let fieldTex: WebGLTexture | null = null;
+    let fieldFb: WebGLFramebuffer | null = null;
+    let useCache = Boolean(floatTexExt && floatBufExt);
+    const fieldP = useCache ? link(skyShader(false)) : null;
+    const composeP = useCache ? link(COMPOSE) : null;
+    if (!fieldP || !composeP) useCache = false;
+    if (useCache && fieldP && composeP) {
+      fieldTex = gl.createTexture();
+      fieldFb = gl.createFramebuffer();
+      if (!fieldTex || !fieldFb) {
+        useCache = false;
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.FLOAT, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fieldTex, 0);
+        useCache = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
+    }
+
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -389,6 +471,32 @@ export function OrbitSpace() {
       pointer: gl.getUniformLocation(starP.prog, 'uPointer'),
       warp: gl.getUniformLocation(starP.prog, 'uWarp'),
     };
+    const fu = fieldP
+      ? {
+          res: gl.getUniformLocation(fieldP.prog, 'uRes'),
+          scale: gl.getUniformLocation(fieldP.prog, 'uScale'),
+          time: gl.getUniformLocation(fieldP.prog, 'uTime'),
+          neb: gl.getUniformLocation(fieldP.prog, 'uNeb'),
+          off: gl.getUniformLocation(fieldP.prog, 'uOff'),
+          zoom: gl.getUniformLocation(fieldP.prog, 'uZoom'),
+          cell: gl.getUniformLocation(fieldP.prog, 'uCell'),
+          density: gl.getUniformLocation(fieldP.prog, 'uDensity'),
+          bright: gl.getUniformLocation(fieldP.prog, 'uBright'),
+          seed: gl.getUniformLocation(fieldP.prog, 'uSeed'),
+          depth: gl.getUniformLocation(fieldP.prog, 'uDepth'),
+          warp: gl.getUniformLocation(fieldP.prog, 'uWarp'),
+        }
+      : null;
+    const cu = composeP
+      ? {
+          res: gl.getUniformLocation(composeP.prog, 'uRes'),
+          scale: gl.getUniformLocation(composeP.prog, 'uScale'),
+          neb: gl.getUniformLocation(composeP.prog, 'uNeb'),
+          field: gl.getUniformLocation(composeP.prog, 'uField'),
+          pointer: gl.getUniformLocation(composeP.prog, 'uPointer'),
+          warp: gl.getUniformLocation(composeP.prog, 'uWarp'),
+        }
+      : null;
 
     const reduceMq = matchMedia('(prefers-reduced-motion: reduce)');
     let reduce = reduceMq.matches;
@@ -411,8 +519,16 @@ export function OrbitSpace() {
       gl.bindFramebuffer(gl.FRAMEBUFFER, nebFb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nebTex, 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (useCache && fieldTex && fieldFb) {
+        gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.FLOAT, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fieldTex, 0);
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) useCache = false;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
       cssSize = [cssW, cssH];
-      dirty = true;
+      fieldDirty = true;
     };
 
     // Layer offsets are integrated from camera deltas measured in SCREEN px, so
@@ -469,88 +585,42 @@ export function OrbitSpace() {
       layerOff[SKY_I] = x;
       layerOff[SKY_I + 1] = y0 + delta / 0.85;
       saveSky();
-      dirty = true;
+      fieldDirty = true;
     };
 
-    let dirty = true;
+    // Stars/sky vs pointer light. Light-only frames composite; they do not rerun stars.
+    let fieldDirty = true;
+    let lightDirty = true;
     let raf = 0;
-    let lastPaint = 0;
+    let lastField = 0;
     let lastT = performance.now();
     let clock = 0;
 
     const offs = new Float32Array(LAYERS.length * 2);
     const zooms = new Float32Array(LAYERS.length);
-    gl.useProgram(starP.prog);
-    gl.uniform1fv(u.cell, LAYERS.map((l) => l.cell));
-    gl.uniform1fv(u.density, LAYERS.map((l) => l.density));
-    gl.uniform1fv(u.bright, LAYERS.map((l) => l.bright));
-    gl.uniform1fv(u.seed, LAYERS.map((l) => l.seed));
-    gl.uniform1fv(u.depth, LAYERS.map((l) => l.depth));
-    gl.uniform1i(u.neb, 0);
+    const layerCells = LAYERS.map((l) => l.cell);
+    const layerDensity = LAYERS.map((l) => l.density);
+    const layerBright = LAYERS.map((l) => l.bright);
+    const layerSeed = LAYERS.map((l) => l.seed);
+    const layerDepth = LAYERS.map((l) => l.depth);
+    const bindStars = (prog: WebGLProgram, loc: { cell: WebGLUniformLocation | null; density: WebGLUniformLocation | null; bright: WebGLUniformLocation | null; seed: WebGLUniformLocation | null; depth: WebGLUniformLocation | null; neb: WebGLUniformLocation | null }) => {
+      gl.useProgram(prog);
+      gl.uniform1fv(loc.cell, layerCells);
+      gl.uniform1fv(loc.density, layerDensity);
+      gl.uniform1fv(loc.bright, layerBright);
+      gl.uniform1fv(loc.seed, layerSeed);
+      gl.uniform1fv(loc.depth, layerDepth);
+      gl.uniform1i(loc.neb, 0);
+    };
+    bindStars(starP.prog, u);
+    if (useCache && fieldP && fu) bindStars(fieldP.prog, fu);
+    if (useCache && composeP && cu) {
+      gl.useProgram(composeP.prog);
+      gl.uniform1i(cu.neb, 0);
+      gl.uniform1i(cu.field, 1);
+    }
 
-    const frame = (t: number) => {
-      raf = requestAnimationFrame(frame);
-      const dt = Math.min(0.1, (t - lastT) / 1000);
-      lastT = t;
-      if (!visible || covered) return;
-
-      if (orbitView.live) {
-        if (!lastLive) {
-          lastX = orbitView.x;
-          lastY = orbitView.y;
-        }
-        const dx = orbitView.x - lastX;
-        const dy = orbitView.y - lastY;
-        if (dx !== 0 || dy !== 0 || orbitView.zoom !== zoom) dirty = true;
-        advance(dx * orbitView.zoom, dy * orbitView.zoom, Math.max(0.01, orbitView.zoom));
-        lastX = orbitView.x;
-        lastY = orbitView.y;
-        zoom = orbitView.zoom;
-      } else if (!reduce) {
-        advance(HOME_DRIFT.x * dt, HOME_DRIFT.y * dt, Math.max(0.01, zoom));
-        if (zoom !== 1) {
-          zoom += (1 - zoom) * Math.min(1, dt * 3);
-          if (Math.abs(zoom - 1) < 0.002) zoom = 1;
-          dirty = true;
-        }
-      }
-      lastLive = orbitView.live;
-
-      if (pointerA !== pointerTarget) {
-        const k = Math.min(1, dt * 6);
-        pointerA += (pointerTarget - pointerA) * k;
-        if (Math.abs(pointerA - pointerTarget) < 0.01) pointerA = pointerTarget;
-        dirty = true;
-      }
-
-      if (warpT0 >= 0) {
-        warp = warpEnvelope((t - warpT0) / WARP_MS);
-        // Arrive somewhere new: swap the sky at the peak, hidden in the streaks.
-        if (reseedPending && t - warpT0 >= WARP_MS * WARP_PEAK) {
-          reseedPending = false;
-          reseedSky();
-        }
-        if (t - warpT0 >= WARP_MS) {
-          warpT0 = -1;
-          warp = 0;
-        }
-        dirty = true;
-      }
-
-      if (!reduce) clock += dt;
-      const idleDue = !reduce && t - lastPaint >= IDLE_FRAME_MS;
-      if (!dirty && !idleDue) return;
-      dirty = false;
-      lastPaint = t;
-
-      const z = Math.max(0.01, zoom);
-      LAYERS.forEach((layer, i) => {
-        const period = layer.cell * PERIOD;
-        offs[i * 2] = wrap(layerOff[i * 2], period);
-        offs[i * 2 + 1] = wrap(layerOff[i * 2 + 1], period);
-        zooms[i] = Math.pow(z, layer.depth);
-      });
-      // Sky pass into the low-res target.
+    const paintNebula = (t: number, z: number) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, nebFb);
       gl.viewport(0, 0, nebW, nebH);
       gl.useProgram(nebP.prog);
@@ -572,58 +642,186 @@ export function OrbitSpace() {
         saveSky();
       }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
 
-      // Stars at full resolution over the upscaled sky.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.useProgram(starP.prog);
+    const uploadStarView = (
+      prog: WebGLProgram,
+      loc: {
+        res: WebGLUniformLocation | null;
+        scale: WebGLUniformLocation | null;
+        time: WebGLUniformLocation | null;
+        off: WebGLUniformLocation | null;
+        zoom: WebGLUniformLocation | null;
+        warp: WebGLUniformLocation | null;
+      }
+    ) => {
+      gl.useProgram(prog);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, nebTex);
-      gl.uniform2f(u.res, canvas.width, canvas.height);
-      gl.uniform1f(u.scale, scale);
-      gl.uniform1f(u.time, clock);
-      gl.uniform2fv(u.off, offs);
-      gl.uniform1fv(u.zoom, zooms);
-      gl.uniform3f(u.pointer, pointerX * scale, canvas.height - pointerY * scale, pointerA);
-      gl.uniform1f(u.warp, warp);
+      gl.uniform2f(loc.res, canvas.width, canvas.height);
+      gl.uniform1f(loc.scale, scale);
+      gl.uniform1f(loc.time, clock);
+      gl.uniform2fv(loc.off, offs);
+      gl.uniform1fv(loc.zoom, zooms);
+      gl.uniform1f(loc.warp, warp);
+    };
+
+    const paintCompose = () => {
+      if (!composeP || !cu || !fieldTex) return;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(composeP.prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, nebTex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+      gl.uniform2f(cu.res, canvas.width, canvas.height);
+      gl.uniform1f(cu.scale, scale);
+      gl.uniform1f(cu.warp, warp);
+      gl.uniform3f(cu.pointer, pointerX * scale, canvas.height - pointerY * scale, pointerA);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
 
+    const frame = (t: number) => {
+      if (!visible || covered) {
+        raf = 0;
+        return;
+      }
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.1, (t - lastT) / 1000);
+      lastT = t;
+
+      if (orbitView.live) {
+        if (!lastLive) {
+          lastX = orbitView.x;
+          lastY = orbitView.y;
+        }
+        const dx = orbitView.x - lastX;
+        const dy = orbitView.y - lastY;
+        if (dx !== 0 || dy !== 0 || orbitView.zoom !== zoom) fieldDirty = true;
+        advance(dx * orbitView.zoom, dy * orbitView.zoom, Math.max(0.01, orbitView.zoom));
+        lastX = orbitView.x;
+        lastY = orbitView.y;
+        zoom = orbitView.zoom;
+      } else if (!reduce) {
+        advance(HOME_DRIFT.x * dt, HOME_DRIFT.y * dt, Math.max(0.01, zoom));
+        if (zoom !== 1) {
+          zoom += (1 - zoom) * Math.min(1, dt * 3);
+          if (Math.abs(zoom - 1) < 0.002) zoom = 1;
+          fieldDirty = true;
+        }
+      }
+      lastLive = orbitView.live;
+
+      if (pointerA !== pointerTarget) {
+        const k = Math.min(1, dt * 6);
+        pointerA += (pointerTarget - pointerA) * k;
+        if (Math.abs(pointerA - pointerTarget) < 0.01) pointerA = pointerTarget;
+        lightDirty = true;
+      }
+
+      if (warpT0 >= 0) {
+        warp = warpEnvelope((t - warpT0) / WARP_MS);
+        // Arrive somewhere new: swap the sky at the peak, hidden in the streaks.
+        if (reseedPending && t - warpT0 >= WARP_MS * WARP_PEAK) {
+          reseedPending = false;
+          reseedSky();
+        }
+        if (t - warpT0 >= WARP_MS) {
+          warpT0 = -1;
+          warp = 0;
+        }
+        fieldDirty = true;
+      }
+
+      if (!reduce) clock += dt;
+      // Field clock stays on the idle cadence. Pointer frames must not reset it,
+      // or a moving cursor would freeze drift until the pointer stops.
+      const idleDue = !reduce && t - lastField >= IDLE_FRAME_MS;
+      if (idleDue) fieldDirty = true;
+      if (!useCache && lightDirty) fieldDirty = true;
+      if (!fieldDirty && !lightDirty) return;
+
+      const z = Math.max(0.01, zoom);
+      if (fieldDirty) {
+        LAYERS.forEach((layer, i) => {
+          const period = layer.cell * PERIOD;
+          offs[i * 2] = wrap(layerOff[i * 2], period);
+          offs[i * 2 + 1] = wrap(layerOff[i * 2 + 1], period);
+          zooms[i] = Math.pow(z, layer.depth);
+        });
+        paintNebula(t, z);
+        if (useCache && fieldP && fu && fieldFb) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFb);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          uploadStarView(fieldP.prog, fu);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          paintCompose();
+        } else {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          uploadStarView(starP.prog, u);
+          gl.uniform3f(u.pointer, pointerX * scale, canvas.height - pointerY * scale, pointerA);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+        fieldDirty = false;
+        lightDirty = false;
+        lastField = t;
+        return;
+      }
+
+      paintCompose();
+      lightDirty = false;
+    };
+
+    const ensure = () => {
+      if (raf !== 0 || !visible || covered) return;
+      raf = requestAnimationFrame(frame);
+    };
     const onPointerMove = (e: PointerEvent) => {
       if (e.pointerType === 'touch') return;
+      pointerTarget = 1;
+      if (e.clientX === pointerX && e.clientY === pointerY) return;
       pointerX = e.clientX;
       pointerY = e.clientY;
-      pointerTarget = 1;
-      dirty = true;
+      lightDirty = true;
+      ensure();
     };
     const onPointerOut = (e: PointerEvent) => {
       if (e.relatedTarget) return;
       pointerTarget = 0;
+      ensure();
     };
     const onReduce = () => {
       reduce = reduceMq.matches;
-      dirty = true;
+      fieldDirty = true;
+      ensure();
     };
     const onVis = () => {
       visible = !document.hidden;
-      dirty = true;
+      fieldDirty = true;
+      ensure();
     };
     const onWarp = () => {
-      dirty = true;
+      fieldDirty = true;
       if (reduce) {
         reseedSky();
+        ensure();
         return;
       }
       warpT0 = performance.now();
       reseedPending = true;
+      ensure();
     };
     const onCover = () => {
       covered = readCovered();
-      dirty = true;
+      fieldDirty = true;
+      ensure();
     };
     const onLost = (e: Event) => {
       e.preventDefault();
       cancelAnimationFrame(raf);
+      raf = 0;
     };
 
     resize();
@@ -635,7 +833,7 @@ export function OrbitSpace() {
     window.addEventListener('review-orbit-cover', onCover);
     window.addEventListener('review-orbit-warp', onWarp);
     canvas.addEventListener('webglcontextlost', onLost);
-    raf = requestAnimationFrame(frame);
+    ensure();
 
     return () => {
       saveSky();
@@ -651,7 +849,10 @@ export function OrbitSpace() {
       gl.deleteBuffer(buf);
       gl.deleteFramebuffer(nebFb);
       gl.deleteTexture(nebTex);
-      for (const p of [nebP, starP]) {
+      if (fieldFb) gl.deleteFramebuffer(fieldFb);
+      if (fieldTex) gl.deleteTexture(fieldTex);
+      for (const p of [nebP, starP, fieldP, composeP]) {
+        if (!p) continue;
         gl.deleteProgram(p.prog);
         gl.deleteShader(p.vs);
         gl.deleteShader(p.fs);
