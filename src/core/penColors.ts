@@ -3,18 +3,22 @@
 const SLOTS_KEY = 'review-pen-slots';
 const CUSTOM_KEY = 'review-pen-custom-colors';
 
-export const DEFAULT_SLOTS: string[] = ['#ffffff', '#1c7ed6', '#e03131', '#ffe27a', '#2f9e44'];
+export const DEFAULT_SLOTS: string[] = ['#ffffff', '#1c7ed6', '#e03131', '#fab005', '#2f9e44'];
 
-/** Hue columns, light → dark. Rendered transposed: rows are shades, columns are hues (Miro-like). */
+/**
+ * Hue columns, light → dark. Rendered transposed: rows are shades, columns are
+ * hues. The standard picker set: neutrals (white to black) then the usual
+ * hue wheel, one clean ramp per hue.
+ */
 export const PALETTE_HUES: string[][] = [
-  ['#fff9c4', '#ffe27a', '#f6c945', '#b98a1f'], // yellow
-  ['#ffe0b8', '#ffa94d', '#e8762d', '#a34d12'], // orange
-  ['#ffc9c9', '#ff8787', '#e03131', '#a01010'], // red
-  ['#c3fad0', '#8ce99a', '#2f9e44', '#1b6b2c'], // green
-  ['#d0ebff', '#74c0fc', '#1c7ed6', '#1864ab'], // blue
-  ['#e5dbff', '#b197fc', '#7950f2', '#5230a0'], // purple
-  ['#f8f9fa', '#dee2e6', '#ced4da', '#495057'], // gray
-  ['#ffffff', '#f046d2', '#868e96', '#1c1c1a'], // white / magenta / slate / black
+  ['#ffffff', '#adb5bd', '#495057', '#000000'], // white / gray / black
+  ['#ffc9c9', '#ff6b6b', '#e03131', '#a51111'], // red
+  ['#ffd8a8', '#ffa94d', '#f76707', '#b04a00'], // orange
+  ['#fff3bf', '#ffd43b', '#fab005', '#b37d00'], // yellow
+  ['#b2f2bb', '#69db7c', '#2f9e44', '#1b5e2a'], // green
+  ['#d0ebff', '#4dabf7', '#1c7ed6', '#0b4f99'], // blue
+  ['#e5dbff', '#9775fa', '#7048e8', '#4424a0'], // purple
+  ['#ffdeeb', '#f783ac', '#d6336c', '#8f1d48'], // pink
 ];
 
 function isHex(value: string): boolean {

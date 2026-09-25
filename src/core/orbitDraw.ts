@@ -26,13 +26,19 @@ export const ORBIT_DRAW = {
   selectionUnder: 'rgba(5, 5, 6, 0.72)',
 } as const;
 
-/** Quick pen slots when Orbit paper is active (local slots only). */
-export const ORBIT_PEN_SLOTS: string[] = [
-  ORBIT_DRAW.ink,
-  ORBIT_DRAW.steel,
-  ORBIT_DRAW.dragon,
-  ORBIT_DRAW.merlin,
-  ORBIT_DRAW.abort,
+/**
+ * Quick pen slots when Orbit paper is active (local slots only): the standard
+ * set, with Orbit's white ink first so it matches the pen default.
+ */
+export const ORBIT_PEN_SLOTS: string[] = [ORBIT_DRAW.ink, ...DEFAULT_SLOTS.slice(1)];
+
+/** Pre-0.15.53 Orbit slots (mission palette); still recognized when leaving Orbit. */
+const LEGACY_ORBIT_PEN_SLOTS: string[] = [
+  ORBIT_COLORS.white,
+  ORBIT_COLORS.steel,
+  ORBIT_COLORS.dragon,
+  ORBIT_COLORS.merlin,
+  ORBIT_COLORS.abort,
 ];
 
 /** Default board paper when leaving Orbit. */
@@ -158,7 +164,8 @@ export function restoreOrbitToolDefaults(): void {
     updateShapeSettings({ stroke: PACKET_STROKE });
   }
   const slots = readPenSlots();
-  const stillOrbitSlots = slots.every((c, i) => c.toLowerCase() === ORBIT_PEN_SLOTS[i]?.toLowerCase());
+  const same = (ref: string[]) => slots.every((c, i) => c.toLowerCase() === ref[i]?.toLowerCase());
+  const stillOrbitSlots = same(ORBIT_PEN_SLOTS) || same(LEGACY_ORBIT_PEN_SLOTS);
   if (stillOrbitSlots) {
     DEFAULT_SLOTS.forEach((c, i) => writePenSlot(i, c));
     emitPenSlots();

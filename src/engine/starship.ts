@@ -15,8 +15,9 @@
  * Plumes, glow and the steam cloud are drawn live with additive blending.
  *
  * Timeline: ignition on the pad, liftoff, a pitch-over that carries the stack
- * sideways, hot staging (flash + vent jets), the booster flips and burns back,
- * and the Ship pulls away on its vacuum engines.
+ * sideways, hot staging (flash + vent jets), the booster turns about its
+ * center and burns back, turns upright and lights its entry burn, and the Ship
+ * pulls away on its vacuum engines.
  */
 
 const ASPECT = 13.8;
@@ -33,7 +34,15 @@ const LIFTOFF = 2.4;
 const SEP = 6.2;
 const SHIP_FADE_AT = SEP + 7.5;
 const SHIP_FADE = 1.6;
-const BOOSTER_LIFE = 6.5;
+const BOOSTER_LIFE = 7.2;
+/**
+ * Booster return (seconds after separation): flip to point the engines along
+ * the flight path, boostback burn, flip back to engines-down, entry burn.
+ */
+const B_FLIP1 = [0.35, 1.9] as const;
+const B_BOOSTBACK = [1.9, 3.2] as const;
+const B_FLIP2 = [3.2, 4.6] as const;
+const B_ENTRY = [4.7, 5.5] as const;
 const END = LIFTOFF + SHIP_FADE_AT + SHIP_FADE + 0.8;
 const SCENE_FADE = 2.2;
 const MAX_PUFFS = 340;
@@ -547,6 +556,11 @@ const VAC: Plume = { sea: false };
  * One engine plume along local +y from (0, 0). `w` = nozzle-cluster width,
  * `len` = visible length (already cut at the ground), `expand` = how far the
  * plume balloons as the air thins (1 at sea level).
+ *
+ * Layers, back to front: a soft glow around the nozzles, a turbulent outer
+ * sheath (three lobes that flicker independently, so the edge churns instead
+ * of pulsing as one shape), the orange body, individual engine jets merging
+ * just below the bells, the white-hot core and the Mach diamonds.
  */
 function drawPlume(
   ctx: CanvasRenderingContext2D,
@@ -561,34 +575,55 @@ function drawPlume(
   if (I <= 0.01 || len <= 1) return;
   const flick = 0.93 + 0.045 * Math.sin(t * 53) + 0.025 * Math.sin(t * 137 + 1.3);
   const L = Math.min(len, fullLen * flick);
+  const cut = len < fullLen * flick;
   const wEnd = w * (0.9 + 0.9 * (expand - 1));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
 
-  // Outer envelope.
-  ctx.globalAlpha = I * (kind.sea ? 0.55 : 0.4);
-  let gr = ctx.createLinearGradient(0, 0, 0, L);
+  // Nozzle glow.
+  const gr0 = ctx.createRadialGradient(0, w * 0.1, 0, 0, w * 0.1, w * 1.1);
   if (kind.sea) {
-    gr.addColorStop(0, 'rgba(255, 170, 90, 0.9)');
-    gr.addColorStop(0.35, 'rgba(255, 120, 55, 0.55)');
-    gr.addColorStop(0.8, 'rgba(190, 70, 80, 0.18)');
-    gr.addColorStop(1, 'rgba(150, 60, 90, 0)');
+    gr0.addColorStop(0, 'rgba(255, 220, 170, 0.55)');
+    gr0.addColorStop(1, 'rgba(255, 140, 60, 0)');
   } else {
-    gr.addColorStop(0, 'rgba(200, 190, 255, 0.8)');
-    gr.addColorStop(0.4, 'rgba(140, 130, 240, 0.35)');
-    gr.addColorStop(1, 'rgba(120, 110, 220, 0)');
+    gr0.addColorStop(0, 'rgba(225, 220, 255, 0.45)');
+    gr0.addColorStop(1, 'rgba(150, 140, 255, 0)');
   }
-  ctx.fillStyle = gr;
-  ctx.beginPath();
-  ctx.moveTo(-w * 0.55, 0);
-  ctx.bezierCurveTo(-wEnd * 1.2, L * 0.3, -wEnd * 1.05, L * 0.75, 0, L);
-  ctx.bezierCurveTo(wEnd * 1.05, L * 0.75, wEnd * 1.2, L * 0.3, w * 0.55, 0);
-  ctx.closePath();
-  ctx.fill();
+  ctx.globalAlpha = I;
+  ctx.fillStyle = gr0;
+  ctx.fillRect(-w * 1.2, -w, w * 2.4, w * 2.3);
+
+  // Turbulent outer sheath.
+  for (let k = 0; k < 3; k++) {
+    const ph = k * 2.1;
+    const wob = 1 + 0.09 * Math.sin(t * (23 + k * 7) + ph) + 0.05 * Math.sin(t * (61 + k * 11) + ph * 2);
+    const lk = L * (0.86 + 0.12 * k) * (cut ? 1 : 0.97 + 0.05 * Math.sin(t * (41 + k * 5) + ph));
+    const sway = w * 0.12 * Math.sin(t * (17 + k * 3) + ph);
+    ctx.globalAlpha = I * (kind.sea ? 0.26 : 0.18);
+    const gr = ctx.createLinearGradient(0, 0, 0, lk);
+    if (kind.sea) {
+      gr.addColorStop(0, 'rgba(255, 175, 95, 0.95)');
+      gr.addColorStop(0.3, 'rgba(255, 125, 55, 0.6)');
+      gr.addColorStop(0.75, 'rgba(200, 75, 60, 0.2)');
+      gr.addColorStop(1, 'rgba(150, 60, 80, 0)');
+    } else {
+      gr.addColorStop(0, 'rgba(205, 195, 255, 0.85)');
+      gr.addColorStop(0.4, 'rgba(145, 135, 240, 0.35)');
+      gr.addColorStop(1, 'rgba(120, 110, 220, 0)');
+    }
+    ctx.fillStyle = gr;
+    const we = wEnd * wob;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.55, 0);
+    ctx.bezierCurveTo(-we * 1.25, lk * 0.28, -we * 1.05, lk * 0.72, sway, lk);
+    ctx.bezierCurveTo(we * 1.05, lk * 0.72, we * 1.25, lk * 0.28, w * 0.55, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // Body.
   ctx.globalAlpha = I * 0.9;
-  gr = ctx.createLinearGradient(0, 0, 0, L * 0.85);
+  let gr = ctx.createLinearGradient(0, 0, 0, L * 0.85);
   if (kind.sea) {
     gr.addColorStop(0, 'rgba(255, 246, 225, 1)');
     gr.addColorStop(0.18, 'rgba(255, 214, 150, 0.95)');
@@ -606,6 +641,29 @@ function drawPlume(
   ctx.quadraticCurveTo(wEnd * 0.7, L * 0.45, w * 0.46, 0);
   ctx.closePath();
   ctx.fill();
+
+  // Individual engine jets fanning out of the cluster and merging below it.
+  const jets = kind.sea ? 7 : 3;
+  const jl = w * (kind.sea ? 0.95 : 0.8);
+  for (let k = 0; k < jets; k++) {
+    const f = k / (jets - 1) - 0.5;
+    const jx = f * w * 0.78;
+    const splay = f * 0.35 * expand;
+    const jw = w * (kind.sea ? 0.075 : 0.13);
+    const lj = jl * (0.9 + 0.1 * Math.sin(t * 71 + k * 1.7));
+    ctx.globalAlpha = I * 0.8;
+    const jg = ctx.createLinearGradient(0, 0, 0, lj);
+    jg.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    jg.addColorStop(0.5, kind.sea ? 'rgba(255, 235, 195, 0.6)' : 'rgba(230, 228, 255, 0.5)');
+    jg.addColorStop(1, 'rgba(255, 220, 170, 0)');
+    ctx.fillStyle = jg;
+    ctx.beginPath();
+    ctx.moveTo(jx - jw, 0);
+    ctx.quadraticCurveTo(jx - jw * 1.2 + splay * lj * 0.5, lj * 0.5, jx + splay * lj, lj);
+    ctx.quadraticCurveTo(jx + jw * 1.2 + splay * lj * 0.5, lj * 0.5, jx + jw, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // White-hot core.
   ctx.globalAlpha = I;
@@ -627,10 +685,23 @@ function drawPlume(
     for (let i = 0; i < 6; i++) {
       const y = w * 0.5 + i * step;
       if (y > L * 0.8) break;
-      ctx.globalAlpha = I * dia * 0.7 * (1 - i / 6);
-      ctx.fillStyle = '#fff7e8';
+      const a = I * dia * 0.7 * (1 - i / 6);
+      // Soft halo, then a crisp diamond.
+      ctx.globalAlpha = a * 0.5;
+      ctx.fillStyle = '#ffd9a8';
       ctx.beginPath();
-      ctx.ellipse(0, y, w * 0.16 * (1 - i * 0.08), w * 0.26, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, y, w * 0.26 * (1 - i * 0.08), w * 0.34, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#fff7e8';
+      const dw = w * 0.15 * (1 - i * 0.08);
+      const dh = w * 0.27;
+      ctx.beginPath();
+      ctx.moveTo(0, y - dh);
+      ctx.quadraticCurveTo(dw * 0.35, y - dh * 0.35, dw, y);
+      ctx.quadraticCurveTo(dw * 0.35, y + dh * 0.35, 0, y + dh);
+      ctx.quadraticCurveTo(-dw * 0.35, y + dh * 0.35, -dw, y);
+      ctx.quadraticCurveTo(-dw * 0.35, y - dh * 0.35, 0, y - dh);
       ctx.fill();
     }
   }
@@ -658,6 +729,7 @@ export class StarshipLaunch {
   private ang = 0;
   private v = 0;
   private staged = false;
+  /** Separated booster; x, y is its middle so it turns about its own center. */
   private boost: { x: number; y: number; vx: number; vy: number; ang: number; ang0: number; age: number } | null = null;
   private puffs: Puff[] = [];
   private puffCarry = 0;
@@ -737,7 +809,15 @@ export class StarshipLaunch {
       this.staged = true;
       const vx = Math.sin(this.ang) * this.v;
       const vy = -Math.cos(this.ang) * this.v;
-      this.boost = { x: this.x, y: this.y, vx: vx * 0.92, vy: vy * 0.92, ang: this.ang, ang0: this.ang, age: 0 };
+      this.boost = {
+        x: this.x + (Math.sin(this.ang) * this.B) / 2,
+        y: this.y - (Math.cos(this.ang) * this.B) / 2,
+        vx: vx * 0.92,
+        vy: vy * 0.92,
+        ang: this.ang,
+        ang0: this.ang,
+        age: 0,
+      };
       // Ship base now sits where the ring was.
       this.x += Math.sin(this.ang) * this.B;
       this.y -= Math.cos(this.ang) * this.B;
@@ -745,33 +825,45 @@ export class StarshipLaunch {
     const b = this.boost;
     if (b) {
       b.age += dt;
-      // Coast, flip over the top, then a boostback burn along the new heading.
+      // Attitude follows a scripted, eased program (never a free spin):
+      // coast, turn the engines toward the flight path, burn back, then turn
+      // upright (engines down) for the fall and the entry burn.
+      const boostbackAng = -this.dir * 1.3;
+      const k1 = smooth((b.age - B_FLIP1[0]) / (B_FLIP1[1] - B_FLIP1[0]));
+      const k2 = smooth((b.age - B_FLIP2[0]) / (B_FLIP2[1] - B_FLIP2[0]));
+      const a1 = b.ang0 + (boostbackAng - b.ang0) * k1;
+      b.ang = a1 + (this.dir * 0.05 - a1) * k2;
+      // Gravity and a little drag, plus the burns along the body axis.
       b.vy += this.aStack * 0.9 * dt;
-      b.vx *= Math.exp(-0.3 * dt);
-      b.ang = b.ang0 - this.dir * Math.PI * smooth((b.age - 0.35) / 1.7);
+      const drag = Math.exp(-0.25 * dt);
+      b.vx *= drag;
+      b.vy *= drag;
       const bb = this.boostbackThrust();
-      if (bb > 0) {
-        b.vx += Math.sin(b.ang) * this.aStack * 1.8 * bb * dt;
-        b.vy -= Math.cos(b.ang) * this.aStack * 1.8 * bb * dt;
+      const eb = this.entryThrust();
+      const thrust = this.aStack * (1.9 * bb + 2.4 * eb);
+      if (thrust > 0) {
+        b.vx += Math.sin(b.ang) * thrust * dt;
+        b.vy -= Math.cos(b.ang) * thrust * dt;
       }
       b.x += b.vx * dt;
       b.y += b.vy * dt;
-      // Cold-gas puffs from the top while it flips.
-      if (b.age > 0.3 && b.age < 2 && this.rand() < dt * 18) {
-        const top = this.B * 0.97;
+      // Cold-gas puffs from the top while it turns.
+      const turning = (b.age > B_FLIP1[0] && b.age < B_FLIP1[1] - 0.2) || (b.age > B_FLIP2[0] && b.age < B_FLIP2[1] - 0.2);
+      if (turning && this.rand() < dt * 22) {
+        const top = this.B * 0.47;
         const side = this.rand() < 0.5 ? -1 : 1;
         const nx = Math.sin(b.ang);
         const ny = -Math.cos(b.ang);
         this.addPuff({
           x: b.x + nx * top,
           y: b.y + ny * top,
-          vx: -ny * side * 60,
-          vy: nx * side * 60,
-          r: this.W * 0.25,
-          grow: this.W * 0.9,
+          vx: -ny * side * 60 + b.vx * 0.5,
+          vy: nx * side * 60 + b.vy * 0.5,
+          r: this.W * 0.22,
+          grow: this.W * 0.8,
           age: 0,
           life: 0.7,
-          alpha: 0.5,
+          alpha: 0.45,
           v: 0,
         });
       }
@@ -797,7 +889,13 @@ export class StarshipLaunch {
   private boostbackThrust(): number {
     const b = this.boost;
     if (!b) return 0;
-    return smooth((b.age - 1.8) / 0.25) * (1 - smooth((b.age - 3.1) / 0.3));
+    return smooth((b.age - B_BOOSTBACK[0]) / 0.25) * (1 - smooth((b.age - B_BOOSTBACK[1] + 0.2) / 0.25));
+  }
+
+  private entryThrust(): number {
+    const b = this.boost;
+    if (!b) return 0;
+    return smooth((b.age - B_ENTRY[0]) / 0.15) * (1 - smooth((b.age - B_ENTRY[1] + 0.15) / 0.2));
   }
 
   /** Where the booster plume meets the ground (u), and how hard (0..1). */
@@ -922,14 +1020,20 @@ export class StarshipLaunch {
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(b.ang);
+      // Sprite and plumes are anchored at the base; b.x, b.y is the middle.
+      ctx.translate(0, this.B / 2);
       ctx.globalAlpha = fade;
-      const bs = this.sprites.booster;
-      if (bs) ctx.drawImage(bs.c, -bs.ax, -bs.ay, bs.w, bs.h);
-      // Tail-off of the main burn right after separation, then boostback.
+      // Plumes first so the hull sits on top of the nozzle glow.
+      // Tail-off of the main burn right after separation, then boostback
+      // (13 engines) and the shorter entry burn (3 engines).
       const tail = 1 - smooth(b.age / 0.35);
       const bb = this.boostbackThrust();
+      const eb = this.entryThrust();
       if (tail > 0.01) drawPlume(ctx, this.W * 0.9, this.H * 0.5, this.H * 0.5, tail * fade, 2.2, t, SEA);
-      if (bb > 0.01) drawPlume(ctx, this.W * 0.55, this.H * 0.34, this.H * 0.34, bb * fade, 2.4, t, SEA);
+      if (bb > 0.01) drawPlume(ctx, this.W * 0.6, this.H * 0.36, this.H * 0.36, bb * fade, 2.2, t + 3.1, SEA);
+      if (eb > 0.01) drawPlume(ctx, this.W * 0.5, this.H * 0.32, this.H * 0.32, eb * fade, 1.3, t + 7.3, SEA);
+      const bs = this.sprites.booster;
+      if (bs) ctx.drawImage(bs.c, -bs.ax, -bs.ay, bs.w, bs.h);
       ctx.restore();
     }
 

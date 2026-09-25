@@ -82,23 +82,37 @@ function HomeRoute() {
   return <Home locale={readLocale()} />;
 }
 
-/** Persistent Orbit chrome — survives home ↔ board so the shader doesn't remount. */
+function readOrbitBoard(): boolean {
+  return document.documentElement.dataset.orbitBoard === '1';
+}
+
+/**
+ * Persistent Orbit layers — survive home ↔ board so the shader doesn't remount.
+ * The space backdrop shows under the Orbit interface, and under any interface
+ * while a board is on Orbit paper (the two are chosen independently). The
+ * tactile layer belongs to the Orbit interface only.
+ */
 function OrbitChrome() {
   const [theme, setTheme] = useState<ChromeThemeId>(() => readChromeTheme());
+  const [board, setBoard] = useState(readOrbitBoard);
   useEffect(() => {
     const sync = () => setTheme(readChromeTheme());
+    const syncBoard = () => setBoard(readOrbitBoard());
     window.addEventListener('review-chrome-theme', sync);
     window.addEventListener('storage', sync);
+    window.addEventListener('review-orbit-board', syncBoard);
     return () => {
       window.removeEventListener('review-chrome-theme', sync);
       window.removeEventListener('storage', sync);
+      window.removeEventListener('review-orbit-board', syncBoard);
     };
   }, []);
-  if (theme !== 'orbit') return null;
+  const chrome = theme === 'orbit';
+  if (!chrome && !board) return null;
   return (
     <>
       <OrbitSpace />
-      <OrbitTactile />
+      {chrome && <OrbitTactile />}
     </>
   );
 }

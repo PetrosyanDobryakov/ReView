@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.15.56
+
+### Orbit polish
+- **Stars are plain and static**: gray-to-white only (no blue / warm / orange tints), no halo and no twinkle, dimmer bright stars. The sky haze is neutral too, and the settings preview cards use gray stars.
+- **Starship booster return**: the booster now turns about its own center (it used to swing around its engine end and then slide off at a frozen angle), turns its engines along the flight path for the boostback burn, turns upright engines-down, and lights a short entry burn before fading.
+- **Starship plumes**: more detailed fire: nozzle glow, a turbulent sheath of three independently flickering lobes, individual engine jets merging below the bells, softer Mach diamonds with halos.
+- **Rotate-knob rocket**: the booster also turns about its center with a boostback lean, legs out on approach; drawn sea-level / vacuum plumes (core, sheath, shock diamonds) instead of a flat glow, and flame particles cool smoothly white to orange.
+- **Toggles on Orbit** look and behave like the default themes (no press-scale on the row, no Orbit-only colors).
+- **Calculator / graph**: the green status light is gone; the calculator's execute key is light gray instead of white.
+- Orbit paper preview card: the limb sits higher so the card shows sky over the planet, with the label on the planet.
+
+### Palette
+- Standard color picker for pen / shapes / text: neutrals (white, gray, charcoal, black) then red, orange, yellow, green, blue, purple, pink ramps. Default yellow slot is a real yellow. Orbit quick slots use the same standard colors (white ink first) instead of the mission palette; old Orbit slots are still restored on leaving Orbit.
+
+### Interface and board themes are independent
+- Orbit interface and Orbit board paper no longer lock each other: pick the Orbit interface over any paper (Charcoal, Cream, custom...), or Orbit paper under any interface (Charcoal, White, Custom...). Choosing one never switches the other. The space backdrop now shows under any interface while the board is on Orbit paper, and Orbit board effects (stardust pen, burn-up, lock brackets, rocket launch) follow the paper, not the interface. Turning the Orbit unlock off still leaves both.
+
+### Fix
+- **Custom board color works from Orbit**: choosing "Custom" while on Orbit paper re-applied the Orbit paper (the custom seed picked it up), so a custom color could never be set. Orbit paper is no longer used as a custom seed.
+
 ## 0.15.55
 
 ### Ops
