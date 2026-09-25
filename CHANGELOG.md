@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.15.57
+
+### Starship finale realism
+- **Booster return and tower catch**: after hot staging the booster flips on its 3 center engines (gimbaled plume), burns back toward the pad on 13 engines, turns engines-down and falls under gravity and drag with grid-fin steering toward the tower. A guided landing burn (13 engines, then the center 3) lights exactly when the fall needs it, it hovers down between the open chopsticks, the arms swing closed under the grid fins, the pins settle on the arms with a small bounce, the engines cut and the tanks vent. It no longer floats around and fades out mid-air.
+- **Gentle ascent**: straight up past the tower, a small pitch kick, then a slow gravity turn (about 7 degrees at staging instead of 34, about 21 for the Ship afterwards instead of 60). The pad and tower sit centered in the view.
+- **More detail**: frost flakes shed off the tanks at ignition and liftoff, a vapor cone around the Ship through max-Q, the Ship's plume scorching the booster's ring at separation, engine bells glowing dull red after each burn, the landing plume hitting the mount with its own steam and glow, and a live chopstick carriage and truss arms (near arm over the booster, far arm behind).
+
+### Orbit sky
+- Stars are a bit more present: more mid-bright stars, slightly brighter and wider points, still static and gray-to-white.
+
 ## 0.15.56
 
 ### Orbit polish

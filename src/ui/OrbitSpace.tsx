@@ -178,7 +178,7 @@ void main() {
 const STAR_LIB = `
 // Monochrome: every star is a neutral gray-to-white point; only brightness varies.
 vec3 starTint(float t) {
-  return vec3(mix(0.62, 1.0, t));
+  return vec3(mix(0.68, 1.0, t));
 }
 
 vec3 stars(vec2 css, vec2 off, float zoom, float cell, float density, float bright, float seed) {
@@ -190,11 +190,11 @@ vec3 stars(vec2 css, vec2 off, float zoom, float cell, float density, float brig
   vec2 pos = (0.1 + 0.8 * vec2(hash21(id + seed * 1.7), hash21(id + seed * 2.3))) * cell;
   float dPx = length(f - pos) * zoom;
   // Heavy-tailed magnitudes: most stars sit near the visibility floor.
-  float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
-  float amp = 0.05 + 0.85 * min(b, 1.0);
+  float b = pow(hash21(id + seed * 3.1), 6.0) * bright;
+  float amp = 0.08 + 0.9 * min(b, 1.0);
   // Point spread in device pixels, so stars stay pin-sharp at any DPR. No
   // halo, no twinkle: plain static points.
-  float sigma = (0.5 + 0.25 * min(b, 1.0)) / uScale;
+  float sigma = (0.55 + 0.25 * min(b, 1.0)) / uScale;
   float psf = exp(-(dPx * dPx) / (2.0 * sigma * sigma));
   // Fade a layer out once its cells shrink on screen (deep zoom-out).
   float fade = smoothstep(10.0, 36.0, cell * zoom);
@@ -223,8 +223,8 @@ vec3 starsWarp(vec2 css, vec2 off, float zoom, float cell, float density, float 
       vec2 ba = s - tail;
       float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
       float d = length(pa - ba * t);
-      float b = pow(hash21(id + seed * 3.1), 7.0) * bright;
-      float amp = 0.12 + 0.85 * min(b, 1.0);
+      float b = pow(hash21(id + seed * 3.1), 6.0) * bright;
+      float amp = 0.14 + 0.9 * min(b, 1.0);
       float sigma = (0.55 + 0.25 * min(b, 1.0)) / uScale;
       float psf = exp(-(d * d) / (2.0 * sigma * sigma)) * mix(0.25, 1.0, t);
       acc += starTint(hash21(id + seed * 5.9)) * psf * amp;
