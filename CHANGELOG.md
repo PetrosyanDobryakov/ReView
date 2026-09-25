@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.53
+
+### Performance
+- **Orbit sky:** the pointer light, vignette and dither composite over a cached star field, so moving the cursor no longer reruns the nebula and star shaders. The field itself stays on the existing idle clock (about 10fps for drift and scintillation) and the shader loop pauses while it is hidden or covered. The picture matches the previous full pass (verified pixel-for-pixel, including the work light).
+
 ## 0.15.52
 
 ### Orbit rework
