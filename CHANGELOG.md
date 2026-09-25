@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.15.54
+
+### Ops
+- **Workers Builds rustup:** `scripts/build-sync-worker.sh` installs rustup (stable, minimal) and the `wasm32-unknown-unknown` target when `rustup` is missing, then runs `worker-build` 0.8.6. Workers Builds images have `curl` and `build-essential` but not Rust, so production deploys of `60b9eb5` (`bash scripts/deploy.sh all`) died with `build-sync-worker: rustup is required` after the SPA build succeeded. No dashboard install command is required for Rust. Non-production deploy on tip was still `echo done` (set that field to `bash scripts/deploy.sh all` or tip builds never run the script).
+
 ## 0.15.53
 
 ### Performance

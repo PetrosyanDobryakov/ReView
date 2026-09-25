@@ -60,7 +60,7 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 
 ### Workers Builds — deploy must actually deploy
 
-**Status (2026-09-18 audit):** Tip and live can match after **manual** `bash scripts/deploy.sh all` (verified `0.15.46+4e1e96b` on https://review.zpro-driftman.workers.dev/). Worker **review** Builds has repeatedly recorded `deployCommand: echo done` on tip pushes — Builds green-checks without publishing. Builds MCP/API remains **read-only** for agents — dashboard config only. Until Deploy / non-prod Deploy are both `bash scripts/deploy.sh all`, treat Builds as non-authoritative and ship with the script + Wrangler auth.
+**Status (2026-09-25):** Production Deploy for Worker **review** is `bash scripts/deploy.sh all`. `main` at `60b9eb5` (0.15.53) built the SPA, then died in `scripts/build-sync-worker.sh` with `rustup is required` (builds `510b0e25-9922-4716-a898-2cb82f2a60b2`, `13f8f6a6-90a5-4ce8-857f-d505725980ee`). The Builds image is Ubuntu 24.04 with `curl` and `build-essential`, not Rust. From 0.15.54 the script installs rustup (stable, minimal, `wasm32-unknown-unknown`) when it is missing — no dashboard install command is required for that. Non-production deploy was still `echo done` on the same commit (`dev-warexpor` `6a6a00fc-6579-443d-aac4-54739691555a`, `dev-warexpor-rust` `cc5ec7ab-f135-4604-9292-92377a3745a9`), so tip pushes green-check without publishing. Set **Non-production branch deploy command** to `bash scripts/deploy.sh all`. Builds MCP/API remains **read-only** for agents. Live `0.15.53+60b9eb5` was a manual Omarchy deploy, not that failed CI run.
 
 #### Preferred: one Builds project on Worker **review**
 
@@ -79,6 +79,8 @@ Account id is public for this project: `3058d81da41b02e06744d5d058570aab` (Zpro.
 | Build command | `npm run build` |
 | **Deploy command** | **`bash scripts/deploy.sh all`** |
 | **Non-production branch deploy command** | **`bash scripts/deploy.sh all`** (or set production branch to `dev-warexpor`) |
+
+Leave the install command as the npm install (default `npm clean-install` is enough). Do not add rustup there: `scripts/build-sync-worker.sh` installs it during the deploy step.
 
 #### Do NOT accept the “name = 'review-sync'” banner on root `wrangler.toml`
 

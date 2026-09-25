@@ -1,6 +1,6 @@
 # ReView Sync Worker (Cloudflare Worker + Durable Object)
 
-The published worker is the Rust crate in this folder (`review-sync-do`, workers-rs). `npx wrangler deploy` runs `scripts/build-sync-worker.sh` and uploads `build/index.js` plus `build/index_bg.wasm`. `src/*.ts` is kept for the Node unit tests and is not the deploy entry.
+The published worker is the Rust crate in this folder (`review-sync-do`, workers-rs). `npx wrangler deploy` runs `scripts/build-sync-worker.sh` and uploads `build/index.js` plus `build/index_bg.wasm`. That script installs rustup and `wasm32-unknown-unknown` when they are missing (Workers Builds has no Rust toolchain). `src/*.ts` is kept for the Node unit tests and is not the deploy entry.
 
 `BOARD_ROOM` — одна DO-комната на `review-<boardId>`. Реле Yjs (sync + awareness). Пустые комнаты GC через alarm **90 с**. Hibernation: `acceptWebSocket` и `setWebSocketAutoResponse` (`review-ka` / `review-ka-ack`).
 
