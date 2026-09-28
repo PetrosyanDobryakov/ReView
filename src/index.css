@@ -4891,9 +4891,9 @@ h3 .swap-text,
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  overflow: visible;
   --g-c1: hsl(var(--g-h, 40) 70% 64%);
-  --g-c2: hsl(var(--g-h2, 200) 55% 60%);
+  --g-c2: hsl(var(--g-h2, 160) 58% 60%);
+  --g-c3: hsl(var(--g-h3, 260) 62% 66%);
 }
 .board-glyph-paper {
   fill: color-mix(in oklab, var(--g-c1) 7%, var(--chrome-bg));
@@ -4903,35 +4903,43 @@ h3 .swap-text,
 }
 .board-row:hover .board-glyph-paper,
 .board-row.has-menu .board-glyph-paper {
-  fill: color-mix(in oklab, var(--g-c1) 10%, var(--chrome-bg));
+  fill: color-mix(in oklab, var(--g-c1) 11%, var(--chrome-bg));
 }
 .board-glyph-dots {
   stroke: var(--chrome-text-dim);
   stroke-width: 1.1;
   stroke-linecap: round;
-  opacity: 0.28;
+  opacity: 0.26;
 }
-.board-glyph-sticky {
-  fill: color-mix(in oklab, var(--g-c1) 85%, var(--chrome-bg));
-}
-.board-glyph-sticky-fold {
-  fill: color-mix(in oklab, var(--g-c1) 55%, var(--chrome-bg));
-}
-.board-glyph-doodle {
+.board-glyph .f1 { fill: color-mix(in oklab, var(--g-c1) 88%, var(--chrome-bg)); }
+.board-glyph .f2 { fill: color-mix(in oklab, var(--g-c2) 88%, var(--chrome-bg)); }
+.board-glyph .f3 { fill: color-mix(in oklab, var(--g-c3) 88%, var(--chrome-bg)); }
+.board-glyph .soft { fill-opacity: 0.32; }
+.board-glyph .wedge { stroke: color-mix(in oklab, var(--g-c1) 7%, var(--chrome-bg)); stroke-width: 0.8; }
+.board-glyph .fold { fill: #000; opacity: 0.2; }
+.board-glyph .s1,
+.board-glyph .s2,
+.board-glyph .s3,
+.board-glyph .ink,
+.board-glyph .paperline {
   fill: none;
-  stroke: var(--g-c2);
   stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.board-glyph-ink {
-  fill: none;
-  stroke: var(--chrome-text);
-  stroke-width: 1.9;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.82;
-}
+.board-glyph .s1 { stroke: var(--g-c1); }
+.board-glyph .s2 { stroke: var(--g-c2); }
+.board-glyph .s3 { stroke: var(--g-c3); }
+.board-glyph .s1.tint { fill: color-mix(in oklab, var(--g-c1) 22%, transparent); }
+.board-glyph .s2.tint { fill: color-mix(in oklab, var(--g-c2) 22%, transparent); }
+.board-glyph .s3.tint { fill: color-mix(in oklab, var(--g-c3) 22%, transparent); }
+.board-glyph .ink { stroke: color-mix(in oklab, var(--chrome-text) 82%, transparent); stroke-width: 1.9; }
+.board-glyph .ink.thin { stroke-width: 1.3; }
+.board-glyph .ink.bold { stroke-width: 2.6; }
+.board-glyph .inkf { fill: var(--chrome-text-dim); }
+.board-glyph .faint { fill: var(--chrome-text); fill-opacity: 0.07; }
+.board-glyph .paperf { fill: color-mix(in oklab, var(--g-c1) 7%, var(--chrome-bg)); }
+.board-glyph .paperline { stroke: var(--chrome-bg); stroke-width: 1.1; }
 .board-main {
   flex: 1;
   min-width: 0;
