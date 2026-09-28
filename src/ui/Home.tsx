@@ -549,7 +549,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     }
                   }}
                 >
-                  <BoardGlyph id={b.id} />
+                  <BoardGlyph id={b.id} name={b.name} />
                   <span className="board-main">
                     {editingBoard === b.id ? (
                       <input
