@@ -17,8 +17,6 @@ type CursorSpec = {
   hy: number;
 };
 
-const PEN_FIT = 'translate(12 12) scale(0.86) translate(-12 -12)';
-
 /** Muted adaptive stroke — softer than board text (#1c1c1a / #eceae4). */
 const STROKE_ON_LIGHT = '#6e6c66';
 const STROKE_ON_DARK = '#a8a59c';
@@ -32,7 +30,7 @@ function cursorStroke(bg: string): string {
   return lum > 0.5 ? STROKE_ON_LIGHT : STROKE_ON_DARK;
 }
 
-const STROKE = (c: string, w = 2) =>
+const STROKE = (c: string, w = 1.75) =>
   `fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"`;
 
 /** Same markup as `Icon` for lasso — loop + handle + optical nudge. */
@@ -49,9 +47,7 @@ function lassoBody(pad: number, stroke: string): string {
 function iconBody(name: IconName, stroke: string): string {
   const nudge = ICON_NUDGE[name];
   const inner =
-    name === 'pen'
-      ? `<g transform="${PEN_FIT}"><path d="${ICON_PATHS.pen}"/></g>`
-      : name === 'lasso'
+    name === 'lasso'
         ? `<path d="${ICON_PATHS.lasso}"/><path d="${LASSO_HANDLE}"/>`
         : `<path d="${ICON_PATHS[name]}"/>`;
   const content = nudge
@@ -61,7 +57,7 @@ function iconBody(name: IconName, stroke: string): string {
 }
 
 const SPECS: Partial<Record<ToolId, CursorSpec>> = {
-  select: { icon: 'select', hx: 5, hy: 4 },
+  select: { icon: 'select', hx: 4, hy: 5 },
   lasso: {
     view: 40,
     hx: 12,
@@ -70,12 +66,12 @@ const SPECS: Partial<Record<ToolId, CursorSpec>> = {
   },
   pen: {
     view: 32,
-    hx: 6,
-    hy: 26,
+    hx: 8,
+    hy: 23,
     body: (stroke) =>
       `<g transform="translate(4 2) scale(1.05)" ${STROKE(stroke)}><path d="${ICON_PATHS.pen}"/></g>`,
   },
-  eraser: { icon: 'eraser', hx: 5, hy: 19 },
+  eraser: { icon: 'eraser', hx: 6, hy: 17 },
   rect: { icon: 'rect', hx: 12, hy: 12 },
   ellipse: { icon: 'ellipse', hx: 12, hy: 12 },
   sticky: { icon: 'sticky', hx: 12, hy: 12 },

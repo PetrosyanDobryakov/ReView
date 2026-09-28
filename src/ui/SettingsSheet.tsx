@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   pickerChromeThemeIds,
   readCustomColors,
@@ -53,29 +53,29 @@ import {
   writePrefs,
   type AppPrefs,
 } from '../core/prefs';
-import { loadUser, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
+import { loadUser, onUserChange, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
 import type { ToolId } from '../engine/tools';
 import { Icon, type IconName } from './icons';
-import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t } from './i18n';
+import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t, type MessageKey } from './i18n';
 import { isOrbitPaper } from '../core/orbit';
-import { PACKET_PAPER } from '../core/orbitDraw';
 import { MOTION, useExitPresence } from './motion';
-import { SlideTrack } from './SlideTrack';
-import { SwapText } from './SwapText';
+import { APP_VERSION } from '../core/version';
 
-type SettingsTab = 'system' | 'binds' | 'customize';
+/**
+ * 1.0 settings: a centered two-pane dialog. The rail scans top-down (you, then
+ * four sections); each pane scrolls on its own. Same settings as the old sheet,
+ * regrouped: nothing here writes new data.
+ */
+type Pane = 'look' | 'keys' | 'ui' | 'net';
 
-type BindTarget =
-  | { kind: 'tool'; id: ToolId }
-  | { kind: 'color'; color: string };
+const PANES: Array<{ id: Pane; icon: IconName; label: MessageKey }> = [
+  { id: 'look', icon: 'palette', label: 'paneLook' },
+  { id: 'keys', icon: 'keyboard', label: 'paneKeys' },
+  { id: 'ui', icon: 'sliders', label: 'paneUi' },
+  { id: 'net', icon: 'wifi', label: 'paneNet' },
+];
 
-const TABS: SettingsTab[] = ['customize', 'binds', 'system'];
-
-const TAB_LABEL: Record<SettingsTab, 'tabSystem' | 'tabBinds' | 'tabCustomize'> = {
-  system: 'tabSystem',
-  binds: 'tabBinds',
-  customize: 'tabCustomize',
-};
+type BindTarget = { kind: 'tool'; id: ToolId } | { kind: 'color'; color: string };
 
 const CUSTOM_COLOR_FIELDS: Array<{
   key: keyof CustomChromeColors;
@@ -108,19 +108,11 @@ const BLOCKED_BIND_CODES = new Set([
   'ArrowRight',
 ]);
 
-function toolBindLabel(locale: LocaleId, id: ToolId): string {
-  return t(locale, id)
+function plainLabel(text: string): string {
+  return text
     .replace(/ \(.+\)$/, '')
     .replace(/ [—–-].+$/, '')
     .trim();
-}
-
-function isLightPaper(hex: string): boolean {
-  if (!/^#[0-9a-fA-F]{6}$/i.test(hex)) return false;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 168;
 }
 
 function isListeningTarget(listening: BindTarget | null, target: BindTarget): boolean {
@@ -130,29 +122,148 @@ function isListeningTarget(listening: BindTarget | null, target: BindTarget): bo
   return false;
 }
 
-/** Height rollout for custom color swatches when Custom is chosen. */
-function CustomSwatchRollout({ open, children }: { open: boolean; children: ReactNode }) {
-  const mounted = useExitPresence(open, MOTION.sheet);
-  const [expanded, setExpanded] = useState(false);
+function initialOf(name: string): string {
+  const ch = [...name.trim()][0];
+  return ch ? ch.toUpperCase() : '?';
+}
 
-  useEffect(() => {
-    if (!mounted || !open) {
-      setExpanded(false);
-      return;
-    }
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setExpanded(true));
-    });
-    return () => cancelAnimationFrame(id);
-  }, [mounted, open]);
-
-  if (!mounted) return null;
+function Toggle({
+  label,
+  hint,
+  on,
+  disabled,
+  onChange,
+}: {
+  label: ReactNode;
+  hint?: string;
+  on: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
   return (
-    <div className={`custom-theme-roll${expanded ? ' is-open' : ''}`}>
-      <div className="custom-theme-roll-clip">
-        <div className="custom-theme-row">{children}</div>
-      </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      className={`sd-row sd-toggle${on ? ' on' : ''}`}
+      onClick={() => onChange(!on)}
+    >
+      <span className="sd-row-text">
+        <b>{label}</b>
+        {hint ? <small>{hint}</small> : null}
+      </span>
+      <span className="switch" aria-hidden="true">
+        <span className="switch-thumb" />
+      </span>
+    </button>
+  );
+}
+
+function Seg<T extends string>({
+  value,
+  options,
+  label,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ id: T; label: string }>;
+  label: string;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="sd-seg" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          className={value === o.id ? 'on' : ''}
+          onClick={() => onChange(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
+  );
+}
+
+/** Range that commits on release (UI scale re-lays the whole chrome). */
+function Range({
+  value,
+  min,
+  max,
+  step,
+  label,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  label: string;
+  onCommit: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const shown = draft ?? value;
+  const commit = () => {
+    if (draft != null) {
+      onCommit(draft);
+      setDraft(null);
+    }
+  };
+  const pct = ((shown - min) / (max - min)) * 100;
+  return (
+    <span className="sd-range">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={shown}
+        aria-label={label}
+        style={{ ['--fill' as string]: `${pct}%` }}
+        onInput={(e) => setDraft(Number((e.target as HTMLInputElement).value))}
+        onChange={(e) => setDraft(Number((e.target as HTMLInputElement).value))}
+        onPointerUp={commit}
+        onTouchEnd={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+      <output>{Math.round(shown * 100)}%</output>
+    </span>
+  );
+}
+
+/** Mini interface preview drawn in the theme's own tokens. */
+function ThemePreview({ id, custom }: { id: ChromeThemeId; custom: CustomChromeColors }) {
+  const style =
+    id === 'custom'
+      ? ({
+          ['--chrome-bg' as string]: custom.bg,
+          ['--chrome-panel' as string]: custom.panel,
+          ['--chrome-border' as string]: 'rgba(127,127,127,.28)',
+          ['--chrome-accent-strong' as string]: custom.accent,
+          ['--chrome-text' as string]: custom.text,
+        } as React.CSSProperties)
+      : undefined;
+  return (
+    <span
+      className={`sd-theme-pv${id === 'orbit' ? ' orbit-sky' : ''}`}
+      data-chrome-theme={id === 'custom' ? undefined : id}
+      style={style}
+      aria-hidden="true"
+    >
+      <span className="pv-island pv-tl" />
+      <span className="pv-island pv-tr" />
+      <span className="pv-island pv-belt">
+        <i className="on" />
+        <i />
+        <i />
+        <i />
+      </span>
+    </span>
   );
 }
 
@@ -194,7 +305,9 @@ export function SettingsSheet({
   onClose: () => void;
 }) {
   const mounted = useExitPresence(open, MOTION.sheetOut);
-  const [tab, setTab] = useState<SettingsTab>('customize');
+  const [pane, setPane] = useState<Pane>('look');
+  /** Phones: the rail is a list; picking a section opens it full-screen. */
+  const [phonePaneOpen, setPhonePaneOpen] = useState(false);
   const [customColors, setCustomColors] = useState<CustomChromeColors>(() => readCustomColors());
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
   const p2pOn = isP2pEnabled();
@@ -208,7 +321,8 @@ export function SettingsSheet({
   const [lanError, setLanError] = useState(false);
   const [lanCopied, setLanCopied] = useState(false);
   const [netLogOn, setNetLogOn] = useState(() => isNetLogEnabled());
-  const connectionRef = useRef<HTMLElement | null>(null);
+  const [query, setQuery] = useState('');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const boardSession = Boolean(getCurrentBoardId());
   const [customBoardBg, setCustomBoardBg] = useState(() => {
     // Orbit paper is its own preset, never a custom color: seeding Custom with
@@ -226,18 +340,14 @@ export function SettingsSheet({
   const [toolBinds, setToolBinds] = useState(() => getToolBinds());
   const [colorBinds, setColorBinds] = useState(() => getColorBinds());
   const [listening, setListening] = useState<BindTarget | null>(null);
-  const [uiScaleDraft, setUiScaleDraft] = useState<number | null>(null);
-  const [cursorScaleDraft, setCursorScaleDraft] = useState<number | null>(null);
 
-  const paperPresets = pickerPaperPresets(prefs.orbitUnlocked);
+  // Orbit is always on the menu in 1.0, tagged experimental; picking it unlocks it.
+  const paperPresets = pickerPaperPresets(true);
+  const themeIds = pickerChromeThemeIds(true);
   const orbitPaperSelected = isOrbitPaper(bg);
   const isCustomBg = !orbitPaperSelected && !paperPresets.some((p) => p.value === bg);
 
-  // Interface theme and board paper are picked independently: Orbit chrome
-  // works over any paper and Orbit paper under any chrome.
-  const leaveOrbitPaper = () => {
-    if (orbitPaperSelected) onBg(PACKET_PAPER);
-  };
+  useEffect(() => onUserChange((u) => setUserColor(u.color)), []);
 
   useEffect(() => {
     if (isCustomBg && /^#[0-9a-fA-F]{6}$/.test(bg)) {
@@ -267,24 +377,19 @@ export function SettingsSheet({
     setP2pSignalDraft(readPrefs().p2pSignaling ?? '');
     setP2pSignalError(false);
     setNetLogOn(isNetLogEnabled());
+    setQuery('');
+    setPhonePaneOpen(false);
     return onKeybindsChange(syncBinds);
   }, [open]);
 
   useEffect(() => {
     if (!open || focusSection !== 'connection') return;
-    setTab('system');
+    setPane('net');
+    setPhonePaneOpen(true);
   }, [open, focusSection]);
 
   useEffect(() => {
-    if (!open || focusSection !== 'connection' || tab !== 'system') return;
-    const id = requestAnimationFrame(() => {
-      connectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [open, focusSection, tab]);
-
-  useEffect(() => {
-    if (!open || tab !== 'system') return;
+    if (!open || pane !== 'net') return;
     if (typeof location !== 'undefined' && !isLocalHostname(location.hostname)) {
       setLanHosts([location.hostname]);
       setLanLoading(false);
@@ -305,11 +410,10 @@ export function SettingsSheet({
       })
       .finally(() => setLanLoading(false));
     return () => ac.abort();
-  }, [open, tab]);
+  }, [open, pane]);
 
   useEffect(() => {
     if (!listening) return;
-
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -326,15 +430,42 @@ export function SettingsSheet({
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (BLOCKED_BIND_CODES.has(e.code)) return;
       if (/^F\d+$/.test(e.code)) return;
-
       if (listening.kind === 'tool') setToolBind(listening.id, e.code);
       else setColorBind(listening.color, e.code);
       setListening(null);
     };
-
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [listening]);
+
+  // Keep focus inside the dialog when it opens.
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      dialogRef.current?.querySelector<HTMLElement>('.sd-nav.on')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const actionRows = useMemo(
+    () =>
+      [
+        { icon: 'undo' as IconName, label: plainLabel(t(locale, 'undo')), keys: [modKey(), 'Z'] },
+        { icon: 'redo' as IconName, label: plainLabel(t(locale, 'redo')), keys: [modKey(), 'Shift', 'Z'] },
+        { icon: 'copy' as IconName, label: t(locale, 'ctxCopy'), keys: [modKey(), 'C'] },
+        { icon: 'paste' as IconName, label: t(locale, 'ctxPaste'), keys: [modKey(), 'V'] },
+        { icon: 'duplicate' as IconName, label: t(locale, 'ctxDuplicate'), keys: [modKey(), 'D'] },
+        { icon: 'lock' as IconName, label: t(locale, 'ctxLock'), keys: [modKey(), 'Shift', 'L'] },
+        { icon: 'trash' as IconName, label: t(locale, 'ctxDelete'), keys: ['Del'] },
+        { icon: 'plus' as IconName, label: t(locale, 'zoomIn'), keys: [modKey(), '+'] },
+        { icon: 'minus' as IconName, label: t(locale, 'zoomOut'), keys: [modKey(), '−'] },
+        { icon: 'fit' as IconName, label: t(locale, 'zoomFit'), keys: [modKey(), '1'] },
+        { icon: 'search' as IconName, label: t(locale, 'zoomActual'), keys: [modKey(), '0'] },
+        { icon: 'close' as IconName, label: t(locale, 'hideUiRow'), keys: ['H'] },
+      ].filter((r) => !q || r.label.toLowerCase().includes(q) || r.keys.join(' ').toLowerCase().includes(q)),
+    [locale, q]
+  );
 
   if (!mounted) return null;
 
@@ -350,833 +481,769 @@ export function SettingsSheet({
     setPrefs(writePrefs(patch));
   };
 
-  const switchTab = (next: SettingsTab) => {
-    if (next === tab) return;
+  const pickPane = (id: Pane) => {
     setListening(null);
-    setTab(next);
+    setPane(id);
+    setPhonePaneOpen(true);
   };
 
   const toggleListen = (target: BindTarget) => {
     setListening((cur) => (isListeningTarget(cur, target) ? null : target));
   };
 
-  return (
-    <div className={`sheet-root${open ? '' : ' is-leaving'}`} role="presentation">
-      <button className="sheet-backdrop" aria-label={t(locale, 'closeSettings')} onClick={onClose} />
-      <aside className="sheet" role="dialog" aria-labelledby="settings-title" aria-hidden={!open}>
-        <div className="sheet-top">
-          <header className="sheet-head">
-            <h2 id="settings-title">
-              <SwapText text={t(locale, 'settings')} />
-            </h2>
-            <button type="button" className="icon-btn" title={t(locale, 'close')} aria-label={t(locale, 'close')} onClick={onClose}>
-              <Icon name="close" size={16} />
-            </button>
-          </header>
+  const pickTheme = (id: ChromeThemeId) => {
+    if (id === 'orbit' && !prefs.orbitUnlocked) patchPrefs({ orbitUnlocked: true });
+    if (id === chromeTheme) return;
+    onChromeTheme(id);
+    writeChromeTheme(id);
+  };
 
-          <div role="tablist" aria-label={t(locale, 'settings')}>
-            <SlideTrack className="sheet-tabs" active={tab}>
-              {TABS.map((id) => (
-                <button
-                  type="button"
-                  key={id}
-                  role="tab"
-                  className="style-btn"
-                  id={`settings-tab-${id}`}
-                  data-slide-active={tab === id ? 'true' : undefined}
-                  aria-selected={tab === id}
-                  aria-controls={`settings-panel-${id}`}
-                  onClick={() => switchTab(id)}
-                >
-                  <SwapText text={t(locale, TAB_LABEL[id])} />
-                </button>
-              ))}
-            </SlideTrack>
-          </div>
-        </div>
+  const pickPaper = (value: string) => {
+    if (isOrbitPaper(value) && !prefs.orbitUnlocked) patchPrefs({ orbitUnlocked: true });
+    onBg(value);
+  };
 
-        <div className="sheet-body">
-          {tab === 'system' && (
-            <div id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" className="sheet-panel">
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'language')} />
-                </h3>
-                <SlideTrack className="locale-row" active={locale}>
-                  {LOCALES.map((id) => (
-                    <button
-                      type="button"
-                      key={id}
-                      className="style-btn"
-                      data-slide-active={locale === id ? 'true' : undefined}
-                      aria-pressed={locale === id}
-                      onClick={() => {
-                        if (id === locale) return;
-                        const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
-                        document.documentElement.style.setProperty('--locale-dir', dir);
-                        writeLocale(id);
-                        onLocale(id);
-                      }}
-                    >
-                      {id.toUpperCase()}
-                    </button>
-                  ))}
-                </SlideTrack>
-              </section>
+  const gridMode: 'none' | 'dots' | 'lines' = !gridOn ? 'none' : prefs.gridStyle;
 
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'advanced')} />
-                </h3>
-                <label className="sheet-range">
-                  <span>{t(locale, 'uiScale')}</span>
-                  <input
-                    type="range"
-                    min={UI_SCALE_MIN}
-                    max={UI_SCALE_MAX}
-                    step={0.05}
-                    value={uiScaleDraft ?? prefs.uiScale}
-                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
-                </label>
-                <label className="sheet-range">
-                  <span>{t(locale, 'toolCursorSize')}</span>
-                  <input
-                    type="range"
-                    min={CURSOR_SCALE_MIN}
-                    max={CURSOR_SCALE_MAX}
-                    step={0.05}
-                    value={cursorScaleDraft ?? prefs.toolCursorScale}
-                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
-                </label>
-                <button
-                  type="button"
-                  className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={prefs.toolHoverAnim}
-                  onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
-                >
-                  <span>{t(locale, 'toolHoverAnim')}</span>
-                  <span className="switch" aria-hidden="true">
-                    <span className="switch-thumb" />
-                  </span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'toolHoverAnimHint')} />
-                </p>
-              </section>
+  const toolRows = BIND_TOOL_ORDER.filter((id) => {
+    if (!q) return true;
+    const code = toolBinds[id] ?? getToolBind(id);
+    return plainLabel(t(locale, id)).toLowerCase().includes(q) || codeToDisplay(code).toLowerCase() === q;
+  });
 
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'gestures')} />
-                </h3>
-                <ul className="sheet-keys">
-                  <li>
-                    {t(locale, 'wheel')} <span>{t(locale, 'zoom')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'spaceRmb')} <span>{t(locale, 'panHint')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'pinchTouch')} <span>{t(locale, 'pinchTouchHint')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'longPressTouch')} <span>{t(locale, 'longPressTouchHint')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'doubleTapTouch')} <span>{t(locale, 'doubleTapTouchHint')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'rotateSnap')} <span>{t(locale, 'rotateSnapGesture')}</span>
-                  </li>
-                  <li>
-                    {t(locale, 'rotateFree')} <span>{t(locale, 'rotateFreeHint')}</span>
-                  </li>
-                  <li>
-                    {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
-                  </li>
-                  <li>
-                    {modKey()}+D <span>{t(locale, 'ctxDuplicate')}</span>
-                  </li>
-                </ul>
-              </section>
+  const paneTitle = (id: Pane) => t(locale, PANES.find((p) => p.id === id)!.label);
 
-              <section className="sheet-section" ref={connectionRef}>
-                <h3>
-                  <SwapText text={t(locale, 'connection')} />
-                </h3>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'syncHint')} />
-                </p>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'syncLanHint')} />
-                </p>
-                <div className="lan-block">
-                  <h4 className="lan-block-title">
-                    <SwapText text={t(locale, 'syncLanSection')} />
-                  </h4>
-                  {lanLoading ? (
-                    <p className="sheet-hint">
-                      <SwapText text={t(locale, 'syncLanLoading')} />
-                    </p>
-                  ) : lanError || lanHosts.length === 0 ? (
-                    <p className="sheet-hint">
-                      <SwapText text={t(locale, 'syncLanEmpty')} />
-                    </p>
-                  ) : (
-                    <ul className="lan-ip-list">
-                      {lanHosts.map((ip) => (
-                        <li key={ip} className="sheet-mono">
-                          {ip}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'syncLanFirewall')} />
-                  </p>
-                  <div className="sheet-actions">
-                    <button
-                      type="button"
-                      className="style-btn active"
-                      disabled={lanLoading || !inviteHostname(lanHosts)}
-                      onClick={async () => {
-                        const host = inviteHostname(lanHosts);
-                        if (!host) return;
-                        const url = lanAppUrl(host);
-                        try {
-                          await navigator.clipboard.writeText(url);
-                          setLanCopied(true);
-                          window.setTimeout(() => setLanCopied(false), 2000);
-                        } catch {
-                          prompt(t(locale, 'syncLanCopyApp'), url);
-                        }
-                      }}
-                    >
-                      {lanCopied ? t(locale, 'syncLanCopied') : t(locale, 'syncLanCopyApp')}
-                    </button>
-                  </div>
-                </div>
-                {!boardSession ? (
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'syncBoardOnly')} />
-                  </p>
-                ) : null}
-                <ul className="sheet-keys">
-                  <li>
-                    <span className={`status-line${sync.online ? ' on' : ''}`}>
-                      {sync.online ? t(locale, 'online') : t(locale, 'offline')}
-                    </span>
-                    <span>{sync.online ? sync.users : '—'}</span>
-                  </li>
-                  <li>
-                    <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
-                    <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
-                  </li>
-                  <li>
-                    <span>{t(locale, 'syncRoom')}</span>
-                    <span className="sheet-mono">{getBoardRoomName(getCurrentBoardId())}</span>
-                  </li>
-                  <li>
-                    <span>{t(locale, 'syncUrl')}</span>
-                    <span className="sheet-mono" title={isSyncEnabled() ? effectiveSyncUrl() : ''}>
-                      {isSyncEnabled() && effectiveSyncUrl() ? effectiveSyncUrl() : '—'}
-                    </span>
-                  </li>
-                </ul>
-                <label className="nick-row">
-                  <span>{t(locale, 'syncUrl')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={syncUrlDraft}
-                    placeholder={defaultSyncUrl()}
-                    spellCheck={false}
-                    disabled={!boardSession}
-                    aria-invalid={syncUrlError}
-                    onChange={(e) => {
-                      setSyncUrlDraft(e.target.value);
-                      setSyncUrlError(false);
-                    }}
-                  />
-                </label>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, syncUrlError ? 'syncUrlInvalid' : 'syncUrlHint')} />
-                </p>
-                <div className="sheet-actions">
-                  <button
-                    type="button"
-                    className="style-btn active"
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const trimmed = syncUrlDraft.trim();
-                      if (trimmed) {
-                        const parsed = parseSyncUrl(trimmed);
-                        if (!parsed) {
-                          setSyncUrlError(true);
-                          return;
-                        }
-                        const next = writePrefs({ syncUrl: parsed });
-                        setPrefs(next);
-                        setSyncUrlDraft(next.syncUrl ?? '');
-                      } else {
-                        const next = writePrefs({ syncUrl: null });
-                        setPrefs(next);
-                        setSyncUrlDraft('');
-                      }
-                      setSyncUrlError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlApply')}
-                  </button>
-                  <button
-                    type="button"
-                    className="style-btn"
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const next = writePrefs({ syncUrl: null });
-                      setPrefs(next);
-                      setSyncUrlDraft('');
-                      setSyncUrlError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlReset')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`style-btn${prefs.syncEnabled ? '' : ' active'}`}
-                    disabled={!boardSession}
-                    onClick={() => {
-                      const enabled = !prefs.syncEnabled;
-                      const next = writePrefs({ syncEnabled: enabled });
-                      setPrefs(next);
-                      reconnectSync();
-                    }}
-                  >
-                    {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
-                  </button>
-                </div>
-
-                {isStaticHost() && !isSyncAvailable() && !p2pOn && (
-                  <div className="sheet-hint" style={{ border: '1px dashed var(--chrome-border)', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
-                    <strong><SwapText text={t(locale, 'staticMode')} /></strong>
-                    <div style={{ marginTop: 4 }}><SwapText text={t(locale, 'staticModeHint')} /></div>
-                  </div>
-                )}
-
-                <div style={{ height: 12 }} />
-
-                <button
-                  type="button"
-                  role="switch"
-                  className={`sheet-switch${p2pOn ? ' on' : ''}`}
-                  aria-checked={p2pOn}
-                  aria-describedby="p2p-hint p2p-enabled-hint"
-                  disabled={!boardSession}
-                  onClick={() => {
-                    const next = writePrefs({ p2pEnabled: !p2pOn });
-                    setPrefs(next);
-                    reconnectSync();
-                  }}
-                >
-                  <span>{t(locale, 'p2p')}</span>
-                  <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
-                </button>
-                <p id="p2p-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pHint')} /></p>
-                <p id="p2p-enabled-hint" className="sheet-hint"><SwapText text={t(locale, 'p2pEnabledHint')} /></p>
-
-                <label className="nick-row">
-                  <span>{t(locale, 'p2pSignaling')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={p2pSignalDraft}
-                    placeholder={p2pSignalingUrls().join(', ')}
-                    spellCheck={false}
-                    disabled={!boardSession || !p2pOn}
-                    aria-invalid={p2pSignalError}
-                    aria-describedby="p2p-signaling-hint"
-                    onChange={(e) => { setP2pSignalDraft(e.target.value); setP2pSignalError(false); }}
-                  />
-                </label>
-                <p id="p2p-signaling-hint" className="sheet-hint"><SwapText text={p2pSignalError ? t(locale, 'p2pSignalingInvalid') : t(locale, 'p2pSignalingHint')} /></p>
-                <div className="sheet-actions">
-                  <button
-                    type="button"
-                    className="style-btn active"
-                    disabled={!boardSession || !p2pOn}
-                    onClick={() => {
-                      const trimmed = p2pSignalDraft.trim();
-                      if (trimmed) {
-                        if (!/^wss?:\/\//i.test(trimmed)) { setP2pSignalError(true); return; }
-                        const next = writePrefs({ p2pSignaling: trimmed });
-                        setPrefs(next);
-                        setP2pSignalDraft(next.p2pSignaling ?? '');
-                      } else {
-                        const next = writePrefs({ p2pSignaling: null });
-                        setPrefs(next);
-                        setP2pSignalDraft('');
-                      }
-                      setP2pSignalError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlApply')}
-                  </button>
-                  <button
-                    type="button"
-                    className="style-btn"
-                    disabled={!boardSession || !p2pOn}
-                    onClick={() => {
-                      const next = writePrefs({ p2pSignaling: null });
-                      setPrefs(next);
-                      setP2pSignalDraft('');
-                      setP2pSignalError(false);
-                      reconnectSync();
-                    }}
-                  >
-                    {t(locale, 'syncUrlReset')}
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  role="switch"
-                  className={`sheet-switch${netLogOn ? ' on' : ''}`}
-                  aria-checked={netLogOn}
-                  onClick={() => {
-                    const next = !isNetLogEnabled();
-                    setNetLogEnabled(next);
-                    setNetLogOn(next);
-                    if (next) netLog.info('logging enabled via settings');
-                  }}
-                >
-                  <span>{t(locale, 'netLog')}</span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'netLogHint')} />
-                </p>
-              </section>
-            </div>
-          )}
-
-          {tab === 'binds' && (
-            <div id="settings-panel-binds" role="tabpanel" aria-labelledby="settings-tab-binds" className="sheet-panel">
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'tools')} />
-                </h3>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'bindsHint')} />
-                </p>
-                <ul className="bind-list">
-                  {BIND_TOOL_ORDER.map((id) => {
-                    const target: BindTarget = { kind: 'tool', id };
-                    const code = toolBinds[id] ?? getToolBind(id);
-                    const name = toolBindLabel(locale, id);
-                    const active = isListeningTarget(listening, target);
-                    return (
-                      <li key={id} className="bind-row">
-                        <span className="bind-label">
-                          <Icon name={id as IconName} size={16} />
-                          <span>{name}</span>
-                        </span>
-                        <button
-                          type="button"
-                          className={`bind-key${active ? ' listening' : ''}${code ? '' : ' empty'}`}
-                          aria-label={`${name}: ${active ? t(locale, 'bindPress') : codeToDisplay(code)}`}
-                          aria-pressed={active}
-                          onClick={() => toggleListen(target)}
-                        >
-                          {active ? t(locale, 'bindPress') : codeToDisplay(code)}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'bindsColors')} />
-                </h3>
-                <ul className="bind-list">
-                  {BIND_COLOR_ORDER.map((slot, index) => {
-                    const slots = readPenSlots();
-                    const swatch = slots[Number(slot)] ?? slots[index] ?? '#ffffff';
-                    const target: BindTarget = { kind: 'color', color: slot };
-                    const code = colorBinds[slot] ?? getColorBind(slot);
-                    const active = isListeningTarget(listening, target);
-                    const colorLabel = t(locale, 'bindColor').replace('{n}', String(index + 1));
-                    return (
-                      <li key={slot} className="bind-row">
-                        <span className="bind-label">
-                          <span className="bind-swatch" style={{ background: swatch }} aria-hidden="true" />
-                          <span>{colorLabel}</span>
-                        </span>
-                        <button
-                          type="button"
-                          className={`bind-key${active ? ' listening' : ''}${code ? '' : ' empty'}`}
-                          aria-label={`${colorLabel}: ${active ? t(locale, 'bindPress') : codeToDisplay(code)}`}
-                          aria-pressed={active}
-                          onClick={() => toggleListen(target)}
-                        >
-                          {active ? t(locale, 'bindPress') : codeToDisplay(code)}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-
-              <button
-                type="button"
-                className="sheet-action"
-                onClick={() => {
-                  setListening(null);
-                  resetKeybinds();
-                }}
-              >
-                <SwapText text={t(locale, 'bindReset')} />
-              </button>
-            </div>
-          )}
-
-          {tab === 'customize' && (
-            <div id="settings-panel-customize" role="tabpanel" aria-labelledby="settings-tab-customize" className="sheet-panel">
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'profile')} />
-                </h3>
-                <label className="nick-row">
-                  <span>{t(locale, 'nickname')}</span>
-                  <input
-                    type="text"
-                    className="nick-input"
-                    value={nick}
-                    maxLength={24}
-                    placeholder={t(locale, 'nicknameHint')}
-                    onChange={(e) => onNick(e.target.value)}
-                  />
-                </label>
-                <div className="members-colors sheet-member-colors" role="group" aria-label={t(locale, 'membersColor')}>
-                  {USER_COLOR_PALETTE.map((c) => (
-                    <button
-                      type="button"
-                      key={c}
-                      className={`members-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
-                      style={{ background: c }}
-                      title={c}
-                      aria-label={c}
-                      aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
-                      onClick={() => {
-                        const next = saveUserColor(c);
-                        setUserColor(next.color);
-                      }}
-                    />
-                  ))}
-                  <input
-                    type="color"
-                    className="members-swatch-custom"
-                    value={/^#[0-9a-fA-F]{6}$/i.test(userColor) ? userColor : '#7c8cff'}
-                    title={userColor}
-                    aria-label={t(locale, 'membersColor')}
-                    onChange={(e) => {
-                      const next = saveUserColor(e.target.value);
-                      setUserColor(next.color);
-                    }}
-                  />
-                </div>
-              </section>
-
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'ui')} />
-                </h3>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'uiHint')} />
-                </p>
-                <button
-                  type="button"
-                  className={`sheet-switch${prefs.orbitUnlocked ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={prefs.orbitUnlocked}
-                  onClick={() => {
-                    const next = !prefs.orbitUnlocked;
-                    patchPrefs({ orbitUnlocked: next });
-                    if (!next && (chromeTheme === 'orbit' || orbitPaperSelected)) {
-                      leaveOrbitPaper();
-                      if (chromeTheme === 'orbit') {
-                        onChromeTheme('packet');
-                        writeChromeTheme('packet');
-                      }
-                    }
-                  }}
-                >
-                  <span className="sheet-switch-label">
-                    <span>{t(locale, 'orbitUnlock')}</span>
-                    <span className="orbit-slop-tag">{t(locale, 'orbitSlopTag')}</span>
-                  </span>
-                  <span className="switch" aria-hidden="true">
-                    <span className="switch-thumb" />
-                  </span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'orbitUnlockHint')} />
-                </p>
-                <SlideTrack className="theme-grid" active={chromeTheme}>
-                  {pickerChromeThemeIds(prefs.orbitUnlocked).map((id) => (
-                    <button
-                      type="button"
-                      key={id}
-                      className="theme-card"
-                      data-theme-preview={id}
-                      data-slide-active={chromeTheme === id ? 'true' : undefined}
-                      aria-pressed={chromeTheme === id}
-                      style={
-                        id === 'custom'
-                          ? { background: customColors.bg, color: customColors.accent }
-                          : undefined
-                      }
-                      onClick={() => {
-                        if (id === chromeTheme) return;
-                        onChromeTheme(id);
-                        writeChromeTheme(id);
-                      }}
-                    >
-                      {t(locale, CHROME_LABEL[id])}
-                    </button>
-                  ))}
-                </SlideTrack>
-                <CustomSwatchRollout open={chromeTheme === 'custom'}>
-                  {CUSTOM_COLOR_FIELDS.map(({ key, label }) => (
-                    <label
-                      key={key}
-                      className="custom-color"
-                      title={t(locale, label)}
-                      aria-label={t(locale, label)}
-                      style={{ background: customColors[key] }}
-                    >
-                      <input
-                        type="color"
-                        value={customColors[key]}
-                        onChange={(e) => applyCustomColor(key, e.target.value)}
-                      />
-                    </label>
-                  ))}
-                </CustomSwatchRollout>
-              </section>
-              
-
-
-              {!hideBoardSection && (
-                <section className="sheet-section">
-                  <h3>
-                    <SwapText text={t(locale, 'board')} />
-                  </h3>
-                  <SlideTrack className="bg-grid" active={isCustomBg ? 'custom' : orbitPaperSelected ? ORBIT_PAPER : bg}>
-                    {paperPresets.map((p) => (
-                      <button
-                        type="button"
-                        key={p.value}
-                        className={`bg-card${isLightPaper(p.value) ? ' light' : ''}`}
-                        data-slide-active={
-                          (p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value)
-                            ? 'true'
-                            : undefined
-                        }
-                        data-paper-preview={p.value === ORBIT_PAPER ? 'orbit' : undefined}
-                        style={{ background: p.value }}
-                        title={t(locale, p.label)}
-                        aria-label={t(locale, p.label)}
-                        aria-pressed={p.value === ORBIT_PAPER ? orbitPaperSelected : bg === p.value}
-                        onClick={() => onBg(p.value)}
-                      >
-                        <span>{t(locale, p.label)}</span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className={`bg-card${isLightPaper(isCustomBg ? bg : customBoardBg) ? ' light' : ''}`}
-                      data-slide-active={isCustomBg ? 'true' : undefined}
-                      style={{ background: isCustomBg ? bg : customBoardBg }}
-                      title={t(locale, 'bgCustom')}
-                      aria-label={t(locale, 'bgCustom')}
-                      aria-pressed={isCustomBg}
-                      onClick={() => onBg(customBoardBg)}
-                    >
-                      <span>{t(locale, 'bgCustom')}</span>
-                    </button>
-                  </SlideTrack>
-                  <CustomSwatchRollout open={isCustomBg}>
-                    <label
-                      className="custom-color"
-                      title={t(locale, 'bgCustom')}
-                      aria-label={t(locale, 'bgCustom')}
-                      style={{ background: /^#[0-9a-fA-F]{6}$/.test(bg) ? bg : customBoardBg }}
-                    >
-                      <input
-                        type="color"
-                        value={/^#[0-9a-fA-F]{6}$/.test(bg) ? bg : customBoardBg}
-                        onChange={(e) => {
-                          setCustomBoardBg(e.target.value);
-                          onBg(e.target.value);
-                        }}
-                      />
-                    </label>
-                  </CustomSwatchRollout>
-                  <button
-                    type="button"
-                    className={`sheet-switch${gridOn ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={gridOn}
-                    onClick={() => onGrid(!gridOn)}
-                  >
-                    <span>{t(locale, 'grid')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`sheet-switch${prefs.adaptInkToPaper ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={prefs.adaptInkToPaper}
-                    onClick={() => patchPrefs({ adaptInkToPaper: !prefs.adaptInkToPaper })}
-                  >
-                    <span>{t(locale, 'adaptInk')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'adaptInkHint')} />
-                  </p>
-                  <button
-                    type="button"
-                    className="style-btn"
-                    onClick={() => {
-                      const n = adaptInkOnce();
-                      if (n) {
-                        try { window.dispatchEvent(new CustomEvent('review-toast', { detail: { msg: `${n} — готово` } })); } catch {}
-                      }
-                    }}
-                  >
-                    {locale === 'ru' ? 'Конвертировать существующие (ч/б ↔)' : locale === 'zh' ? '转换现有墨迹' : 'Convert existing ink (b/w)'}
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={locale === 'ru' ? 'Одноразово: чёрный на тёмной → белый, белый на светлой → чёрный. Остальные цвета не трогает.' : locale === 'zh' ? '一次性：深底黑变白，浅底白变黑。其他颜色不变。' : 'One-time: black on dark → white, white on light → black. Other colors unchanged.'} />
-                  </p>
-                  <button
-                    type="button"
-                    className={`sheet-switch${prefs.recognizeShapes ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={prefs.recognizeShapes}
-                    onClick={() => patchPrefs({ recognizeShapes: !prefs.recognizeShapes })}
-                  >
-                    <span>{t(locale, 'recognizeShapes')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'recognizeShapesHint')} />
-                  </p>
-                  <button
-                    type="button"
-                    className={`sheet-switch${prefs.rotateSnap ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={prefs.rotateSnap}
-                    onClick={() => patchPrefs({ rotateSnap: !prefs.rotateSnap })}
-                  >
-                    <span>{t(locale, 'rotateSnap')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'rotateSnapHint')} />
-                  </p>
-                  <button
-                    type="button"
-                    className={`sheet-switch${prefs.rotateHandleTop ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={prefs.rotateHandleTop}
-                    onClick={() => patchPrefs({ rotateHandleTop: !prefs.rotateHandleTop })}
-                  >
-                    <span>{t(locale, 'rotateHandleTop')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'rotateHandleTopHint')} />
-                  </p>
-                  <button
-                    type="button"
-                    className={`sheet-switch${prefs.smoothPeerCursors ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={prefs.smoothPeerCursors}
-                    onClick={() => patchPrefs({ smoothPeerCursors: !prefs.smoothPeerCursors })}
-                  >
-                    <span>{t(locale, 'smoothPeerCursors')}</span>
-                    <span className="switch" aria-hidden="true">
-                      <span className="switch-thumb" />
-                    </span>
-                  </button>
-                  <p className="sheet-hint">
-                    <SwapText text={t(locale, 'smoothPeerCursorsHint')} />
-                  </p>
-                </section>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="sheet-fade" aria-hidden="true" />
-      </aside>
+  const head = (id: Pane) => (
+    <div className="sd-pane-h">
+      <button
+        type="button"
+        className="icon-btn sd-back"
+        aria-label={t(locale, 'close')}
+        onClick={() => setPhonePaneOpen(false)}
+      >
+        <Icon name="chevronLeft" size={18} />
+      </button>
+      <h3>{paneTitle(id)}</h3>
+      <button type="button" className="icon-btn" title={t(locale, 'close')} aria-label={t(locale, 'close')} onClick={onClose}>
+        <Icon name="close" size={18} />
+      </button>
     </div>
   );
+
+  const renderLook = () => (
+    <>
+      {head('look')}
+      <section className="sd-grp">
+        <div className="sd-grp-l">
+          <span>{t(locale, 'ui')}</span>
+          <span>{t(locale, 'chromeGroupHint')}</span>
+        </div>
+        <div className="sd-themes">
+          {themeIds.map((id) => (
+            <button
+              type="button"
+              key={id}
+              className={`sd-theme${chromeTheme === id ? ' on' : ''}`}
+              aria-pressed={chromeTheme === id}
+              title={id === 'orbit' ? t(locale, 'orbitUnlockHint') : undefined}
+              onClick={() => pickTheme(id)}
+            >
+              <ThemePreview id={id} custom={customColors} />
+              <span className="sd-theme-name">
+                {t(locale, CHROME_LABEL[id])}
+                {id === 'orbit' ? <span className="sd-chip">{t(locale, 'expChip')}</span> : null}
+              </span>
+            </button>
+          ))}
+        </div>
+        {chromeTheme === 'custom' && (
+          <div className="sd-custom-colors" aria-label={t(locale, 'customColors2')}>
+            {CUSTOM_COLOR_FIELDS.map(({ key, label }) => (
+              <label key={key} className="sd-color-field" title={t(locale, label)}>
+                <span className="sd-color-chip" style={{ background: customColors[key] }}>
+                  <input type="color" value={customColors[key]} onChange={(e) => applyCustomColor(key, e.target.value)} />
+                </span>
+                <span>{t(locale, label)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {!hideBoardSection && (
+        <>
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'paperGroup')}</span>
+              <span>{t(locale, 'paperGroupHint')}</span>
+            </div>
+            <div className="sd-papers">
+              {paperPresets.map((p) => {
+                const orbit = p.value === ORBIT_PAPER;
+                const on = orbit ? orbitPaperSelected : bg === p.value;
+                return (
+                  <button
+                    type="button"
+                    key={p.value}
+                    className={`sd-paper${on ? ' on' : ''}${orbit ? ' orbit-sky' : ''}`}
+                    style={orbit ? undefined : { backgroundColor: p.value, ['--dot' as string]: dotInk(p.value) }}
+                    title={t(locale, p.label)}
+                    aria-label={t(locale, p.label)}
+                    aria-pressed={on}
+                    onClick={() => pickPaper(p.value)}
+                  />
+                );
+              })}
+              <label
+                className={`sd-paper sd-paper-custom${isCustomBg ? ' on' : ''}`}
+                style={{ backgroundColor: isCustomBg ? bg : customBoardBg, ['--dot' as string]: dotInk(isCustomBg ? bg : customBoardBg) }}
+                title={t(locale, 'bgCustom')}
+              >
+                <input
+                  type="color"
+                  aria-label={t(locale, 'bgCustom')}
+                  value={/^#[0-9a-fA-F]{6}$/.test(bg) && isCustomBg ? bg : customBoardBg}
+                  onClick={() => {
+                    if (!isCustomBg) onBg(customBoardBg);
+                  }}
+                  onChange={(e) => {
+                    setCustomBoardBg(e.target.value);
+                    onBg(e.target.value);
+                  }}
+                />
+                <Icon name="plus" size={14} />
+              </label>
+            </div>
+            <div className="sd-row">
+              <span className="sd-row-text">
+                <b>{t(locale, 'gridStyle')}</b>
+                <small>{t(locale, 'gridHint')}</small>
+              </span>
+              <Seg
+                value={gridMode}
+                label={t(locale, 'gridStyle')}
+                options={[
+                  { id: 'none', label: t(locale, 'gridNone') },
+                  { id: 'dots', label: t(locale, 'gridDots') },
+                  { id: 'lines', label: t(locale, 'gridLines') },
+                ]}
+                onChange={(id) => {
+                  if (id === 'none') {
+                    onGrid(false);
+                    return;
+                  }
+                  if (!gridOn) onGrid(true);
+                  patchPrefs({ gridStyle: id });
+                }}
+              />
+            </div>
+          </section>
+
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'inkSection')}</span>
+            </div>
+            <Toggle
+              label={t(locale, 'adaptInk')}
+              hint={t(locale, 'adaptInkHint')}
+              on={prefs.adaptInkToPaper}
+              onChange={(v) => patchPrefs({ adaptInkToPaper: v })}
+            />
+            <div className="sd-row">
+              <span className="sd-row-text">
+                <b>{t(locale, 'convertInk')}</b>
+                <small>{t(locale, 'convertInkHint')}</small>
+              </span>
+              <button
+                type="button"
+                className="sd-btn"
+                onClick={() => {
+                  const n = adaptInkOnce();
+                  if (n) {
+                    try {
+                      window.dispatchEvent(new CustomEvent('review-toast', { detail: { msg: `${n}` } }));
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                }}
+              >
+                {t(locale, 'convertInkBtn')}
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+    </>
+  );
+
+  const keycap = (code: string, active: boolean, label: string, onClick: () => void) => (
+    <button
+      type="button"
+      className={`sd-kbd sd-kbd-btn${active ? ' listening' : ''}${code ? '' : ' empty'}`}
+      aria-label={`${label}: ${active ? t(locale, 'bindPress') : codeToDisplay(code)}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {active ? t(locale, 'bindPress') : codeToDisplay(code)}
+    </button>
+  );
+
+  const renderKeys = () => {
+    const slots = readPenSlots();
+    const colorRows = BIND_COLOR_ORDER.map((slot, index) => ({
+      slot,
+      index,
+      swatch: slots[Number(slot)] ?? slots[index] ?? '#ffffff',
+      label: t(locale, 'bindColor').replace('{n}', String(index + 1)),
+    })).filter((r) => !q || r.label.toLowerCase().includes(q));
+    const gestures: Array<[MessageKey, MessageKey]> = [
+      ['wheel', 'zoom'],
+      ['spaceRmb', 'panHint'],
+      ['pinchTouch', 'pinchTouchHint'],
+      ['longPressTouch', 'longPressTouchHint'],
+      ['doubleTapTouch', 'doubleTapTouchHint'],
+      ['rotateFree', 'rotateFreeHint'],
+    ];
+    const gestureRows = gestures.filter(
+      ([a, b]) => !q || t(locale, a).toLowerCase().includes(q) || t(locale, b).toLowerCase().includes(q)
+    );
+    const empty = !toolRows.length && !colorRows.length && !actionRows.length && !gestureRows.length;
+    return (
+      <>
+        {head('keys')}
+        <label className="sd-search">
+          <Icon name="search" size={16} />
+          <input
+            type="search"
+            value={query}
+            placeholder={t(locale, 'keysSearch')}
+            aria-label={t(locale, 'keysSearch')}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+          />
+        </label>
+        {empty && <p className="sd-empty">{t(locale, 'keysNone')}</p>}
+        {toolRows.length > 0 && (
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'tools')}</span>
+              <span>{t(locale, 'keysToolsHint')}</span>
+            </div>
+            <div className="sd-keys">
+              {toolRows.map((id) => {
+                const target: BindTarget = { kind: 'tool', id };
+                const code = toolBinds[id] ?? getToolBind(id);
+                const name = plainLabel(t(locale, id));
+                return (
+                  <div key={id} className="sd-key">
+                    <Icon name={id as IconName} size={17} />
+                    <span>{name}</span>
+                    {keycap(code, isListeningTarget(listening, target), name, () => toggleListen(target))}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+        {colorRows.length > 0 && (
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'bindsColors')}</span>
+            </div>
+            <div className="sd-keys">
+              {colorRows.map((r) => {
+                const target: BindTarget = { kind: 'color', color: r.slot };
+                const code = colorBinds[r.slot] ?? getColorBind(r.slot);
+                return (
+                  <div key={r.slot} className="sd-key">
+                    <span className="sd-key-swatch" style={{ background: r.swatch }} aria-hidden="true" />
+                    <span>{r.label}</span>
+                    {keycap(code, isListeningTarget(listening, target), r.label, () => toggleListen(target))}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+        {actionRows.length > 0 && (
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'keysActions')}</span>
+            </div>
+            <div className="sd-keys">
+              {actionRows.map((r) => (
+                <div key={r.label} className="sd-key">
+                  <Icon name={r.icon} size={17} />
+                  <span>{r.label}</span>
+                  <span className="sd-kbd-group">
+                    {r.keys.map((k) => (
+                      <kbd key={k} className="sd-kbd">
+                        {k}
+                      </kbd>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {gestureRows.length > 0 && (
+          <section className="sd-grp">
+            <div className="sd-grp-l">
+              <span>{t(locale, 'gestures')}</span>
+              <span>{t(locale, 'gesturesHint')}</span>
+            </div>
+            <div className="sd-gestures">
+              {gestureRows.map(([a, b]) => (
+                <div key={a}>
+                  <b>{t(locale, a)}</b>
+                  {t(locale, b)}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {!q && (
+          <div className="sd-foot-actions">
+            <button
+              type="button"
+              className="sd-btn"
+              onClick={() => {
+                setListening(null);
+                resetKeybinds();
+              }}
+            >
+              {t(locale, 'bindReset')}
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderUi = () => (
+    <>
+      {head('ui')}
+      <section className="sd-grp">
+        <div className="sd-row">
+          <span className="sd-row-text">
+            <b>{t(locale, 'language')}</b>
+          </span>
+          <Seg
+            value={locale}
+            label={t(locale, 'language')}
+            options={LOCALES.map((id) => ({ id, label: id === 'ru' ? 'Русский' : id === 'en' ? 'English' : '中文' }))}
+            onChange={(id) => {
+              if (id === locale) return;
+              const dir = LOCALES.indexOf(id) >= LOCALES.indexOf(locale) ? '1' : '-1';
+              document.documentElement.style.setProperty('--locale-dir', dir);
+              writeLocale(id);
+              onLocale(id);
+            }}
+          />
+        </div>
+        <div className="sd-row">
+          <span className="sd-row-text">
+            <b>{t(locale, 'uiScale')}</b>
+            <small>{t(locale, 'uiScaleHint')}</small>
+          </span>
+          <Range
+            value={prefs.uiScale}
+            min={UI_SCALE_MIN}
+            max={UI_SCALE_MAX}
+            step={0.05}
+            label={t(locale, 'uiScale')}
+            onCommit={(v) => patchPrefs({ uiScale: v })}
+          />
+        </div>
+        <div className="sd-row">
+          <span className="sd-row-text">
+            <b>{t(locale, 'toolCursorSize')}</b>
+          </span>
+          <Range
+            value={prefs.toolCursorScale}
+            min={CURSOR_SCALE_MIN}
+            max={CURSOR_SCALE_MAX}
+            step={0.05}
+            label={t(locale, 'toolCursorSize')}
+            onCommit={(v) => patchPrefs({ toolCursorScale: v })}
+          />
+        </div>
+        <Toggle
+          label={t(locale, 'toolHoverAnim')}
+          hint={t(locale, 'toolHoverAnimHint')}
+          on={prefs.toolHoverAnim}
+          onChange={(v) => patchPrefs({ toolHoverAnim: v })}
+        />
+        <div className="sd-row">
+          <span className="sd-row-text">
+            <b>{t(locale, 'hideUiRow')}</b>
+            <small>{t(locale, 'hideUiHint')}</small>
+          </span>
+          <kbd className="sd-kbd">H</kbd>
+        </div>
+      </section>
+      <section className="sd-grp">
+        <div className="sd-grp-l">
+          <span>{t(locale, 'boardBehavior')}</span>
+        </div>
+        <Toggle
+          label={t(locale, 'recognizeShapes')}
+          hint={t(locale, 'recognizeShapesHint')}
+          on={prefs.recognizeShapes}
+          onChange={(v) => patchPrefs({ recognizeShapes: v })}
+        />
+        <Toggle
+          label={t(locale, 'rotateSnap')}
+          hint={t(locale, 'rotateSnapHint')}
+          on={prefs.rotateSnap}
+          onChange={(v) => patchPrefs({ rotateSnap: v })}
+        />
+        <Toggle
+          label={t(locale, 'rotateHandleTop')}
+          hint={t(locale, 'rotateHandleTopHint')}
+          on={prefs.rotateHandleTop}
+          onChange={(v) => patchPrefs({ rotateHandleTop: v })}
+        />
+        <Toggle
+          label={t(locale, 'smoothPeerCursors')}
+          hint={t(locale, 'smoothPeerCursorsHint')}
+          on={prefs.smoothPeerCursors}
+          onChange={(v) => patchPrefs({ smoothPeerCursors: v })}
+        />
+      </section>
+    </>
+  );
+
+  const statusTitle = !boardSession
+    ? t(locale, 'netHome')
+    : !prefs.syncEnabled
+      ? t(locale, 'netStatusOff')
+      : sync.online
+        ? t(locale, 'netStatusOnline')
+        : t(locale, 'netStatusOffline');
+  const statusSub = [
+    boardSession && sync.online ? t(locale, 'netPeople').replace('{n}', String(Math.max(1, sync.users))) : null,
+    boardSession ? `${t(locale, 'persist')}: ${ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const inviteHost = inviteHostname(lanHosts);
+  const inviteUrl = inviteHost ? lanAppUrl(inviteHost) : '';
+
+  const renderNet = () => (
+    <>
+      {head('net')}
+      <div className={`sd-status${boardSession && prefs.syncEnabled && sync.online ? ' on' : ''}`}>
+        <span className="pulse" aria-hidden="true" />
+        <span className="sd-row-text">
+          <b>{statusTitle}</b>
+          {statusSub ? <small>{statusSub}</small> : null}
+        </span>
+        {boardSession && (
+          <button
+            type="button"
+            className="sd-btn"
+            onClick={() => {
+              const next = writePrefs({ syncEnabled: !prefs.syncEnabled });
+              setPrefs(next);
+              reconnectSync();
+            }}
+          >
+            {prefs.syncEnabled ? t(locale, 'syncDisconnect') : t(locale, 'syncConnect')}
+          </button>
+        )}
+      </div>
+
+      <section className="sd-grp">
+        <div className="sd-grp-l">
+          <span>{t(locale, 'netSameWifi')}</span>
+        </div>
+        <div className="sd-addr">
+          <code className={inviteUrl ? '' : 'dim'}>
+            {lanLoading ? t(locale, 'syncLanLoading') : inviteUrl || t(locale, 'syncLanEmpty')}
+          </code>
+          <button
+            type="button"
+            className="sd-btn"
+            disabled={lanLoading || !inviteUrl}
+            onClick={async () => {
+              if (!inviteUrl) return;
+              try {
+                await navigator.clipboard.writeText(inviteUrl);
+                setLanCopied(true);
+                window.setTimeout(() => setLanCopied(false), 2000);
+              } catch {
+                prompt(t(locale, 'syncLanCopyApp'), inviteUrl);
+              }
+            }}
+          >
+            <Icon name="copy" size={16} />
+            {lanCopied ? t(locale, 'syncLanCopied') : t(locale, 'ctxCopy')}
+          </button>
+        </div>
+        {!lanLoading && (lanError || !inviteUrl) ? <p className="sd-note">{t(locale, 'syncLanFirewall')}</p> : null}
+      </section>
+
+      <section className="sd-grp">
+        <Toggle
+          label={t(locale, 'saveRemoteBoards')}
+          hint={t(locale, 'saveRemoteBoardsHint')}
+          on={prefs.saveRemoteBoards}
+          onChange={(v) => patchPrefs({ saveRemoteBoards: v })}
+        />
+        <Toggle
+          label={t(locale, 'p2p')}
+          hint={t(locale, 'p2pHint')}
+          on={p2pOn}
+          disabled={!boardSession}
+          onChange={(v) => {
+            setPrefs(writePrefs({ p2pEnabled: v }));
+            reconnectSync();
+          }}
+        />
+        {isStaticHost() && !isSyncAvailable() && !p2pOn && (
+          <p className="sd-note">
+            <strong>{t(locale, 'staticMode')}</strong> {t(locale, 'staticModeHint')}
+          </p>
+        )}
+      </section>
+
+      <details className="sd-dev">
+        <summary>
+          <Icon name="chevronRight" size={14} />
+          {t(locale, 'devSection')}
+        </summary>
+        <div className="sd-dev-body">
+          <ul className="sd-facts">
+            <li>
+              <span>{t(locale, 'syncRoom')}</span>
+              <code>{getBoardRoomName(getCurrentBoardId())}</code>
+            </li>
+            <li>
+              <span>{t(locale, 'syncUrl')}</span>
+              <code title={isSyncEnabled() ? effectiveSyncUrl() : ''}>
+                {isSyncEnabled() && effectiveSyncUrl() ? effectiveSyncUrl() : '—'}
+              </code>
+            </li>
+          </ul>
+          <label className="sd-field">
+            <span>{t(locale, 'syncUrl')}</span>
+            <input
+              type="text"
+              className="nick-input"
+              value={syncUrlDraft}
+              placeholder={defaultSyncUrl()}
+              spellCheck={false}
+              disabled={!boardSession}
+              aria-invalid={syncUrlError}
+              onChange={(e) => {
+                setSyncUrlDraft(e.target.value);
+                setSyncUrlError(false);
+              }}
+            />
+            <small>{t(locale, syncUrlError ? 'syncUrlInvalid' : 'syncUrlHint')}</small>
+          </label>
+          <div className="sd-foot-actions">
+            <button
+              type="button"
+              className="sd-btn primary"
+              disabled={!boardSession}
+              onClick={() => {
+                const trimmed = syncUrlDraft.trim();
+                if (trimmed) {
+                  const parsed = parseSyncUrl(trimmed);
+                  if (!parsed) {
+                    setSyncUrlError(true);
+                    return;
+                  }
+                  const next = writePrefs({ syncUrl: parsed });
+                  setPrefs(next);
+                  setSyncUrlDraft(next.syncUrl ?? '');
+                } else {
+                  const next = writePrefs({ syncUrl: null });
+                  setPrefs(next);
+                  setSyncUrlDraft('');
+                }
+                setSyncUrlError(false);
+                reconnectSync();
+              }}
+            >
+              {t(locale, 'syncUrlApply')}
+            </button>
+            <button
+              type="button"
+              className="sd-btn"
+              disabled={!boardSession}
+              onClick={() => {
+                const next = writePrefs({ syncUrl: null });
+                setPrefs(next);
+                setSyncUrlDraft('');
+                setSyncUrlError(false);
+                reconnectSync();
+              }}
+            >
+              {t(locale, 'syncUrlReset')}
+            </button>
+          </div>
+          <label className="sd-field">
+            <span>{t(locale, 'p2pSignaling')}</span>
+            <input
+              type="text"
+              className="nick-input"
+              value={p2pSignalDraft}
+              placeholder={p2pSignalingUrls().join(', ')}
+              spellCheck={false}
+              disabled={!boardSession || !p2pOn}
+              aria-invalid={p2pSignalError}
+              onChange={(e) => {
+                setP2pSignalDraft(e.target.value);
+                setP2pSignalError(false);
+              }}
+            />
+            <small>{p2pSignalError ? t(locale, 'p2pSignalingInvalid') : t(locale, 'p2pSignalingHint')}</small>
+          </label>
+          <div className="sd-foot-actions">
+            <button
+              type="button"
+              className="sd-btn primary"
+              disabled={!boardSession || !p2pOn}
+              onClick={() => {
+                const trimmed = p2pSignalDraft.trim();
+                if (trimmed) {
+                  if (!/^wss?:\/\//i.test(trimmed)) {
+                    setP2pSignalError(true);
+                    return;
+                  }
+                  const next = writePrefs({ p2pSignaling: trimmed });
+                  setPrefs(next);
+                  setP2pSignalDraft(next.p2pSignaling ?? '');
+                } else {
+                  const next = writePrefs({ p2pSignaling: null });
+                  setPrefs(next);
+                  setP2pSignalDraft('');
+                }
+                setP2pSignalError(false);
+                reconnectSync();
+              }}
+            >
+              {t(locale, 'syncUrlApply')}
+            </button>
+            <button
+              type="button"
+              className="sd-btn"
+              disabled={!boardSession || !p2pOn}
+              onClick={() => {
+                const next = writePrefs({ p2pSignaling: null });
+                setPrefs(next);
+                setP2pSignalDraft('');
+                setP2pSignalError(false);
+                reconnectSync();
+              }}
+            >
+              {t(locale, 'syncUrlReset')}
+            </button>
+          </div>
+          <Toggle
+            label={t(locale, 'netLog')}
+            hint={t(locale, 'netLogHint')}
+            on={netLogOn}
+            onChange={(next) => {
+              setNetLogEnabled(next);
+              setNetLogOn(next);
+              if (next) netLog.info('logging enabled via settings');
+            }}
+          />
+        </div>
+      </details>
+    </>
+  );
+
+  return (
+    <div className={`sheet-root sd-root${open ? '' : ' is-leaving'}`} role="presentation">
+      <button className="sheet-backdrop sd-backdrop" aria-label={t(locale, 'closeSettings')} onClick={onClose} />
+      <div
+        ref={dialogRef}
+        className={`sd${phonePaneOpen ? ' pane-open' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(locale, 'settings')}
+        aria-hidden={!open}
+      >
+        <nav className="sd-rail" aria-label={t(locale, 'settings')}>
+          <div className="sd-me">
+            <button
+              type="button"
+              className="icon-btn sd-rail-close"
+              title={t(locale, 'close')}
+              aria-label={t(locale, 'close')}
+              onClick={onClose}
+            >
+              <Icon name="close" size={18} />
+            </button>
+            <span className="sd-me-av" style={{ background: userColor, ['--ring' as string]: userColor }} aria-hidden="true">
+              {initialOf(nick)}
+            </span>
+            <span className="sd-me-text">
+              <input
+                type="text"
+                className="sd-me-name"
+                value={nick}
+                maxLength={24}
+                placeholder={t(locale, 'nicknameHint')}
+                aria-label={t(locale, 'nickname')}
+                onChange={(e) => onNick(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+              />
+              <small>{t(locale, 'identityHint')}</small>
+            </span>
+          </div>
+          <div className="sd-me-colors" role="group" aria-label={t(locale, 'membersColor')}>
+            {USER_COLOR_PALETTE.map((c) => (
+              <button
+                type="button"
+                key={c}
+                className={`sd-me-swatch${userColor.toLowerCase() === c.toLowerCase() ? ' on' : ''}`}
+                style={{ background: c }}
+                title={c}
+                aria-label={c}
+                aria-pressed={userColor.toLowerCase() === c.toLowerCase()}
+                onClick={() => setUserColor(saveUserColor(c).color)}
+              />
+            ))}
+          </div>
+          {PANES.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`sd-nav${pane === p.id ? ' on' : ''}`}
+              aria-current={pane === p.id ? 'page' : undefined}
+              onClick={() => pickPane(p.id)}
+            >
+              <Icon name={p.icon} size={18} />
+              <span>{t(locale, p.label)}</span>
+              <Icon name="chevronRight" size={14} />
+            </button>
+          ))}
+          <div className="sd-rail-foot">v{APP_VERSION} · ReView</div>
+        </nav>
+        <div className="sd-pane" key={pane}>
+          {pane === 'look' && renderLook()}
+          {pane === 'keys' && renderKeys()}
+          {pane === 'ui' && renderUi()}
+          {pane === 'net' && renderNet()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Dot color for a paper swatch preview (matches the board's dot grid ink). */
+function dotInk(hex: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/i.test(hex)) return 'rgba(236,234,228,.2)';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? 'rgba(26,26,28,.2)' : 'rgba(236,234,228,.2)';
 }

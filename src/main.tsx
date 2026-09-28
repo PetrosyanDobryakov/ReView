@@ -7,7 +7,7 @@ import { loadUser } from './core/user';
 import { bootstrapUserProfile } from './core/userProfile';
 import { applyChromeTheme, readChromeTheme, type ChromeThemeId } from './core/chromeTheme';
 import { applyLocale, readLocale } from './core/locale';
-import { applyUiScale, migrateRotateHandleTopDefaultOff } from './core/prefs';
+import { applyUiScale, migrateOneZeroDefaults, migrateRotateHandleTopDefaultOff } from './core/prefs';
 import { migrateLegacyOrbitPaper } from './core/orbit';
 import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
@@ -27,6 +27,9 @@ import '@fontsource/onest/cyrillic-700.css';
 // Orbit chrome font. Files load only when the Orbit theme uses them.
 import './index.css';
 
+// Before loadUser(): a first visit has no review-user yet, which is how 1.0
+// tells fresh arrivals (dot grid, smaller UI) from returning users.
+migrateOneZeroDefaults();
 loadUser();
 bootstrapUserProfile();
 // After profile apply: 0.15.2–0.15.5 defaulted rotateHandleTop on; flip stored on → off once.

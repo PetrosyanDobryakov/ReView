@@ -5,6 +5,7 @@ import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
+import { SelectionBar } from './ui/SelectionBar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
@@ -45,6 +46,7 @@ import {
   publishPage,
   publishBoardView,
   onSyncLifecycle,
+  resolveInviteBoardUrl,
   type SyncStatus,
   type PeerCursor,
 } from './net';
@@ -212,9 +214,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const fileBarRef = useRef<HTMLElement | null>(null);
   const fileIslandRef = useRef<HTMLDivElement | null>(null);
   const metaIslandRef = useRef<HTMLDivElement | null>(null);
-  const zoomClusterRef = useRef<HTMLSpanElement | null>(null);
   const zoomOverflowRef = useRef<HTMLSpanElement | null>(null);
-  const zoomCollapsedRef = useRef(false);
+  const [nameMenuOpen, setNameMenuOpen] = useState(false);
+  const nameMenuRef = useRef<HTMLSpanElement | null>(null);
   const syncWasOnline = useRef(false);
   useEffect(() => {
     const m = getBoard(boardId);
@@ -226,52 +228,28 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     setHostOffline(false);
     setUiHidden(false);
     setZoomMenuOpen(false);
+    setNameMenuOpen(false);
     recordBoardVisit(boardId);
   }, [boardId]);
 
+
   useEffect(() => {
-    const bar = fileBarRef.current;
-    const file = fileIslandRef.current;
-    const meta = metaIslandRef.current;
-    if (!bar || !file || !meta) return;
-
-    const measure = () => {
-      const narrow = window.matchMedia('(max-width: 720px)').matches;
-      const tablet = window.matchMedia('(min-width: 721px) and (max-width: 1024px)').matches;
-      let next = narrow;
-      if (!narrow && tablet) {
-        const fileRect = file.getBoundingClientRect();
-        const metaRect = meta.getBoundingClientRect();
-        const gap = metaRect.left - fileRect.right;
-        const overflow = file.scrollWidth > file.clientWidth + 1;
-        const clusterW = zoomClusterRef.current?.offsetWidth
-          ?? zoomOverflowRef.current?.offsetWidth
-          ?? 148;
-        if (zoomCollapsedRef.current) {
-          next = gap < 12 + clusterW;
-        } else {
-          next = gap < 12 || overflow;
-        }
-      }
-      zoomCollapsedRef.current = next;
-      if (next) bar.setAttribute('data-zoom-collapsed', 'true');
-      else {
-        bar.removeAttribute('data-zoom-collapsed');
-        setZoomMenuOpen(false);
-      }
+    if (!nameMenuOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      const root = nameMenuRef.current;
+      if (root && e.target instanceof Node && root.contains(e.target)) return;
+      setNameMenuOpen(false);
     };
-
-    const ro = new ResizeObserver(measure);
-    ro.observe(bar);
-    ro.observe(file);
-    ro.observe(meta);
-    window.addEventListener('resize', measure);
-    measure();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNameMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointer, true);
+    window.addEventListener('keydown', onKey);
     return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
+      window.removeEventListener('pointerdown', onPointer, true);
+      window.removeEventListener('keydown', onKey);
     };
-  }, [boardTitle, hostOffline, ephemeral, error, zoom]);
+  }, [nameMenuOpen]);
 
   useEffect(() => {
     if (!zoomMenuOpen) return;
@@ -798,6 +776,54 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   const engine = engineRef.current;
 
+  const openExport = () => {
+    commitOpenEditors();
+    const e = engineRef.current;
+    if (!e) return;
+    if (e.selection.size > 0 && e.selectionBounds()) {
+      setExportState({ source: 'selection', rect: null });
+    } else if (!e.contentBox()) {
+      e.beginExportPick();
+    } else {
+      setExportState({ source: 'all', rect: null });
+    }
+  };
+
+  const flashToast = (msg: string, ms = 1800) => {
+    setToast(msg);
+    window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), ms);
+  };
+
+  const exportFile = () => {
+    commitOpenEditors();
+    void exportBoardFile(boardId)
+      .then((res) =>
+        flashToast(
+          res === 'ok'
+            ? t(readLocale(), 'shareCopied')
+            : res === 'too_large'
+              ? t(readLocale(), 'exportTooLarge')
+              : t(readLocale(), 'error')
+        )
+      )
+      .catch(() => flashToast(t(readLocale(), 'error')));
+  };
+
+  const copyBoardLink = async () => {
+    let url = `${window.location.origin}${boardUrl(boardId)}`;
+    try {
+      url = (await resolveInviteBoardUrl(boardId)).url;
+    } catch {
+      /* keep origin URL */
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      flashToast(t(readLocale(), 'membersInviteCopied'));
+    } catch {
+      flashToast(t(readLocale(), 'membersInviteFail'));
+    }
+  };
+
   const dismissMenu = () => {
     engineRef.current?.setPasteAnchor(null);
     setCtxSubmenu(null);
@@ -968,7 +994,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         }
       );
     } else {
-      menuEntries.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => void e?.pasteFromClipboard() });
+      menuEntries.push(
+        { label: t(locale, 'ctxPaste'), hint: `${modKey()}+V`, run: () => void e?.pasteFromClipboard() },
+        { label: t(locale, 'insertFileShort'), run: () => fileRef.current?.click() }
+      );
+      pushSep(menuEntries);
+      menuEntries.push(
+        { label: t(locale, 'zoomFit'), hint: `${modKey()}+1`, run: () => e?.fitContent() },
+        { label: t(locale, 'exportImage'), run: () => openExport() }
+      );
     }
   }
 
@@ -1083,228 +1117,270 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         </div>
       )}
       <header className="file-bar" ref={fileBarRef}>
-        <div className="island file-island" ref={fileIslandRef}>
-          <button type="button" className="icon-btn" data-dismiss-edit title={t(locale, 'home')} aria-label={t(locale, 'home')} onClick={onBack}>
-            <Icon name="home" />
-          </button>
-          <div className="island-sep" />
-          {editingName && renameMode ? (
-            <input
-              className="brand-edit"
-              value={boardTitle}
-              autoFocus
-              maxLength={40}
-              aria-label={t(locale, 'renameBoard')}
-              onChange={(e) => setBoardTitle(e.target.value)}
-              onBlur={() => {
-                const v = commitBoardRename(boardId, boardTitle, boardOwnerId, boardMeta?.name ?? 'ReView');
-                setBoardTitle(v);
-                setEditingName(false);
-              }}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
+        <div className="file-left">
+          <div className="island file-island" ref={fileIslandRef}>
+            <button type="button" className="icon-btn" data-dismiss-edit title={t(locale, 'boardsTitle')} aria-label={t(locale, 'boardsTitle')} onClick={onBack}>
+              <Icon name="home" />
+            </button>
+            <div className="island-sep" />
+            {editingName && renameMode ? (
+              <input
+                className="brand-edit"
+                value={boardTitle}
+                autoFocus
+                maxLength={40}
+                aria-label={t(locale, 'rename')}
+                onChange={(e) => setBoardTitle(e.target.value)}
+                onBlur={() => {
                   const v = commitBoardRename(boardId, boardTitle, boardOwnerId, boardMeta?.name ?? 'ReView');
                   setBoardTitle(v);
                   setEditingName(false);
-                }
-                if (e.key === 'Escape') {
-                  const m = getBoard(boardId);
-                  setBoardTitle(displayBoardTitle(m, metaTitle(), m?.name ?? 'ReView'));
-                  setEditingName(false);
-                }
-              }}
-              onKeyUp={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <button
-              type="button"
-              className="brand"
-              title={renameMode ? t(locale, 'renameBoard') : t(locale, 'boardTitleReadOnly')}
-              onClick={() => {
-                if (renameMode) setEditingName(true);
-              }}
-              style={renameMode ? undefined : { cursor: 'default' }}
-            >
-              {boardTitle}
-            </button>
-          )}
-          <div className="island-sep" />
-          <PageBar locale={locale} />
-          <div className="island-sep" />
-          <button
-            type="button"
-            className="icon-btn"
-            data-keep-edit
-            title={t(locale, 'undo')}
-            aria-label={t(locale, 'undo')}
-            disabled={!canUndo || Boolean(editTarget || editGraph || editCalc)}
-            onClick={() => {
-              if (engineRef.current?.editing) return;
-              undoManager.undo();
-              engineRef.current?.remeasureAfterHistory();
-            }}
-          >
-            <Icon name="undo" />
-          </button>
-          <button
-            type="button"
-            className="icon-btn"
-            data-keep-edit
-            title={t(locale, 'redo')}
-            aria-label={t(locale, 'redo')}
-            disabled={!canRedo || Boolean(editTarget || editGraph || editCalc)}
-            onClick={() => {
-              if (engineRef.current?.editing) return;
-              undoManager.redo();
-              engineRef.current?.remeasureAfterHistory();
-            }}
-          >
-            <Icon name="redo" />
-          </button>
-          <div className="island-sep" />
-          <span className="file-zoom-cluster" ref={zoomClusterRef}>
-            <button type="button" className="icon-btn" title={t(locale, 'zoomOut')} aria-label={t(locale, 'zoomOut')} onClick={() => engine?.zoomBy(1 / 1.2)}>
-              <Icon name="minus" />
-            </button>
-            <button type="button" className="zoom-value" title={t(locale, 'zoomReset')} aria-label={t(locale, 'zoomReset')} onClick={() => engine?.resetZoom()}>
-              {zoom}%
-            </button>
-            <button type="button" className="icon-btn" title={t(locale, 'zoomIn')} aria-label={t(locale, 'zoomIn')} onClick={() => engine?.zoomBy(1.2)}>
-              <Icon name="plus" />
-            </button>
-            <button type="button" className="icon-btn" title={t(locale, 'fit')} aria-label={t(locale, 'fit')} onClick={() => engine?.fitContent()}>
-              <Icon name="fit" />
-            </button>
-            <div className="island-sep" />
-          </span>
-          <span className="file-zoom-overflow" ref={zoomOverflowRef}>
-            <button
-              type="button"
-              className={`zoom-value file-zoom-overflow-btn${zoomMenuOpen ? ' is-open' : ''}`}
-              title={t(locale, 'zoomMenu')}
-              aria-label={t(locale, 'zoomMenu')}
-              aria-haspopup="menu"
-              aria-expanded={zoomMenuOpen}
-              onClick={() => setZoomMenuOpen((v) => !v)}
-            >
-              {zoom}%
-            </button>
-            {zoomMenuOpen && (
-              <div className="island file-zoom-menu" role="menu" aria-label={t(locale, 'zoomMenu')}>
-                <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1 / 1.2)}>
-                  <Icon name="minus" />
-                  <span>{t(locale, 'zoomOut')}</span>
-                </button>
-                <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1.2)}>
-                  <Icon name="plus" />
-                  <span>{t(locale, 'zoomIn')}</span>
-                </button>
+                }}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    const v = commitBoardRename(boardId, boardTitle, boardOwnerId, boardMeta?.name ?? 'ReView');
+                    setBoardTitle(v);
+                    setEditingName(false);
+                  }
+                  if (e.key === 'Escape') {
+                    const m = getBoard(boardId);
+                    setBoardTitle(displayBoardTitle(m, metaTitle(), m?.name ?? 'ReView'));
+                    setEditingName(false);
+                  }
+                }}
+                onKeyUp={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="board-name-wrap" ref={nameMenuRef}>
                 <button
                   type="button"
-                  role="menuitem"
-                  className="menu-row"
-                  onClick={() => {
-                    engine?.resetZoom();
-                    setZoomMenuOpen(false);
+                  className={`brand brand-menu${nameMenuOpen ? ' is-open' : ''}`}
+                  title={t(locale, 'boardMenu')}
+                  aria-haspopup="menu"
+                  aria-expanded={nameMenuOpen}
+                  onClick={() => setNameMenuOpen((v) => !v)}
+                  onDoubleClick={() => {
+                    if (!renameMode) return;
+                    setNameMenuOpen(false);
+                    setEditingName(true);
                   }}
                 >
-                  <span>
-                    {zoom}% — {t(locale, 'zoomResetShort')}
-                  </span>
+                  <span className="brand-text">{boardTitle}</span>
+                  <Icon name="chevronDown" size={14} />
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="menu-row"
-                  onClick={() => {
-                    engine?.fitContent();
-                    setZoomMenuOpen(false);
-                  }}
-                >
-                  <Icon name="fit" />
-                  <span>{t(locale, 'fit')}</span>
-                </button>
-              </div>
+                {nameMenuOpen && (
+                  <div className="island file-zoom-menu board-name-menu" role="menu" aria-label={t(locale, 'boardMenu')}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-row"
+                      disabled={!renameMode}
+                      title={renameMode ? undefined : t(locale, 'boardTitleReadOnly')}
+                      onClick={() => {
+                        setNameMenuOpen(false);
+                        setEditingName(true);
+                      }}
+                    >
+                      <Icon name="pen" size={16} />
+                      <span>{t(locale, 'rename')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-row"
+                      onClick={() => {
+                        setNameMenuOpen(false);
+                        void copyBoardLink();
+                      }}
+                    >
+                      <Icon name="link" size={16} />
+                      <span>{t(locale, 'copyLink')}</span>
+                    </button>
+                    <div className="menu-sep" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-row"
+                      data-commit-edit
+                      onClick={() => {
+                        setNameMenuOpen(false);
+                        openExport();
+                      }}
+                    >
+                      <Icon name="export" size={16} />
+                      <span>{t(locale, 'exportImage')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-row"
+                      data-commit-edit
+                      title={t(locale, 'shareBoardHint')}
+                      onClick={() => {
+                        setNameMenuOpen(false);
+                        exportFile();
+                      }}
+                    >
+                      <Icon name="download" size={16} />
+                      <span>{t(locale, 'exportFile')}</span>
+                    </button>
+                  </div>
+                )}
+              </span>
             )}
+            <PageBar locale={locale} />
+            {ephemeral && (
+              <>
+                <div className="island-sep" />
+                <button
+                  type="button"
+                  className="style-btn active save-board-btn"
+                  title={t(locale, 'keepOnDeviceHint')}
+                  aria-label={t(locale, 'keepOnDevice')}
+                  onClick={handleKeepOnDevice}
+                >
+                  {t(locale, 'keepOnDevice')}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="island history-island">
+            <button
+              type="button"
+              className="icon-btn"
+              data-keep-edit
+              title={t(locale, 'undo')}
+              aria-label={t(locale, 'undo')}
+              disabled={!canUndo || Boolean(editTarget || editGraph || editCalc)}
+              onClick={() => {
+                if (engineRef.current?.editing) return;
+                undoManager.undo();
+                engineRef.current?.remeasureAfterHistory();
+              }}
+            >
+              <Icon name="undo" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              data-keep-edit
+              title={t(locale, 'redo')}
+              aria-label={t(locale, 'redo')}
+              disabled={!canRedo || Boolean(editTarget || editGraph || editCalc)}
+              onClick={() => {
+                if (engineRef.current?.editing) return;
+                undoManager.redo();
+                engineRef.current?.remeasureAfterHistory();
+              }}
+            >
+              <Icon name="redo" />
+            </button>
             <div className="island-sep" />
-          </span>
-          <button
-            type="button"
-            className="icon-btn"
-            data-commit-edit
-            title={t(locale, 'exportBoardHint')}
-            aria-label={t(locale, 'exportBoard')}
-            onClick={() => {
-              commitOpenEditors();
-              void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); setToast(msg); setTimeout(() => setToast(null), 1800); }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); });
-            }}
-          >
-            <Icon name="download" />
-          </button>
-          {ephemeral && (
-            <>
-              <div className="island-sep" />
+            <span className="file-zoom-overflow" ref={zoomOverflowRef}>
               <button
                 type="button"
-                className="style-btn active save-board-btn"
-                title={t(locale, 'keepOnDeviceHint')}
-                aria-label={t(locale, 'keepOnDevice')}
+                className={`zoom-value file-zoom-overflow-btn${zoomMenuOpen ? ' is-open' : ''}`}
+                title={t(locale, 'zoomMenu')}
+                aria-label={t(locale, 'zoomMenu')}
+                aria-haspopup="menu"
+                aria-expanded={zoomMenuOpen}
+                onClick={() => setZoomMenuOpen((v) => !v)}
+              >
+                {zoom}%
+                <Icon name="chevronDown" size={13} />
+              </button>
+              {zoomMenuOpen && (
+                <div className="island file-zoom-menu" role="menu" aria-label={t(locale, 'zoomMenu')}>
+                  <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1.2)}>
+                    <span>{t(locale, 'zoomIn')}</span>
+                    <kbd className="menu-kbd">{modKey()} +</kbd>
+                  </button>
+                  <button type="button" role="menuitem" className="menu-row" onClick={() => engine?.zoomBy(1 / 1.2)}>
+                    <span>{t(locale, 'zoomOut')}</span>
+                    <kbd className="menu-kbd">{modKey()} −</kbd>
+                  </button>
+                  <div className="menu-sep" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-row"
+                    onClick={() => {
+                      engine?.fitContent();
+                      setZoomMenuOpen(false);
+                    }}
+                  >
+                    <span>{t(locale, 'zoomFit')}</span>
+                    <kbd className="menu-kbd">{modKey()} 1</kbd>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-row"
+                    onClick={() => {
+                      engine?.resetZoom();
+                      setZoomMenuOpen(false);
+                    }}
+                  >
+                    <span>{t(locale, 'zoomActual')}</span>
+                    <kbd className="menu-kbd">{modKey()} 0</kbd>
+                  </button>
+                </div>
+              )}
+            </span>
+          </div>
+        </div>
+        <div className="file-right">
+          <div className="island meta-island" ref={metaIslandRef}>
+            {hostOffline && ephemeral && (
+              <button
+                type="button"
+                className="host-offline-banner"
+                title={`${t(locale, 'hostOfflineBanner')} — ${t(locale, 'keepOnDeviceHint')}`}
                 onClick={handleKeepOnDevice}
               >
-                {t(locale, 'keepOnDevice')}
+                <span>{t(locale, 'hostOfflineBanner')}</span>
+                <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
               </button>
-            </>
-          )}
-        </div>
-        <div className="island meta-island" ref={metaIslandRef}>
-          {hostOffline && ephemeral && (
+            )}
+            {errorShown && errorView && (
+              <button
+                type="button"
+                className={`error-banner${error ? '' : ' is-leaving'}`}
+                onClick={() => setError(null)}
+                title={t(locale, 'errorHint')}
+                aria-label={t(locale, 'errorHint')}
+              >
+                {t(locale, 'error')}: {errorView}
+              </button>
+            )}
+            <MembersMenu
+              locale={locale}
+              boardId={boardId}
+              online={sync.online}
+              syncEnabled={sync.enabled}
+              peers={peers}
+              onOpenConnection={() => {
+                setSettingsFocus('connection');
+                setSettingsOpen(true);
+              }}
+            />
+          </div>
+          <div className="island settings-island">
             <button
               type="button"
-              className="host-offline-banner"
-              title={`${t(locale, 'hostOfflineBanner')} — ${t(locale, 'keepOnDeviceHint')}`}
-              onClick={handleKeepOnDevice}
+              className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
+              title={t(locale, 'settings')}
+              aria-label={t(locale, 'settings')}
+              aria-expanded={settingsOpen}
+              onClick={() => {
+                setSettingsFocus(null);
+                setSettingsOpen(true);
+              }}
             >
-              <span>{t(locale, 'hostOfflineBanner')}</span>
-              <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
+              <Icon name="settings" />
             </button>
-          )}
-          {errorShown && errorView && (
-            <button
-              type="button"
-              className={`error-banner${error ? '' : ' is-leaving'}`}
-              onClick={() => setError(null)}
-              title={t(locale, 'errorHint')}
-              aria-label={t(locale, 'errorHint')}
-            >
-              {t(locale, 'error')}: {errorView}
-            </button>
-          )}
-          <MembersMenu
-            locale={locale}
-            boardId={boardId}
-            online={sync.online}
-            syncEnabled={sync.enabled}
-            peers={peers}
-            onOpenConnection={() => {
-              setSettingsFocus('connection');
-              setSettingsOpen(true);
-            }}
-          />
-          <div className="island-sep" />
-          <button
-            type="button"
-            className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
-            title={t(locale, 'settings')}
-            aria-label={t(locale, 'settings')}
-            aria-expanded={settingsOpen}
-            onClick={() => {
-              setSettingsFocus(null);
-              setSettingsOpen(true);
-            }}
-          >
-            <Icon name="settings" />
-          </button>
+          </div>
         </div>
       </header>
 
@@ -1346,48 +1422,49 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         </div>
       )}
 
-      <Toolbar
+      <SelectionBar
+        engine={engine}
         locale={locale}
-        tool={tool}
         selectionCount={selectionCount}
+        selectionRevision={selectionRevision}
         canCrop={canCrop}
-        cropActive={cropActive}
-        onTool={handleTool}
-        onDelete={() => {
-          commitOpenEditors();
-          engineRef.current?.deleteSelection();
-        }}
-        onCopy={() => {
-          commitOpenEditors();
-          engineRef.current?.copySelection();
-        }}
-        onPaste={() => {
-          commitOpenEditors();
-          void engineRef.current?.pasteFromClipboard();
-        }}
+        suppressed={Boolean(editTarget || editGraph || editCalc || cropActive || menu || settingsOpen || exportState || uiHidden)}
         onDuplicate={() => {
           commitOpenEditors();
           engineRef.current?.duplicateSelection();
         }}
-        onInsertImage={() => fileRef.current?.click()}
-        onCrop={() => engine?.startCropSelected()}
+        onCopy={() => {
+          commitOpenEditors();
+          engineRef.current?.copySelection();
+          setToast(t(locale, 'syncLanCopied'));
+          window.setTimeout(() => setToast(null), 1400);
+        }}
+        onDelete={() => {
+          commitOpenEditors();
+          engineRef.current?.deleteSelection();
+        }}
+        onToggleLock={() => engineRef.current?.toggleLockSelection()}
+        onCrop={() => engineRef.current?.startCropSelected()}
+        onExport={openExport}
+        onMore={(x, y) => {
+          const e = engineRef.current;
+          const id = e ? [...e.selection][0] : undefined;
+          const v = id ? e?.views.get(id) : undefined;
+          if (!id || !v) return;
+          setCtxSubmenu(null);
+          setMenu({ x, y, shapeId: id, type: v.type, locked: Boolean(v.locked) });
+        }}
+      />
+
+      <Toolbar
+        locale={locale}
+        tool={tool}
+        penColor={pen.color}
+        cropActive={cropActive}
+        onTool={handleTool}
+        onInsertFile={() => fileRef.current?.click()}
         onApplyCrop={() => engine?.applyCrop()}
         onCancelCrop={() => engine?.cancelCrop()}
-        onExport={() => {
-          commitOpenEditors();
-          const e = engineRef.current;
-          if (!e) return;
-          if (selectionCount > 0 && e.selectionBounds()) {
-            setExportState({ source: 'selection', rect: null });
-          } else {
-            const box = e.contentBox();
-            if (!box) {
-              e.beginExportPick();
-            } else {
-              setExportState({ source: 'all', rect: null });
-            }
-          }
-        }}
       />
 
       <SettingsSheet

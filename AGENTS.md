@@ -16,13 +16,13 @@ Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and opt
 
 ## Versioning
 
-Semver lives in `package.json` (and matching `package-lock.json`). Current line is `0.15.x` (tip patch moves often; read `package.json`, do not hard-code `N` in notes).
+Semver lives in `package.json` (and matching `package-lock.json`). Current line is `1.0.x` since the 1.0 redesign (tip patch moves often; read `package.json`, do not hard-code `N` in notes).
 
 1. **Every ship that changes product behavior, agent-facing ship docs (`AGENTS.md`, deploy gotchas), or ships to preview** bumps the version and adds a `CHANGELOG.md` section for that version. Do not reuse a version string already on `dev-warexpor` / live.
-2. **Patch** (`0.15.N` → `0.15.N+1`) for fixes and polish. **Minor** only when Warexpor JR asks. Do not invent majors.
+2. **Patch** (`1.0.N` → `1.0.N+1`) for fixes and polish. **Minor** only when Warexpor JR asks. Do not invent majors.
 3. **After every version bump:** push `dev-warexpor` to GitHub. For product/preview ships, also deploy (`bash scripts/deploy.sh all` / Project wrangler). Never leave https://review.zpro-driftman.workers.dev/ ahead of `origin/dev-warexpor` as the normal state after a product ship.
 4. **`main`:** fast-forward only when Warexpor explicitly says the tip is stable enough — not automatic on every patch.
-5. **One tip lineage:** work from latest `origin/dev-warexpor`. If two agents race the same next version, rebase and take the next free patch — do not publish duplicate `0.15.N` tips.
+5. **One tip lineage:** work from latest `origin/dev-warexpor`. If two agents race the same next version, rebase and take the next free patch — do not publish duplicate `1.0.N` tips.
 6. **Verify live:** Home `v{version}+{sha}` / `node scripts/check-live-version.mjs` / `<meta name="review-build">` should match the pushed tip after deploy.
 
 ## Cursor Cloud specific instructions
