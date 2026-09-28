@@ -4863,7 +4863,7 @@ h3 .swap-text,
   content: '';
   position: absolute;
   top: 0;
-  left: 66px;
+  left: 70px;
   right: 12px;
   height: 1px;
   background: var(--chrome-border-soft);
@@ -4885,19 +4885,52 @@ h3 .swap-text,
 .board-row.has-menu {
   z-index: 2;
 }
-.board-tile {
+.board-glyph {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
+  display: block;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
-  background: color-mix(in oklab, hsl(var(--tile-hue, 40) 55% 58%) 20%, var(--chrome-panel-2));
-  color: color-mix(in oklab, hsl(var(--tile-hue, 40) 55% 58%) 70%, var(--chrome-text));
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, hsl(var(--tile-hue, 40) 55% 58%) 22%, transparent);
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1;
+  overflow: visible;
+  --g-c1: hsl(var(--g-h, 40) 70% 64%);
+  --g-c2: hsl(var(--g-h2, 200) 55% 60%);
+}
+.board-glyph-paper {
+  fill: color-mix(in oklab, var(--g-c1) 7%, var(--chrome-bg));
+  stroke: var(--chrome-border-soft);
+  stroke-width: 1;
+  transition: fill var(--chrome-dur-fast) var(--chrome-ease);
+}
+.board-row:hover .board-glyph-paper,
+.board-row.has-menu .board-glyph-paper {
+  fill: color-mix(in oklab, var(--g-c1) 10%, var(--chrome-bg));
+}
+.board-glyph-dots {
+  stroke: var(--chrome-text-dim);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  opacity: 0.28;
+}
+.board-glyph-sticky {
+  fill: color-mix(in oklab, var(--g-c1) 85%, var(--chrome-bg));
+}
+.board-glyph-sticky-fold {
+  fill: color-mix(in oklab, var(--g-c1) 55%, var(--chrome-bg));
+}
+.board-glyph-doodle {
+  fill: none;
+  stroke: var(--g-c2);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.board-glyph-ink {
+  fill: none;
+  stroke: var(--chrome-text);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.82;
 }
 .board-main {
   flex: 1;
@@ -5151,10 +5184,9 @@ h3 .swap-text,
   .board-row + .board-row::before {
     left: 60px;
   }
-  .board-tile {
-    width: 36px;
-    height: 36px;
-    font-size: 15px;
+  .board-glyph {
+    width: 40px;
+    height: 40px;
   }
 }
 
