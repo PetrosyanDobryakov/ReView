@@ -63,6 +63,33 @@ export interface AppPrefs {
   p2pSignaling: string | null;
   /** Custom toolbelt order per strip group + More shelf. null = defaults. */
   toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
+  /**
+   * How this viewer draws the board grid when the board has it on. Local like
+   * `paperBg`: collaborators can pick dots or lines on the same board.
+   */
+  gridStyle: GridStyle;
+}
+
+export type GridStyle = 'dots' | 'lines';
+
+/**
+ * 1.0 chrome is roomier (40px tool pills, 36px island buttons), so a first
+ * visit on a mouse-and-keyboard screen starts at 90%: the same physical button
+ * size as the old 100% with the new spacing. Touch screens keep 100% so tap
+ * targets stay large. Returning users keep what they had.
+ */
+export const FIRST_VISIT_UI_SCALE = 0.9;
+export const FIRST_VISIT_UI_SCALE_TOUCH = 1;
+
+function firstVisitUiScale(): number {
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) {
+      return FIRST_VISIT_UI_SCALE_TOUCH;
+    }
+  } catch {
+    /* ignore */
+  }
+  return FIRST_VISIT_UI_SCALE;
 }
 
 const STORAGE_KEY = 'review-prefs';
@@ -71,7 +98,7 @@ const DEFAULTS: AppPrefs = {
   saveRemoteBoards: false,
   adaptInkToPaper: true,
   toolCursorScale: 1,
-  uiScale: 1,
+  uiScale: firstVisitUiScale(),
   toolHoverAnim: true,
   paperBg: null,
   recognizeShapes: false,
@@ -85,6 +112,7 @@ const DEFAULTS: AppPrefs = {
   p2pUserSet: false,
   p2pSignaling: null,
   toolbarOrder: null,
+  gridStyle: 'dots',
 };
 
 function normalizeSyncUrl(raw: unknown): string | null {
@@ -191,6 +219,7 @@ function parsePrefs(raw: unknown): AppPrefs {
     toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
       ? normalizeToolbarOrder(parsed.toolbarOrder)
       : DEFAULTS.toolbarOrder,
+    gridStyle: parsed.gridStyle === 'lines' || parsed.gridStyle === 'dots' ? parsed.gridStyle : DEFAULTS.gridStyle,
   };
 }
 
@@ -260,6 +289,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
         : cur.p2pSignaling,
     toolbarOrder:
       patch.toolbarOrder !== undefined ? normalizeToolbarOrder(patch.toolbarOrder) : cur.toolbarOrder,
+    gridStyle: patch.gridStyle === 'lines' || patch.gridStyle === 'dots' ? patch.gridStyle : cur.gridStyle,
   };
   cached = next;
   try {
@@ -279,6 +309,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     'rotateHandleTop',
     'smoothPeerCursors',
     'toolbarOrder',
+    'gridStyle',
   ];
   if (userFields.some((k) => patch[k] !== undefined)) {
     try {
@@ -316,6 +347,33 @@ export function migrateRotateHandleTopDefaultOff(): void {
   if (readPrefs().rotateHandleTop) {
     writePrefs({ rotateHandleTop: false });
   }
+}
+
+/**
+ * 1.0 defaults (dot grid, smaller first-visit UI scale) are for people who
+ * arrive fresh. Anyone with ReView data from before 1.0 keeps line grid and
+ * their old 100% scale unless they stored something else. Runs once per
+ * device, before `loadUser()` creates `review-user` on a first visit.
+ */
+const ONE_ZERO_DEFAULTS_MIGRATE = 'review-migrate-1.0-defaults';
+
+export function migrateOneZeroDefaults(): void {
+  let returning = false;
+  let stored: Record<string, unknown> = {};
+  try {
+    if (localStorage.getItem(ONE_ZERO_DEFAULTS_MIGRATE) === '1') return;
+    localStorage.setItem(ONE_ZERO_DEFAULTS_MIGRATE, '1');
+    returning = localStorage.getItem('review-user') !== null || localStorage.getItem(STORAGE_KEY) !== null;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) stored = (JSON.parse(raw) as Record<string, unknown>) ?? {};
+  } catch {
+    return;
+  }
+  if (!returning) return;
+  const patch: Partial<AppPrefs> = {};
+  if (stored.gridStyle === undefined) patch.gridStyle = 'lines';
+  if (typeof stored.uiScale !== 'number') patch.uiScale = 1;
+  if (Object.keys(patch).length) writePrefs(patch);
 }
 
 export { CURSOR_SCALE_MIN, CURSOR_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_MAX };

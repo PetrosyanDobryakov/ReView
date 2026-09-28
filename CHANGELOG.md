@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## 1.0.0
+
+The 1.0 redesign: board chrome, settings and icons rebuilt around one idea, each corner of the screen has one job. Nothing about your boards changes; this is chrome, defaults and polish.
+
+### Board
+- **Top left is "where am I"**: Home, the board name and the page chip. Clicking the name opens a board menu with Rename, Copy link, Export as image and Download .review file (double-click still renames). Export left the top strip.
+- **Undo and zoom sit in a slim island next to it**: undo, redo and one "100%" button whose menu holds zoom in, zoom out, show all and 100%, each with its shortcut. The always-visible +, -, fit cluster is gone.
+- **Top right is "who is here"**: presence avatars now show initials, next to one primary **Invite** button (person-plus icon) that opens the members and invite panel. Settings sit alone in their own island at the edge.
+- **The toolbelt is tools only**: select, hand, pen, eraser, shapes, arrow, sticky, text, then Insert and shape recognition. Lasso lives under select and every shape (ellipse, diamond, flowchart shapes, frame) under the shapes button, as flyouts: click the active slot again, hold it or right-click to pick another. The slot remembers the last one you used. Insert holds file or image plus graph, calculator and table (still drag-to-reorder). Paste, copy, duplicate, delete, export and crop left the toolbelt.
+- **Active tool is a solid pill** in the strongest chrome color, 40px targets, and the pen button shows its ink as a dot.
+- **Selection bar floats over the selection**: duplicate, copy, crop (images), export, lock, delete and more (the full context menu). It follows pans and zooms, flips below when there is no room above, and steps aside while you drag, edit text or crop. Right-clicking empty board now also offers insert file, show all and export.
+- **Style island speaks visually**: marker and highlighter are icon toggles, the width slider became three size dots (click the active dot again to fine-tune).
+- **Dot grid**: a quiet dot lattice replaces the line grid as the default look (spacing stays 16-40px at any zoom). Lines and no grid are one click away in Appearance; the choice is per viewer, like paper.
+
+### Settings
+- **A centered two-pane dialog** instead of the side sheet with tabs: a rail with you on top (name you can edit in place, cursor color dots), then Appearance, Keys & gestures, Interface and Connection. Each pane scrolls on its own. On phones the rail is a list and each section opens full-screen with a back arrow.
+- **Appearance**: interface themes are tiny live previews in each theme's own colors; Orbit is always listed with an "exp." chip (its description is the tooltip) and picking it unlocks it. Board paper is its own row, "independent of the interface", with centered dot-grid swatches and a custom color; grid is None / Dots / Lines; ink adaptation below.
+- **Keys & gestures** (was "Binds"): search across actions and keys, two columns of real keycaps (click one, press the new key), color binds, the global shortcuts, and gestures as tiles.
+- **Interface**: language as a segmented control, UI scale and cursor size sliders, tool animation, hide-interface hint, and board behavior toggles (recognize shapes, rotate magnet, top rotate handle, smooth peer cursors).
+- **Connection**: a status line first (connected or not, people on the board, where the board is stored, connect / disconnect), then the same-Wi-Fi address with Copy, then "Save others' boards" and P2P. Server URL, P2P signaling, room and the net log fold under "For developers".
+
+### Icons
+- One hand for the whole set: 24px grid, 1.75 stroke, 2px corner radius on boxes, round caps and joins. Redrawn: select, hand, pen, eraser, rect, ellipse, diamond, triangle, sticky (a note, not a page), text, sparkles, highlighter (chisel marker), paste, export (out of a tray), insert image (picture with a plus), copy, duplicate, trash, calculator, graph, warning, a clean eight-tooth settings cog and a house with an arched door. New: invite, lock / unlock, insert, shapes, palette, keyboard, sliders, wifi, search. Flowchart shapes, table, image, file, frame and alignment glyphs follow the same corners. Tool cursors match the new glyphs.
+
+### First visit defaults
+- New visitors on a mouse-and-keyboard screen start at 90% UI scale (the same physical button size as the old 100% with the roomier 1.0 spacing); touch screens start at 100%. New visitors get the dot grid.
+- Anyone with ReView data from before 1.0 keeps line grid and their previous UI scale (100% unless they changed it). The check runs once per device.
+
 ## 0.15.58
 
 ### Home redesign

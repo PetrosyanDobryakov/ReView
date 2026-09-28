@@ -244,6 +244,72 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
   );
 }
 
+const PEN_SIZE_PRESETS: Array<{ size: number; dot: number; label: 'sizeFine' | 'sizeMedium' | 'sizeBold' }> = [
+  { size: 3, dot: 5, label: 'sizeFine' },
+  { size: 6, dot: 8, label: 'sizeMedium' },
+  { size: 12, dot: 12, label: 'sizeBold' },
+];
+
+/** Three size dots; clicking the active one opens a slider for in-between widths. */
+function PenSizeDots({ locale, size, onSize }: { locale: LocaleId; size: number; onSize: (n: number) => void }) {
+  const [tune, setTune] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tune) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
+      setTune(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [tune]);
+  const nearest = PEN_SIZE_PRESETS.reduce((best, p) =>
+    Math.abs(p.size - size) < Math.abs(best.size - size) ? p : best
+  );
+  return (
+    <div className="size-dots" ref={rootRef} role="group" aria-label={t(locale, 'brushSize')}>
+      {PEN_SIZE_PRESETS.map((p) => {
+        const on = p === nearest;
+        return (
+          <button
+            key={p.size}
+            type="button"
+            className={`size-dot${on ? ' active' : ''}${on && p.size !== size ? ' tuned' : ''}`}
+            title={on ? `${t(locale, p.label)} · ${size} — ${t(locale, 'sizeTuneHint')}` : t(locale, p.label)}
+            aria-label={t(locale, p.label)}
+            aria-pressed={on}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (on) setTune((v) => !v);
+              else {
+                setTune(false);
+                onSize(p.size);
+              }
+            }}
+          >
+            <i style={{ width: p.dot, height: p.dot }} />
+          </button>
+        );
+      })}
+      {tune && (
+        <div className="island size-tune" role="dialog" aria-label={t(locale, 'brushSize')}>
+          <input
+            className="size-slider"
+            type="range"
+            min={1}
+            max={20}
+            value={size}
+            autoFocus
+            aria-label={t(locale, 'brushSize')}
+            onChange={(e) => onSize(Number(e.target.value))}
+          />
+          <span className="size-value">{size}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function StyleBar({
   locale,
   tool,
@@ -485,47 +551,33 @@ export function StyleBar({
       )}
       {view.showPenStyle && (
         <>
-          <button
-            type="button"
-            className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
-            title={t(locale, 'markerHint')}
-            aria-pressed={pen.style === 'marker'}
-            onClick={() => {
-              updatePenSettings({ style: 'marker' });
-              const next = effectivePen();
-              if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
-                onPatched();
-              }
-            }}
-          >
-            {t(locale, 'marker')}
-          </button>
-          <button
-            type="button"
-            className={`style-btn${pen.style === 'highlighter' ? ' active' : ''}`}
-            title={t(locale, 'highlighterHint')}
-            aria-pressed={pen.style === 'highlighter'}
-            onClick={() => {
-              updatePenSettings({ style: 'highlighter' });
-              const next = effectivePen();
-              if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
-                onPatched();
-              }
-            }}
-          >
-            {t(locale, 'highlighter')}
-          </button>
-          <input
-            className="size-slider"
-            type="range"
-            min={1}
-            max={20}
-            value={pen.size}
-            title={t(locale, 'brushSize')}
-            onChange={(e) => {
-              const size = Number(e.target.value);
+          <div className="style-seg" role="group" aria-label={t(locale, 'penStyle')}>
+            {(['marker', 'highlighter'] as const).map((style) => (
+              <button
+                key={style}
+                type="button"
+                className={`style-seg-btn${pen.style === style ? ' active' : ''}`}
+                title={t(locale, style === 'marker' ? 'markerHint' : 'highlighterHint')}
+                aria-label={t(locale, style)}
+                aria-pressed={pen.style === style}
+                onClick={() => {
+                  updatePenSettings({ style });
+                  const next = effectivePen();
+                  if (penTargets.length) {
+                    patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
+                    onPatched();
+                  }
+                }}
+              >
+                <Icon name={style === 'marker' ? 'pen' : 'highlight'} size={18} />
+              </button>
+            ))}
+          </div>
+          <div className="style-divider" />
+          <PenSizeDots
+            locale={locale}
+            size={pen.size}
+            onSize={(size) => {
               updatePenSettings({ size });
               if (penTargets.length) {
                 patchShapes(penTargets.map((v) => [v.id, { strokeWidth: penStrokeWidthForSize(v, size) }]));
@@ -533,7 +585,6 @@ export function StyleBar({
               }
             }}
           />
-          <span className="size-value">{pen.size}</span>
         </>
       )}
       {view.showFill && (
