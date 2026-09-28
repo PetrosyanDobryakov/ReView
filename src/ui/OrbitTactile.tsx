@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 const INTERACTIVE =
-  'button, a, [role="button"], [role="switch"], [role="menuitem"], [role="option"], [role="tab"], .board-row, .theme-card, .bg-card, .tool-btn, .icon-btn, .style-btn, .sheet-switch, .home-team-btn, .ctx-item, .menu-item, input[type="checkbox"], input[type="radio"], select, summary';
+  'button, a, [role="button"], [role="switch"], [role="menuitem"], [role="option"], [role="tab"], .board-row, .theme-card, .bg-card, .tool-btn, .icon-btn, .style-btn, .sheet-switch, .home-tab, .ctx-item, .menu-item, input[type="checkbox"], input[type="radio"], select, summary';
 
 function isOrbitChrome(): boolean {
   return document.documentElement.dataset.chromeTheme === 'orbit';

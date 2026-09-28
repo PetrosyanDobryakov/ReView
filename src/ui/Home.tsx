@@ -16,6 +16,7 @@ import {
   isBoardPersistedLocally,
   listRecentBoards,
   isOwnBoard,
+  boardStorageKind,
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
@@ -38,6 +39,41 @@ import { loadUser, saveUser } from '../core/user';
 import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
+
+function hueOf(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function initialOf(name: string): string {
+  const ch = Array.from(name.trim())[0];
+  return ch ? ch.toLocaleUpperCase() : '·';
+}
+
+const REL_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['second', 60],
+  ['minute', 60],
+  ['hour', 24],
+  ['day', 7],
+  ['week', 4.35],
+  ['month', 12],
+  ['year', Infinity],
+];
+
+function relativeTime(ts: number, localeTag: string): string {
+  try {
+    const rtf = new Intl.RelativeTimeFormat(localeTag, { numeric: 'auto' });
+    let v = (ts - Date.now()) / 1000;
+    for (const [unit, step] of REL_STEPS) {
+      if (Math.abs(v) < step) return rtf.format(Math.round(v), unit);
+      v /= step;
+    }
+  } catch {
+    /* fall through */
+  }
+  return new Date(ts).toLocaleDateString(localeTag);
+}
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const navigate = useNavigate();
@@ -274,13 +310,62 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     };
   }, [openMenuId]);
 
+  const activeTeamMeta = activeTeam === 'recent' ? null : teams.find((tm) => tm.id === activeTeam) ?? null;
+  const teamCount = (id: string) => boards.filter((b) => b.teamId === id && isOwnBoard(b)).length;
+
+  const renderMenu = (key: string, items: React.ReactNode) => (
+    <span className="board-row-menu-wrap">
+      <button
+        type="button"
+        className={`icon-btn board-row-menu-trigger${openMenuId === key ? ' is-open' : ''}`}
+        title={t(locale, 'more')}
+        aria-label={t(locale, 'more')}
+        aria-expanded={openMenuId === key}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpenMenuId(openMenuId === key ? null : key);
+        }}
+      >
+        <Icon name="dots" size={18} />
+      </button>
+      {openMenuId === key && (
+        <div className="board-row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          {items}
+        </div>
+      )}
+    </span>
+  );
+
+  const menuItem = (icon: Parameters<typeof Icon>[0]['name'], label: string, onClick: () => void, opts?: { danger?: boolean; disabled?: boolean; title?: string }) => (
+    <button
+      type="button"
+      className={`board-row-menu-item${opts?.danger ? ' danger' : ''}`}
+      role="menuitem"
+      disabled={opts?.disabled}
+      title={opts?.title}
+      onClick={() => {
+        if (opts?.disabled) return;
+        setOpenMenuId(null);
+        onClick();
+      }}
+    >
+      <Icon name={icon} size={14} />
+      {label}
+    </button>
+  );
+
+  const commitTeamRename = (id: string) => {
+    renameTeam(id, teamName);
+    setEditingTeam(null);
+    refresh();
+  };
+
   return (
     <div className="home-root">
       <header className="file-bar">
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
-          <div className="island-sep" />
-          <span className="home-title">{t(locale, 'home')}</span>
           <div className="island-sep" />
           {verStatus?.kind === 'outdated' ? (
             <a
@@ -315,363 +400,289 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         </div>
       </header>
 
-      <div className="home-notice" role="note">
-        <Icon name="warn" size={16} />
-        <span className="home-notice-text">{t(locale, 'storageNotice')}</span>
-        {/* ponytail: desktop download placeholder — no URL yet, wire to the installer link later */}
-        <span className="home-notice-cta" role="link" aria-disabled="true" title={t(locale, 'desktopCta')}>
-          {t(locale, 'desktopCta')}
-        </span>
-      </div>
-
-      <div className="home-body">
-        <div className="island home-side">
-          <div className="home-side-head">
-            <span className="panel-label">{t(locale, 'recent')}</span>
-          </div>
-          <div className="home-teams">
-            <div
-              className={`home-team-btn${activeTeam === 'recent' ? ' on' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => setActiveTeam('recent')}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setActiveTeam('recent');
-                }
-              }}
-            >
-              <span className="home-team-name">{t(locale, 'recent')}</span>
-            </div>
-          </div>
-          <div className="home-side-head">
-            <span className="panel-label">{t(locale, 'teams')}:</span>
-            <button type="button" className="icon-btn" title="+" aria-label="+" onClick={handleCreateTeam}>
-              <Icon name="plus" size={16} />
-            </button>
-          </div>
-          <div className="home-teams">
-            {teams.map((team) => (
-              <div
-                key={team.id}
-                className={`home-team-btn${activeTeam === team.id ? ' on' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => setActiveTeam(team.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setActiveTeam(team.id);
-                  }
-                }}
-              >
-                {editingTeam === team.id ? (
-                  <input
-                    autoFocus
-                    value={teamName}
-                    onChange={(e) => setTeamName(e.target.value)}
-                    onBlur={() => {
-                      renameTeam(team.id, teamName);
-                      setEditingTeam(null);
-                      refresh();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        renameTeam(team.id, teamName);
-                        setEditingTeam(null);
-                        refresh();
-                      }
-                      if (e.key === 'Escape') setEditingTeam(null);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="home-inline-input"
-                  />
-                ) : (
-                  <span className="home-team-name">{team.name}</span>
-                )}
-                <span className="home-team-actions" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    style={{ width: 24, height: 24 }}
-                    title={t(locale, 'rename')}
-                    aria-label={t(locale, 'rename')}
-                    onClick={() => {
-                      setEditingTeam(team.id);
-                      setTeamName(team.name);
-                    }}
-                  >
-                    <Icon name="pen" size={14} />
-                  </button>
-                  {team.id !== 'default' && (
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ width: 24, height: 24 }}
-                      title={t(locale, 'ctxDelete')}
-                      aria-label={t(locale, 'ctxDelete')}
-                      onClick={() => {
-                        if (confirm(t(locale, 'deleteTeamConfirm'))) {
-                          deleteTeam(team.id);
-                          setActiveTeam('default');
-                          refresh();
-                        }
-                      }}
-                    >
-                      <Icon name="trash" size={14} />
-                    </button>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="sheet-section home-storage">
-            <h3>{t(locale, 'storage')}</h3>
-            <p className="sheet-hint">{t(locale, 'saveRemoteBoardsHint')}</p>
+      <main className="home-shell">
+        <div className="home-hero">
+          <h1 className="home-h1">{t(locale, 'boardsTitle')}</h1>
+          <div className="home-hero-actions">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,.review,application/json"
+              className="visually-hidden"
+              aria-label={t(locale, 'importBoardAction')}
+              onChange={handleImportPick}
+            />
             <button
               type="button"
-              className={`sheet-switch${saveRemote ? ' on' : ''}`}
-              role="switch"
-              aria-checked={saveRemote}
-              onClick={toggleSaveRemote}
+              className="home-btn"
+              title={t(locale, 'importBoardHint')}
+              onClick={() => importRef.current?.click()}
             >
-              <span>{t(locale, 'saveRemoteBoards')}</span>
-              <span className="switch" aria-hidden="true">
-                <span className="switch-thumb" />
-              </span>
+              <Icon name="upload" size={16} />
+              <span className="home-btn-label">{t(locale, 'importBoard')}</span>
             </button>
-          </div>
-
-          <div className="sheet-section">
-            <h3>{t(locale, 'join')}</h3>
-            <p className="sheet-hint">{t(locale, 'joinHint')}</p>
-            <div className="home-join-row">
-              <input
-                value={joinLink}
-                onChange={(e) => setJoinLink(e.target.value)}
-                placeholder="https://…/board/…"
-                className="home-inline-input home-join-input"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleJoin();
-                }}
-              />
-              <button
-                type="button"
-                className="style-btn active style-btn-icon"
-                onClick={handleJoin}
-                aria-label={t(locale, 'join')}
-              >
-                <Icon name="arrow" size={16} />
-              </button>
-            </div>
-          </div>
-
-          <div className="sheet-section home-share">
-            <h3>{t(locale, 'shareBoard')}</h3>
-            <p className="sheet-hint">{t(locale, 'shareBoardHint')}</p>
-            <p className="sheet-hint">{t(locale, 'importBoardHint')}</p>
-            <input ref={importRef} type="file" accept=".json,.review,application/json" className="visually-hidden" aria-label={t(locale, 'importBoardAction')} onChange={handleImportPick} />
-            <div className="sheet-actions">
-              <button type="button" className="style-btn active" onClick={() => importRef.current?.click()}>
-                <Icon name="upload" size={14} />
-                {t(locale, 'importBoard')}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="island home-main">
-          <div className="home-main-head">
-            <h2>{activeTeam === 'recent' ? t(locale, 'recent') : (teams.find((tm) => tm.id === activeTeam)?.name ?? '')}</h2>
-            <button type="button" className="style-btn active" onClick={handleCreateBoard}>
-              <Icon name="plus" size={14} />
+            <button type="button" className="home-btn home-btn-primary" onClick={handleCreateBoard}>
+              <Icon name="plus" size={16} />
               {t(locale, 'newBoard')}
             </button>
           </div>
-          <div className="home-list">
-            <div className="board-row board-row-head">
-              <span className="board-col-idx">#</span>
-              <span className="board-col-name">{t(locale, 'boardNameCol')}</span>
-              <span className="board-col-status">{t(locale, 'boardStorageCol')}</span>
-              <span className="board-col-actions">{t(locale, 'boardActionsCol')}</span>
-            </div>
-            {filtered.length ? (
-              filtered.map((b, idx) => {
-                const known = weightsReady && Object.prototype.hasOwnProperty.call(weights, b.id);
-                const bytes = known ? weights[b.id]! : undefined;
-                const weightLabelFull =
-                  bytes === undefined
-                    ? t(locale, 'boardWeightLoading')
-                    : bytes === 0
-                      ? t(locale, 'boardWeightEmpty')
-                      : formatBoardWeight(bytes, localeTag);
-                const weightLabelShort = bytes === 0 ? '—' : weightLabelFull;
-                const weightTitle = bytes === 0 && known ? t(locale, 'boardWeightEmpty') : bytes && bytes > 0 ? weightLabelFull : undefined;
-                const needsSave =
-                  (b.status === 'remote' && !isBoardPersistedLocally(b)) ||
-                  (Boolean(b.savedLocally) && known && bytes === 0);
-                const dateLabel = new Date(b.updatedAt).toLocaleString(localeTag);
-                return (
-                  <div
-                    key={b.id}
-                    className="island board-row"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => navigateThemed(navigate, boardUrl(b.id))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigateThemed(navigate, boardUrl(b.id));
-                      }
-                    }}
-                  >
-                    <span className="board-col-idx">{idx + 1}</span>
-                    <span className="board-col-name">
-                      {editingBoard === b.id ? (
-                        <input
-                          autoFocus
-                          value={boardName}
-                          onChange={(e) => setBoardName(e.target.value)}
-                          onBlur={() => {
+        </div>
+
+        <form
+          className="home-join"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleJoin();
+          }}
+        >
+          <Icon name="link" size={16} />
+          <input
+            value={joinLink}
+            onChange={(e) => setJoinLink(e.target.value)}
+            placeholder={t(locale, 'joinHint')}
+            aria-label={t(locale, 'joinHint')}
+            className="home-join-input"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button type="submit" className="home-join-go" disabled={!joinLink.trim()}>
+            {t(locale, 'join')}
+            <Icon name="arrow" size={14} />
+          </button>
+        </form>
+
+        <nav className="home-tabs" aria-label={t(locale, 'teams')}>
+          <div className="home-tabs-scroll" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTeam === 'recent'}
+              className={`home-tab${activeTeam === 'recent' ? ' on' : ''}`}
+              onClick={() => setActiveTeam('recent')}
+            >
+              {t(locale, 'recent')}
+            </button>
+            <span className="home-tabs-sep" aria-hidden="true" />
+            {teams.map((team) =>
+              editingTeam === team.id ? (
+                <input
+                  key={team.id}
+                  autoFocus
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  onBlur={() => commitTeamRename(team.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitTeamRename(team.id);
+                    if (e.key === 'Escape') setEditingTeam(null);
+                  }}
+                  className="home-tab-input"
+                  aria-label={t(locale, 'rename')}
+                />
+              ) : (
+                <button
+                  key={team.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTeam === team.id}
+                  className={`home-tab${activeTeam === team.id ? ' on' : ''}`}
+                  onClick={() => setActiveTeam(team.id)}
+                  onDoubleClick={() => {
+                    setEditingTeam(team.id);
+                    setTeamName(team.name);
+                  }}
+                >
+                  <span className="home-tab-name">{team.name}</span>
+                  <span className="home-tab-count">{teamCount(team.id)}</span>
+                </button>
+              )
+            )}
+            <button
+              type="button"
+              className="home-tab home-tab-add"
+              title={t(locale, 'teams')}
+              aria-label={`${t(locale, 'teams')} +`}
+              onClick={handleCreateTeam}
+            >
+              <Icon name="plus" size={14} />
+            </button>
+          </div>
+          {activeTeamMeta && editingTeam !== activeTeamMeta.id
+            ? renderMenu(
+                `team:${activeTeamMeta.id}`,
+                <>
+                  {menuItem('pen', t(locale, 'rename'), () => {
+                    setEditingTeam(activeTeamMeta.id);
+                    setTeamName(activeTeamMeta.name);
+                  })}
+                  {activeTeamMeta.id !== 'default' &&
+                    menuItem(
+                      'trash',
+                      t(locale, 'ctxDelete'),
+                      () => {
+                        if (confirm(t(locale, 'deleteTeamConfirm'))) {
+                          deleteTeam(activeTeamMeta.id);
+                          setActiveTeam('default');
+                          refresh();
+                        }
+                      },
+                      { danger: true }
+                    )}
+                </>
+              )
+            : null}
+        </nav>
+
+        {filtered.length ? (
+          <ul className="home-list" role="list">
+            {filtered.map((b) => {
+              const known = weightsReady && Object.prototype.hasOwnProperty.call(weights, b.id);
+              const bytes = known ? weights[b.id]! : undefined;
+              const weightLabel =
+                bytes === undefined ? t(locale, 'boardWeightLoading') : bytes === 0 ? null : formatBoardWeight(bytes, localeTag);
+              const needsSave =
+                (b.status === 'remote' && !isBoardPersistedLocally(b)) || (Boolean(b.savedLocally) && known && bytes === 0);
+              const sessionOnly = boardStorageKind(b) !== 'onDevice';
+              const open = () => navigateThemed(navigate, boardUrl(b.id));
+              return (
+                <li
+                  key={b.id}
+                  className={`board-row${openMenuId === b.id ? ' has-menu' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  title={b.id}
+                  onClick={open}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      open();
+                    }
+                  }}
+                >
+                  <span className="board-tile" aria-hidden="true" style={{ '--tile-hue': hueOf(b.id) } as React.CSSProperties}>
+                    {initialOf(b.name)}
+                  </span>
+                  <span className="board-main">
+                    {editingBoard === b.id ? (
+                      <input
+                        autoFocus
+                        value={boardName}
+                        onChange={(e) => setBoardName(e.target.value)}
+                        onBlur={() => {
+                          renameBoard(b.id, boardName);
+                          setEditingBoard(null);
+                          refresh();
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
                             renameBoard(b.id, boardName);
                             setEditingBoard(null);
                             refresh();
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              renameBoard(b.id, boardName);
-                              setEditingBoard(null);
-                              refresh();
-                            }
-                            if (e.key === 'Escape') setEditingBoard(null);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="home-inline-input"
-                          style={{ minWidth: 120 }}
-                        />
-                      ) : (
-                        <b className="board-name-text">{b.name}</b>
-                      )}
-                      <span className="board-meta-line">
-                        <span className="board-id-label">{b.id}</span>
-                        <span className="board-meta-sep" aria-hidden="true">·</span>
-                        <span className="board-meta-weight" title={weightTitle}>
-                          {weightLabelShort}
-                        </span>
-                        <span className="board-meta-sep" aria-hidden="true">·</span>
-                        <span className="board-meta-date">{dateLabel}</span>
-                        <span className="board-meta-badge-inline">
+                          }
+                          if (e.key === 'Escape') setEditingBoard(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="home-inline-input"
+                      />
+                    ) : (
+                      <span className="board-name-text">{b.name}</span>
+                    )}
+                    <span className="board-meta-line">
+                      <span title={new Date(b.updatedAt).toLocaleString(localeTag)}>{relativeTime(b.updatedAt, localeTag)}</span>
+                      {weightLabel ? (
+                        <>
                           <span className="board-meta-sep" aria-hidden="true">·</span>
-                          <span className="board-meta-badge-wrap">
-                            <BoardStorageBadge meta={b} locale={locale} />
-                          </span>
-                        </span>
-                      </span>
+                          <span className="board-meta-weight">{weightLabel}</span>
+                        </>
+                      ) : null}
+                      {sessionOnly ? <BoardStorageBadge meta={b} locale={locale} /> : null}
                     </span>
-                    <span className="board-col-status" onClick={(e) => e.stopPropagation()}>
-                      <BoardStorageBadge meta={b} locale={locale} />
-                      {needsSave && (
-                        <button
-                          type="button"
-                          className="style-btn board-row-cta"
-                          title={t(locale, 'keepOnDeviceHint')}
-                          onClick={() => handleSaveBoard(b.id)}
-                        >
-                          {t(locale, 'keepOnDevice')}
-                        </button>
-                      )}
-                    </span>
-                    <span className="board-col-actions" onClick={(e) => e.stopPropagation()}>
-                      <span className="board-row-tools">
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t(locale, 'saveAsMyBoardHint')}
-                          aria-label={t(locale, 'saveAsMyBoard')}
-                          onClick={() => void handleCloneBoard(b.id)}
-                        >
-                          <Icon name="duplicate" size={20} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t(locale, 'copyLink')}
-                          aria-label={t(locale, 'copyLink')}
-                          onClick={() => handleCopyLink(b.id)}
-                        >
-                          <Icon name="copy" size={20} />
-                        </button>
-                        <span className="board-row-menu-wrap">
-                          <button
-                            type="button"
-                            className="icon-btn board-row-menu-trigger"
-                            aria-label={t(locale, 'more')}
-                            aria-expanded={openMenuId === b.id}
-                            aria-haspopup="menu"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenMenuId(openMenuId === b.id ? null : b.id);
-                            }}
-                          >
-                            <Icon name="dots" size={20} />
-                          </button>
-                          {openMenuId === b.id && (
-                            <div className="board-row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                className="board-row-menu-item"
-                                role="menuitem"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  void handleExportBoard(b.id);
-                                }}
-                              >
-                                <Icon name="download" size={14} />
-                                {t(locale, 'exportBoard')}
-                              </button>
-                              <button
-                                type="button"
-                                className="board-row-menu-item"
-                                role="menuitem"
-                                disabled={!canRenameBoardOnHome(b)}
-                                onClick={() => {
-                                  if (!canRenameBoardOnHome(b)) return;
-                                  setOpenMenuId(null);
-                                  setEditingBoard(b.id);
-                                  setBoardName(b.name);
-                                }}
-                              >
-                                <Icon name="pen" size={14} />
-                                {t(locale, 'rename')}
-                              </button>
-                              <button
-                                type="button"
-                                className="board-row-menu-item danger"
-                                role="menuitem"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  void handleDeleteBoard(b.id);
-                                }}
-                              >
-                                <Icon name="trash" size={14} />
-                                {t(locale, 'ctxDelete')}
-                              </button>
-                            </div>
-                          )}
-                        </span>
-                      </span>
-                    </span>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="sheet-hint home-empty">{t(locale, activeTeam === 'recent' ? 'recentEmpty' : 'noBoards')}</div>
+                  </span>
+                  <span className="board-actions" onClick={(e) => e.stopPropagation()}>
+                    {needsSave && (
+                      <button
+                        type="button"
+                        className="home-btn home-btn-sm"
+                        title={t(locale, 'keepOnDeviceHint')}
+                        onClick={() => handleSaveBoard(b.id)}
+                      >
+                        <Icon name="download" size={14} />
+                        <span className="home-btn-label">{t(locale, 'keepOnDevice')}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="icon-btn board-hover-action"
+                      title={t(locale, 'copyLink')}
+                      aria-label={t(locale, 'copyLink')}
+                      onClick={() => handleCopyLink(b.id)}
+                    >
+                      <Icon name="link" size={18} />
+                    </button>
+                    {renderMenu(
+                      b.id,
+                      <>
+                        {menuItem('duplicate', t(locale, 'saveAsMyBoard'), () => void handleCloneBoard(b.id), {
+                          title: t(locale, 'saveAsMyBoardHint'),
+                        })}
+                        {menuItem('download', t(locale, 'exportBoard'), () => void handleExportBoard(b.id))}
+                        {menuItem(
+                          'pen',
+                          t(locale, 'rename'),
+                          () => {
+                            setEditingBoard(b.id);
+                            setBoardName(b.name);
+                          },
+                          { disabled: !canRenameBoardOnHome(b) }
+                        )}
+                        <div className="board-row-menu-sep" role="separator" />
+                        {menuItem('trash', t(locale, 'ctxDelete'), () => void handleDeleteBoard(b.id), { danger: true })}
+                      </>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="home-empty">
+            <p>{t(locale, activeTeam === 'recent' ? 'recentEmpty' : 'noBoards')}</p>
+            {activeTeam !== 'recent' && (
+              <button type="button" className="home-btn home-btn-primary" onClick={handleCreateBoard}>
+                <Icon name="plus" size={16} />
+                {t(locale, 'newBoard')}
+              </button>
             )}
           </div>
-        </div>
-      </div>
+        )}
+
+        <footer className="home-foot">
+          <p className="home-foot-note">
+            <Icon name="warn" size={14} />
+            <span>{t(locale, 'storageNotice')}</span>
+          </p>
+          <div className="home-foot-row">
+            <button
+              type="button"
+              className={`sheet-switch home-foot-switch${saveRemote ? ' on' : ''}`}
+              role="switch"
+              aria-checked={saveRemote}
+              title={t(locale, 'saveRemoteBoardsHint')}
+              onClick={toggleSaveRemote}
+            >
+              <span className="switch" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+              <span>{t(locale, 'saveRemoteBoards')}</span>
+            </button>
+            {/* ponytail: desktop download placeholder — no URL yet, wire to the installer link later */}
+            <span className="home-foot-cta" role="link" aria-disabled="true" title={t(locale, 'desktopCta')}>
+              {t(locale, 'desktopCta')}
+            </span>
+          </div>
+        </footer>
+      </main>
 
       <SettingsSheet
         open={settingsOpen}
