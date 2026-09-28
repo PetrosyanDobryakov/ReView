@@ -6,7 +6,7 @@
 
 ### Home redesign
 - **One column instead of sidebar + table**: big "Boards" title with Import and New board on the right, one "paste a board link" field under it (the Join button appears once there is something to join), team tabs as pills with board counts, then the board list. The four explainer boxes in the sidebar are gone.
-- **Cleaner board rows**: a colored initial tile, the name, and a relative "updated 5 hours ago" (exact time on hover) plus size. The "#" column, table header and board id (now the row tooltip) are gone; the storage badge only shows when a board is session-only, next to its Keep on device button.
+- **Cleaner board rows**: a procedural mini-board thumbnail (dot-grid paper, a sticky note, an ink squiggle and a doodle, seeded from the board id so each board keeps its own), the name, and a relative "updated 5 hours ago" (exact time on hover) plus size. The "#" column, table header and board id (now the row tooltip) are gone; the storage badge only shows when a board is session-only, next to its Keep on device button.
 - **Actions on hover**: copy link and a ⋯ menu (Save as my board, Export, Rename, Delete) appear on hover or focus; always visible on touch.
 - **Teams**: "+" pill adds a team, double-click a team to rename it, the ⋯ at the end of the tab row renames or deletes the active team.
 - **Footer fine print**: the browser-cache warning, the "Save others' boards" switch (its explanation is now the tooltip) and the desktop-app note sit quietly at the bottom.

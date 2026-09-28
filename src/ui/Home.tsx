@@ -31,6 +31,7 @@ import { t } from './i18n';
 import type { LocaleId } from '../core/locale';
 import { Icon } from './icons';
 import { BoardStorageBadge } from './BoardStorageBadge';
+import { BoardGlyph } from './BoardGlyph';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
@@ -39,17 +40,6 @@ import { loadUser, saveUser } from '../core/user';
 import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
-
-function hueOf(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
-function initialOf(name: string): string {
-  const ch = Array.from(name.trim())[0];
-  return ch ? ch.toLocaleUpperCase() : '·';
-}
 
 const REL_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
   ['second', 60],
@@ -559,9 +549,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     }
                   }}
                 >
-                  <span className="board-tile" aria-hidden="true" style={{ '--tile-hue': hueOf(b.id) } as React.CSSProperties}>
-                    {initialOf(b.name)}
-                  </span>
+                  <BoardGlyph id={b.id} />
                   <span className="board-main">
                     {editingBoard === b.id ? (
                       <input
