@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.1
+
+### Fix
+- **Compact host offline on 403**: `compactBoard` `src/core/store.ts:1174` left `sync` detached when `DELETE /room/review-<id>` returned `403` while guests were still connected (workers.dev has no loopback `127.0.0.1` auth, `src/core/store.ts:1039`/`worker/src/index.ts:62` needs token or empty room). `bmur5jwk2dvnw` compacted `24.0 MB → 14.3 MB` `didCompact:true` but the host stayed offline for all guests until reload. Now re-attaches even on `403` (old server doc merges back, but host stays online).
+
 ## 0.15.57
 
 ### Starship finale realism

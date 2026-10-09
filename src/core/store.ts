@@ -1174,8 +1174,12 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     if (wiped) {
       attachSync(doc, boardId);
     } else {
-      // Re-attaching without a wipe merges the old tombstoned room back in.
-      netLog.warn('compact left sync detached — server wipe failed', () => ({ boardId }));
+      // Keep the board online even when the server wipe fails (e.g. 403
+      // while guests are still connected on workers.dev). The old room will
+      // merge back in, but the host must not stay detached → guests see
+      // "host offline" forever (bmur5jwk2dvnw 24MB→14MB compact with 403).
+      netLog.warn('compact server wipe failed — re-attaching anyway', () => ({ boardId, before, after }));
+      attachSync(doc, boardId);
     }
     bumpCurrentBoard();
     emitBoardReady();
