@@ -999,7 +999,10 @@ async function deleteServerRoomForCompact(room: string): Promise<boolean> {
   async function tryDelete(url: string, via: string): Promise<boolean> {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const res = await fetch(url, { method: 'DELETE' });
+        const res = await fetch(url, {
+          method: 'DELETE',
+          headers: { 'X-Review-Compact-Token': 'review-compact-2026' },
+        });
         if (res.ok || res.status === 404) {
           fileLogFallback('info', 'compact cleared server room', { room, via, attempt, status: res.status });
           return true;
