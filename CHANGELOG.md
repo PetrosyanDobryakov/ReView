@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.2
+
+### Fix
+- **Compact on workers.dev with guests**: `deleteServerRoomForCompact` `src/core/store.ts:1002` now sends `X-Review-Compact-Token` (`review-compact-2026`, secret `REVIEW_COMPACT_TOKEN` on `review-sync`) so `DELETE /room/review-<id>` succeeds even while sockets are open (`worker/src/index.ts:62` needs token or empty room). Before, `403` left the room at `24MB` and the next `syncStep1` was still huge.
+
 ## 1.0.1
 
 ### Fix
