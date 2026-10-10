@@ -22,7 +22,7 @@ import { patchShapes } from '../core/store';
 import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
-import { applyFormatToEditor, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
+import { applyFormatToEditor, hasTextSelection, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
 import { t } from './i18n';
 import { Icon, type IconName } from './icons';
 import { ChromeSelect } from './ChromeSelect';
@@ -399,6 +399,10 @@ export function StyleBar({
 
     if (editing) {
       const editor = getTextEditor();
+      const hasRichSelection =
+        editor instanceof HTMLElement &&
+        textOverlayAllowsRich(editTarget ?? { type: 'text' }) &&
+        hasTextSelection(editor);
       if (editor instanceof HTMLElement) {
         if (
           textOverlayAllowsRich(editTarget ?? { type: 'text' }) &&
@@ -416,7 +420,17 @@ export function StyleBar({
 
       const editPatch: Partial<EditTarget> = {};
       const cellEdit = Boolean(editTarget?.tableCell);
-      if (!cellEdit) {
+      // When a range is selected, keep the shape-level base unchanged — the
+      // rich spans carry the difference. Otherwise the commit would see
+      // base==span and drop richHtml (whole-shape repaint).
+      const isRichToggle =
+        patch.bold !== undefined ||
+        patch.italic !== undefined ||
+        patch.underline !== undefined ||
+        patch.strike !== undefined ||
+        patch.highlight !== undefined ||
+        patch.color !== undefined;
+      if (!cellEdit && !(hasRichSelection && isRichToggle)) {
         if (patch.bold !== undefined) editPatch.bold = patch.bold;
         if (patch.italic !== undefined) editPatch.italic = patch.italic;
         if (patch.underline !== undefined) editPatch.underline = patch.underline;
@@ -425,7 +439,7 @@ export function StyleBar({
       }
       if (patch.align !== undefined) editPatch.textAlign = patch.align;
       if (patch.size !== undefined) editPatch.fontSize = patch.size;
-      if (patch.color !== undefined) editPatch.color = patch.color;
+      if (!hasRichSelection && patch.color !== undefined) editPatch.color = patch.color;
       if (Object.keys(editPatch).length) onEditStyle(editPatch);
 
       if (editTarget?.tableCell) {
@@ -434,6 +448,17 @@ export function StyleBar({
         delete shapePatch.underline;
         delete shapePatch.strike;
         delete shapePatch.highlight;
+      }
+      // Don't write shape-level rich fields while a range is active — the
+      // overlay's HTML will be committed as richHtml, and the fallback would
+      // make spans look non-rich.
+      if (hasRichSelection && isRichToggle) {
+        delete shapePatch.bold;
+        delete shapePatch.italic;
+        delete shapePatch.underline;
+        delete shapePatch.strike;
+        delete shapePatch.highlight;
+        delete shapePatch.textColor;
       }
       if (editTarget?.id && Object.keys(shapePatch).length) {
         patchShapes([[editTarget.id, shapePatch]]);

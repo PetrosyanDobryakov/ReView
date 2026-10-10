@@ -64,7 +64,7 @@ export function readLiveFormat(root: HTMLElement, fallbackColor: string): LiveTe
   };
 }
 
-function hasTextSelection(root: HTMLElement): boolean {
+export function hasTextSelection(root: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
   const range = sel.getRangeAt(0);
@@ -115,12 +115,18 @@ function setCommandState(cmd: string, active: boolean, root: HTMLElement): void 
   const sel = window.getSelection();
   if (!sel) return;
   const hadRange = hasTextSelection(root);
-  if (!hadRange) sel.selectAllChildren(root);
+  if (!hadRange) {
+    // No selection — toggle typing style for next input, don't recolor the whole block.
+    let guard = 0;
+    while (document.queryCommandState(cmd) !== active && guard++ < 4) {
+      document.execCommand(cmd);
+    }
+    return;
+  }
   let guard = 0;
   while (document.queryCommandState(cmd) !== active && guard++ < 4) {
     document.execCommand(cmd);
   }
-  if (!hadRange) sel.collapseToEnd();
 }
 
 export type EditorFormatPatch = {
@@ -135,7 +141,6 @@ export type EditorFormatPatch = {
 /** Apply formatting inside the live text overlay. */
 export function applyFormatToEditor(root: HTMLElement, patch: EditorFormatPatch): void {
   root.focus();
-  const sel = window.getSelection();
   const ranged = hasTextSelection(root);
 
   if (patch.color !== undefined) {
@@ -147,13 +152,9 @@ export function applyFormatToEditor(root: HTMLElement, patch: EditorFormatPatch)
     if (ranged) {
       document.execCommand('foreColor', false, patch.color);
     } else {
-      const range = document.createRange();
-      range.selectNodeContents(root);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
+      // No selection — set typing color for next input, don't repaint the whole block.
       document.execCommand('foreColor', false, patch.color);
-      sel?.collapseToEnd();
-      root.style.color = patch.color;
+      // keep caret where it was (execCommand with collapsed range doesn't move it)
     }
     root.dispatchEvent(new InputEvent('input', { bubbles: true }));
     return;
@@ -166,9 +167,12 @@ export function applyFormatToEditor(root: HTMLElement, patch: EditorFormatPatch)
 
   if (patch.highlight !== undefined) {
     if (patch.highlight) {
-      if (!ranged) sel?.selectAllChildren(root);
-      document.execCommand('hiliteColor', false, HILITE_HEX);
-      if (!ranged) sel?.collapseToEnd();
+      if (ranged) {
+        document.execCommand('hiliteColor', false, HILITE_HEX);
+      } else {
+        // collapsed — mark typing highlight, don't highlight the whole block
+        document.execCommand('hiliteColor', false, HILITE_HEX);
+      }
     } else {
       clearHighlightInEditor(root);
     }
