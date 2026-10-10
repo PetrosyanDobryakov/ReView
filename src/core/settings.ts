@@ -1,4 +1,4 @@
-export type PenStyle = 'marker' | 'highlighter';
+export type PenStyle = 'marker' | 'highlighter' | 'dashed';
 
 export interface PenSettings {
   color: string;
@@ -103,7 +103,7 @@ function restore(): void {
       const p = bag.pen as Record<string, unknown>;
       if (typeof p.color === 'string') settings.pen.color = p.color;
       if (typeof p.size === 'number' && p.size > 0 && p.size < 200) settings.pen.size = p.size;
-      if (p.style === 'marker' || p.style === 'highlighter') settings.pen.style = p.style;
+      if (p.style === 'marker' || p.style === 'highlighter' || p.style === 'dashed') settings.pen.style = p.style;
     }
     if (bag.shape && typeof bag.shape === 'object') {
       const s = bag.shape as Record<string, unknown>;
@@ -218,16 +218,23 @@ export function shapeFillValue(): string {
   return settings.shape.filled ? settings.shape.fill : 'transparent';
 }
 
-export function effectivePen(): { color: string; width: number; alpha: number } {
+export function effectivePen(): { color: string; width: number; alpha: number; dashed: boolean } {
   if (settings.pen.style === 'highlighter') {
-    return { color: settings.pen.color, width: settings.pen.size * 4, alpha: 0.3 };
+    return { color: settings.pen.color, width: settings.pen.size * 4, alpha: 0.3, dashed: false };
   }
-  return { color: settings.pen.color, width: settings.pen.size, alpha: 1 };
+  if (settings.pen.style === 'dashed') {
+    return { color: settings.pen.color, width: settings.pen.size, alpha: 1, dashed: true };
+  }
+  return { color: settings.pen.color, width: settings.pen.size, alpha: 1, dashed: false };
 }
 
 /** Highlighter strokes store translucent alpha; marker strokes are opaque. */
 export function strokeIsHighlighter(v: { alpha?: number }): boolean {
   return (v.alpha ?? 1) < 0.99;
+}
+
+export function strokeIsDashed(v: { dash?: boolean }): boolean {
+  return !!v.dash;
 }
 
 /** Brush-size slider: scale from the selected stroke, not the current tool style. */

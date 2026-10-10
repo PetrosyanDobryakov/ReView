@@ -571,6 +571,7 @@ export class SyncClient {
       stroke: draft.stroke,
       strokeWidth: draft.strokeWidth,
       ...(draft.alpha !== undefined ? { alpha: draft.alpha } : {}),
+      ...(draft.dash ? { dash: true } : {}),
     };
     this.lastDraft = slim;
     this.hotAwareness.queue({ draft: slim });
@@ -1219,6 +1220,7 @@ function parseDraft(raw: unknown): PeerDraft | null {
     stroke: d.stroke,
     strokeWidth: d.strokeWidth,
     ...(typeof d.alpha === 'number' ? { alpha: d.alpha } : {}),
+    ...(d.dash === true ? { dash: true } : {}),
   };
 }
 

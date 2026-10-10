@@ -5153,7 +5153,9 @@ export class Engine {
           d.points,
           d.strokeWidth,
           displayInk(d.stroke, boardBg),
-          d.alpha ?? 0.85
+          d.alpha ?? 0.85,
+          undefined,
+          d.dash
         );
         // Do not set peersAnimating from a static draft — setPeers already
         // dirties when tip/geometry changes (peerDraftPaintDirty). Keeping the

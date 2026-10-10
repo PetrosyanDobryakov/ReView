@@ -486,6 +486,7 @@ function parseDraft(raw: unknown): PeerDraft | null {
     stroke: d.stroke,
     strokeWidth: d.strokeWidth,
     ...(typeof d.alpha === 'number' ? { alpha: d.alpha } : {}),
+    ...(d.dash === true ? { dash: true } : {}),
   };
 }
 

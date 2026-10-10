@@ -1074,6 +1074,7 @@ export class PenTool extends Tool {
       stroke: pen.color,
       strokeWidth: pen.width,
       alpha: pen.alpha,
+      ...(pen.dashed ? { dash: true } : {}),
     });
   }
 
@@ -1165,7 +1166,7 @@ export class PenTool extends Tool {
       maxY = Math.max(maxY, points[i + 1]);
     }
     const slice = pressures.slice(0, points.length / 2);
-    const hasPressure = pressureVaries(slice, points.length / 2);
+    const hasPressure = !pen.dashed && pressureVaries(slice, points.length / 2);
     store.addShape({
       type: 'pen',
       x: minX - pad,
@@ -1176,6 +1177,7 @@ export class PenTool extends Tool {
       stroke: pen.color,
       strokeWidth: pen.width,
       alpha: pen.alpha,
+      ...(pen.dashed ? { dash: true } : {}),
       points,
       pressures: hasPressure ? slice : undefined,
     });
@@ -1208,7 +1210,8 @@ export class PenTool extends Tool {
       pen.width,
       displayInk(pen.color, bg),
       pen.alpha * 0.9,
-      this.shift || !this.capturePressure ? undefined : this.pressures
+      this.shift || !this.capturePressure || pen.dashed ? undefined : this.pressures,
+      pen.dashed
     );
   }
 
