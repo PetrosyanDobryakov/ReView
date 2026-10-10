@@ -686,6 +686,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     textAlign: (m.get('textAlign') as ShapeView['textAlign'] | undefined) ?? undefined,
     highlight: m.get('highlight') === true,
     alpha: m.get('alpha') as number | undefined,
+    dash: m.get('dash') === true ? true : undefined,
     src: m.get('src') as string | undefined,
     pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
     page: m.get('page') as number | undefined,
@@ -782,6 +783,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('page', docPageIndex(v.page, v.pages.length));
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
+  if (v.dash) m.set('dash', true);
   if (v.src) m.set('src', v.src);
   if (v.locked) m.set('locked', true);
   if (v.cropW !== undefined || v.cropH !== undefined) {
@@ -891,6 +893,9 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const safe = sanitizeRichHtml(value as string);
       if (!safe || !safe.includes('<')) m.delete('richHtml');
       else m.set(key, safe);
+    } else if (key === 'dash') {
+      if (value === true) m.set('dash', true);
+      else m.delete('dash');
     } else {
       m.set(key, value);
     }

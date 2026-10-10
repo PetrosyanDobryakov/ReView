@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.4
+
+### Feature
+- **Пунктир** — третий стиль пера рядом с маркером/хайлайтером (`src/core/settings.ts:1` `PenStyle dashed`, `src/core/shapes.ts:1529` `drawPenStroke` `setLineDash`, `src/core/store.ts:688` `dash`). На тёмной/светлой/Orbit бумаге цвет адаптируется как у маркера, хайлайтер остаётся полупрозрачным под контентом.
+
 ## 1.0.3
 
 ### Feature

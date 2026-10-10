@@ -39,6 +39,7 @@ export const ICON_PATHS = {
   underline: '',
   strikethrough: '',
   highlight: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
+  dashed: 'M3 12h5M9 12h6M16 12h5',
   alignLeft: 'M3 4v16M7 8h13M7 12h10M7 16h13',
   alignCenterH: 'M12 4v16M6 8h12M5 12h14M6 16h12',
   alignRight: 'M21 4v16M4 8h13M7 12h10M4 16h13',

@@ -519,7 +519,9 @@ export function StyleBar({
               updatePenSettings({ style: 'marker' });
               const next = effectivePen();
               if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
+                patchShapes(
+                  penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width, dash: false } as unknown as Partial<ShapeView>])
+                );
                 onPatched();
               }
             }}
@@ -535,12 +537,30 @@ export function StyleBar({
               updatePenSettings({ style: 'highlighter' });
               const next = effectivePen();
               if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
+                patchShapes(
+                  penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width, dash: false } as unknown as Partial<ShapeView>])
+                );
                 onPatched();
               }
             }}
           >
             {t(locale, 'highlighter')}
+          </button>
+          <button
+            type="button"
+            className={`style-btn${pen.style === 'dashed' ? ' active' : ''}`}
+            title={t(locale, 'dashedHint')}
+            aria-pressed={pen.style === 'dashed'}
+            onClick={() => {
+              updatePenSettings({ style: 'dashed' });
+              const next = effectivePen();
+              if (penTargets.length) {
+                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width, dash: true } as Partial<ShapeView>]));
+                onPatched();
+              }
+            }}
+          >
+            {t(locale, 'dashed')}
           </button>
           <input
             className="size-slider"

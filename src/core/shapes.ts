@@ -67,6 +67,7 @@ export interface ShapeView {
   /** Degrees clockwise. Box shapes render rotated; pens/arrows bake into points. */
   rotation?: number;
   alpha?: number;
+  dash?: boolean;
   textColor?: string;
   bold?: boolean;
   italic?: boolean;
@@ -1531,9 +1532,10 @@ export function drawPenStroke(
   width: number,
   color: string,
   alpha: number,
-  pressures?: number[]
+  pressures?: number[],
+  dash?: boolean
 ): void {
-  paintPenStroke(ctx, pts, width, color, alpha, pressures);
+  paintPenStroke(ctx, pts, width, color, alpha, pressures, dash);
 }
 
 function paintPenStroke(
@@ -1542,7 +1544,8 @@ function paintPenStroke(
   width: number,
   color: string,
   alpha: number,
-  pressures?: number[]
+  pressures?: number[],
+  dash?: boolean
 ): void {
   ctx.save();
   ctx.strokeStyle = color;
@@ -1550,8 +1553,9 @@ function paintPenStroke(
   ctx.fillStyle = color;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (dash) ctx.setLineDash([Math.max(4, width * 2.2), Math.max(4, width * 2.2)]);
   if (pts.length === 2) {
-    const useP = pressureVaries(pressures, 1);
+    const useP = !dash && pressureVaries(pressures, 1);
     const w = useP ? width * (0.35 + 0.65 * (pressures![0] ?? 0.5)) : width;
     ctx.beginPath();
     ctx.arc(pts[0], pts[1], w / 2, 0, Math.PI * 2);
@@ -1559,7 +1563,7 @@ function paintPenStroke(
     ctx.restore();
     return;
   }
-  if (pressureVaries(pressures, pts.length / 2)) {
+  if (!dash && pressureVaries(pressures, pts.length / 2)) {
     strokePressureRibbon(ctx, pts, width, pressures!);
   } else {
     strokeSmoothPath(ctx, pts, width);
@@ -2013,7 +2017,8 @@ export function drawShape(
         v.strokeWidth,
         displayInk(v.stroke, boardBg),
         v.alpha ?? 1,
-        v.pressures
+        v.pressures,
+        v.dash
       );
       break;
     case 'arrow':

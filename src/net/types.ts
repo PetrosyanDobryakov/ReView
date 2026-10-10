@@ -20,6 +20,7 @@ export type PeerDraft = {
   stroke: string;
   strokeWidth: number;
   alpha?: number;
+  dash?: boolean;
 };
 
 /** Live eraser hover preview (awareness only). */
