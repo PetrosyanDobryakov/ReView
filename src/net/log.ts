@@ -1,9 +1,9 @@
 /**
- * Dedicated sync/network debug logger.
- * Console (always when enabled) + optional POST to sync `/net-log` when that route exists.
+ * Dedicated sync/network debug logger. Console only: there is no server to
+ * ship logs to, and peers never see them.
  */
 
-import { effectiveSyncUrl, isSyncEnabled } from './config';
+import { isSyncEnabled } from './config';
 
 export type NetLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -21,25 +21,11 @@ type NetDebugPeek = () => Record<string, unknown>;
 
 let cachedEnabled: boolean | null = null;
 
-type QueuedLine = {
-  t: string;
-  level: NetLogLevel;
-  msg: string;
-  data?: unknown;
-  client?: string;
-};
-
-const queue: QueuedLine[] = [];
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let clientTag: string | null = null;
-let sessionHintLogged = false;
-let flushInFlight = false;
-let serverNetLogDisabled = false;
 let booted = false;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let statusPeek: NetDebugPeek | null = null;
 
-/** SyncClient registers a peek so heartbeats can report real WS state without import cycles. */
+/** The P2P client registers a peek so heartbeats can report real WS state without import cycles. */
 export function registerNetDebugPeek(fn: NetDebugPeek): void {
   statusPeek = fn;
 }
@@ -156,24 +142,20 @@ export function bootNetLog(): void {
   const on = isNetLogEnabled();
   if (!on) return;
 
-  const syncUrl = effectiveSyncUrl();
   const syncOn = isSyncEnabled();
   const path = typeof location !== 'undefined' ? location.pathname : '';
   const onBoard = typeof path === 'string' && path.startsWith('/board/');
   // warn = visible under Chrome's default filter (Info/Verbose can be off).
   console.warn(`${PREFIX} review net debug ON`, {
-    syncUrl,
     syncEnabled: syncOn,
     path,
     peek: statusPeek?.() ?? null,
     tip: onBoard
-      ? 'Network → WS should show wss://…review-sync…/<room>. Off: ?netLog=0 or reviewNetDebug(false)'
-      : 'No WS until you open /board/…. Then Network → WS → review-sync. Off: ?netLog=0 or reviewNetDebug(false)',
+      ? 'Network → WS shows the hub sockets (/signal/<room>); board data goes over WebRTC (chrome://webrtc-internals). Off: ?netLog=0 or reviewNetDebug(false)'
+      : 'No hub sockets until you open /board/…. Off: ?netLog=0 or reviewNetDebug(false)',
   });
   if (!syncOn) {
-    console.warn(
-      `${PREFIX} sync is DISABLED in Settings — Network → WS will stay empty until sync is turned on`
-    );
+    console.warn(`${PREFIX} P2P is OFF in Settings — this tab works alone until it is turned on`);
   }
 
   startHeartbeat();
@@ -185,11 +167,10 @@ function startHeartbeat(): void {
   if (heartbeatTimer || typeof setInterval === 'undefined') return;
   heartbeatTimer = setInterval(() => {
     if (!isNetLogEnabled()) return;
-    const peek = statusPeek?.() ?? { note: 'open a /board/… to attach SyncClient' };
+    const peek = statusPeek?.() ?? { note: 'open a /board/… to join the mesh' };
     // warn so periodic proof stays visible
     console.warn(`${PREFIX} heartbeat`, {
       t: new Date().toISOString(),
-      syncUrl: effectiveSyncUrl(),
       syncEnabled: isSyncEnabled(),
       ...peek,
     });
@@ -210,7 +191,6 @@ export function setNetLogEnabled(on: boolean): void {
   if (on) {
     booted = false;
     bootNetLog();
-    scheduleFlush(0);
   } else {
     stopHeartbeat();
     console.warn(`${PREFIX} review net debug OFF`);
@@ -221,113 +201,6 @@ function resolveData(data: LogData | undefined): unknown {
   if (data === undefined) return undefined;
   if (typeof data === 'function') return data();
   return data;
-}
-
-function getClientTag(): string {
-  if (clientTag) return clientTag;
-  try {
-    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-    clientTag = `tab-${id.slice(0, 8)}`;
-  } catch {
-    clientTag = `tab-${Date.now().toString(36)}`;
-  }
-  return clientTag;
-}
-
-/** HTTP base for the sync server (ws → http). */
-export function syncHttpBase(): string {
-  return effectiveSyncUrl().replace(/^ws/i, 'http');
-}
-
-function enqueue(level: NetLogLevel, msg: string, data?: unknown): void {
-  if (serverNetLogDisabled) return;
-  queue.push({
-    t: new Date().toISOString(),
-    level,
-    msg,
-    data,
-    client: getClientTag(),
-  });
-  if (queue.length >= 24) scheduleFlush(0);
-  else scheduleFlush(400);
-}
-
-function scheduleFlush(ms: number): void {
-  if (flushTimer) {
-    if (ms === 0) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    } else return;
-  }
-  if (ms === 0) {
-    void flushQueue();
-    return;
-  }
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    void flushQueue();
-  }, ms);
-}
-
-async function flushQueue(): Promise<void> {
-  if (flushInFlight || !queue.length || !isNetLogEnabled() || serverNetLogDisabled) {
-    if (serverNetLogDisabled) queue.length = 0;
-    return;
-  }
-  if (typeof fetch === 'undefined') return;
-  flushInFlight = true;
-  const batch = queue.splice(0, queue.length);
-  try {
-    const res = await fetch(`${syncHttpBase()}/net-log`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lines: batch }),
-      keepalive: true,
-    });
-    if (res.status === 404) {
-      // Cloudflare sync worker has no /net-log — console-only is fine.
-      serverNetLogDisabled = true;
-      queue.length = 0;
-      return;
-    }
-    if (!sessionHintLogged && res.ok) {
-      sessionHintLogged = true;
-      try {
-        const info = (await res.json()) as { file?: string };
-        if (info.file) console.warn(PREFIX, 'session file', info.file);
-      } catch {
-        /* body optional */
-      }
-    }
-  } catch {
-    queue.unshift(...batch.slice(-200));
-  } finally {
-    flushInFlight = false;
-    if (queue.length) scheduleFlush(800);
-  }
-}
-
-function flushBeacon(): void {
-  if (
-    !queue.length ||
-    typeof navigator === 'undefined' ||
-    !navigator.sendBeacon ||
-    !isNetLogEnabled() ||
-    serverNetLogDisabled
-  )
-    return;
-  const batch = queue.splice(0, queue.length);
-  try {
-    const blob = new Blob([JSON.stringify({ lines: batch })], { type: 'application/json' });
-    navigator.sendBeacon(`${syncHttpBase()}/net-log`, blob);
-  } catch {
-    /* ignore */
-  }
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', flushBeacon);
-  window.addEventListener('beforeunload', flushBeacon);
 }
 
 function emit(level: NetLogLevel, msg: string, data?: LogData): void {
@@ -345,7 +218,6 @@ function emit(level: NetLogLevel, msg: string, data?: LogData): void {
     if (payload !== undefined) console.warn(PREFIX, msg, payload);
     else console.warn(PREFIX, msg);
   }
-  enqueue(level, msg, payload);
 }
 
 export const netLog = {
@@ -361,8 +233,8 @@ export const netLog = {
   error(msg: string, data?: LogData): void {
     emit('error', msg, data);
   },
-  /** Force pending lines to the sync server (tests / debug). */
+  /** Kept for callers from the server-log era; console lines are never queued. */
   flush(): Promise<void> {
-    return flushQueue();
+    return Promise.resolve();
   },
 };

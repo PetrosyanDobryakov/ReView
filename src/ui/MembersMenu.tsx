@@ -113,6 +113,7 @@ export function MembersMenu({
   const [nickDraft, setNickDraft] = useState(() => loadUser().name);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
   const [lanHosts, setLanHosts] = useState<string[]>([]);
+  const [lanPort, setLanPort] = useState<number | undefined>(undefined);
   const [lanLoading, setLanLoading] = useState(false);
   const [lanError, setLanError] = useState(false);
   const [inviteFlash, setInviteFlash] = useState<'ok' | 'fail' | null>(null);
@@ -136,21 +137,28 @@ export function MembersMenu({
       setLanError(false);
       return;
     }
-    const ac = new AbortController();
+    let live = true;
     setLanLoading(true);
     setLanError(false);
-    fetchLanAddresses(ac.signal)
+    fetchLanAddresses()
       .then((info) => {
+        if (!live) return;
         const host = inviteHostname(info.addresses);
         setLanHosts(host ? info.addresses : []);
+        setLanPort(info.port);
         setLanError(!host);
       })
       .catch(() => {
+        if (!live) return;
         setLanHosts([]);
         setLanError(true);
       })
-      .finally(() => setLanLoading(false));
-    return () => ac.abort();
+      .finally(() => {
+        if (live) setLanLoading(false);
+      });
+    return () => {
+      live = false;
+    };
   }, [open]);
 
   const close = useCallback(() => setOpen(false), []);
@@ -237,7 +245,7 @@ export function MembersMenu({
       }
     } catch {
       if (primaryHost) {
-        const lan = lanBoardUrl(boardId, primaryHost);
+        const lan = lanBoardUrl(boardId, primaryHost, lanPort);
         if (await shareUrl(lan, 'ReView')) {
           setInviteFlash('ok');
         } else {

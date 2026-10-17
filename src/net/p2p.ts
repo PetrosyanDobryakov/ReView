@@ -1,36 +1,56 @@
 /**
- * Optional P2P sync via y-webrtc. Used on Vercel/static where no
- * central websocket server exists. Awareness (cursors, presence) is
- * shared via the same Yjs awareness channel.
+ * Board sync over our own P2P mesh (`src/net/p2p/`). Hubs only introduce
+ * peers; the board document and awareness (cursors, presence) travel over
+ * WebRTC data channels between browsers. Nothing is stored anywhere but in
+ * each peer's own local storage.
  */
 
 import * as Y from 'yjs';
-import type { WebrtcProvider } from 'y-webrtc';
+import { Awareness } from 'y-protocols/awareness';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
-import { boardRoomName, isP2pEnabled, p2pSignalingUrls } from './config';
-import { netLog } from './log';
+import { boardRoomName, isSyncEnabled } from './config';
+import { netLog, registerNetDebugPeek } from './log';
 import { clampConfettiPower, parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
+import { Mesh } from './p2p/mesh';
+import { captureInviteHub, iceServers, resolveHubs } from './p2p/hubs';
+import { randomPeerId } from './p2p/protocol';
+import { webrtcAvailable } from './p2p/webrtcLink';
+import type { MeshSnapshot } from './p2p/types';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
 
-const P2P_RETRY_BASE_MS = 1000;
-const P2P_RETRY_MAX_MS = 30000;
+/** Re-read hubs (LAN neighbours come and go) this often while a board is open. */
+const HUB_REFRESH_MS = 15_000;
+
+declare const __REVIEW_BUILD__: string;
 
 type StatusListener = (s: SyncStatus) => void;
 type PeerListener = (p: PeerCursor[]) => void;
 type LifecycleListener = () => void;
+type MeshListener = (s: MeshSnapshot) => void;
+
+function appVersion(): string {
+  try {
+    return typeof __REVIEW_BUILD__ === 'string' ? __REVIEW_BUILD__ : '';
+  } catch {
+    return '';
+  }
+}
 
 class P2pClient {
   private doc: Y.Doc | null = null;
   private boardId: string | null = null;
-  private provider: unknown | null = null;
-  private providerRoom: string | null = null;
-  private pendingTeardown: Promise<void> = Promise.resolve();
-  private connectGate: Promise<void> = Promise.resolve();
+  private awareness: Awareness | null = null;
+  private mesh: Mesh | null = null;
+  /** One id per tab: other tabs of the same user are separate peers. */
+  readonly peerId = randomPeerId();
+  private hubTimer: ReturnType<typeof setInterval> | null = null;
+  private hubGen = 0;
+  private noHub = false;
 
   private lastUser: UserInfo | null = null;
   private lastCursor: CursorPos | null = null;
@@ -44,126 +64,98 @@ class P2pClient {
   private confettiClearTimer: ReturnType<typeof setTimeout> | null = null;
   private confettiSeq = 0;
 
-  private lastError: string | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retryAttempt = 0;
-
   private readonly statusListeners = new Set<StatusListener>();
   private readonly peerListeners = new Set<PeerListener>();
   private readonly lifecycleListeners = new Set<LifecycleListener>();
+  private readonly meshListeners = new Set<MeshListener>();
   private offPeerDisplay: (() => void) | null = null;
-  private awarenessChangeHandler: (() => void) | null = null;
-  private statusHandler: (() => void) | null = null;
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
+  constructor() {
+    captureInviteHub();
+    registerNetDebugPeek(() => {
+      const snap = this.getMeshSnapshot();
+      return {
+        room: snap.room,
+        peer: snap.self,
+        hubs: snap.hubs.map((h) => `${h.url} ${h.state}`),
+        links: snap.peers.map((p) => `${p.peer.slice(0, 6)} ${p.state} ${p.path} ${p.rtt ?? '-'}ms`),
+      };
+    });
+  }
+
   attach(doc: Y.Doc, boardId: string): void {
-    if (this.doc === doc && this.boardId === boardId && this.provider) return;
-    netLog.info('p2p attach', () => ({ boardId, room: boardRoomName(boardId) }));
+    if (this.doc === doc && this.boardId === boardId && this.mesh) return;
+    netLog.info('p2p attach', () => ({ boardId, room: boardRoomName(boardId), peer: this.peerId }));
     this.teardown();
-    this.clearRetryTimer();
-    this.retryAttempt = 0;
-    this.lastError = null;
     this.doc = doc;
     this.boardId = boardId;
-    if (isP2pEnabled()) void this.connect();
-    this.emitLifecycle();
-    this.emitStatus();
-    this.emitPeers();
+    if (isSyncEnabled()) this.connect();
+    this.emitAll();
   }
 
   detach(): void {
     netLog.info('p2p detach', () => ({ boardId: this.boardId }));
     this.teardown();
-    this.clearRetryTimer();
-    this.retryAttempt = 0;
-    this.lastError = null;
     this.doc = null;
     this.boardId = null;
-    this.emitLifecycle();
-    this.emitStatus();
-    this.emitPeers();
+    this.emitAll();
   }
 
+  /** Rebuild after prefs change (sync toggle, hubs, ICE). */
   reconnect(): void {
-    netLog.info('p2p reconnect', () => ({ boardId: this.boardId, p2pEnabled: isP2pEnabled() }));
+    netLog.info('p2p reconnect', () => ({ boardId: this.boardId, enabled: isSyncEnabled() }));
     this.teardown();
-    this.clearRetryTimer();
-    this.retryAttempt = 0;
-    this.lastError = null;
-    if (this.doc && this.boardId && isP2pEnabled()) void this.connect();
-    this.emitLifecycle();
-    this.emitStatus();
-    this.emitPeers();
+    if (this.doc && this.boardId && isSyncEnabled()) this.connect();
+    this.emitAll();
   }
 
-  async connect(): Promise<void> {
-    const prevGate = this.connectGate;
-    let release!: () => void;
-    this.connectGate = new Promise<void>(r => (release = r));
-    await prevGate;
-    try {
-      await this.pendingTeardown;
-      if (!this.doc || !this.boardId) return;
-      if (!isP2pEnabled()) return;
-      const expectedDoc = this.doc;
-      const expectedBoardId = this.boardId;
-      const room = boardRoomName(expectedBoardId);
-      if (this.provider && this.providerRoom === room) return;
-      this.teardown();
-      await this.pendingTeardown;
-      try {
-        const mod = await import('y-webrtc');
-      // Re-check after async gap: detach() or attach(newBoard) may have run during import.
-      if (!this.doc || !this.boardId) return;
-      if (this.doc !== expectedDoc || this.boardId !== expectedBoardId) return;
-      if (boardRoomName(this.boardId) !== room) return;
-      if (!isP2pEnabled()) return;
-      if (this.provider && this.providerRoom === room) return;
-      const WebrtcProvider = (mod as unknown as { WebrtcProvider: new (room: string, doc: Y.Doc, opts: Record<string, unknown>) => unknown }).WebrtcProvider;
-      if (!WebrtcProvider) throw new Error('no WebrtcProvider');
-      const signaling = p2pSignalingUrls();
-      netLog.info('p2p provider create', () => ({ room, signaling }));
-      const provider = new WebrtcProvider(room, this.doc, {
-        signaling,
-        awareness: undefined,
-        filterBcConns: false,
-      } as Record<string, unknown>);
-      // Guard before assignment: if doc/boardId changed during construction, destroy leaked provider.
-      if (!this.doc || !this.boardId || this.doc !== expectedDoc || this.boardId !== expectedBoardId || boardRoomName(this.boardId) !== room) {
-        try { (provider as unknown as { destroy?: () => void }).destroy?.(); } catch {}
-        try { (provider as unknown as { disconnect?: () => void }).disconnect?.(); } catch {}
-        return;
-      }
-      this.provider = provider;
-      this.providerRoom = room;
-      this.bind(provider);
-      if (this.lastUser) this.write('user', this.lastUser); else this.write('user', loadUser());
-      if (this.lastTool) this.write('tool', this.lastTool);
-      if (this.lastPage) this.write('page', this.lastPage);
-      this.write('viewing', this.lastViewing);
-      this.hotAwareness.clear();
-      this.applyHotAwareness({
-        cursor: this.lastCursor,
-        draft: this.lastDraft,
-        erasePreview: this.lastErase,
-        selection: this.lastSelection,
-      });
-      this.lastError = null;
-      this.retryAttempt = 0;
-      this.clearRetryTimer();
-      this.emitStatus();
-      this.emitPeers();
-      } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e);
-        // netLog is gated off by default; also emit to console so chunk-load/missing-export is never silent
-        try { console.error('[review:net] p2p connect failed', e); } catch {}
-        netLog.warn('p2p connect failed', () => ({ err: String(e) }));
+  /** Re-resolve hubs now and skip hub retry backoff (P2P panel "refresh"). */
+  refreshHubs(): void {
+    this.mesh?.retryHubs();
+    void this.updateHubs();
+  }
+
+  private connect(): void {
+    const doc = this.doc;
+    const boardId = this.boardId;
+    if (!doc || !boardId) return;
+    const awareness = new Awareness(doc);
+    this.awareness = awareness;
+    this.mesh = new Mesh(doc, awareness, boardRoomName(boardId), this.peerId, {
+      iceServers: iceServers(),
+      appVersion: appVersion(),
+      onChange: () => {
         this.emitStatus();
-        this.scheduleRetry();
-      }
-    } finally {
-      release();
-    }
+        this.emitMesh();
+      },
+      log: (msg, data) => netLog.info(`p2p ${msg}`, data),
+    });
+    this.bind(awareness);
+    this.write('user', this.lastUser ?? loadUser());
+    if (this.lastTool) this.write('tool', this.lastTool);
+    if (this.lastPage) this.write('page', this.lastPage);
+    this.write('viewing', this.lastViewing);
+    this.hotAwareness.clear();
+    this.applyHotAwareness({
+      cursor: this.lastCursor,
+      draft: this.lastDraft,
+      erasePreview: this.lastErase,
+      selection: this.lastSelection,
+    });
+    void this.updateHubs();
+    this.hubTimer = setInterval(() => void this.updateHubs(), HUB_REFRESH_MS);
+  }
+
+  private async updateHubs(): Promise<void> {
+    const mesh = this.mesh;
+    if (!mesh) return;
+    const gen = ++this.hubGen;
+    const { specs } = await resolveHubs();
+    if (this.mesh !== mesh || gen !== this.hubGen) return;
+    this.noHub = specs.length === 0;
+    mesh.setHubs(specs);
+    this.emitStatus();
   }
 
   isAttached(): boolean {
@@ -179,36 +171,66 @@ class P2pClient {
   }
 
   disconnect(): void {
-    netLog.info('p2p disconnect', () => ({ boardId: this.boardId, room: this.providerRoom }));
+    netLog.info('p2p disconnect', () => ({ boardId: this.boardId }));
     this.teardown();
-    this.clearRetryTimer();
-    this.retryAttempt = 0;
-    this.lastError = null;
-    this.emitStatus();
-    this.emitPeers();
+    this.emitAll();
   }
 
+  /**
+   * online = at least one hub or one peer link is up. A tab with open links
+   * stays online even if every hub goes away.
+   */
   getStatus(): SyncStatus {
-    if (!isP2pEnabled()) return { online: false, users: 0, enabled: false, error: null };
-    const p = this.provider as unknown as WebrtcProvider | null;
-    if (!p) return { online: false, users: 0, enabled: true, error: this.lastError };
-    const states = p.awareness?.getStates();
-    const size = states ? states.size : 0;
-    // Provider.connected is the public y-webrtc signal (room !== null && shouldConnect).
-    // Avoid probing private internals (signalingConns[].ws/connected, room.bcconnected,
-    // room.webrtcConns) typed as any / deprecated lib0 fields that can silently break
-    // on version changes and cause false offline (previous: online required transportOnline).
-    const online = p.connected === true;
-    return { online, users: online ? size : 0, enabled: true, error: this.lastError };
+    if (!isSyncEnabled()) return { online: false, users: 0, enabled: false, error: null };
+    const mesh = this.mesh;
+    const aw = this.awareness;
+    if (!mesh || !aw) return { online: false, users: 0, enabled: true, error: null };
+    const online = mesh.hubsOpen() > 0 || mesh.openLinks() > 0;
+    const error = !webrtcAvailable() ? 'webrtc-unavailable' : this.noHub ? 'no-hub' : null;
+    return { online, users: online ? aw.getStates().size : 0, enabled: true, error };
+  }
+
+  /** Live P2P state for the P2P panel. */
+  getMeshSnapshot(): MeshSnapshot {
+    if (this.mesh) return this.mesh.snapshot();
+    return {
+      room: this.boardId ? boardRoomName(this.boardId) : null,
+      self: this.peerId,
+      enabled: isSyncEnabled(),
+      webrtc: webrtcAvailable(),
+      hubs: [],
+      peers: [],
+    };
+  }
+
+  /** Awareness client id -> display name, for labelling mesh peers in the panel. */
+  clientNames(): Map<number, { name: string; color: string }> {
+    const out = new Map<number, { name: string; color: string }>();
+    const aw = this.awareness;
+    if (!aw) return out;
+    for (const [id, state] of aw.getStates()) {
+      const user = (state as { user?: { name?: string; color?: string } }).user;
+      if (user?.name) out.set(id, { name: user.name, color: user.color || '#7c8cff' });
+    }
+    return out;
+  }
+
+  /** Lowest awareness client id dedups shared arrays so peers do not ping-pong. */
+  isAwarenessLeader(): boolean {
+    const aw = this.awareness;
+    if (!aw) return true;
+    let min = aw.clientID;
+    for (const id of aw.getStates().keys()) if (id < min) min = id;
+    return min === aw.clientID;
   }
 
   collectPeers(): PeerCursor[] {
-    const p = this.provider as unknown as { awareness?: { getStates(): Map<number, unknown>; clientID: number } } | null;
-    if (!p?.awareness) return [];
+    const aw = this.awareness;
+    if (!aw) return [];
     const selfId = loadUser().id;
     const byUser = new Map<string, PeerCursor>();
-    for (const [id, state] of p.awareness.getStates()) {
-      if (id === p.awareness.clientID) continue;
+    for (const [id, state] of aw.getStates()) {
+      if (id === aw.clientID) continue;
       const st = state as Record<string, unknown>;
       const user = st.user as UserInfo | undefined;
       if (!user || !user.name) continue;
@@ -247,10 +269,10 @@ class P2pClient {
 
   /** Another tab of the same user still counts — compact must not run against a live replica. */
   hasOtherAwarenessClients(): boolean {
-    const p = this.provider as unknown as { awareness?: { getStates(): Map<number, unknown>; clientID: number } } | null;
-    if (!p?.awareness) return false;
-    for (const id of p.awareness.getStates().keys()) {
-      if (id !== p.awareness.clientID) return true;
+    const aw = this.awareness;
+    if (!aw) return false;
+    for (const id of aw.getStates().keys()) {
+      if (id !== aw.clientID) return true;
     }
     return false;
   }
@@ -271,7 +293,7 @@ class P2pClient {
   }
   publishSelection(ids: string[] | null): void {
     if (!ids || !ids.length) {
-      if (this.lastSelection === null && !this.provider) return;
+      if (this.lastSelection === null && !this.awareness) return;
       this.lastSelection = null;
       this.hotAwareness.queue({ selection: null });
       this.hotAwareness.flushNow();
@@ -307,7 +329,7 @@ class P2pClient {
       clearTimeout(this.confettiClearTimer);
       this.confettiClearTimer = null;
     }
-    if (this.lastConfetti === null && !this.provider) return;
+    if (this.lastConfetti === null && !this.awareness) return;
     this.lastConfetti = null;
     this.hotAwareness.queue({ confetti: null });
     this.hotAwareness.flushNow();
@@ -345,116 +367,63 @@ class P2pClient {
   onStatus(cb: StatusListener): () => void { this.statusListeners.add(cb); cb(this.getStatus()); return () => { this.statusListeners.delete(cb); }; }
   onPeers(cb: PeerListener): () => void { this.peerListeners.add(cb); cb(this.collectPeers()); return () => { this.peerListeners.delete(cb); }; }
   onLifecycle(cb: LifecycleListener): () => void { this.lifecycleListeners.add(cb); return () => { this.lifecycleListeners.delete(cb); }; }
+  onMesh(cb: MeshListener): () => void { this.meshListeners.add(cb); cb(this.getMeshSnapshot()); return () => { this.meshListeners.delete(cb); }; }
 
   rosterKey(peers: PeerCursor[] = this.collectPeers()): string {
     return peers.map(p => `${p.id}\0${p.userId}\0${p.name}\0${p.color}\0${p.tool ?? ''}\0${p.page ?? ''}\0${p.focus ?? ''}\0${(p.selection ?? []).join(',')}`).join('\n');
   }
 
   private applyHotAwareness(patch: AwarenessPatch): void {
-    const p = this.provider as unknown as {
-      awareness?: {
-        getLocalState(): Record<string, unknown> | null;
-        setLocalState(v: Record<string, unknown> | null): void;
-      };
-    } | null;
-    const awareness = p?.awareness;
-    if (!awareness) return;
+    const aw = this.awareness;
+    if (!aw) return;
     try {
-      const prev = awareness.getLocalState() ?? {};
-      awareness.setLocalState({ ...prev, ...patch });
+      const prev = aw.getLocalState() ?? {};
+      aw.setLocalState({ ...prev, ...patch });
     } catch {}
   }
 
   private write(field: string, value: unknown): void {
-    const p = this.provider as unknown as { awareness?: { setLocalStateField(k: string, v: unknown): void } } | null;
-    try { p?.awareness?.setLocalStateField(field, value); } catch {}
+    try { this.awareness?.setLocalStateField(field, value); } catch {}
   }
 
-  private bind(provider: unknown): void {
-    const p = provider as unknown as {
-      awareness: { on(e: string, fn: () => void): void; off(e: string, fn: () => void): void; getStates(): Map<number, unknown> };
-      on?(e: string, fn: () => void): void;
-      off?(e: string, fn: () => void): void;
-    };
-    const onAware = (
-      changes?: { added?: number[]; updated?: number[]; removed?: number[] }
-    ) => {
+  private bind(aw: Awareness): void {
+    const onAware = (changes?: { added?: number[]; updated?: number[]; removed?: number[] }) => {
       this.emitStatus();
-      // Prefer change-only (matches SyncClient). update+change double-fired emitPeers.
-      const aware = p.awareness as { clientID?: number };
-      const localId = typeof aware.clientID === 'number' ? aware.clientID : null;
-      if (localId != null && changes && awarenessChangeIsLocalOnly(changes, localId)) {
-        return;
-      }
+      if (changes && awarenessChangeIsLocalOnly(changes, aw.clientID)) return;
       this.emitPeers();
     };
-    p.awareness.on('change', onAware);
-    this.awarenessChangeHandler = onAware;
-    if (typeof p.on === 'function') {
-      const onStatus = () => { this.emitStatus(); this.emitPeers(); };
-      p.on('peers', onStatus);
-      p.on('status', onStatus);
-      this.statusHandler = onStatus;
-    }
+    aw.on('change', onAware);
+    this.offAwareness = () => aw.off('change', onAware);
     if (!this.offPeerDisplay) this.offPeerDisplay = onPeerDisplayChange(() => this.emitPeers());
-    // keep reference to allow teardown
-    (this as unknown as { _p: unknown })._p = p;
   }
+
+  private offAwareness: (() => void) | null = null;
 
   private teardown(): void {
     this.hotAwareness.clear();
-    const p = (this as unknown as { _p?: { awareness: { off(e: string, fn: () => void): void } ; off?(e: string, fn: () => void): void } })._p as { awareness: { off(e: string, fn: () => void): void }; off?(e:string, fn:()=>void):void } | undefined;
-    if (p && this.awarenessChangeHandler) {
-      try { p.awareness.off('change', this.awarenessChangeHandler); } catch {}
-      if (this.statusHandler && p.off) {
-        try { p.off('peers', this.statusHandler); } catch {}
-        try { p.off('status', this.statusHandler); } catch {}
-      }
-    }
-    this.awarenessChangeHandler = null;
-    this.statusHandler = null;
-    (this as unknown as { _p?: unknown })._p = undefined;
+    this.hubGen += 1;
+    if (this.hubTimer) { clearInterval(this.hubTimer); this.hubTimer = null; }
+    if (this.offAwareness) { try { this.offAwareness(); } catch {} this.offAwareness = null; }
     if (this.offPeerDisplay) { try { this.offPeerDisplay(); } catch {} this.offPeerDisplay = null; }
-    const prov = this.provider as unknown as { destroy?: () => void; disconnect?: () => void; awareness?: { setLocalState(v: unknown): void }; key?: Promise<unknown> } | null;
-    if (prov) {
-      try { prov.awareness?.setLocalState(null); } catch {}
-      try { prov.destroy?.(); } catch {}
-      try { prov.disconnect?.(); } catch {}
-      // WebrtcProvider.destroy is async via key.then(() => { room.destroy(); rooms.delete() })
-      // even with no password it is Promise.resolve(null).then() => microtask delay.
-      // Chain pendingTeardown so rapid re-attach waits for global rooms.delete before openRoom.
-      const prev = this.pendingTeardown;
-      const k = prov.key;
-      const hasKey = !!k && typeof (k as unknown as { then?: unknown }).then === 'function';
-      const cur = hasKey
-        ? prev.then(() => (k as Promise<unknown>).then(() => {}, () => {})).then(() => {})
-        : prev.then(() => {});
-      // one extra microtask ensures destroy's key.then handler (rooms.delete) has run
-      this.pendingTeardown = cur.then(() => new Promise<void>(res => queueMicrotask(res))).catch(() => {});
-    }
-    this.provider = null;
-    this.providerRoom = null;
-    // do not clear lastError here — connect() preserves failure error via catch after teardown;
-    // explicit clear is done on successful connect and on detach/disconnect/reconnect below
+    // Mesh first: it sends our "gone" awareness frame while links are still open.
+    try { this.mesh?.destroy(); } catch {}
+    this.mesh = null;
+    try { this.awareness?.destroy(); } catch {}
+    this.awareness = null;
+    this.noHub = false;
   }
 
-  private clearRetryTimer(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
+  private emitAll(): void {
+    this.emitLifecycle();
+    this.emitStatus();
+    this.emitPeers();
+    this.emitMesh();
   }
 
-  private scheduleRetry(): void {
-    if (!this.doc || !this.boardId || !isP2pEnabled() || this.provider) return;
-    if (this.retryTimer) return;
-    const delay = Math.min(P2P_RETRY_BASE_MS * 2 ** this.retryAttempt, P2P_RETRY_MAX_MS);
-    this.retryAttempt += 1;
-    netLog.info('p2p retry scheduled', () => ({ delay, attempt: this.retryAttempt }));
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      if (this.doc && this.boardId && isP2pEnabled() && !this.provider) void this.connect();
-    }, delay);
+  private emitMesh(): void {
+    if (!this.meshListeners.size) return;
+    const snap = this.getMeshSnapshot();
+    for (const l of [...this.meshListeners]) l(snap);
   }
 
   private emitStatus(): void {
@@ -516,6 +485,11 @@ function parseErasePreview(raw: unknown): PeerErasePreview | null {
 }
 
 export const p2pClient = new P2pClient();
+
+if (typeof window !== 'undefined') {
+  // Console helper: `reviewP2p()` prints hubs, links, paths and RTT.
+  (window as unknown as { reviewP2p?: () => MeshSnapshot }).reviewP2p = () => p2pClient.getMeshSnapshot();
+}
 
 export function attachP2p(doc: Y.Doc, boardId: string): void { p2pClient.attach(doc, boardId); }
 export function detachP2p(): void { p2pClient.detach(); }

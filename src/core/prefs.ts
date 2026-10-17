@@ -3,7 +3,11 @@
 import type { ToolId } from '../engine/tools';
 
 export interface AppPrefs {
-  /** When false (default), remote/"other users'" boards are not written to IndexedDB. */
+  /**
+   * When true (default), boards opened from someone else's link are saved to
+   * IndexedDB. With full P2P there is no server copy, so this device is where
+   * the board lives. False = joined boards are session-only.
+   */
   saveRemoteBoards: boolean;
   /**
    * When true, low-contrast ink (pen / arrow / free text) is remapped to stay readable
@@ -40,27 +44,19 @@ export interface AppPrefs {
    * When false, snap display pose to the latest awareness sample (realtime).
    */
   smoothPeerCursors: boolean;
-  /**
-   * Override for the Yjs websocket URL. null = built-in
-   * `VITE_SYNC_URL` or `ws(s)://<hostname>:1234`.
-   */
-  syncUrl: string | null;
-  /** When false, the websocket provider is destroyed and peers are offline. */
+  /** When false, the P2P mesh is torn down and this tab works alone. */
   syncEnabled: boolean;
   /**
    * Unlock the Orbit chrome skin in Customize. Visual-only alternate world;
    * off by default so Packet stays the everyday look.
    */
   orbitUnlocked: boolean;
-  /** Optional WebRTC p2p sync (for Vercel/static without a websocket server). */
-  p2pEnabled: boolean;
-  /**
-   * True once the user toggled P2P in settings. Distinguishes an explicit off
-   * from the old stored default `p2pEnabled: false`.
-   */
-  p2pUserSet: boolean;
-  /** Signaling servers for y-webrtc. null = defaults. */
-  p2pSignaling: string | null;
+  /** Extra hubs to join (a friend's review-host), as `ws://host:port` bases. */
+  p2pHubs: string[];
+  /** ICE lines (`stun:…`, or `turn:…|user|pass`). null = public STUN defaults; [] = LAN only. */
+  p2pIce: string[] | null;
+  /** Also join the hubs of review-hosts found on the LAN (mDNS). */
+  p2pLanDiscovery: boolean;
   /** Custom toolbelt order per strip group + More shelf. null = defaults. */
   toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
 }
@@ -68,7 +64,7 @@ export interface AppPrefs {
 const STORAGE_KEY = 'review-prefs';
 
 const DEFAULTS: AppPrefs = {
-  saveRemoteBoards: false,
+  saveRemoteBoards: true,
   adaptInkToPaper: true,
   toolCursorScale: 1,
   uiScale: 1,
@@ -78,35 +74,49 @@ const DEFAULTS: AppPrefs = {
   rotateSnap: true,
   rotateHandleTop: false,
   smoothPeerCursors: true,
-  syncUrl: null,
   syncEnabled: true,
   orbitUnlocked: false,
-  p2pEnabled: false,
-  p2pUserSet: false,
-  p2pSignaling: null,
+  p2pHubs: [],
+  p2pIce: null,
+  p2pLanDiscovery: true,
   toolbarOrder: null,
 };
 
-function normalizeSyncUrl(raw: unknown): string | null {
-  if (raw === null || raw === undefined || raw === '') return null;
-  if (typeof raw !== 'string') return null;
-  const s = raw.trim();
-  if (!s) return null;
-  if (!/^wss?:\/\//i.test(s)) return null;
-  return s.replace(/\/$/, '');
+const MAX_HUBS = 8;
+const MAX_ICE = 8;
+
+/** `ws://host:port` / `wss://host` bases, deduped. Anything else is dropped. */
+function normalizeHubList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim().replace(/\/+$/, '');
+    if (!/^wss?:\/\/[^\s/]+$/i.test(s)) continue;
+    if (!out.includes(s)) out.push(s);
+    if (out.length >= MAX_HUBS) break;
+  }
+  return out;
 }
 
-export function parseSyncUrl(raw: string): string | null {
-  return normalizeSyncUrl(raw);
+function normalizeIceList(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim();
+    if (!/^(stun|turns?):\S+$/i.test(s.split('|')[0] ?? '')) continue;
+    if (!out.includes(s)) out.push(s);
+    if (out.length >= MAX_ICE) break;
+  }
+  return out;
 }
 
-function normalizeP2pSignaling(raw: unknown): string | null {
-  if (raw === null || raw === undefined || raw === '') return null;
-  if (typeof raw !== 'string') return null;
-  const s = raw.trim();
-  if (!s) return null;
-  if (!/^wss?:\/\//i.test(s)) return null;
-  return s.replace(/\/$/, '');
+/** Parse the ICE textarea (one server per line). null when any line is invalid. */
+export function parseIceLines(text: string): string[] | null {
+  const lines = text.split(/[\n,]+/).map((l) => l.trim()).filter(Boolean);
+  const parsed = normalizeIceList(lines) ?? [];
+  return parsed.length === lines.length ? parsed : null;
 }
 
 const CURSOR_SCALE_MIN = 0.7;
@@ -178,16 +188,12 @@ function parsePrefs(raw: unknown): AppPrefs {
       typeof parsed.rotateHandleTop === 'boolean' ? parsed.rotateHandleTop : DEFAULTS.rotateHandleTop,
     smoothPeerCursors:
       typeof parsed.smoothPeerCursors === 'boolean' ? parsed.smoothPeerCursors : DEFAULTS.smoothPeerCursors,
-    syncUrl: Object.prototype.hasOwnProperty.call(parsed, 'syncUrl')
-      ? normalizeSyncUrl(parsed.syncUrl)
-      : DEFAULTS.syncUrl,
     syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
     orbitUnlocked: typeof parsed.orbitUnlocked === 'boolean' ? parsed.orbitUnlocked : DEFAULTS.orbitUnlocked,
-    p2pEnabled: typeof parsed.p2pEnabled === 'boolean' ? parsed.p2pEnabled : DEFAULTS.p2pEnabled,
-    p2pUserSet: parsed.p2pUserSet === true,
-    p2pSignaling: Object.prototype.hasOwnProperty.call(parsed, 'p2pSignaling')
-      ? normalizeP2pSignaling(parsed.p2pSignaling)
-      : DEFAULTS.p2pSignaling,
+    p2pHubs: normalizeHubList(parsed.p2pHubs),
+    p2pIce: Object.prototype.hasOwnProperty.call(parsed, 'p2pIce') ? normalizeIceList(parsed.p2pIce) : DEFAULTS.p2pIce,
+    p2pLanDiscovery:
+      typeof parsed.p2pLanDiscovery === 'boolean' ? parsed.p2pLanDiscovery : DEFAULTS.p2pLanDiscovery,
     toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
       ? normalizeToolbarOrder(parsed.toolbarOrder)
       : DEFAULTS.toolbarOrder,
@@ -225,39 +231,12 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
             ? patch.paperBg
             : cur.paperBg
           : cur.paperBg,
-    syncUrl:
-      patch.syncUrl !== undefined
-        ? patch.syncUrl === null
-          ? null
-          : (() => {
-              const normalized = normalizeSyncUrl(patch.syncUrl);
-              if (normalized === null && typeof patch.syncUrl === 'string' && patch.syncUrl.trim() !== '') {
-                throw new Error('Invalid syncUrl: must start with ws:// or wss://');
-              }
-              return normalized;
-            })()
-        : cur.syncUrl,
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
     orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
-    p2pEnabled: patch.p2pEnabled !== undefined ? Boolean(patch.p2pEnabled) : cur.p2pEnabled,
-    p2pUserSet:
-      patch.p2pEnabled !== undefined
-        ? true
-        : patch.p2pUserSet !== undefined
-          ? Boolean(patch.p2pUserSet)
-          : cur.p2pUserSet,
-    p2pSignaling:
-      patch.p2pSignaling !== undefined
-        ? patch.p2pSignaling === null
-          ? null
-          : (() => {
-              const normalized = normalizeP2pSignaling(patch.p2pSignaling);
-              if (normalized === null && typeof patch.p2pSignaling === 'string' && patch.p2pSignaling.trim() !== '') {
-                throw new Error('Invalid p2pSignaling URL: must start with ws:// or wss://');
-              }
-              return normalized;
-            })()
-        : cur.p2pSignaling,
+    p2pHubs: patch.p2pHubs !== undefined ? normalizeHubList(patch.p2pHubs) : cur.p2pHubs,
+    p2pIce: patch.p2pIce !== undefined ? normalizeIceList(patch.p2pIce) : cur.p2pIce,
+    p2pLanDiscovery:
+      patch.p2pLanDiscovery !== undefined ? Boolean(patch.p2pLanDiscovery) : cur.p2pLanDiscovery,
     toolbarOrder:
       patch.toolbarOrder !== undefined ? normalizeToolbarOrder(patch.toolbarOrder) : cur.toolbarOrder,
   };

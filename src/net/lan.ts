@@ -1,8 +1,8 @@
-import { effectiveSyncUrl } from './config';
+import { findSelfHost } from './p2p/hubs';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-/** Bracket IPv6 so it is legal in URLs. Keep in sync with `sync/netUtil.mjs`. */
+/** Bracket IPv6 so it is legal in URLs. Keep in sync with `rust/review-host/src/room_name.rs`. */
 export function formatHostForUrl(host: string): string {
   const h = host.trim();
   if (!h) return h;
@@ -21,46 +21,28 @@ export function isLocalHostname(hostname: string): boolean {
 export function inviteHostname(lanAddresses: string[]): string | null {
   if (typeof location === 'undefined') return lanAddresses[0] ?? null;
   const current = location.hostname;
-  if (!isLocalHostname(current)) return current;
+  if (/^https?:$/.test(location.protocol) && !isLocalHostname(current)) return current;
   return lanAddresses[0] ?? null;
 }
 
-function syncHttpBase(): string {
-  try {
-    const sync = new URL(effectiveSyncUrl());
-    const httpProto = sync.protocol === 'wss:' ? 'https:' : 'http:';
-    return `${httpProto}//${sync.host}`;
-  } catch {
-    const proto =
-      typeof location !== 'undefined' && location.protocol === 'https:' ? 'https' : 'http';
-    const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
-    return `${proto}://${host}:1234`;
-  }
-}
-
 export type LanInfo = {
+  /** Port friends should open: the host's when it serves the UI, else this page's (dev). */
   port: number;
   addresses: string[];
+  /** True when the address is served by a review-host that bundles the web UI. */
+  hostServesUi: boolean;
 };
 
-/** Ask the sync server which private LAN IPv4 addresses this machine has. */
-export async function fetchLanAddresses(signal?: AbortSignal): Promise<LanInfo> {
-  const res = await fetch(`${syncHttpBase()}/lan`, {
-    method: 'GET',
-    signal,
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`lan ${res.status}`);
-  const data: unknown = await res.json();
-  if (!data || typeof data !== 'object') throw new Error('lan bad body');
-  const rec = data as Record<string, unknown>;
-  const port = typeof rec.port === 'number' ? rec.port : 1234;
-  const raw = Array.isArray(rec.addresses) ? rec.addresses : [];
-  const addresses = raw
-    .filter((a): a is string => typeof a === 'string' && a.length > 0)
-    .slice()
+/** Private LAN addresses of the review-host this tab belongs to. */
+export async function fetchLanAddresses(): Promise<LanInfo> {
+  const self = await findSelfHost(true);
+  if (!self) throw new Error('no review-host');
+  const addresses = self.addresses
+    .filter((a) => !a.includes(':'))
     .sort((a, b) => lanRank(a) - lanRank(b));
-  return { port, addresses };
+  const servesUi = self.ui;
+  const port = servesUi ? self.port : Number(uiPort());
+  return { port, addresses, hostServesUi: servesUi };
 }
 
 function lanRank(addr: string): number {
@@ -75,43 +57,40 @@ function uiPort(): string {
   return location.protocol === 'https:' ? '443' : '80';
 }
 
-function uiProtocol(): string {
-  if (typeof location === 'undefined') return 'http:';
-  return location.protocol === 'https:' ? 'https:' : 'http:';
+function originFor(host: string, port: number, protocol = 'http:'): string {
+  const h = formatHostForUrl(host);
+  const needsPort = !(port === 80 && protocol === 'http:') && !(port === 443 && protocol === 'https:');
+  return needsPort ? `${protocol}//${h}:${port}` : `${protocol}//${h}`;
 }
 
 /** Board URL friends can open on the same LAN. */
-export function lanBoardUrl(boardId: string, lanHost: string): string {
-  const port = uiPort();
-  const host = formatHostForUrl(lanHost);
-  const needsPort = port !== '80' && port !== '443';
-  const origin = needsPort
-    ? `${uiProtocol()}//${host}:${port}`
-    : `${uiProtocol()}//${host}`;
-  return `${origin}/board/${encodeURIComponent(boardId)}`;
+export function lanBoardUrl(boardId: string, lanHost: string, port = Number(uiPort())): string {
+  return `${originFor(lanHost, port)}/board/${encodeURIComponent(boardId)}`;
 }
 
-/** App home URL on a LAN host (for Settings “copy app URL”). */
-export function lanAppUrl(lanHost: string): string {
-  const port = uiPort();
-  const host = formatHostForUrl(lanHost);
-  const needsPort = port !== '80' && port !== '443';
-  return needsPort
-    ? `${uiProtocol()}//${host}:${port}/`
-    : `${uiProtocol()}//${host}/`;
+/** App home URL on a LAN host (for Settings "copy app URL"). */
+export function lanAppUrl(lanHost: string, port = Number(uiPort())): string {
+  return `${originFor(lanHost, port)}/`;
 }
 
-/** Resolve the best invite URL for a board (LAN when on localhost). */
+/**
+ * Best invite URL for a board. A page on a public/LAN hostname shares its own
+ * origin; on localhost or inside the desktop app it shares the host's LAN
+ * address so a friend's browser can load the UI and the hub from it.
+ */
 export async function resolveInviteBoardUrl(
   boardId: string,
-  signal?: AbortSignal
 ): Promise<{ url: string; host: string; fromLan: boolean }> {
-  if (typeof location !== 'undefined' && !isLocalHostname(location.hostname)) {
+  if (
+    typeof location !== 'undefined' &&
+    /^https?:$/.test(location.protocol) &&
+    !isLocalHostname(location.hostname)
+  ) {
     const url = `${location.origin}/board/${encodeURIComponent(boardId)}`;
     return { url, host: location.hostname, fromLan: false };
   }
-  const { addresses } = await fetchLanAddresses(signal);
-  const host = inviteHostname(addresses);
+  const { addresses, port } = await fetchLanAddresses();
+  const host = addresses[0];
   if (!host) throw new Error('no lan address');
-  return { url: lanBoardUrl(boardId, host), host, fromLan: true };
+  return { url: lanBoardUrl(boardId, host, port), host, fromLan: true };
 }

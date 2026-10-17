@@ -5,7 +5,7 @@ import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync, ensureP2pAttached, hasDistinctRemoteCollaborators, hasRemoteCollaborators, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
+import { attachSync, detachSync, hasDistinctRemoteCollaborators, hasRemoteCollaborators, isAwarenessLeader, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 import {
   boardHadRemoteCollaborators,
@@ -16,8 +16,6 @@ import {
   startReplicaHeartbeat,
   stopReplicaHeartbeat,
 } from './compactGuard';
-import { effectiveSyncUrl, isLoopbackSyncHostname, loopbackSyncHttpBase } from '../net/config';
-import { syncClient } from '../net/client';
 import { netLog } from '../net/log';
 import { sanitizeRichHtml } from './richText';
 import {
@@ -262,7 +260,7 @@ export function initBoard(boardId: string): void {
       attachPersistence(boardId);
       if (persistence) void migrateLegacyBoard(persistence);
     }
-    try { ensureP2pAttached(doc, boardId); } catch {}
+    try { attachSync(doc, boardId); } catch {}
     return;
   }
   closeWriteGate();
@@ -309,8 +307,6 @@ export function initBoard(boardId: string): void {
   emitActivePage();
   attachSync(doc, boardId);
   startReplicaHeartbeat(boardId, hasDistinctRemoteCollaborators);
-  // If p2p was enabled after initial load, ensure it attaches too
-  try { ensureP2pAttached(doc, boardId); } catch {}
   // Ephemeral boards never get an IDB 'synced' — still notify the engine immediately.
   if (!persistence) {
     migratePointsSpace();
@@ -987,66 +983,9 @@ function bumpCurrentBoard(): void {
 }
 
 /**
- * Wipe the in-memory Y.Doc on the local sync server after compact.
- * Prefer loopback so DELETE is authorized even when the UI was opened via a LAN IP.
- * Never fall back to an unauthenticated DELETE against a LAN/public host on Node.
- * Cloudflare rooms may be cleared without a token once empty (same as 90s GC).
- */
-async function deleteServerRoomForCompact(room: string): Promise<boolean> {
-  const path = `/room/${encodeURIComponent(room)}`;
-  const loopbackUrl = `${loopbackSyncHttpBase()}${path}`;
-
-  async function tryDelete(url: string, via: string): Promise<boolean> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const res = await fetch(url, { method: 'DELETE' });
-        if (res.ok || res.status === 404) {
-          fileLogFallback('info', 'compact cleared server room', { room, via, attempt, status: res.status });
-          return true;
-        }
-        if (res.status === 403 && attempt < 4) {
-          await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
-          continue;
-        }
-        netLog.warn('compact room DELETE rejected', () => ({ room, via, status: res.status, attempt }));
-        return false;
-      } catch (e) {
-        if (attempt < 4) {
-          await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
-          continue;
-        }
-        netLog.warn('compact room DELETE failed', () => ({ room, via, err: String(e) }));
-        return false;
-      }
-    }
-    return false;
-  }
-
-  if (await tryDelete(loopbackUrl, 'loopback')) return true;
-
-  let syncHost = '';
-  let syncUrl = '';
-  try {
-    syncUrl = effectiveSyncUrl();
-    syncHost = new URL(syncUrl).hostname;
-  } catch {
-    return false;
-  }
-  if (isLoopbackSyncHostname(syncHost) && syncHost !== '127.0.0.1') {
-    const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
-    if (await tryDelete(`${base}${path}`, 'loopback-alias')) return true;
-  }
-  if (!isLoopbackSyncHostname(syncHost)) {
-    const base = syncUrl.replace(/^ws(s)?:\/\//, 'http$1://');
-    return tryDelete(`${base}${path}`, 'sync-url');
-  }
-  return false;
-}
-
-/**
  * Forever fix for 355MB ghost boards (gc:false tombstones).
  * Rebuilds a fresh Y.Doc with only live shapes/meta/order/pages,
- * wipes IndexedDB `review-v1-*` and in-memory server room.
+ * and wipes IndexedDB `review-v1-*`.
  */
 export async function compactBoard(): Promise<{ before: number; after: number; didCompact: boolean }> {
   if (!currentBoardId || compactInFlight) return { before: 0, after: 0, didCompact: false };
@@ -1164,19 +1103,8 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     } else {
       persistence = null;
     }
-    // clear server in-memory room (it still holds 372MB Y.Doc)
-    let wiped = false;
-    try {
-      wiped = await deleteServerRoomForCompact(`review-${boardId}`);
-    } catch (e) {
-      netLog.warn('compact clear server room failed', () => ({ err: String(e) }));
-    }
-    if (wiped) {
-      attachSync(doc, boardId);
-    } else {
-      // Re-attaching without a wipe merges the old tombstoned room back in.
-      netLog.warn('compact left sync detached — server wipe failed', () => ({ boardId }));
-    }
+    // No server copy exists; peers were absent (compactHasLiveReplica), so rejoin on the fresh doc.
+    attachSync(doc, boardId);
     bumpCurrentBoard();
     emitBoardReady();
     netLog.info('compactBoard done', () => ({ boardId, before, after }));
@@ -1186,16 +1114,11 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
   }
 }
 
-function fileLogFallback(level: string, msg: string, data?: unknown): void {
-  try {
-    netLog.info(msg, () => data as unknown as never);
-  } catch {}
-  void level;
-}
-
 if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__compactBoard = compactBoard;
   (window as unknown as Record<string, unknown>).__maybeAutoCompact = maybeAutoCompact;
+  // Live shape count for console checks and the P2P end-to-end script.
+  (window as unknown as Record<string, unknown>).__reviewShapeCount = () => board.size;
 }
 
 export function clearShapeKeys(id: string, keys: string[]): void {
@@ -1312,7 +1235,7 @@ export function listPages(): string[] {
   if (dup) {
     // ponytail: only leader dedups to avoid 3-peer ping-pong (other tabs of
     // the same user still count — collectPeers hides those)
-    if (!syncClient.isAwarenessLeader()) return uniq;
+    if (!isAwarenessLeader()) return uniq;
     queueMicrotask(() => {
       doc.transact(() => {
         const cur = a.toArray();
