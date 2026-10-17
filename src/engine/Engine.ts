@@ -38,7 +38,7 @@ import {
   imageDownloadExt,
   videoDownloadExt,
 } from '../core/media';
-import { attachDocBlobs, attachImageBlobs } from '../core/mediaBlobs';
+import { attachDocBlobs, attachImageBlobs, warmVisibleBlobMedia } from '../core/mediaBlobs';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import {
   ROTATE_CW_DISC_RADIUS_SCALE,
@@ -5039,6 +5039,13 @@ export class Engine {
     }
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
+      // Stage 2 read path: warm blob bytes for the LOD resolution this view needs.
+      if (v.type === 'image' || v.type === 'video' || v.type === 'doc') {
+        const screenPx = Math.max(v.w, v.h) * this.camera.zoom;
+        const pageIndex =
+          v.type === 'doc' ? docPageIndex(v.page, (v.pages ?? []).length) : undefined;
+        warmVisibleBlobMedia(v, screenPx, pageIndex);
+      }
       // hide canvas text of the shape being edited — the overlay renders it.
       // Calculator: keep display+keys on canvas; hide only overlay-owned header
       // chrome (≡ + mode title) so open nav does not ghost a second mode label.

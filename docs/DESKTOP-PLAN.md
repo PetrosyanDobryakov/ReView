@@ -43,6 +43,12 @@ Baseline 2026-10-17: аккаунт `zpro.driftman@gmail.com`; live SPA `1.0.4+1
   `patchShapeInternal` расширены. Плюс `allowImportingTsExtensions` в tsconfig (нужен Node
   strip-types тестам). Проверено: `media-blobs-test` зелен, весь `npm test` зелен кроме
   `sync-test` (нет cargo на машине — окружение), `npm run build` собирается. Прод не затронут.
+- [x] Этап 2 чтение с LOD (2026-10-17): резолвер `resolvedBlobUrl/ensureBlobUrl`
+  (in-flight дедуп, негативный кэш 30s), чистые селекторы `selectBlobKind/selectPaintSrc/
+  selectDocPaintSrc`, per-frame `warmVisibleBlobMedia` в Engine (экранный размер → thumb/full,
+  doc — только текущая страница); `drawShape` рисует резолвленный блоб, иначе `src` как раньше.
+  Перерисовка — существующими onImageLoad/onVideoLoad. Проверено: тесты зелены (кроме
+  `sync-test` — нет cargo), `npm run build` собирается. Прод не затронут.
 - [ ] Этап 1: файловое хранилище досок (детект `__TAURI__`, снятие лимита 32 МБ локально).
 - [ ] Этап 2: картинки как блобы по content-hash (Y.Doc хранит только ссылку) — главный рычаг веса и CF-нагрузки.
 - [ ] Этап 3: каскад транспортов LAN → P2P → Cloudflare + свой signaling (+ TURN при необходимости).

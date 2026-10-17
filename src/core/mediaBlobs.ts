@@ -13,9 +13,11 @@
 import {
   CompositeBlobStore,
   IdbBlobStore,
+  LOD_FULL_MIN_SCREEN_PX,
   MemoryBlobStore,
   THUMB_JPEG_QUALITY,
   THUMB_MAX_DIM,
+  createBlobObjectUrl,
   hashBytes,
   type BlobRef,
   type BlobStore,
@@ -205,6 +207,169 @@ export async function attachImageBlobs(
   if (!ref || !currentOk(deps)) return ref;
   applyPatch(deps, shapeId, { blob: ref.blob, thumb: ref.thumb, mime: ref.mime, bytes: ref.bytes });
   return ref;
+}
+
+/**
+ * Read path: blob hash → renderable object URL.
+ *
+ * Synchronous paint code uses {@link resolvedBlobUrl} (cache hit only) and
+ * falls back to `src` while bytes load. {@link ensureBlobUrl} loads in the
+ * background with in-flight dedup (one store read per hash no matter how many
+ * frames ask) and a short negative cache so missing blobs don't hammer IDB.
+ * Loaded URLs warm the existing engine image/video cache (`blob:` URLs are
+ * accepted), whose load listeners already trigger repaint — no new repaint
+ * plumbing needed.
+ */
+
+const resolvedUrls = new Map<string, string>();
+const inflight = new Map<string, Promise<string | null>>();
+const negativeUntil = new Map<string, number>();
+
+/** How long a store miss suppresses retries (ms). */
+export const BLOB_NEGATIVE_TTL_MS = 30_000;
+
+/** Sync cache read for paint. Null = not loaded (yet or at all). */
+export function resolvedBlobUrl(hash: string): string | null {
+  return resolvedUrls.get(hash) ?? null;
+}
+
+/** Background load of one blob into an object URL. Never throws. */
+export function ensureBlobUrl(hash: string, store?: BlobStore): Promise<string | null> {
+  const hit = resolvedUrls.get(hash);
+  if (hit) return Promise.resolve(hit);
+  const pending = inflight.get(hash);
+  if (pending) return pending;
+  const quietUntil = negativeUntil.get(hash) ?? 0;
+  if (quietUntil > Date.now()) return Promise.resolve(null);
+  const job = (async (): Promise<string | null> => {
+    try {
+      const row = await (store ?? mediaBlobStore()).get(hash);
+      if (!row) {
+        negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);
+        return null;
+      }
+      negativeUntil.delete(hash);
+      const url = createBlobObjectUrl(row.bytes, row.mime);
+      if (!url) {
+        negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);
+        return null;
+      }
+      resolvedUrls.set(hash, url);
+      return url;
+    } catch {
+      negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);
+      return null;
+    } finally {
+      inflight.delete(hash);
+    }
+  })();
+  inflight.set(hash, job);
+  return job;
+}
+
+/** Drop a resolved URL (future GC wiring). Returns true when one existed. */
+export function releaseResolvedBlobUrl(hash: string): boolean {
+  const url = resolvedUrls.get(hash);
+  if (!url) return false;
+  resolvedUrls.delete(hash);
+  try {
+    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/** Test hook: clear resolver caches. */
+export function __clearBlobResolverForTests(): void {
+  for (const [, url] of resolvedUrls) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+  resolvedUrls.clear();
+  inflight.clear();
+  negativeUntil.clear();
+}
+
+/** Which resolution to load for an on-screen size (pure, spec 2.4). */
+export function selectBlobKind(screenPx: number): 'full' | 'thumb' {
+  return screenPx >= LOD_FULL_MIN_SCREEN_PX ? 'full' : 'thumb';
+}
+
+/**
+ * Paint source for a single-src view (pure).
+ * Resolved blob wins (full, else thumb); otherwise legacy `src`.
+ */
+export function selectPaintSrc(
+  src: string | undefined,
+  fullUrl: string | null,
+  thumbUrl: string | null
+): string {
+  return fullUrl ?? thumbUrl ?? src ?? '';
+}
+
+/**
+ * Paint source for one doc page (pure).
+ * Resolved page blob wins (full, else thumb); otherwise legacy page dataURL.
+ */
+export function selectDocPaintSrc(
+  pageDataUrl: string | undefined,
+  pageBlobUrl: string | null,
+  pageThumbUrl: string | null
+): string {
+  return pageBlobUrl ?? pageThumbUrl ?? pageDataUrl ?? '';
+}
+
+export interface BlobMediaView {
+  type?: string;
+  blob?: string | null;
+  thumb?: string | null;
+  mime?: string;
+  pageBlobs?: string[];
+  pageThumbs?: Array<string | null>;
+}
+
+/**
+ * Per-frame warmer for visible views: kicks background loads for the LOD
+ * resolution the view needs right now. Fire-and-forget, never throws.
+ * `pageIndex` is the resolved doc page (doc shapes only).
+ */
+export function warmVisibleBlobMedia(
+  v: BlobMediaView,
+  screenPx: number,
+  pageIndex?: number,
+  store?: BlobStore
+): void {
+  try {
+    if (v.type === 'image' || v.type === 'video' || (!v.type && (v.blob || v.thumb))) {
+      if (selectBlobKind(screenPx) === 'full') {
+        if (v.blob) void ensureBlobUrl(v.blob, store);
+      } else if (v.thumb) {
+        void ensureBlobUrl(v.thumb, store);
+      } else if (v.blob) {
+        void ensureBlobUrl(v.blob, store);
+      }
+      return;
+    }
+    if (v.type === 'doc' && pageIndex !== undefined) {
+      const full = v.pageBlobs?.[pageIndex];
+      const thumb = v.pageThumbs?.[pageIndex];
+      if (selectBlobKind(screenPx) === 'full') {
+        if (full) void ensureBlobUrl(full, store);
+      } else if (thumb) {
+        void ensureBlobUrl(thumb, store);
+      } else if (full) {
+        void ensureBlobUrl(full, store);
+      }
+    }
+  } catch {
+    /* warmer is best-effort */
+  }
 }
 
 /**
