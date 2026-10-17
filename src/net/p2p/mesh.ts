@@ -29,7 +29,7 @@ import {
   split,
 } from './protocol';
 import { WebRtcLink, isInitiator, webrtcAvailable } from './webrtcLink';
-import type { HubInfo, HubSource, MeshSnapshot, PeerInfo, PeerLink } from './types';
+import type { HubInfo, HubSource, LinkEvents, MeshSnapshot, PeerInfo, PeerLink } from './types';
 
 const PING_MS = 5_000;
 /** A link that delivers nothing (not even PONG) for this long is dead. */
@@ -49,6 +49,8 @@ export type MeshOptions = {
   appVersion: string;
   onChange: () => void;
   log?: (msg: string, data?: Record<string, unknown>) => void;
+  /** Transport factory. Defaults to WebRTC; tests pass an in-memory link. */
+  createLink?: (peer: string, initiator: boolean, events: LinkEvents) => PeerLink;
 };
 
 type Entry = {
@@ -155,7 +157,7 @@ export class Mesh {
       hubs: [...e.hubs],
       attempts: e.attempts,
     }));
-    return { room: this.room, self: this.self, enabled: true, webrtc: webrtcAvailable(), hubs, peers };
+    return { room: this.room, self: this.self, enabled: true, webrtc: this.canLink(), hubs, peers };
   }
 
   destroy(): void {
@@ -248,18 +250,13 @@ export class Mesh {
   }
 
   private ensureLink(e: Entry): void {
-    if (this.destroyed || !webrtcAvailable()) return;
+    if (this.destroyed || !this.canLink()) return;
     if (e.link && (e.link.state === 'connecting' || e.link.state === 'open')) return;
     if (e.retryTimer) return;
     const initiator = isInitiator(this.self, e.peer);
     e.attempts += 1;
     e.reasm.clear();
-    const link: PeerLink = new WebRtcLink(e.peer, initiator, this.opts.iceServers, {
-      open: () => this.onLinkOpen(e, link),
-      message: (data) => this.onLinkMessage(e, link, data),
-      close: (reason) => this.onLinkClose(e, link, reason),
-      signal: (data) => this.sendSignal(e, data),
-    });
+    const link: PeerLink = this.newLink(e, initiator);
     e.link = link;
     this.opts.log?.('link start', { peer: e.peer, initiator, attempt: e.attempts });
     // The initiator may be in a retry backoff; ask it to offer now.
@@ -298,16 +295,27 @@ export class Mesh {
 
   /** Responder link for an incoming offer, without a knock (the offer is already here). */
   private ensureLinkQuiet(e: Entry): void {
-    if (!webrtcAvailable()) return;
+    if (!this.canLink()) return;
     e.attempts += 1;
     e.reasm.clear();
-    const link: PeerLink = new WebRtcLink(e.peer, false, this.opts.iceServers, {
+    e.link = this.newLink(e, false);
+  }
+
+  private canLink(): boolean {
+    return this.opts.createLink ? true : webrtcAvailable();
+  }
+
+  private newLink(e: Entry, initiator: boolean): PeerLink {
+    const events: LinkEvents = {
       open: () => this.onLinkOpen(e, link),
       message: (data) => this.onLinkMessage(e, link, data),
       close: (reason) => this.onLinkClose(e, link, reason),
       signal: (data) => this.sendSignal(e, data),
-    });
-    e.link = link;
+    };
+    const link: PeerLink = this.opts.createLink
+      ? this.opts.createLink(e.peer, initiator, events)
+      : new WebRtcLink(e.peer, initiator, this.opts.iceServers, events);
+    return link;
   }
 
   private sendSignal(e: Entry, data: unknown): void {

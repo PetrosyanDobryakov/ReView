@@ -15,9 +15,6 @@ Thumbs.db
 
 .tmp-artifacts/
 
-# Rust sync server
+# Rust host
 rust/target/
-data/sync-rooms/
-worker/target/
-worker/build/
-worker/.wrangler/
+scripts/p2p-bundle.mjs

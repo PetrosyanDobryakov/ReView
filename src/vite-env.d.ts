@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_SYNC_URL?: string;
+  /** Port of the dev review-host when Vite serves the UI (default 1234). */
+  readonly VITE_HOST_PORT?: string;
 }
 
 interface ImportMeta {

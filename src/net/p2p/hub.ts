@@ -26,6 +26,7 @@ export function normalizeHubUrl(raw: string): string | null {
   let s = raw.trim();
   if (!s) return null;
   if (/^https?:\/\//i.test(s)) s = s.replace(/^http/i, 'ws');
+  else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && !/^wss?:\/\//i.test(s)) return null;
   if (!/^wss?:\/\//i.test(s)) s = `ws://${s}`;
   try {
     const u = new URL(s);

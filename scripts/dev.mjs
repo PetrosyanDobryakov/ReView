@@ -5,14 +5,17 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
-/** Optional overrides: REVIEW_UI_PORT / REVIEW_SYNC_PORT / REVIEW_HOST (defaults 5173 / 1234 / 0.0.0.0). */
+/**
+ * Vite on :5173 plus review-host (signaling hub + LAN discovery) on :1234.
+ * Optional overrides: REVIEW_UI_PORT / REVIEW_PORT / REVIEW_HOST (defaults 5173 / 1234 / 0.0.0.0).
+ */
 const uiPort = process.env.REVIEW_UI_PORT || '5173';
-const syncPort = process.env.REVIEW_SYNC_PORT || '1234';
+const hostPort = process.env.REVIEW_PORT || process.env.REVIEW_SYNC_PORT || '1234';
 const host = process.env.REVIEW_HOST || '0.0.0.0';
 
 const withNetLog = process.argv.includes('--log') || process.argv.includes('--net-log') || process.env.REVIEW_NET_LOG === '1';
-const serverEnv = { ...process.env, REVIEW_SYNC_PORT: syncPort, REVIEW_HOST: host, ...(withNetLog ? { REVIEW_NET_LOG: '1' } : {}) };
-const viteEnv = { ...process.env, VITE_SYNC_PORT: syncPort, ...(withNetLog ? { VITE_NET_LOG: '1', REVIEW_NET_LOG: '1' } : {}) };
+const serverEnv = { ...process.env, REVIEW_PORT: hostPort, REVIEW_HOST: host, ...(withNetLog ? { REVIEW_VERBOSE: '1' } : {}) };
+const viteEnv = { ...process.env, VITE_HOST_PORT: hostPort, ...(withNetLog ? { VITE_NET_LOG: '1' } : {}) };
 
 const server = spawn(process.execPath, ['scripts/rust-server.mjs'], {
   cwd: root,
