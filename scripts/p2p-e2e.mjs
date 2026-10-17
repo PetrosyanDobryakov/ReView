@@ -90,6 +90,7 @@ async function hubPeers(room) {
 const { chromium } = await loadPlaywright();
 const launchOpts = existsSync('/opt/pw-browsers/chromium') ? {} : {};
 const browser = await chromium.launch(launchOpts);
+const consoleLog = [];
 try {
   await waitFor(async () => {
     try {
@@ -101,12 +102,14 @@ try {
   }, 10_000, 'host up');
 
   const board = `e2e${Date.now().toString(36)}`;
+  const t0 = Date.now();
   const ctxA = await browser.newContext({ viewport: { width: 1100, height: 760 } });
   const ctxB = await browser.newContext({ viewport: { width: 1100, height: 760 } });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
   for (const [name, page] of [['A', a], ['B', b]]) {
     page.on('pageerror', (e) => console.error(`[${name}] pageerror`, e.message));
+    page.on('console', (m) => consoleLog.push(`[${name} ${Date.now() - t0}ms] ${m.text()}`));
   }
   const linked = async (page) =>
     page.evaluate(() => {
@@ -128,7 +131,7 @@ try {
   };
 
   // 1. A is alone and draws. Nothing goes anywhere: there is no server copy.
-  await a.goto(`${base}/board/${board}`);
+  await a.goto(`${base}/board/${board}?netDebug=1`);
   await waitFor(async () => (await shapes(a)) >= 0, 10_000, 'A board ready');
   await a.waitForLoadState('networkidle');
   await a.waitForTimeout(1_000);
@@ -137,7 +140,7 @@ try {
   console.log(`p2p-e2e: A drew alone (${first} shape)`);
 
   // 2. B joins late and gets the board from A over the data channel.
-  await b.goto(`${base}/board/${board}`);
+  await b.goto(`${base}/board/${board}?netDebug=1`);
   await waitFor(async () => (await linked(a)) === 1 && (await linked(b)) === 1, 20_000, 'data channel open');
   const snapA = await a.evaluate(() => window.reviewP2p());
   console.log('p2p-e2e: link open', JSON.stringify({ hubs: snapA.hubs.map((h) => [h.url, h.state]), path: snapA.peers[0].path }));
@@ -160,11 +163,12 @@ try {
   }
   const ctxC = await browser.newContext();
   const c = await ctxC.newPage();
-  await c.goto(`${base}/board/${board}`);
+  await c.goto(`${base}/board/${board}?netDebug=1`);
   await waitFor(async () => (await hubPeers(room)) === 3, 10_000, 'C on hub');
   await ctxC.close();
   await waitFor(async () => (await hubPeers(room)) === 2, 10_000, 'hub forgets C');
   console.log('p2p-e2e: hub forgot C as soon as it left');
+  await waitFor(async () => (await shapes(a)) === (await shapes(b)), 10_000, 'A and B agree after C left');
 
   // 5. Kill the hub. Open links keep working: board data never used it.
   killHub();
@@ -175,6 +179,15 @@ try {
   if (!process.exitCode) console.log('p2p-e2e: OK');
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e));
+  for (const [i, ctx] of browser.contexts().entries()) {
+    for (const page of ctx.pages()) {
+      const state = await page
+        .evaluate(() => ({ shapes: window.__reviewShapeCount?.(), mesh: window.reviewP2p?.() }))
+        .catch((err) => String(err));
+      console.error(`p2p-e2e: context ${i}`, JSON.stringify(state));
+    }
+  }
+  console.error(consoleLog.slice(-80).join('\n'));
   if (process.env.E2E_SHOTS) {
     for (const [i, ctx] of browser.contexts().entries()) {
       for (const page of ctx.pages()) await page.screenshot({ path: path.join(process.env.E2E_SHOTS, `p2p-e2e-${i}.png`) }).catch(() => {});

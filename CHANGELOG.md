@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.15.60
+
+### P2P
+- **Edits lost on a dying link are repaired.** Relay suppression trusted that a peer with a direct link to the author got each edit from it. If that link died with an edit still in flight, the edit never arrived, and later edits that built on it got stuck. Now, whenever a link closes, the remaining peers exchange state vectors and fill each other's gaps. A peer that receives an update with missing parents also asks its links for a resync (at most once per 2 s). This is the likely cause of the occasional `p2p-e2e` failure "B -> A with the hub dead": a write the third tab made on joining reached only one of the other two before it left.
+- Tests: `p2p-test` covers a lost in-flight edit. `p2p-e2e` checks that A and B agree before killing the hub, and dumps mesh state and console on failure.
+
 ## 0.15.59
 
 ### Cloudflare hub
