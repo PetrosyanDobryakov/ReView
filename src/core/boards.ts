@@ -2,6 +2,7 @@ import { readPrefs } from './prefs';
 import { deleteBoardDatabase } from './boardSize';
 import { readLocale } from './locale';
 import { t } from '../ui/i18n';
+import { deleteBoardFile, isDesktop } from '../net/p2p/desktop';
 
 export interface Team {
   id: string;
@@ -204,6 +205,14 @@ export function createBoard(name: string, teamId = 'default', status: BoardStatu
   return b;
 }
 
+/** Add a board record restored from elsewhere (desktop board files). No-op if the id exists. */
+export function importBoardMeta(meta: BoardMeta): void {
+  const boards = readBoards();
+  if (boards.some((b) => b.id === meta.id)) return;
+  boards.push(meta);
+  writeBoards(boards);
+}
+
 export function renameBoard(id: string, name: string): void {
   const boards = readBoards().map((b) => (b.id === id ? { ...b, name: name.trim() || b.name, updatedAt: Date.now() } : b));
   writeBoards(boards);
@@ -220,6 +229,7 @@ export function deleteBoard(id: string): void {
 export async function deleteBoardData(id: string): Promise<boolean> {
   const ok = await deleteBoardDatabase(id);
   if (!ok) return false;
+  if (isDesktop()) await deleteBoardFile(id);
   deleteBoard(id);
   return true;
 }

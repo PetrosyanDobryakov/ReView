@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rtc-path"
+description = "Enables the rtc_path command without any pre-configured scope."
+commands.allow = ["rtc_path"]
+
+[[permission]]
+identifier = "deny-rtc-path"
+description = "Denies the rtc_path command without any pre-configured scope."
+commands.deny = ["rtc_path"]

@@ -6,6 +6,7 @@ import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally 
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, hasDistinctRemoteCollaborators, hasRemoteCollaborators, isAwarenessLeader, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
+import { attachDesktopMirror } from './desktopBoards';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 import {
   boardHadRemoteCollaborators,
@@ -100,8 +101,13 @@ function shouldPersist(boardId: string): boolean {
   return isBoardPersistedLocally(getBoard(boardId));
 }
 
+/** Desktop app: stops the board-file mirror (flushes the last edit first). */
+let stopDesktopMirror: () => void = () => {};
+
 function attachPersistence(boardId: string): void {
   persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
+  stopDesktopMirror();
+  stopDesktopMirror = attachDesktopMirror(doc, boardId);
   const onSynced = () => {
     ensurePages();
     syncActivePageFromStorage();
@@ -267,6 +273,7 @@ export function initBoard(boardId: string): void {
   try { undoManager.clear(); } catch {}
   try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
+  stopDesktopMirror();
   try {
     persistence?.destroy();
   } catch {}
@@ -322,6 +329,7 @@ export function leaveBoard(): void {
   try { undoManager.clear(); } catch {}
   try { (undoManager as unknown as { destroy?: () => void })?.destroy?.(); } catch {}
   detachSync();
+  stopDesktopMirror();
   try { persistence?.destroy(); } catch {}
   persistence = null;
   pagesObserved = false;
@@ -1049,8 +1057,9 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     }
     netLog.info('compactBoard start', () => ({ boardId, before, after, shapes: board.size, orderLen: order.length }));
     const persistLocally = Boolean(persistence) && shouldPersist(boardId);
-    // detach before destroying — wait for the socket to drop so empty-room DELETE is allowed
+    // Leave the mesh before swapping docs so peers never see the half-built state.
     detachSync();
+    stopDesktopMirror();
     await new Promise((r) => setTimeout(r, 80));
     // clear old IndexedDB database content
     try {
@@ -1086,6 +1095,8 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     emitActivePage();
     if (persistLocally) {
       persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
+      // Overwrite the desktop board file with the compact doc; never merge the bloated file back.
+      stopDesktopMirror = attachDesktopMirror(doc, boardId, { load: false });
       try {
         await withIdbTimeout(
           (persistence as unknown as { whenSynced: Promise<void> }).whenSynced,

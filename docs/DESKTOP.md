@@ -1,29 +1,54 @@
-# Desktop and Android shell
+# Desktop (and Android) app
 
-One Tauri 2 app in `src-tauri/` loads the existing Vite/React frontend. It does not replace `rust/review-sync` or the wasm `review-sync` worker. The shell version in `src-tauri/tauri.conf.json` is `0.1.0`. The web app stays at the `package.json` version. This note does not change that web version.
+`src-tauri/` is a Tauri 2 app. Running it makes your computer a ReView host:
 
-Identifier: `dev.zpro.review`. Dev URL: `http://localhost:5173`. Production assets: `dist/` from `npm run build`. `beforeDevCommand` is `npm run dev` (Vite plus the Rust sync server). `beforeBuildCommand` is `npm run build`. Content security policy is unset so the existing whiteboard, websocket, and WebRTC code is not blocked by a new policy. Vite ignores `src-tauri/**` so Rust build output does not restart the dev server.
+- **Embedded `review-host`** (`rust/review-host`, the same code as the standalone binary). It listens on `0.0.0.0:4455`, or the next free port up to `4475`. It serves this same web UI to friends' browsers on your network, runs the signaling hub, and advertises itself over mDNS so other ReView apps on the Wi-Fi find it.
+- **The window loads the UI from that host** (`http://127.0.0.1:<port>/`). The app and a friend's browser therefore follow the same origin rules, and `ws://` hubs on the LAN are never blocked as mixed content. Dev builds load Vite instead (`REVIEW_DESKTOP_EMBEDDED=1` forces the embedded UI).
+- **Boards are files.** Every saved board is mirrored to `<app data>/boards/<id>.review` (Yjs snapshot) plus `<id>.json` (name, team). On Linux, `<app data>` is `~/.local/share/dev.zpro.review`. The files are the durable copy. If the webview storage is lost or the port (origin) changes, boards come back from the files on launch. Closing the window first writes any pending edit. **Settings → System → Connection (P2P) → Boards folder** opens the folder.
+- **Native WebRTC where the webview has none.** Ubuntu/Debian WebKitGTK is built without WebRTC. The app then serves `RTCPeerConnection` from Rust (webrtc-rs, `src-tauri/src/rtc.rs`) through a small polyfill (`src/net/p2p/nativeRtc.ts`). It speaks standard WebRTC, so a desktop on Linux connects to Chrome, Firefox, Safari and other desktops. On Windows (WebView2), macOS (WKWebView) and Android the webview's own WebRTC is used. On Linux the app also switches WebKitGTK's own WebRTC setting on, for distro builds that have it.
 
-Run these from the repository root.
+Nothing in the app stores or forwards board data for anyone else: other people's boards reach this machine only over direct peer links.
 
-## Desktop dev
-
-```bash
-npm install
-npm run desktop
-```
-
-`npm run desktop` is `tauri dev`. It starts `npm run dev` for you. Do not start a second `npm run dev` on ports 5173 and 1234.
-
-Linux packages used to compile here: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`. Windows and macOS use the same project; install the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for those hosts. `bundle.targets` is `all`, which is Tauri's default set for the host you build on.
-
-Production bundle:
+## Run
 
 ```bash
-npm run desktop:build
+npm ci
+npm run desktop          # tauri dev: Vite + hot reload, embedded host on :4455
+npm run desktop:build    # release bundles under src-tauri/target/release/bundle/
 ```
 
-That runs `tsc --noEmit && vite build`, then the release shell.
+Linux build dependencies: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev patchelf`. Windows and macOS need the usual [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+Environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `REVIEW_DESKTOP_PORT` | First port to try for the embedded host (default `4455`). |
+| `REVIEW_NAME` | Name other peers see for this host (default: hostname). |
+| `REVIEW_MDNS=0` | Do not advertise or browse the LAN. |
+| `REVIEW_DESKTOP_EMBEDDED=1` | Dev build: load the UI from the embedded host instead of Vite. |
+| `REVIEW_SELFTEST=1` | Boot, run checks inside the webview, print `REVIEW_SELFTEST {json}`, exit 0/1. |
+| `REVIEW_SELFTEST_BOARD=<id>` | With the self-test: also open that board and wait for a peer's stroke (see below). |
+
+## Inviting friends
+
+Open a board, then **Members → Copy link for friends**. The link is `http://<your-lan-ip>:4455/board/<id>`. A friend opens it in any browser (no install), loads the UI from your app, and connects to you directly. Friends who also run the app see your host in **Connection (P2P) → Hubs** automatically (mDNS) and join it on their own.
+
+For friends outside your network, see [DEPLOY.md](DEPLOY.md#friends-outside-your-network) (Tailscale, or a hub on a VPS).
+
+## Security notes
+
+- IPC (board files, native WebRTC) is granted only to the app's own window on `http://127.0.0.1:*` / `http://localhost:*` (`src-tauri/capabilities/default.json`). Pages served to LAN friends get no IPC; they run in the friend's browser.
+- The embedded host accepts only text signaling frames, keeps nothing after a socket closes, and caps rooms and peers (see DEPLOY.md).
+- If you do not want to host for the LAN, set `REVIEW_HOST=127.0.0.1` to bind loopback only.
+
+## Verified on this repo's CI box (Linux x86_64, Ubuntu 24.04, WebKitGTK 2.52 without WebRTC)
+
+- `REVIEW_SELFTEST=1 xvfb-run -a src-tauri/target/debug/review-desktop` reports: native WebRTC installed, a loopback data channel delivered `ping`, the embedded host answered `/lan`, and board files round-tripped over IPC.
+- `xvfb-run -a node scripts/desktop-e2e.mjs`: the app and a headless Chromium join one board through the app's host. A stroke drawn in Chromium arrives in the app over a direct WebRTC link (Rust stack on one side, Chromium's on the other) and lands in the board file on disk.
+- `npx tauri build --bundles deb` produced the release `.deb`.
+
+Not built here: Windows, macOS, Android APK. They use the same code; Android and Apple webviews have WebRTC built in.
 
 ## Android
 
@@ -53,19 +78,4 @@ npm run android
 npm run android:build
 ```
 
-Those are `tauri android dev` and `tauri android build`. Dev still uses the Vite server. The CLI rewrites the dev host so an emulator can reach the machine. A release Android build embeds `dist/`. Neither command was run here.
-
-## What this machine actually built
-
-Linux x86_64, Tauri CLI 2.11.5:
-
-- `cargo build --manifest-path src-tauri/Cargo.toml` finished the debug shell.
-- `npx tauri build` finished the release shell and wrote `ReView_0.1.0_amd64.deb`, `ReView-0.1.0-1.x86_64.rpm`, and `ReView_0.1.0_amd64.AppImage` under `src-tauri/target/release/bundle/`. Those bundles are gitignored. The window was not opened.
-
-Initialized here, not packaged:
-
-- Android project `src-tauri/gen/android` from `tauri android init --ci` after the SDK and NDK install above. No emulator was present, and no APK was built.
-
-Not built here:
-
-- Windows and macOS. The project targets them; this host is Linux.
+Those are `tauri android dev` and `tauri android build`. Dev still uses the Vite server. On Android the app embeds the same host as on desktop; the system WebView has WebRTC, so the native bridge is not used. The CLI rewrites the dev host so an emulator can reach the machine. A release Android build embeds `dist/`. Neither command was run here.

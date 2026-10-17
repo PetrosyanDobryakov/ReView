@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.15.58
+
+### Fully peer-to-peer, self-hosted
+- **No server holds boards any more.** Board data moves only between devices over WebRTC data channels and is stored only on those devices. The Cloudflare `review-sync` Durable Object, its room storage, compaction DELETE and the y-websocket client are gone.
+- **Own P2P layer** (`src/net/p2p/`): full mesh, Yjs sync and awareness over an ordered `review` data channel, 16 KiB framing with chunked reassembly for big pastes, relay through a middle peer when two peers cannot reach each other (skipped when the target already has a direct link), RTT pings, link path detection (same network, direct through NAT, TURN). Links outlive their hub.
+- **`review-host`** (Rust, replaces `review-sync`): serves the web UI (`--dist`), a stateless signaling hub at `/signal/<room>` that only forwards SDP/ICE (binary frames refused, empty rooms forgotten at once), `/lan` and `/health`, and mDNS discovery of other hosts on the LAN. `npm run host` = build + host on `:1234`.
+- **P2P panel** (Settings → System): on/off, invite address, live links (who, state, path, RTT, traffic), hubs (this host, LAN, added, from invite) with state, add a friend's hub, LAN discovery switch, STUN/TURN lines. Console helper `reviewP2p()`.
+- **Joined boards are saved on your device by default**, since there is no server copy.
+
+### Desktop app
+- Tauri app embeds review-host: it serves the UI to friends' browsers on your Wi-Fi (`http://<lan-ip>:4455/board/<id>`), runs the hub and finds other ReView hosts over mDNS. The window loads the UI from that host.
+- Boards are mirrored to files (`<app data>/boards/<id>.review` + `.json`) and restored on launch if the webview storage is missing. Closing the window flushes pending edits first. "Boards folder" button in the P2P panel.
+- Native WebRTC (webrtc-rs) behind an `RTCPeerConnection` polyfill for webviews built without it (Ubuntu/Debian WebKitGTK); desktop links interoperate with browsers.
+- `REVIEW_SELFTEST=1` self-check mode; `scripts/desktop-e2e.mjs` proves app <-> Chromium sync.
+
+### Tests
+- `scripts/p2p-test.mjs` (in `npm test`): framing, hub addresses, mesh against a real review-host with in-memory links (late join, awareness, 300 KB chunked update, leave clears cursors, relay, duplicate-relay suppression).
+- `scripts/p2p-e2e.mjs` (`npm run test:e2e`): two headless Chromium browsers over real WebRTC: late join, live edits, hub forgets leavers, links survive the hub being killed.
+- Rust: hub unit tests and a websocket integration test in `rust/review-host`.
+
 ## 0.15.57
 
 ### Starship finale realism

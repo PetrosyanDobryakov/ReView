@@ -21,11 +21,15 @@ export function isDesktop(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
+async function call<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+  headers?: Record<string, string>,
+): Promise<T | null> {
   if (!isDesktop()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<T>(cmd, args);
+    return await invoke<T>(cmd, args, headers ? { headers } : undefined);
   } catch (e) {
     try { console.warn('[review:desktop]', cmd, e); } catch { /* ignore */ }
     return null;
@@ -36,15 +40,26 @@ export function desktopHostInfo(): Promise<DesktopHostInfo | null> {
   return call<DesktopHostInfo>('host_info');
 }
 
-/** Write a full Yjs snapshot of a board to `<boardsDir>/<id>.review`. */
-export async function saveBoardFile(id: string, title: string, update: Uint8Array): Promise<boolean> {
-  const ok = await call<boolean>('board_save', { id, title, data: Array.from(update) });
+/** Write a full Yjs snapshot of a board to `<boardsDir>/<id>.review` (raw IPC body, no JSON copy). */
+export async function saveBoardFile(id: string, metaJson: string, update: Uint8Array): Promise<boolean> {
+  const ok = await call<boolean>('board_save', update as unknown as Record<string, unknown>, {
+    'x-board-id': id,
+    'x-board-meta': encodeURIComponent(metaJson),
+  });
   return ok === true;
 }
 
 export async function loadBoardFile(id: string): Promise<Uint8Array | null> {
-  const data = await call<number[] | null>('board_load', { id });
-  return data ? new Uint8Array(data) : null;
+  const data = await call<ArrayBuffer | number[]>('board_load', { id });
+  if (!data) return null;
+  const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data);
+  return bytes.length ? bytes : null;
+}
+
+export type BoardFile = { id: string; savedAt: number; size: number; meta: unknown };
+
+export async function listBoardFiles(): Promise<BoardFile[]> {
+  return (await call<BoardFile[]>('board_list')) ?? [];
 }
 
 export async function deleteBoardFile(id: string): Promise<void> {

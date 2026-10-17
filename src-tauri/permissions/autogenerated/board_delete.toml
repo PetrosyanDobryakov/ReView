@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-board-delete"
+description = "Enables the board_delete command without any pre-configured scope."
+commands.allow = ["board_delete"]
+
+[[permission]]
+identifier = "deny-board-delete"
+description = "Denies the board_delete command without any pre-configured scope."
+commands.deny = ["board_delete"]

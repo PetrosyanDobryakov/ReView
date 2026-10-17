@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rtc-add-ice"
+description = "Enables the rtc_add_ice command without any pre-configured scope."
+commands.allow = ["rtc_add_ice"]
+
+[[permission]]
+identifier = "deny-rtc-add-ice"
+description = "Denies the rtc_add_ice command without any pre-configured scope."
+commands.deny = ["rtc_add_ice"]
