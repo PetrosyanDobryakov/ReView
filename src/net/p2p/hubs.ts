@@ -141,9 +141,28 @@ export function captureInviteHub(): string | null {
   return url;
 }
 
+let pageHostCache: { at: number; value: HostProbe | null } | null = null;
+
+/**
+ * Desktop dev: the window comes from Vite while browsers use the dev hub on
+ * :1234, so the app also joins the hub that serves (or sits next to) its page.
+ */
+async function findPageHost(): Promise<HostProbe | null> {
+  if (!isDesktop() || typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) return null;
+  if (pageHostCache && Date.now() - pageHostCache.at < 30_000) return pageHostCache.value;
+  let value = await probe(location.origin);
+  if (!value) {
+    const dev = `${location.protocol}//${formatHostForUrl(location.hostname)}:${hostPort()}`;
+    if (dev !== location.origin) value = await probe(dev);
+  }
+  pageHostCache = { at: Date.now(), value };
+  return value;
+}
+
 export async function resolveHubs(): Promise<{ specs: HubSpec[]; self: HostProbe | null }> {
   const prefs = readPrefs();
   const self = await findSelfHost();
+  const page = await findPageHost();
   const specs: HubSpec[] = [];
   const seen = new Set<string>();
   const add = (url: string | null, source: HubSource) => {
@@ -152,6 +171,7 @@ export async function resolveHubs(): Promise<{ specs: HubSpec[]; self: HostProbe
     specs.push({ url, source });
   };
   if (self) add(self.hub, 'self');
+  if (page && page.id !== self?.id) add(page.hub, 'lan');
   if (self && prefs.p2pLanDiscovery) {
     for (const h of self.hosts) if (h.id !== self.id) add(lanHostHub(h), 'lan');
   }

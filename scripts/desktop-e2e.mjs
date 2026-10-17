@@ -8,6 +8,9 @@
  * arrives over a peer link.
  *
  *   npm run build && (cd src-tauri && cargo build) && xvfb-run -a node scripts/desktop-e2e.mjs
+ *
+ * DESKTOP_E2E_DEV=1: the app loads Vite (start `npm run dev` first) and the
+ * browser opens the board on Vite, so they meet on the dev hub (:1234).
  */
 import { execSync, spawn } from 'node:child_process';
 import path from 'node:path';
@@ -16,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = 4455 + Math.floor(Math.random() * 400);
 const board = `desk${Date.now().toString(36)}`;
+const devMode = process.env.DESKTOP_E2E_DEV === '1';
 
 async function loadPlaywright() {
   try {
@@ -31,7 +35,7 @@ const app = spawn(path.join(root, 'src-tauri', 'target', 'debug', 'review-deskto
     ...process.env,
     REVIEW_SELFTEST: '1',
     REVIEW_SELFTEST_BOARD: board,
-    REVIEW_DESKTOP_EMBEDDED: '1',
+    ...(devMode ? {} : { REVIEW_DESKTOP_EMBEDDED: '1' }),
     REVIEW_DESKTOP_PORT: String(port),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -48,10 +52,10 @@ const { chromium } = await loadPlaywright();
 const browser = await chromium.launch();
 let code = 1;
 try {
-  const base = `http://127.0.0.1:${port}`;
+  const base = devMode ? 'http://localhost:5173' : `http://127.0.0.1:${port}`;
   for (let i = 0; i < 60; i++) {
     try {
-      if ((await fetch(`${base}/lan`)).ok) break;
+      if ((await fetch(`http://127.0.0.1:${port}/lan`)).ok) break;
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 500));
   }
