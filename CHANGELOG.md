@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.15.59
+
+### Cloudflare hub
+- The Worker **review** now runs a signaling hub next to the web UI (`cloudflare/worker.ts`). It speaks the same wire format as review-host and gives each room its own Durable Object (`SignalRoom`). A page opened from the Worker finds the hub through `/lan` and connects over `wss://` with no setup.
+- Sockets hibernate, and the runtime answers the 20 s hub ping without waking the object, so idle rooms cost nothing. The hub refuses binary frames, writes no data (only a sweep alarm for dead sockets), and a room forgets everyone when it empties.
+- Tests: `npm run test:cf` (protocol test under `wrangler dev`) and `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` (two Chromium tabs synced through the Worker). `wrangler` and `@cloudflare/workers-types` are now dev dependencies.
+
 ## 0.15.58
 
 ### Fully peer-to-peer, self-hosted

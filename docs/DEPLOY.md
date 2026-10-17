@@ -95,6 +95,21 @@ Run review-host with `--host 127.0.0.1 --no-mdns` there.
 - **Joined boards** are saved by default («Save others' boards» on Home), because no server keeps a copy. With it off, a joined board lasts only for the tab session.
 - **A board exists only while some device has it.** If you are alone and offline, your copy is the only one. **Export** writes a `.review` file you can import anywhere.
 
-## Optional static copy
+## Cloudflare (UI + hub, no server of your own)
 
-`bash scripts/deploy.sh` publishes `dist/` to the Cloudflare Worker `review` (Assets only). A static https copy has no hub of its own. It works only with a `wss://` hub added in the P2P panel, so it is mostly useful as a mirror of the UI. There is no sync worker any more.
+`wrangler.toml` deploys the Worker **review**: the web UI from Workers Assets, plus the same signaling hub as review-host, written for Workers (`cloudflare/worker.ts`).
+
+```bash
+npm ci
+bash scripts/deploy.sh      # npm run build, then wrangler deploy (needs a Cloudflare login)
+```
+
+Open `https://<worker>.workers.dev/board/<id>` and share that link. The page finds its own hub through `/lan`, the same way it does on review-host, and connects over `wss://`, so nothing needs configuring.
+
+- **Hub:** `/signal/<room>` routes each room to its own Durable Object (`SignalRoom`). Wire format, limits (64 peers per room, 64 KB text frames, binary refused) and the 75 s idle drop all match review-host.
+- **Nothing is stored.** Sockets use the hibernation API and the object keeps no data. The only thing written is the alarm that sweeps dead sockets while a room has members. A room forgets everyone once its last socket closes.
+- **Cost:** `{"t":"ping"}` (every 20 s per tab) is answered by the runtime without waking the object. What gets billed is joins and the WebRTC handshake, which is tens of small messages per link. Board data never passes through Cloudflare, and drawing costs nothing.
+- **What it does not do:** LAN discovery (`/lan` lists no addresses or hosts), relaying (no TURN), and global stats (`/health` has no counts, because each room lives in its own object).
+- `HUB_NAME` in `[vars]` sets the name peers see (default `Cloudflare`).
+
+Test locally: `npm run test:cf` (protocol test under `wrangler dev`) and `npm run build && E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` (two Chromium tabs synced through the Worker).
