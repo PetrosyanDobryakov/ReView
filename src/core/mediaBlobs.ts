@@ -286,6 +286,33 @@ export function collectLegacyMedia(
 }
 
 /**
+ * Collect every blob hash referenced by a doc's shapes (pure).
+ * Used by v2 export to know which bytes must ride alongside the slim update.
+ */
+export function collectBlobHashes(shapes: Iterable<[string, ShapeFields]>): string[] {
+  const out = new Set<string>();
+  for (const [, m] of shapes) {
+    let blob: unknown;
+    let thumb: unknown;
+    let pageBlobs: unknown;
+    let pageThumbs: unknown;
+    try {
+      blob = m.get('blob');
+      thumb = m.get('thumb');
+      pageBlobs = m.get('pageBlobs');
+      pageThumbs = m.get('pageThumbs');
+    } catch {
+      continue;
+    }
+    if (typeof blob === 'string' && blob) out.add(blob);
+    if (typeof thumb === 'string' && thumb) out.add(thumb);
+    for (const h of stringArrayOf(pageBlobs) ?? []) if (h) out.add(h);
+    for (const h of stringArrayOf(pageThumbs) ?? []) if (h) out.add(h);
+  }
+  return [...out];
+}
+
+/**
  * Read path: blob hash → renderable object URL.
  *
  * Synchronous paint code uses {@link resolvedBlobUrl} (cache hit only) and

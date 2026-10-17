@@ -11,6 +11,15 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { getBoard, createBoard, deleteBoardData, type BoardMeta } from './boards';
 import { getCurrentBoardId, doc, flushPendingPatches, META_OWNER_ID, META_TITLE } from './store';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
+import {
+  MAX_V2_FILE_BYTES,
+  createBoardFileV2,
+  parseBoardFileV2,
+  sniffBoardFileVersion,
+  sniffMime,
+  type BoardFileV2,
+} from './boardFileV2';
+import { collectBlobHashes, mediaBlobStore } from './mediaBlobs';
 
 const FILE_VERSION = 1;
 const FILE_EXT = '.review';
@@ -20,6 +29,8 @@ const MIME_JSON = 'application/json';
 // 32MB covers realistic photo boards; transient base64 (~43MB string) is fine on desktop.
 export const MAX_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_UPDATE_BYTES = 32 * 1024 * 1024;
+/** v1/v2 import pre-guard (version-specific caps apply after sniffing). */
+export { MAX_V2_FILE_BYTES };
 export const MAX_BASE64_CHARS = 45 * 1024 * 1024; // ceil(32MB*4/3) ≈ 42.7MB
 
 export type BoardFile = {
@@ -175,9 +186,40 @@ function safeFileName(name: string): string {
   return s;
 }
 
+/**
+ * Collect the blob bytes referenced by a doc update (Stage 2 v2 export).
+ * Null = no media (stay on legacy v1 for max compat) or bytes missing locally
+ * (v1 still carries `src`, so the legacy file stays complete in phase A).
+ */
+async function buildBoardFileV2Payload(update: Uint8Array): Promise<Map<string, Uint8Array> | null> {
+  try {
+    const probe = new Y.Doc();
+    try {
+      Y.applyUpdate(probe, update);
+      const shapes = probe.getMap('shapes');
+      const hashes = collectBlobHashes(
+        shapes.entries() as unknown as Iterable<[string, { get(key: string): unknown }]>
+      );
+      if (!hashes.length) return null;
+      const store = mediaBlobStore();
+      const out = new Map<string, Uint8Array>();
+      for (const hash of hashes) {
+        const row = await store.get(hash);
+        if (!row) return null;
+        out.set(hash, row.bytes);
+      }
+      return out;
+    } finally {
+      probe.destroy();
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** Build the share payload for a board (no side effects). */
 export type BoardFileError = 'missing' | 'load_failed' | 'too_large';
-export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile } | { error: BoardFileError }> {
+export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile | BoardFileV2 } | { error: BoardFileError }> {
   const meta = getBoard(boardId);
   if (!meta) return { error: 'missing' };
   const loaded = await loadUpdateForBoard(boardId);
@@ -214,6 +256,27 @@ export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile
   const appVersion = (() => {
     try { return (import.meta as unknown as { env?: Record<string,string> }).env?.VITE_APP_VERSION ?? '0.12.0'; } catch { return '0.12.0'; }
   })();
+  // Stage 2 v2: slim update + blob dictionary. Falls back to legacy v1 below
+  // (in phase A `src` is intact, so the v1 file stays complete).
+  try {
+    const payload = await buildBoardFileV2Payload(update);
+    if (payload) {
+      const v2 = createBoardFileV2({
+        boardId: meta.id,
+        name: meta.name,
+        teamId: meta.teamId,
+        createdAt: meta.createdAt,
+        exportedAt: Date.now(),
+        appVersion,
+        pages,
+        docUpdate: update,
+        blobs: [...payload.entries()].map(([hash, bytes]) => ({ hash, bytes })),
+      });
+      if ('file' in v2) return { file: v2.file };
+    }
+  } catch {
+    /* fall through to v1 */
+  }
   let b64: string;
   try {
     b64 = toBase64(update);
@@ -239,15 +302,24 @@ export async function buildBoardFile(boardId: string): Promise<{ file: BoardFile
   };
 }
 
+/** Base64 payload length + file cap for either envelope version. */
+function boardFilePayloadLength(file: BoardFile | BoardFileV2): number {
+  return 'update' in file ? file.update.length : file.docUpdate.length;
+}
+
+function boardFileCap(file: BoardFile | BoardFileV2): number {
+  return 'update' in file ? MAX_FILE_BYTES : MAX_V2_FILE_BYTES;
+}
+
 /** Trigger a download for a board's .review file. */
 export async function exportBoardFile(boardId: string): Promise<'ok' | 'too_large' | 'failed'> {
   const built = await buildBoardFile(boardId);
   if (!('file' in built)) return built.error === 'too_large' ? 'too_large' : 'failed';
   const file = built.file;
   // guard JSON.stringify + Blob triple allocation with max-bytes cap
-  if (file.update.length > MAX_BASE64_CHARS) return 'too_large';
+  if (boardFilePayloadLength(file) > MAX_BASE64_CHARS) return 'too_large';
   const json = JSON.stringify(file);
-  if (json.length > MAX_FILE_BYTES) return 'too_large';
+  if (json.length > boardFileCap(file)) return 'too_large';
   const blob = new Blob([json], { type: MIME_JSON });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -267,12 +339,12 @@ export async function shareBoard(boardId: string): Promise<'shared' | 'downloade
   const built = await buildBoardFile(boardId);
   if (!('file' in built)) return built.error === 'too_large' ? 'too_large' : 'failed';
   const file = built.file;
-  if (file.update.length > MAX_BASE64_CHARS) return 'too_large';
+  if (boardFilePayloadLength(file) > MAX_BASE64_CHARS) return 'too_large';
   const meta = getBoard(boardId);
   const filename = `${safeFileName(meta?.name ?? boardId)}${FILE_EXT}`;
   // guard JSON.stringify + Blob triple allocation with max-bytes cap
   const json = JSON.stringify(file);
-  if (json.length > MAX_FILE_BYTES) return 'too_large';
+  if (json.length > boardFileCap(file)) return 'too_large';
   const blob = new Blob([json], { type: MIME_JSON });
   try {
     const nav = navigator as unknown as { share?: (d: unknown) => Promise<void>; canShare?: (d: unknown) => boolean };
@@ -353,9 +425,49 @@ function parseBoardFile(raw: unknown): BoardFile | null {
   return r as BoardFile;
 }
 
+/**
+ * Import a v2 .review file (slim update + blob dict).
+ * All-or-nothing: a v2 doc carries no `src` fallback, so missing/unverifiable
+ * blob bytes fail the whole import instead of creating a board with holes.
+ */
+async function importBoardFileV2(raw: unknown): Promise<ImportResult> {
+  const payload = parseBoardFileV2(raw);
+  if (!payload) return { ok: false, error: 'invalid_file' };
+  try {
+    const probe = new Y.Doc();
+    try {
+      Y.applyUpdate(probe, payload.docUpdate);
+    } finally {
+      probe.destroy();
+    }
+  } catch {
+    return { ok: false, error: 'invalid_update' };
+  }
+  const name = (payload.name && payload.name.trim().slice(0, 40)) || payload.boardId || 'Imported board';
+  const teamId = typeof payload.teamId === 'string' && payload.teamId ? payload.teamId : 'default';
+  const created = createBoard(name, teamId, 'local');
+  try {
+    await writeUpdateToBoard(created.id, payload.docUpdate, stripCopiedIdentity);
+  } catch {
+    await deleteBoardData(created.id);
+    return { ok: false, error: 'write_failed' };
+  }
+  try {
+    // put() re-hashes every blob: tampered bytes fail the import, not the board.
+    const store = mediaBlobStore();
+    for (const [hash, bytes] of payload.blobs) {
+      await store.put(hash, bytes, sniffMime(bytes));
+    }
+  } catch {
+    await deleteBoardData(created.id);
+    return { ok: false, error: 'write_failed' };
+  }
+  return { ok: true, board: created };
+}
+
 /** Import a .review JSON file — creates a new local board with the payload's content. */
 export async function importBoardFile(file: File): Promise<ImportResult> {
-  if (typeof file.size === 'number' && file.size > MAX_FILE_BYTES) {
+  if (typeof file.size === 'number' && file.size > MAX_V2_FILE_BYTES) {
     return { ok: false, error: 'file_too_large' };
   }
   let text: string;
@@ -364,13 +476,15 @@ export async function importBoardFile(file: File): Promise<ImportResult> {
   } catch {
     return { ok: false, error: 'read_failed' };
   }
-  if (text.length > MAX_FILE_BYTES) return { ok: false, error: 'file_too_large' };
+  if (text.length > MAX_V2_FILE_BYTES) return { ok: false, error: 'file_too_large' };
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return { ok: false, error: 'invalid_json' };
   }
+  // Stage 2 v2 envelope (slim update + blob dict); legacy v1 flows below untouched.
+  if (sniffBoardFileVersion(parsed) === 2) return importBoardFileV2(parsed);
   const payload = parseBoardFile(parsed);
   if (!payload) return { ok: false, error: 'invalid_file' };
   if (payload.update.length > MAX_BASE64_CHARS) return { ok: false, error: 'file_too_large' };
