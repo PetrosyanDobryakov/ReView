@@ -57,6 +57,9 @@ impl RunningHost {
     pub fn lan_addresses(&self) -> Vec<String> {
         list_lan_addresses()
     }
+    pub fn serves_ui(&self) -> bool {
+        self.app.static_source.is_some()
+    }
     pub fn mdns_active(&self) -> bool {
         self.app.discovery.active()
     }
@@ -260,6 +263,7 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request) -> Response {
             "port": app.port,
             "addresses": list_lan_addresses(),
             "mdns": app.discovery.active(),
+            "ui": app.static_source.is_some(),
             "hosts": app.discovery.hosts(),
         }))),
         _ => serve_static(&app, &path, method == Method::HEAD),
