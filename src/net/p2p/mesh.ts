@@ -39,6 +39,13 @@ const RETRY_MAX_MS = 30_000;
 /** Frame 0x07: UTF-8 JSON array of peer ids this peer has open links to. */
 const NEIGHBORS = 0x07;
 
+/**
+ * A knock means the responder has no working link. The initiator restarts its
+ * own attempt unless that attempt is younger than this (both sides usually
+ * discover each other at the same moment).
+ */
+const KNOCK_GRACE_MS = 2_000;
+
 /** Origin for awareness removals the mesh does locally; never re-broadcast. */
 const LOCAL_DROP = Symbol('mesh-drop');
 
@@ -57,6 +64,8 @@ type Entry = {
   peer: string;
   hubs: Set<string>;
   link: PeerLink | null;
+  /** When the current link attempt started. */
+  linkSince: number;
   attempts: number;
   retryTimer: ReturnType<typeof setTimeout> | null;
   reasm: Reassembler;
@@ -199,6 +208,7 @@ export class Mesh {
         peer,
         hubs: new Set(),
         link: null,
+        linkSince: 0,
         attempts: 0,
         retryTimer: null,
         reasm: new Reassembler(),
@@ -269,13 +279,17 @@ export class Mesh {
     e.hubs.add(hub);
     const kind = data && typeof data === 'object' ? (data as { kind?: unknown }).kind : null;
     if (kind === 'knock') {
-      if (isInitiator(this.self, from) && !(e.link && e.link.state === 'open')) {
-        if (e.link?.state !== 'connecting') {
-          if (e.retryTimer) clearTimeout(e.retryTimer);
-          e.retryTimer = null;
-          this.ensureLink(e);
-        }
+      if (!isInitiator(this.self, from)) return;
+      if (e.link && Date.now() - e.linkSince < KNOCK_GRACE_MS) return;
+      // Whatever we hold is stale (the responder would not knock otherwise): start over now.
+      if (e.link) {
+        const old = e.link;
+        e.link = null;
+        old.close();
       }
+      if (e.retryTimer) clearTimeout(e.retryTimer);
+      e.retryTimer = null;
+      this.ensureLink(e);
       return;
     }
     if (kind === 'offer' && !isInitiator(this.self, from)) {
@@ -306,6 +320,7 @@ export class Mesh {
   }
 
   private newLink(e: Entry, initiator: boolean): PeerLink {
+    e.linkSince = Date.now();
     const events: LinkEvents = {
       open: () => this.onLinkOpen(e, link),
       message: (data) => this.onLinkMessage(e, link, data),
