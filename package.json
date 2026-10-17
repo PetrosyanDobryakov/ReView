@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.15.58",
+  "version": "0.15.59",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with self-hosted peer-to-peer sync (WebRTC mesh, Yjs). The host only introduces peers and stores nothing.",
   "type": "module",
@@ -25,6 +25,7 @@
     "test": "node scripts/store-test.mjs && node scripts/paste-test.mjs && node scripts/bundle-engine.mjs && node scripts/engine-test.mjs && node scripts/lock-test.mjs && node scripts/board-size-test.mjs && node scripts/board-title-test.mjs && node scripts/text-contrast-test.mjs && node scripts/recognize-test.mjs && node scripts/bundle-core.mjs && node scripts/transform-test.mjs && node scripts/points-space-test.mjs && node scripts/peer-motion-test.mjs && node --experimental-strip-types scripts/pointer-env-test.mjs && node --experimental-strip-types scripts/awareness-batch-test.mjs && node --experimental-strip-types scripts/awareness-change-test.mjs && node --experimental-strip-types scripts/net-log-test.mjs && node scripts/compact-guard-test.mjs && node --experimental-strip-types scripts/toolbar-order-test.mjs && node --experimental-strip-types scripts/calc-engine-test.mjs && node --experimental-strip-types scripts/peer-selection-test.mjs && node --experimental-strip-types scripts/peer-confetti-test.mjs && node --experimental-strip-types scripts/rotate-effect-origin-test.mjs && node --experimental-strip-types scripts/rotate-icon-stroke-test.mjs && node scripts/bundle-p2p.mjs && node scripts/p2p-test.mjs",
     "test:p2p": "node scripts/bundle-p2p.mjs && node scripts/p2p-test.mjs",
     "test:e2e": "npm run build && node scripts/p2p-e2e.mjs",
+    "test:cf": "tsc -p cloudflare/tsconfig.json && node scripts/cf-hub-test.mjs",
     "test:desktop": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/desktop-e2e.mjs",
     "sync:github": "bash scripts/sync-github.sh",
     "sync:github:dry": "bash scripts/sync-github.sh --dry-run"
@@ -44,12 +45,14 @@
     "yjs": "^13.6.25"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261016.1",
     "@tauri-apps/cli": "^2.11.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.0",
+    "wrangler": "^4.151.1",
     "ws": "^8.21.3"
   },
   "allowScripts": {

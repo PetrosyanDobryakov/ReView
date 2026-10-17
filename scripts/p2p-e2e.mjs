@@ -7,6 +7,7 @@
  * after both tabs close, `/health` must report zero rooms.
  *
  *   npm run build && node scripts/p2p-e2e.mjs
+ *   E2E_HUB=cloudflare node scripts/p2p-e2e.mjs   (hub = cloudflare/worker.ts under wrangler dev)
  *
  * Needs Playwright (local or global install) and a Chromium.
  */
@@ -47,15 +48,44 @@ if (!existsSync(path.join(root, 'dist', 'index.html'))) {
   process.exit(2);
 }
 
-execFileSync('cargo', ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'], {
-  stdio: 'inherit',
-});
-const port = 20000 + Math.floor(Math.random() * 20000);
-const host = spawn(path.join(root, 'rust', 'target', 'debug', 'review-host'), ['--dist', path.join(root, 'dist'), '--port', String(port), '--host', '127.0.0.1', '--no-mdns'], {
-  stdio: ['ignore', 'pipe', 'inherit'],
-});
-host.stdout.on('data', (d) => process.stdout.write(`[host] ${d}`));
-const base = `http://127.0.0.1:${port}`;
+// E2E_HUB=cloudflare: the same run against cloudflare/worker.ts under wrangler dev.
+const onCloudflare = process.env.E2E_HUB === 'cloudflare';
+let base;
+let killHub;
+let stopHub;
+if (onCloudflare) {
+  const { startCfDev } = await import('./cf-dev.mjs');
+  const cf = await startCfDev({ assetsDir: path.join(root, 'dist'), hubName: 'cf-e2e' });
+  base = cf.base;
+  killHub = () => cf.child.kill('SIGKILL');
+  stopHub = () => cf.stop();
+} else {
+  execFileSync('cargo', ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'], {
+    stdio: 'inherit',
+  });
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const host = spawn(path.join(root, 'rust', 'target', 'debug', 'review-host'), ['--dist', path.join(root, 'dist'), '--port', String(port), '--host', '127.0.0.1', '--no-mdns'], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  host.stdout.on('data', (d) => process.stdout.write(`[host] ${d}`));
+  base = `http://127.0.0.1:${port}`;
+  killHub = () => host.kill('SIGKILL');
+  stopHub = () => host.kill('SIGTERM');
+}
+
+/** Peers the hub lists in a room, as a newcomer would see them. */
+async function hubPeers(room) {
+  if (!onCloudflare) return (await (await fetch(`${base}/health`)).json()).peers;
+  const { default: WebSocket } = await import('ws');
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/signal/${room}?peer=e2e-probe-${Date.now()}`);
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d));
+      if (m.t === 'welcome') { resolve(m.peers.length); ws.close(); }
+    });
+    ws.on('error', reject);
+  });
+}
 
 const { chromium } = await loadPlaywright();
 const launchOpts = existsSync('/opt/pw-browsers/chromium') ? {} : {};
@@ -123,18 +153,21 @@ try {
   if (!(statsA.bytesOut > 0 && statsA.bytesIn > 0)) fail('no bytes on the link');
 
   // 4. A third tab joins and leaves: the hub forgets it at once.
-  const live = await (await fetch(`${base}/health`)).json();
-  if (live.rooms !== 1 || live.peers !== 2) fail(`expected 1 room / 2 peers, got ${JSON.stringify(live)}`);
+  const room = `review-${board}`;
+  if (!onCloudflare) {
+    const live = await (await fetch(`${base}/health`)).json();
+    if (live.rooms !== 1 || live.peers !== 2) fail(`expected 1 room / 2 peers, got ${JSON.stringify(live)}`);
+  }
   const ctxC = await browser.newContext();
   const c = await ctxC.newPage();
   await c.goto(`${base}/board/${board}`);
-  await waitFor(async () => (await (await fetch(`${base}/health`)).json()).peers === 3, 10_000, 'C on hub');
+  await waitFor(async () => (await hubPeers(room)) === 3, 10_000, 'C on hub');
   await ctxC.close();
-  await waitFor(async () => (await (await fetch(`${base}/health`)).json()).peers === 2, 10_000, 'hub forgets C');
+  await waitFor(async () => (await hubPeers(room)) === 2, 10_000, 'hub forgets C');
   console.log('p2p-e2e: hub forgot C as soon as it left');
 
   // 5. Kill the hub. Open links keep working: board data never used it.
-  host.kill('SIGKILL');
+  killHub();
   await new Promise((r) => setTimeout(r, 1_500));
   const third = await draw(b);
   await waitFor(async () => (await shapes(a)) === third, 10_000, 'B -> A with the hub dead');
@@ -149,5 +182,5 @@ try {
   }
 } finally {
   await browser.close();
-  host.kill('SIGTERM');
+  stopHub();
 }

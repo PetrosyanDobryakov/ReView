@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Optional: publish a static copy of the web UI to the Cloudflare Worker
-# **review** (Assets only). ReView is self-hosted: sync needs a review-host
-# hub. A static https copy can only use wss:// hubs (browsers block ws:// from
-# https pages), so add one in Settings -> System -> Connection (P2P) -> Friend's hub.
-#
-# There is no sync worker any more; boards never touch Cloudflare.
+# Publish the Cloudflare Worker **review**: the web UI (Assets) plus the
+# signaling hub (cloudflare/worker.ts, one Durable Object per room). The hub
+# only introduces peers; boards never touch Cloudflare.
 #
 # Auth (pick one):
 #   CI / agents:  CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
@@ -49,7 +46,7 @@ if [[ ! -d node_modules/typescript ]] || [[ ! -x node_modules/.bin/tsc ]]; then
   npm ci --no-audit --no-fund
 fi
 
-echo "==> review (static web UI)"
+echo "==> review (web UI + signaling hub)"
 # Root wrangler.toml [build] runs `npm run build` before upload.
 npx wrangler deploy
 
