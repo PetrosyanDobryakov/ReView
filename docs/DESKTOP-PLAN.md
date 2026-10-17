@@ -36,6 +36,13 @@ Baseline 2026-10-17: аккаунт `zpro.driftman@gmail.com`; live SPA `1.0.4+1
   нет Rust/cargo — предсущее окружение, не код), хвостовые тесты после него — зеленые,
   `npm run build` собирается.
 - [ ] Этап 0: Tauri-оболочка собирается (`npm run desktop`, окно + иконки + плагины fs/dialog/updater).
+- [x] Этап 2 фаза A dual-write (2026-10-17): `src/core/mediaBlobs.ts` — decode dataURL,
+  thumb 256px/JPEG, ingest в `review-blobs`, патч `blob/thumb/mime/bytes` (+ `pageBlobs/pageThumbs`
+  у doc) через `patchShapesUntracked` (без undo); подключено в `insertImageFile/insertVideoFile/
+  addDocument`, `src`/`pages` пишутся как раньше. `ShapeView` + `createShapeYMap`/`readShape`/
+  `patchShapeInternal` расширены. Плюс `allowImportingTsExtensions` в tsconfig (нужен Node
+  strip-types тестам). Проверено: `media-blobs-test` зелен, весь `npm test` зелен кроме
+  `sync-test` (нет cargo на машине — окружение), `npm run build` собирается. Прод не затронут.
 - [ ] Этап 1: файловое хранилище досок (детект `__TAURI__`, снятие лимита 32 МБ локально).
 - [ ] Этап 2: картинки как блобы по content-hash (Y.Doc хранит только ссылку) — главный рычаг веса и CF-нагрузки.
 - [ ] Этап 3: каскад транспортов LAN → P2P → Cloudflare + свой signaling (+ TURN при необходимости).

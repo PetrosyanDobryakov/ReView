@@ -38,6 +38,7 @@ import {
   imageDownloadExt,
   videoDownloadExt,
 } from '../core/media';
+import { attachDocBlobs, attachImageBlobs } from '../core/mediaBlobs';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import {
   ROTATE_CW_DISC_RADIUS_SCALE,
@@ -2148,6 +2149,18 @@ export class Engine {
     this.camera.zoomAt(this.w / 2, this.h / 2, this.w / 2, this.h / 2, factor);
   }
 
+  /**
+   * Stage 2 phase-A blob deps for the board that started this insert.
+   * Patches are untracked (no undo item); render keeps using `src`.
+   */
+  private blobDepsFor(boardId: string | null) {
+    return {
+      isCurrent: () => store.getCurrentBoardId() === boardId,
+      patch: (sid: string, p: Record<string, unknown>) =>
+        store.patchShapesUntracked([[sid, p as Partial<ShapeView>]]),
+    };
+  }
+
   insertImageFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
     const locale = readLocale();
     const mime = resolveFileMime(file);
@@ -2215,6 +2228,8 @@ export class Engine {
           },
           page
         );
+        // Stage 2 phase A: stash bytes content-addressed alongside `src` (best-effort).
+        void attachImageBlobs(id, src, this.blobDepsFor(boardId));
         this.setSelection([id]);
         this.dirty = true;
       };
@@ -2268,6 +2283,8 @@ export class Engine {
           },
           page
         );
+        // Stage 2 phase A: stash bytes content-addressed alongside `src` (best-effort).
+        void attachImageBlobs(id, src, this.blobDepsFor(boardId));
         // Warm the shared cache so paint/play use the same element.
         getVideo(src);
         this.setSelection([id]);
@@ -2300,6 +2317,7 @@ export class Engine {
     const w = maxShow;
     const h = Math.round(maxShow / (ratio || 0.707));
     const pos = at ?? { x: this.camera.x, y: this.camera.y };
+    const boardId = store.getCurrentBoardId();
     const id = store.addShape(
       {
         type: 'doc',
@@ -2315,6 +2333,8 @@ export class Engine {
       },
       pageId
     );
+    // Stage 2 phase A: stash pages content-addressed alongside `pages` (best-effort).
+    void attachDocBlobs(id, pages, this.blobDepsFor(boardId));
     this.setSelection([id]);
     return id;
   }

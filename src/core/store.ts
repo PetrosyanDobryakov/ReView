@@ -687,7 +687,21 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     highlight: m.get('highlight') === true,
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
+    blob: typeof m.get('blob') === 'string' ? (m.get('blob') as string) : undefined,
+    thumb: typeof m.get('thumb') === 'string' ? (m.get('thumb') as string) : undefined,
+    mime: typeof m.get('mime') === 'string' ? (m.get('mime') as string) : undefined,
+    bytes: typeof m.get('bytes') === 'number' ? (m.get('bytes') as number) : undefined,
     pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
+    pageBlobs: (() => {
+      const p = m.get('pageBlobs');
+      if (p instanceof Y.Array) return (p.toArray() as unknown[]).filter((x): x is string => typeof x === 'string');
+      return Array.isArray(p) ? p.filter((x): x is string => typeof x === 'string') : undefined;
+    })(),
+    pageThumbs: (() => {
+      const p = m.get('pageThumbs');
+      const arr = p instanceof Y.Array ? (p.toArray() as unknown[]) : Array.isArray(p) ? p : undefined;
+      return arr?.map((x) => (typeof x === 'string' ? x : null));
+    })(),
     page: m.get('page') as number | undefined,
     locked: m.get('locked') as boolean | undefined,
     cropX: m.get('cropX') as number | undefined,
@@ -783,6 +797,21 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
+  // Stage 2 blob refs (phase A dual-write; render still reads `src`).
+  if (v.blob) m.set('blob', v.blob);
+  if (v.thumb !== undefined && v.thumb !== null) m.set('thumb', v.thumb);
+  if (v.mime) m.set('mime', v.mime);
+  if (v.bytes !== undefined) m.set('bytes', v.bytes);
+  if (v.pageBlobs) {
+    const arr = new Y.Array<string>();
+    arr.insert(0, v.pageBlobs);
+    m.set('pageBlobs', arr);
+  }
+  if (v.pageThumbs) {
+    const arr = new Y.Array<unknown>();
+    arr.insert(0, v.pageThumbs as unknown[]);
+    m.set('pageThumbs', arr);
+  }
   if (v.locked) m.set('locked', true);
   if (v.cropW !== undefined || v.cropH !== undefined) {
     m.set('cropX', v.cropX ?? 0);
@@ -871,6 +900,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const arr = new Y.Array<string>();
       arr.insert(0, value as string[]);
       m.set('pages', arr);
+    } else if ((key === 'pageBlobs' || key === 'pageThumbs') && Array.isArray(value)) {
+      const arr = new Y.Array<unknown>();
+      arr.insert(0, value as unknown[]);
+      m.set(key, arr);
     } else if (key === 'cells' && Array.isArray(value)) {
       const arr = new Y.Array<string>();
       arr.insert(0, (value as unknown[]).filter((x): x is string => typeof x === 'string'));

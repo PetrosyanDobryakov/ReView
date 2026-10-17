@@ -75,7 +75,14 @@ export interface ShapeView {
   textAlign?: TextAlign;
   highlight?: boolean;
   src?: string;
+  /** Stage 2 blob ref (phase A: written alongside `src`; render still uses `src`). */
+  blob?: string;
+  thumb?: string | null;
+  mime?: string;
+  bytes?: number;
   pages?: string[];
+  pageBlobs?: string[];
+  pageThumbs?: Array<string | null>;
   page?: number;
   locked?: boolean;
   cropX?: number;
