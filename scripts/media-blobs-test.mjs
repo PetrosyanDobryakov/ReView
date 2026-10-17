@@ -10,6 +10,7 @@ import {
   __clearBlobResolverForTests,
   attachDocBlobs,
   attachImageBlobs,
+  collectLegacyMedia,
   decodeDataUrl,
   ensureBlobUrl,
   ingestDataUrlAsBlob,
@@ -234,6 +235,47 @@ assert.equal(selectDocPaintSrc(undefined, null, null), '');
   warmVisibleBlobMedia({ type: 'image' }, 2000, undefined, store);
   warmVisibleBlobMedia({ type: 'rect' }, 2000, undefined, store);
   __clearBlobResolverForTests();
+}
+
+// --- collectLegacyMedia ----------------------------------------------------------
+{
+  const shape = (entries) => new Map(entries);
+  const found = collectLegacyMedia([
+    ['a', shape([['type', 'image'], ['src', PIXEL_PNG]])],
+    ['b', shape([['type', 'image'], ['src', PIXEL_PNG], ['blob', 'abc']])],
+    ['c', shape([['type', 'image'], ['src', 'blob:https://x/123']])],
+    ['d', shape([['type', 'video'], ['src', 'data:video/mp4;base64,abcd']])],
+    ['e', shape([['type', 'doc'], ['pages', [PIXEL_PNG, 'https://x/page2']]])],
+    [
+      'f',
+      shape([
+        ['type', 'doc'],
+        ['pages', [PIXEL_PNG]],
+        ['pageBlobs', ['deadbeef']],
+      ]),
+    ],
+    [
+      'g',
+      shape([
+        ['type', 'doc'],
+        // Y.Array-like pages (duck-typed toArray).
+        ['pages', { toArray: () => [PIXEL_PNG] }],
+      ]),
+    ],
+    ['h', shape([['type', 'rect']])],
+    ['i', { get() { throw new Error('bad map'); } }],
+  ]);
+  assert.deepEqual(
+    found.map((it) => [it.id, it.kind, it.srcs.length]),
+    [
+      ['a', 'image', 1],
+      ['d', 'video', 1],
+      ['e', 'doc', 1],
+      ['g', 'doc', 1],
+    ]
+  );
+  assert.equal(found[0].srcs[0], PIXEL_PNG);
+  assert.deepEqual(collectLegacyMedia([]), []);
 }
 
 console.log('media-blobs-test: ok');

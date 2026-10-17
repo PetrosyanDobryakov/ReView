@@ -210,6 +210,82 @@ export async function attachImageBlobs(
 }
 
 /**
+ * Migration scan: find shapes that still carry legacy dataURL bytes without a
+ * blob ref (pure — works on Y.Maps and plain Maps alike, no store needed).
+ * A shape counts as migrated once `blob` (`pageBlobs` for docs) is present:
+ * phase-A writes are all-or-nothing per shape.
+ */
+export interface LegacyMediaItem {
+  id: string;
+  kind: 'image' | 'video' | 'doc';
+  srcs: string[];
+}
+
+interface ShapeFields {
+  get(key: string): unknown;
+}
+
+function stringArrayOf(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) return value.filter((s): s is string => typeof s === 'string');
+  if (value && typeof (value as { toArray?: unknown }).toArray === 'function') {
+    const arr = (value as { toArray(): unknown }).toArray();
+    if (Array.isArray(arr)) return arr.filter((s): s is string => typeof s === 'string');
+  }
+  return undefined;
+}
+
+function isDataUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('data:');
+}
+
+export function collectLegacyMedia(
+  shapes: Iterable<[string, ShapeFields]>
+): LegacyMediaItem[] {
+  const out: LegacyMediaItem[] = [];
+  for (const [id, m] of shapes) {
+    let type: unknown;
+    try {
+      type = m.get('type');
+    } catch {
+      continue;
+    }
+    if (type === 'image' || type === 'video') {
+      let blob: unknown;
+      try {
+        blob = m.get('blob');
+      } catch {
+        continue;
+      }
+      if (typeof blob === 'string' && blob) continue;
+      let src: unknown;
+      try {
+        src = m.get('src');
+      } catch {
+        continue;
+      }
+      if (isDataUrl(src)) out.push({ id, kind: type, srcs: [src] });
+    } else if (type === 'doc') {
+      let pageBlobs: unknown;
+      try {
+        pageBlobs = m.get('pageBlobs');
+      } catch {
+        continue;
+      }
+      if ((stringArrayOf(pageBlobs) ?? []).length > 0) continue;
+      let pages: unknown;
+      try {
+        pages = m.get('pages');
+      } catch {
+        continue;
+      }
+      const srcs = (stringArrayOf(pages) ?? []).filter(isDataUrl);
+      if (srcs.length) out.push({ id, kind: 'doc', srcs });
+    }
+  }
+  return out;
+}
+
+/**
  * Read path: blob hash → renderable object URL.
  *
  * Synchronous paint code uses {@link resolvedBlobUrl} (cache hit only) and
