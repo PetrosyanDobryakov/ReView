@@ -1,11 +1,7 @@
-//! Room names shared by the Node server and the Cloudflare worker.
-//! Keep behavior aligned with `sync/netUtil.mjs` and `worker/src/roomName.ts`.
+//! Room names for signaling rooms (`review-<boardId>`).
+//! Keep behavior aligned with `src/net/roomName.ts`.
 
 pub const MAX_ROOM_NAME: usize = 200;
-
-pub fn pathname_only(url_path: &str) -> &str {
-    url_path.split('?').next().unwrap_or("")
-}
 
 pub fn normalize_room_name(name: &str) -> String {
     let trimmed = name.trim();
@@ -26,20 +22,6 @@ pub fn is_valid_room_name(name: &str) -> bool {
     }
     name.bytes()
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-}
-
-pub fn room_from_websocket_path(url_path: &str) -> String {
-    let path = pathname_only(url_path);
-    let rest = path.strip_prefix('/').unwrap_or(path);
-    normalize_room_name(rest)
-}
-
-pub fn room_from_delete_path(url_path: &str) -> String {
-    let path = pathname_only(url_path);
-    let Some(rest) = path.strip_prefix("/room/") else {
-        return String::new();
-    };
-    normalize_room_name(rest)
 }
 
 /// Bracket IPv6 so it is legal in `ws://[fd00::1]:1234`.
@@ -122,11 +104,6 @@ mod tests {
 
     #[test]
     fn paths_match_room_name_test() {
-        assert_eq!(room_from_websocket_path("/review-abc?x=1"), "review-abc");
-        assert_eq!(room_from_websocket_path("/review-abc/"), "review-abc");
-        assert_eq!(room_from_delete_path("/room/review-abc"), "review-abc");
-        assert_eq!(room_from_delete_path("/room/review-abc/"), "review-abc");
-        assert_eq!(room_from_delete_path("/health"), "");
         assert_eq!(normalize_room_name("/review-x/"), "review-x");
         assert_eq!(format_host_for_url("192.168.1.5"), "192.168.1.5");
         assert_eq!(format_host_for_url("fd00::1"), "[fd00::1]");

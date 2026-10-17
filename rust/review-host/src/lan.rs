@@ -1,4 +1,4 @@
-//! Private LAN addresses for `GET /lan` and the listen banner.
+//! Private LAN addresses for `GET /lan`, invites and the listen banner.
 
 use if_addrs::get_if_addrs;
 
