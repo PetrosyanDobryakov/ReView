@@ -12,11 +12,11 @@ Primary job is a local infinite whiteboard used at the desk or on a LAN. Audienc
 
 ## Product Purpose
 
-ReView is a local-first board: draw, shape, text, stickers, images, erase; optional realtime collab via Yjs. Success is a board that stays usable offline, syncs when the local server is up, and does not feel like a generic AI dashboard.
+ReView is a local-first board: draw, shape, text, stickers, images, erase; realtime collab via Yjs, peer to peer. Success is a board that stays usable offline, syncs directly between the people on it, and does not feel like a generic AI dashboard.
 
 ## Positioning
 
-Runs on the user’s machine (Vite + local websocket), persists in IndexedDB, optional same-room sync. Not a cloud whiteboard SaaS.
+Runs on the user’s machine and is self-hosted (review-host or the desktop app; the host only introduces peers), persists in IndexedDB and desktop board files, syncs over WebRTC. Not a cloud whiteboard SaaS: no server ever holds a board.
 
 ## Operating Context
 

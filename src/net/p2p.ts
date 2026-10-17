@@ -19,6 +19,7 @@ import { Mesh } from './p2p/mesh';
 import { captureInviteHub, iceServers, resolveHubs } from './p2p/hubs';
 import { randomPeerId } from './p2p/protocol';
 import { webrtcAvailable } from './p2p/webrtcLink';
+import { installNativeRtc } from './p2p/nativeRtc';
 import type { MeshSnapshot } from './p2p/types';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
@@ -72,6 +73,8 @@ class P2pClient {
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
   constructor() {
+    // Desktop on a webview without WebRTC (Ubuntu WebKitGTK): use the app's native stack.
+    if (installNativeRtc()) netLog.info('p2p using native WebRTC bridge');
     captureInviteHub();
     registerNetDebugPeek(() => {
       const snap = this.getMeshSnapshot();

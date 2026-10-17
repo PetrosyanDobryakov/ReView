@@ -2,7 +2,7 @@
 # Optional: publish a static copy of the web UI to the Cloudflare Worker
 # **review** (Assets only). ReView is self-hosted: sync needs a review-host
 # hub. A static https copy can only use wss:// hubs (browsers block ws:// from
-# https pages), so add one in Settings -> P2P -> Friend's hub.
+# https pages), so add one in Settings -> System -> Connection (P2P) -> Friend's hub.
 #
 # There is no sync worker any more; boards never touch Cloudflare.
 #

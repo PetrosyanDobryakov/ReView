@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-board-load"
+description = "Enables the board_load command without any pre-configured scope."
+commands.allow = ["board_load"]
+
+[[permission]]
+identifier = "deny-board-load"
+description = "Denies the board_load command without any pre-configured scope."
+commands.deny = ["board_load"]

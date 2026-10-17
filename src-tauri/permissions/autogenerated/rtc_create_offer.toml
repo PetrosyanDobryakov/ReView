@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rtc-create-offer"
+description = "Enables the rtc_create_offer command without any pre-configured scope."
+commands.allow = ["rtc_create_offer"]
+
+[[permission]]
+identifier = "deny-rtc-create-offer"
+description = "Denies the rtc_create_offer command without any pre-configured scope."
+commands.deny = ["rtc_create_offer"]

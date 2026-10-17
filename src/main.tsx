@@ -13,6 +13,7 @@ import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
 import { bootNetLog } from './net/log';
+import { restoreDesktopBoards } from './core/desktopBoards';
 import { OrbitSpace } from './ui/OrbitSpace';
 import { OrbitTactile } from './ui/OrbitTactile';
 import { navigateThemed } from './ui/navTransition';
@@ -130,16 +131,22 @@ function AppShell() {
   );
 }
 
-try {
-  createRoot(document.getElementById('root')!).render(
-    <BrowserRouter>
-      <AppShell />
-    </BrowserRouter>
-  );
-} catch (err) {
-  const box = document.createElement('pre');
-  box.style.cssText =
-    'position:fixed;inset:0;z-index:99999;background:#300;color:#fff;padding:12px;font-size:12px;white-space:pre-wrap;overflow:auto';
-  box.textContent = '[render] ' + String(err);
-  document.body.appendChild(box);
+function render(): void {
+  try {
+    createRoot(document.getElementById('root')!).render(
+      <BrowserRouter>
+        <AppShell />
+      </BrowserRouter>
+    );
+  } catch (err) {
+    const box = document.createElement('pre');
+    box.style.cssText =
+      'position:fixed;inset:0;z-index:99999;background:#300;color:#fff;padding:12px;font-size:12px;white-space:pre-wrap;overflow:auto';
+    box.textContent = '[render] ' + String(err);
+    document.body.appendChild(box);
+  }
 }
+
+// Desktop: boards on disk that this webview origin has not seen yet go back on Home first.
+// In a browser this resolves immediately.
+void restoreDesktopBoards().catch(() => 0).finally(render);

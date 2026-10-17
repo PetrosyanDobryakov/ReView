@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rtc-create"
+description = "Enables the rtc_create command without any pre-configured scope."
+commands.allow = ["rtc_create"]
+
+[[permission]]
+identifier = "deny-rtc-create"
+description = "Denies the rtc_create command without any pre-configured scope."
+commands.deny = ["rtc_create"]

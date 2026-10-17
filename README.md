@@ -2,11 +2,11 @@
 
 [English](README.md) · [Русский](README.ru.md) · [中文](README.zh.md)
 
-Local-first infinite board. Draw, drop stickies, type, paste images. It keeps working with the network unplugged. Optional realtime sync is a websocket on your machine (or LAN), or peer-to-peer WebRTC in the browser. Works as a static site on Vercel with local save and file sharing.
+Local-first infinite board. Draw, drop stickies, type, paste images. It keeps working with the network unplugged. Realtime collaboration is peer to peer: boards travel directly between devices over WebRTC and are stored only on those devices. You host it yourself with one small binary, `review-host`, or the desktop app. The host serves the UI and introduces peers. It never stores or relays board data.
 
 The product is named ReView. The on-screen name can be renamed by clicking it in the header.
 
-Home is `/`. Each board lives at `/board/:id` with its own IndexedDB (`review-v1-<id>`) and sync room (`review-<id>`). Remote boards are not written to disk unless you turn on «Save others’ boards» on the home page or click «Save locally».
+Home is `/`. Each board lives at `/board/:id` with its own IndexedDB (`review-v1-<id>`) and P2P room (`review-<id>`). Boards you join are saved on your device by default, since no server keeps a copy. Turn off «Save others’ boards» on Home for session-only joins.
 
 ![Empty board](docs/screenshots/board.png)
 
@@ -18,9 +18,10 @@ Home is `/`. Each board lives at `/board/:id` with its own IndexedDB (`review-v1
 - Undo / redo, z-order, lock, lasso, marquee
 - Teams and multiple boards on the home page, with local size shown
 - Per-board IndexedDB persistence (`review-v1-<id>`)
-- Optional Yjs rooms `review-<id>` on `ws://<host>:1234` or P2P WebRTC
-- Save and share boards as `.review` files (local import/export) — primary sharing on Vercel
-- Works on Vercel as a static SPA (no server required)
+- Peer-to-peer sync (Yjs over WebRTC data channels) with a P2P panel that shows each link's path (LAN, direct, TURN), latency and traffic
+- Self-hosting with `review-host`: web UI, stateless signaling hub, LAN discovery (mDNS)
+- Desktop app (Tauri 2) that hosts for friends on your Wi-Fi and keeps boards as files
+- Save and share boards as `.review` files (local import/export)
 - UI in Russian (default), English, Chinese
 - Chrome skins and board paper are separate settings
 
@@ -35,23 +36,29 @@ npm install
 npm run dev
 ```
 
-That starts the Vite app at [http://localhost:5173](http://localhost:5173) and the sync server at `ws://localhost:1234`. Open the page. Draw. Refresh: the board is still there.
+That starts the Vite app at [http://localhost:5173](http://localhost:5173) and `review-host` (the signaling hub) on `:1234`. Open the page. Draw. Refresh: the board is still there.
 
-Sync is optional. `npm run server` is enough if you only want the websocket. Two browsers on the same machine, or another device on the LAN using your host IP instead of `localhost`, share the same board room.
+Two browsers, or another device on the LAN using your IP instead of `localhost`, on the same `/board/<id>` connect to each other directly. The board then flows browser to browser.
+
+To host for real (UI and hub on one port):
+
+```bash
+npm run host        # http://<lan-ip>:1234/
+```
+
+Desktop app: `npm run desktop` (dev) / `npm run desktop:build`. See [docs/DESKTOP.md](docs/DESKTOP.md).
 
 `localhost` and `127.0.0.1` are different origins. IndexedDB will not follow you between them. Pick one and stay there.
 
 ```bash
-npm test
+npm test            # unit tests + P2P mesh against a real review-host
+npm run test:e2e    # two headless Chromium browsers sync a board over WebRTC
 npm run build
 ```
 
 ## Deploy
 
-- **Vercel / Cloudflare Pages (static, no server):** push to Vercel or Pages — it builds `dist/` and serves as SPA. Boards stay in the browser (IndexedDB). Without a dedicated sync worker URL, P2P (WebRTC) defaults on via `wss://signaling.yjs.dev` (room `review-<boardId>`). The canonical Cloudflare Workers tip (`review` + `review-sync`) uses the Durable Object websocket instead and **disables P2P** on `*.workers.dev` / `*.pages.dev`. Use **Export** / **Import** for file share. LAN/self-host still treats P2P as opt-in.
-- **Self-hosted with sync:** `npm run server` (Rust `review-sync` on `:1234`). Set `VITE_SYNC_URL` to point browsers at your `wss://` server.
-
-Production / VM hosting: see [docs/DEPLOY.md](docs/DEPLOY.md). Optional env: `VITE_SYNC_URL`, `VITE_P2P_SIGNALING`.
+There is nothing to deploy to a cloud. Whoever runs `review-host` (or the desktop app) is a host. See [docs/DEPLOY.md](docs/DEPLOY.md) for LAN, virtual-LAN (Tailscale) and VPS setups, TLS, STUN/TURN, and where boards are stored.
 
 ![Settings](docs/screenshots/settings.png)
 

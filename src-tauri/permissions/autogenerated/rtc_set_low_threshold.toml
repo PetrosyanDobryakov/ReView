@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rtc-set-low-threshold"
+description = "Enables the rtc_set_low_threshold command without any pre-configured scope."
+commands.allow = ["rtc_set_low_threshold"]
+
+[[permission]]
+identifier = "deny-rtc-set-low-threshold"
+description = "Denies the rtc_set_low_threshold command without any pre-configured scope."
+commands.deny = ["rtc_set_low_threshold"]

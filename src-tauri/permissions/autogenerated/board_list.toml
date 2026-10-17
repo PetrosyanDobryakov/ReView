@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-board-list"
+description = "Enables the board_list command without any pre-configured scope."
+commands.allow = ["board_list"]
+
+[[permission]]
+identifier = "deny-board-list"
+description = "Denies the board_list command without any pre-configured scope."
+commands.deny = ["board_list"]

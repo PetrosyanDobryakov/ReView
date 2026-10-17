@@ -1,11 +1,37 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "App commands for the main window. The UI is served by the app's own embedded host on loopback (or Vite in dev), so IPC is granted to those origins only, never to LAN or internet pages.",
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
   "permissions": [
-    "core:default"
+    "core:default",
+    "allow-host-info",
+    "allow-quit-ready",
+    "allow-board-save",
+    "allow-board-load",
+    "allow-board-list",
+    "allow-board-delete",
+    "allow-open-boards-folder",
+    "allow-selftest-report",
+    "allow-rtc-create",
+    "allow-rtc-create-data-channel",
+    "allow-rtc-create-offer",
+    "allow-rtc-create-answer",
+    "allow-rtc-set-local",
+    "allow-rtc-set-remote",
+    "allow-rtc-add-ice",
+    "allow-rtc-send",
+    "allow-rtc-set-low-threshold",
+    "allow-rtc-close-channel",
+    "allow-rtc-path",
+    "allow-rtc-close"
   ]
 }

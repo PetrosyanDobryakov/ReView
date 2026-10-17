@@ -1,7 +1,7 @@
 [package]
 name = "review-desktop"
-version = "0.1.0"
-description = "ReView desktop and Android shell. Loads the Vite frontend. Does not replace review-sync."
+version = "0.2.0"
+description = "ReView desktop and Android app. Embeds review-host (web UI for LAN friends + signaling hub), keeps boards as files on disk, syncs peer to peer."
 license = "Apache-2.0"
 repository = "https://github.com/PetrosyanDobryakov/ReView"
 edition = "2021"
@@ -20,3 +20,12 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.6", features = [] }
 tauri-plugin-log = "2"
+review-host = { path = "../rust/review-host" }
+# Native WebRTC for webviews that ship without it (Ubuntu/Debian WebKitGTK).
+# Exposed to the page as an RTCPeerConnection polyfill (src/net/p2p/nativeRtc.ts).
+webrtc = "0.12"
+tokio = { version = "1", features = ["sync", "time"] }
+
+# WebKitGTK ships with WebRTC switched off; the app turns it on for its webview.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0", features = ["v2_40"] }

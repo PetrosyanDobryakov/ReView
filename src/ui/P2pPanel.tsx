@@ -174,7 +174,7 @@ export function P2pPanel({
             {!prefs.syncEnabled ? t(locale, 'syncDisconnect') : sync.online ? t(locale, 'online') : t(locale, 'offline')}
           </span>
           <span>
-            {open} {t(locale, 'p2pLinksOpen')}
+            {t(locale, 'p2pPeers')}: {open}
           </span>
         </li>
         <li>
