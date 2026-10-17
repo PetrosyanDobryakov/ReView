@@ -1,6 +1,6 @@
 /**
- * Launcher only. The Yjs sync server is the Rust binary `review-sync`.
- * This file exists so an old `node server.mjs` cannot boot the TypeScript stack.
+ * Launcher only. The host is the Rust binary `review-host` (web UI + signaling
+ * hub, no board storage). Kept so an old `node server.mjs` still works.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';

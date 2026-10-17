@@ -1,6 +1,7 @@
 /**
- * Build (incremental) and exec the Rust sync server.
- * `npm run server` / `npm run dev` use this instead of the old Node Yjs process.
+ * Build (incremental) and exec `review-host`: the self-hosted web UI server,
+ * stateless signaling hub and LAN discovery. It stores no board data.
+ * `npm run server` (hub only) / `npm run host` (hub + built UI) / `npm run dev`.
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -8,12 +9,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const binPath = path.join(root, 'rust', 'target', 'debug', 'review-sync');
+export const binPath = path.join(root, 'rust', 'target', 'debug', 'review-host');
 
 export function ensureRustServer() {
   execFileSync(
     'cargo',
-    ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-sync'],
+    ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'],
     {
       cwd: root,
       stdio: 'inherit',
@@ -24,7 +25,7 @@ export function ensureRustServer() {
     },
   );
   if (!existsSync(binPath)) {
-    throw new Error(`review-sync binary missing at ${binPath}`);
+    throw new Error(`review-host binary missing at ${binPath}`);
   }
   return binPath;
 }

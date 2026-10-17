@@ -187,7 +187,7 @@ console.log('board-title empty-pages heal: ok');
 
 // --- draft/erase awareness rAF batch (one setLocalState with cursor) ---
 {
-  const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
+  const clientSrc = readFileSync(root + '/src/net/p2p.ts', 'utf8');
   assert.match(clientSrc, /AwarenessBatch/, 'client uses AwarenessBatch');
   assert.match(clientSrc, /hotAwareness/, 'hot awareness coalescer wired');
   assert.match(clientSrc, /applyHotAwareness/, 'single setLocalState apply path');
@@ -196,35 +196,11 @@ console.log('board-title empty-pages heal: ok');
 }
 console.log('board-title awareness batch: ok');
 
-// --- Awareness heartbeat: one setLocalState; solo skip; 45s interval ---
+// --- Mesh awareness: local drops never fan out; leave clears cursors at once ---
 {
-  const clientSrc = readFileSync(root + '/src/net/client.ts', 'utf8');
-  const start = clientSrc.indexOf('private republishAwareness');
-  const end = clientSrc.indexOf('private writePresence');
-  assert.ok(start >= 0 && end > start, 'republishAwareness before writePresence');
-  const body = clientSrc.slice(start, end);
-  assert.doesNotMatch(
-    body,
-    /this\.writePresence|this\.writeTool|this\.writePage|this\.writeViewing/,
-    'heartbeat must not fan out via setLocalStateField wrappers'
-  );
-  assert.match(body, /applyHotAwareness/, 'heartbeat uses single setLocalState path');
-  assert.match(body, /user[,:\s]/, 'heartbeat snapshot includes presence');
-  assert.match(body, /viewing/, 'heartbeat snapshot includes viewing');
-  assert.match(
-    clientSrc,
-    /AWARENESS_HEARTBEAT_MS\s*=\s*45_000/,
-    'idle heartbeat must be 45s (not 20s) to cut DO wake rate'
-  );
-  assert.match(
-    clientSrc,
-    /MAX_BACKOFF_MS\s*=\s*60_000/,
-    'reconnect backoff must cap at 60s to avoid upgrade storms'
-  );
-  assert.match(
-    clientSrc,
-    /hasOtherAwarenessClients\(\)\s*\)\s*return/,
-    'solo boards must skip awareness heartbeat'
-  );
+  const meshSrc = readFileSync(root + '/src/net/p2p/mesh.ts', 'utf8');
+  assert.match(meshSrc, /origin === LOCAL_DROP\) return/, 'link-loss removals are not re-broadcast');
+  assert.match(meshSrc, /removeAwarenessStates\(this\.awareness, gone, LOCAL_DROP\)/, 'drops use LOCAL_DROP origin');
+  assert.match(meshSrc, /writeVarString\(enc, 'null'\)/, 'destroy announces a null awareness state');
 }
-console.log('board-title awareness heartbeat single-frame: ok');
+console.log('board-title mesh awareness: ok');
