@@ -7,11 +7,19 @@ import assert from 'node:assert/strict';
 import { hashBytes, MemoryBlobStore } from '../src/core/blobs.ts';
 import {
   INGEST_MAX_BYTES,
+  __clearBlobResolverForTests,
   attachDocBlobs,
   attachImageBlobs,
   decodeDataUrl,
+  ensureBlobUrl,
   ingestDataUrlAsBlob,
   makeThumbBytes,
+  releaseResolvedBlobUrl,
+  resolvedBlobUrl,
+  selectBlobKind,
+  selectDocPaintSrc,
+  selectPaintSrc,
+  warmVisibleBlobMedia,
 } from '../src/core/mediaBlobs.ts';
 
 const enc = new TextEncoder();
@@ -123,6 +131,109 @@ assert.equal(await makeThumbBytes(PIXEL_PNG), null);
     null
   );
   assert.equal(patches2.length, 0);
+}
+
+// --- LOD selection (pure) ------------------------------------------------------
+assert.equal(selectBlobKind(0), 'thumb');
+assert.equal(selectBlobKind(399), 'thumb');
+assert.equal(selectBlobKind(400), 'full');
+assert.equal(selectBlobKind(4000), 'full');
+
+// --- paint source selection (pure) --------------------------------------------
+assert.equal(selectPaintSrc('src', 'full-url', 'thumb-url'), 'full-url');
+assert.equal(selectPaintSrc('src', null, 'thumb-url'), 'thumb-url');
+assert.equal(selectPaintSrc('src', null, null), 'src');
+assert.equal(selectPaintSrc(undefined, null, null), '');
+assert.equal(selectDocPaintSrc('page', 'full-url', 'thumb-url'), 'full-url');
+assert.equal(selectDocPaintSrc('page', null, 'thumb-url'), 'thumb-url');
+assert.equal(selectDocPaintSrc('page', null, null), 'page');
+assert.equal(selectDocPaintSrc(undefined, null, null), '');
+
+// --- resolver: miss / load / cache / dedup / negative --------------------------
+{
+  __clearBlobResolverForTests();
+  const store = new MemoryBlobStore();
+  const bytes = enc.encode('paint-bytes');
+  const hash = await hashBytes(bytes);
+  let gets = 0;
+  const counting = {
+    get: async (h) => {
+      gets += 1;
+      return store.get(h);
+    },
+    has: (h) => store.has(h),
+    put: (h, b, m) => store.put(h, b, m),
+    delete: (h) => store.delete(h),
+  };
+
+  // Miss resolves null without throwing.
+  assert.equal(await ensureBlobUrl(hash, counting), null);
+  assert.equal(resolvedBlobUrl(hash), null);
+  const getsAfterMiss = gets;
+  // Negative cache: immediate retry does not touch the store again.
+  assert.equal(await ensureBlobUrl(hash, counting), null);
+  assert.equal(gets, getsAfterMiss);
+
+  // Store the bytes, clear the negative mark via fresh hash path: use a new hash.
+  const bytes2 = enc.encode('paint-bytes-2');
+  const hash2 = await hashBytes(bytes2);
+  await counting.put(hash2, bytes2, 'image/png');
+  const [u1, u2] = await Promise.all([ensureBlobUrl(hash2, counting), ensureBlobUrl(hash2, counting)]);
+  assert.ok(u1.startsWith('blob:'));
+  assert.equal(u1, u2); // in-flight dedup + cache
+  assert.equal(resolvedBlobUrl(hash2), u1);
+  const getsAfterLoad = gets;
+  assert.equal(await ensureBlobUrl(hash2, counting), u1);
+  assert.equal(gets, getsAfterLoad); // cache hit: no store read
+  assert.equal(releaseResolvedBlobUrl(hash2), true);
+  assert.equal(resolvedBlobUrl(hash2), null);
+  assert.equal(releaseResolvedBlobUrl(hash2), false);
+}
+
+// --- warmer kicks LOD loads for visible views ----------------------------------
+{
+  __clearBlobResolverForTests();
+  const store = new MemoryBlobStore();
+  const fullBytes = enc.encode('warm-full');
+  const thumbBytes = enc.encode('warm-thumb');
+  const full = await hashBytes(fullBytes);
+  const thumb = await hashBytes(thumbBytes);
+  await store.put(full, fullBytes, 'image/png');
+  await store.put(thumb, thumbBytes, 'image/jpeg');
+
+  // Small on screen -> thumb only.
+  warmVisibleBlobMedia({ type: 'image', blob: full, thumb }, 100, undefined, store);
+  for (let i = 0; i < 50 && !resolvedBlobUrl(thumb); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(resolvedBlobUrl(thumb).startsWith('blob:'));
+  assert.equal(resolvedBlobUrl(full), null);
+
+  // Large on screen -> full (thumb stays as-is).
+  warmVisibleBlobMedia({ type: 'image', blob: full, thumb }, 2000, undefined, store);
+  for (let i = 0; i < 50 && !resolvedBlobUrl(full); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(resolvedBlobUrl(full).startsWith('blob:'));
+
+  // Doc shape warms only the current page.
+  __clearBlobResolverForTests();
+  warmVisibleBlobMedia(
+    { type: 'doc', pageBlobs: [full, thumb], pageThumbs: [null, null] },
+    2000,
+    1,
+    store
+  );
+  for (let i = 0; i < 50 && !resolvedBlobUrl(thumb); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(resolvedBlobUrl(thumb).startsWith('blob:'));
+  assert.equal(resolvedBlobUrl(full), null);
+
+  // No refs -> no work, no throw.
+  warmVisibleBlobMedia({ type: 'image' }, 2000, undefined, store);
+  warmVisibleBlobMedia({ type: 'rect' }, 2000, undefined, store);
+  __clearBlobResolverForTests();
 }
 
 console.log('media-blobs-test: ok');
