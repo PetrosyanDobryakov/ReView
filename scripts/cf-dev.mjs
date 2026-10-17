@@ -43,7 +43,9 @@ new_sqlite_classes = ["SignalRoom"]
     ['dev', '--config', path.join(tmp, 'wrangler.toml'), '--port', String(port), '--ip', '127.0.0.1',
       '--inspector-port', String(port + 1), '--persist-to', path.join(tmp, 'state'),
       '--show-interactive-dev-session=false'],
-    { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
+    // Own process group: wrangler spawns workerd, and killing only wrangler
+    // would leave workerd holding our pipes (the test would never exit).
+    { cwd: tmp, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   );
   let output = '';
   const onData = (d) => {
@@ -53,8 +55,13 @@ new_sqlite_classes = ["SignalRoom"]
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
   const base = `http://127.0.0.1:${port}`;
+  const kill = (signal) => {
+    try { process.kill(-child.pid, signal); } catch { /* already gone */ }
+  };
   const stop = () => {
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    kill('SIGTERM');
+    child.stdout.destroy();
+    child.stderr.destroy();
     fs.rmSync(tmp, { recursive: true, force: true });
   };
   const until = Date.now() + 60_000;
@@ -68,5 +75,5 @@ new_sqlite_classes = ["SignalRoom"]
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  return { base, hub: base.replace(/^http/, 'ws'), port, child, stop, output: () => output };
+  return { base, hub: base.replace(/^http/, 'ws'), port, child, kill, stop, output: () => output };
 }

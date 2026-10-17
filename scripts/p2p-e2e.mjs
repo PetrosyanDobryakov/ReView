@@ -57,7 +57,7 @@ if (onCloudflare) {
   const { startCfDev } = await import('./cf-dev.mjs');
   const cf = await startCfDev({ assetsDir: path.join(root, 'dist'), hubName: 'cf-e2e' });
   base = cf.base;
-  killHub = () => cf.child.kill('SIGKILL');
+  killHub = () => cf.kill('SIGKILL');
   stopHub = () => cf.stop();
 } else {
   execFileSync('cargo', ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'], {
