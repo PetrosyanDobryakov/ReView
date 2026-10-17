@@ -46,6 +46,9 @@ const NEIGHBORS = 0x07;
  */
 const KNOCK_GRACE_MS = 2_000;
 
+/** Minimum gap between resyncs asked for because an update arrived with missing parents. */
+const PENDING_RESYNC_MS = 2_000;
+
 /** Origin for awareness removals the mesh does locally; never re-broadcast. */
 const LOCAL_DROP = Symbol('mesh-drop');
 
@@ -84,6 +87,7 @@ export class Mesh {
   private readonly hubs = new Map<string, HubConnection>();
   private readonly entries = new Map<string, Entry>();
   private msgSeq = 0;
+  private lastPendingResync = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
 
@@ -256,6 +260,7 @@ export class Mesh {
     this.dropClients(e);
     this.entries.delete(e.peer);
     this.announceNeighbors();
+    if (link) this.resync(null);
     this.changed();
   }
 
@@ -365,6 +370,7 @@ export class Mesh {
     this.opts.log?.('link closed', { peer: e.peer, reason });
     this.announceNeighbors();
     if (this.destroyed) return;
+    this.resync(e);
     if (e.hubs.size === 0) {
       this.entries.delete(e.peer);
       this.changed();
@@ -410,6 +416,14 @@ export class Mesh {
           return;
         }
         if (encoding.length(enc) > 0) this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
+        if (this.doc.store.pendingStructs || this.doc.store.pendingDs) {
+          const now = Date.now();
+          if (now - this.lastPendingResync > PENDING_RESYNC_MS) {
+            this.lastPendingResync = now;
+            this.opts.log?.('update with missing parents, resync', { peer: e.peer });
+            this.resync(null);
+          }
+        }
         return;
       }
       case Frame.Awareness: {
@@ -488,6 +502,25 @@ export class Mesh {
     if (!origin || typeof origin !== 'object') return null;
     for (const e of this.entries.values()) if (e === origin) return e;
     return null;
+  }
+
+  /**
+   * Ask every open link (except `skip`) for what we lack: they answer our state
+   * vector with a diff. Relay suppression trusts that a peer with a direct link
+   * to the source got the update from it; when that link dies, an edit still
+   * in flight on it is lost, so survivors compare notes whenever a link goes.
+   */
+  private resync(skip: Entry | null): void {
+    let msg: Uint8Array | null = null;
+    for (const e of this.entries.values()) {
+      if (e === skip || e.link?.state !== 'open') continue;
+      if (!msg) {
+        const enc = encoding.createEncoder();
+        syncProtocol.writeSyncStep1(enc, this.doc);
+        msg = frame(Frame.Sync, encoding.toUint8Array(enc));
+      }
+      this.sendTo(e, msg);
+    }
   }
 
   /** Send to every open link except the source, skipping peers already linked to the source. */

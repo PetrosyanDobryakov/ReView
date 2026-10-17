@@ -57,7 +57,7 @@ assert.match(randomPeerId(), /^[0-9a-f]{24}$/);
 
 // ---- in-memory links ----------------------------------------------------------
 /** Links pair up by (self, peer). `blocked` pairs never open (NAT that cannot punch through). */
-function linkNet(blocked = new Set()) {
+function linkNet(blocked = new Set(), lossy = new Set()) {
   const ends = new Map();
   const key = (a, b) => `${a}>${b}`;
   return (self) => (peer, _initiator, ev) => {
@@ -71,6 +71,8 @@ function linkNet(blocked = new Set()) {
       send(data) {
         if (this.state !== 'open' || !this.other) return false;
         this.bytesOut += data.length;
+        // A lossy direction accepts the frame and loses it (link dying mid-flight).
+        if (lossy.has(`${self}>${peer}`)) return true;
         const other = this.other;
         const copy = data.slice();
         setTimeout(() => {
@@ -215,6 +217,29 @@ try {
     // A sends to B and C once each; nobody relays to a peer that already has a direct link to A.
     assert.ok(delta < 50_000 * 2.5, `relay suppressed (sent ${delta} bytes)`);
     console.log(`p2p-test: full mesh, ${delta} bytes for a 50KB edit (no duplicate relay)`);
+  }
+  // An edit lost on a dying link is repaired by the survivors. Relay
+  // suppression assumed B would get C's edit directly; when C leaves, A and B
+  // exchange state vectors so B still gets it, and B's later edits (which may
+  // build on it) still apply on A.
+  {
+    const lossy = new Set();
+    const net = linkNet(new Set(), lossy);
+    const a = peer('peer-aaaa', net, 'review-p2ptest4');
+    const b = peer('peer-bbbb', net, 'review-p2ptest4');
+    const c = peer('peer-cccc', net, 'review-p2ptest4');
+    await waitFor(() => [a, b, c].every((p) => p.mesh.openLinks() === 2), 'full mesh');
+    await new Promise((r) => setTimeout(r, 100));
+    lossy.add('peer-cccc>peer-bbbb');
+    c.doc.getArray('order').push(['fromC']);
+    await waitFor(() => a.doc.getArray('order').length === 1, 'C -> A');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(b.doc.getArray('order').length, 0, 'C -> B was lost');
+    c.mesh.destroy();
+    await waitFor(() => b.doc.getArray('order').length === 1, 'B repaired from A after C left');
+    b.doc.getArray('order').push(['fromB']);
+    await waitFor(() => a.doc.getArray('order').toArray().join() === 'fromC,fromB', 'B -> A after repair');
+    console.log('p2p-test: lost edit on a dying link repaired by survivors');
   }
   console.log('p2p-test: OK');
 } finally {
