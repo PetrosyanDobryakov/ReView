@@ -11,6 +11,8 @@ import {
   lanAppUrl,
   normalizeHubUrl,
   onMesh,
+  changeDataFolder,
+  desktopHostInfo,
   openBoardsFolder,
   p2pClient,
   reconnectSync,
@@ -95,6 +97,11 @@ export function P2pPanel({
   const [iceError, setIceError] = useState(false);
   const boardSession = Boolean(getCurrentBoardId());
   const desktop = isDesktop();
+  const [dataDir, setDataDir] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    if (desktop) void desktopHostInfo().then((i) => setDataDir(i?.dataDir ?? i?.boardsDir ?? null));
+  }, [desktop]);
 
   useEffect(
     () =>
@@ -235,6 +242,29 @@ export function P2pPanel({
             </button>
           ) : null}
         </div>
+        {desktop && dataDir ? (
+          <div className="p2p-row">
+            <span className="sheet-hint">{t(locale, 'p2pDataFolder')}</span>
+            <span className="sheet-mono p2p-url" title={dataDir}>
+              {dataDir}
+            </span>
+            <button
+              type="button"
+              className="style-btn p2p-mini"
+              disabled={moving}
+              onClick={async () => {
+                setMoving(true);
+                try {
+                  if (!(await changeDataFolder())) setMoving(false);
+                } catch {
+                  setMoving(false);
+                }
+              }}
+            >
+              {moving ? t(locale, 'p2pDataMoving') : t(locale, 'p2pDataChange')}
+            </button>
+          </div>
+        ) : null}
         <p className="sheet-hint">
           <SwapText text={t(locale, 'syncLanFirewall')} />
         </p>

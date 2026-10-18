@@ -424,6 +424,9 @@ const ru = {
   p2pIceHint: 'По строке на сервер. Пусто — только локальная сеть. Свой TURN: turn:host:3478|логин|пароль',
   p2pIceInvalid: 'Строки должны начинаться с stun:, turn: или turns:',
   p2pBoardsFolder: 'Папка с досками',
+  p2pDataFolder: 'Доски, медиа и данные приложения хранятся в:',
+  p2pDataChange: 'Сменить папку…',
+  p2pDataMoving: 'Переносим и перезапускаем…',
 };
 
 const en: typeof ru = {
@@ -846,6 +849,9 @@ const en: typeof ru = {
   p2pIceHint: 'One server per line. Empty = local network only. Your own TURN: turn:host:3478|user|pass',
   p2pIceInvalid: 'Lines must start with stun:, turn: or turns:',
   p2pBoardsFolder: 'Boards folder',
+  p2pDataFolder: 'Boards, media and app data live in:',
+  p2pDataChange: 'Change folder…',
+  p2pDataMoving: 'Moving and restarting…',
 };
 
 const zh: typeof ru = {
@@ -1268,6 +1274,9 @@ const zh: typeof ru = {
   p2pIceHint: '每行一个服务器。留空 = 仅局域网。自建 TURN：turn:host:3478|用户名|密码',
   p2pIceInvalid: '每行必须以 stun:、turn: 或 turns: 开头',
   p2pBoardsFolder: '画板文件夹',
+  p2pDataFolder: '白板、媒体和应用数据保存在：',
+  p2pDataChange: '更改文件夹…',
+  p2pDataMoving: '正在移动并重启…',
 };
 
 export const MESSAGES: Record<LocaleId, typeof ru> = { ru, en, zh };

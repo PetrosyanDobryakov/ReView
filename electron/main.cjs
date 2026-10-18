@@ -12,7 +12,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -26,17 +26,193 @@ const QUIT_GRACE_MS = 3000;
 const MAX_BOARD_BYTES = 512 * 1024 * 1024;
 const MAX_BLOB_BYTES = 64 * 1024 * 1024;
 
-/**
- * Same folder the Tauri app used (`dev.zpro.review` under the OS data dir), so
- * boards and media saved by earlier versions come back on first launch.
- */
-function dataDir() {
-  if (process.env.REVIEW_DATA_DIR) return process.env.REVIEW_DATA_DIR;
+// ---- where everything lives ---------------------------------------------
+//
+// The user picks one folder on first launch (Documents/ReView suggested) and
+// can move it later from Settings. It holds boards/, blobs/ and the app's
+// browser profile (.review-app/, page storage and caches), so nothing of
+// substance sits in AppData. Only a pointer file stays in the OS config dir.
+// Moves happen at startup, before Chromium opens anything.
+
+const PROFILE_DIR = '.review-app';
+/** The app's default config dir (`%APPDATA%\ReView`, `~/.config/ReView`). */
+const configDir = app.getPath('userData');
+const pointerFile = path.join(configDir, 'location.json');
+
+/** Folder of the Tauri builds and 0.16.0-0.16.1. */
+function legacyDataDir() {
   if (process.platform === 'linux') {
     const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
     return path.join(base, 'dev.zpro.review');
   }
   return path.join(app.getPath('appData'), 'dev.zpro.review');
+}
+
+function readPointer() {
+  try {
+    const j = JSON.parse(fs.readFileSync(pointerFile, 'utf8'));
+    return typeof j.dataDir === 'string' && path.isAbsolute(j.dataDir) ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePointer(j) {
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(pointerFile, JSON.stringify(j, null, 2));
+}
+
+/** Rename, or copy then delete across drives. Existing files at the target win. */
+function moveInto(src, dst) {
+  if (!fs.existsSync(src) || path.resolve(src) === path.resolve(dst)) return;
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  if (!fs.existsSync(dst)) {
+    try {
+      fs.renameSync(src, dst);
+      return;
+    } catch {
+      /* other drive: copy below */
+    }
+  }
+  fs.cpSync(src, dst, { recursive: true, force: false, errorOnExist: false });
+  fs.rmSync(src, { recursive: true, force: true });
+}
+
+/** Carry out a move the last run scheduled (first-run choice or a folder change). */
+function applyPendingMove(pointer) {
+  const move = pointer.move;
+  if (!move) return pointer;
+  const to = pointer.dataDir;
+  try {
+    fs.mkdirSync(to, { recursive: true });
+    for (const name of ['boards', 'blobs']) moveInto(path.join(move.data, name), path.join(to, name));
+    if (move.profile) {
+      // The old profile dir is also where the pointer lives: move its contents only.
+      const target = path.join(to, PROFILE_DIR);
+      fs.mkdirSync(target, { recursive: true });
+      for (const name of fs.existsSync(move.profile) ? fs.readdirSync(move.profile) : []) {
+        if (name === 'location.json') continue;
+        // Chromium's single-instance lock links belong to the old run.
+        if (name.startsWith('Singleton')) {
+          fs.rmSync(path.join(move.profile, name), { force: true });
+          continue;
+        }
+        moveInto(path.join(move.profile, name), path.join(target, name));
+      }
+      if (path.basename(move.profile) === PROFILE_DIR) {
+        try { fs.rmdirSync(move.profile); } catch { /* not empty: leave it */ }
+      }
+    }
+    if (move.data !== to && path.basename(move.data) === 'dev.zpro.review') {
+      try { fs.rmdirSync(move.data); } catch { /* not empty: leave it */ }
+    }
+  } catch (err) {
+    console.error('[review] moving data failed:', err);
+  }
+  const next = { dataDir: to };
+  writePointer(next);
+  return next;
+}
+
+let pointer = process.env.REVIEW_DATA_DIR ? null : readPointer();
+if (pointer) pointer = applyPendingMove(pointer);
+
+function dataDir() {
+  if (process.env.REVIEW_DATA_DIR) return process.env.REVIEW_DATA_DIR;
+  return pointer?.dataDir ?? legacyDataDir();
+}
+
+if (process.env.REVIEW_DATA_DIR) {
+  // Tests run the app against a throwaway folder, browser profile included.
+  app.setPath('userData', path.join(process.env.REVIEW_DATA_DIR, 'profile'));
+} else if (pointer) {
+  const profile = path.join(pointer.dataDir, PROFILE_DIR);
+  fs.mkdirSync(profile, { recursive: true });
+  if (process.platform === 'win32') execFile('attrib', ['+h', profile], () => {});
+  app.setPath('userData', profile);
+}
+
+const ui = (() => {
+  const lang = app.getLocale?.() || process.env.LANG || '';
+  if (/^ru/i.test(lang)) {
+    return {
+      title: 'Где хранить доски?',
+      detail: (p) => `Доски, картинки и данные приложения будут лежать в одной папке. Предлагаем:\n${p}\n\nПапку можно сменить позже в Настройках, Подключение.`,
+      use: 'Использовать эту папку',
+      pick: 'Выбрать папку…',
+      pickTitle: 'Папка для досок ReView',
+    };
+  }
+  if (/^zh/i.test(lang)) {
+    return {
+      title: '白板保存在哪里？',
+      detail: (p) => `白板、图片和应用数据都会放在同一个文件夹。建议：\n${p}\n\n以后可以在 设置 > 连接 中更改。`,
+      use: '使用此文件夹',
+      pick: '选择文件夹…',
+      pickTitle: 'ReView 白板文件夹',
+    };
+  }
+  return {
+    title: 'Where should ReView keep your boards?',
+    detail: (p) => `Boards, images and the app's own data all go into one folder. Suggested:\n${p}\n\nYou can move it later in Settings, Connection.`,
+    use: 'Use this folder',
+    pick: 'Choose folder…',
+    pickTitle: 'Folder for ReView boards',
+  };
+});
+
+async function pickFolder(defaultPath) {
+  const r = await dialog.showOpenDialog({
+    title: ui().pickTitle,
+    defaultPath,
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+  });
+  return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+}
+
+/**
+ * First launch of this version: ask for the folder, schedule moving whatever
+ * older versions left (boards, media, browser profile) and restart into it.
+ * Returns false when the app restarts.
+ */
+async function ensureDataDir() {
+  if (process.env.REVIEW_DATA_DIR || pointer) return true;
+  const suggested = path.join(app.getPath('documents'), 'ReView');
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'ReView',
+    message: ui().title,
+    detail: ui().detail(suggested),
+    buttons: [ui().use, ui().pick],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  const chosen = (response === 1 && (await pickFolder(suggested))) || suggested;
+  writePointer({ dataDir: chosen, move: { data: legacyDataDir(), profile: configDir } });
+  app.relaunch();
+  app.exit(0);
+  return false;
+}
+
+/** Settings: move everything to another folder (restarts the app). */
+async function changeDataDir() {
+  const current = dataDir();
+  const chosen = await pickFolder(current);
+  if (!chosen || path.resolve(chosen) === path.resolve(current)) return null;
+  if (path.resolve(chosen).startsWith(path.resolve(current) + path.sep)) throw new Error('inside the current folder');
+  try {
+    await win?.webContents.executeJavaScript('window.__reviewFlushBoards ? window.__reviewFlushBoards() : null');
+  } catch {
+    /* page gone: files are as fresh as they get */
+  }
+  writePointer({ dataDir: chosen, move: { data: current, profile: app.getPath('userData') } });
+  app.relaunch();
+  setImmediate(() => {
+    quitReady = true;
+    app.quit();
+  });
+  return chosen;
 }
 
 function hostBinary() {
@@ -135,6 +311,7 @@ async function hostInfo() {
     hosts: lan.hosts ?? [],
     mdns: !!lan.mdns,
     boardsDir: boardsDir(),
+    dataDir: dataDir(),
   };
 }
 
@@ -195,7 +372,9 @@ const commands = {
     for (const ext of ['review', 'json']) fs.rmSync(path.join(dir, `${args.id}.${ext}`), { force: true });
   },
 
-  open_boards_folder: () => shell.openPath(boardsDir()).then(() => undefined),
+  open_boards_folder: () => shell.openPath(dataDir()).then(() => undefined),
+
+  data_dir_change: () => changeDataDir(),
 
   blob_save(bytes, headers) {
     const hash = headers?.['x-blob-hash'];
@@ -432,9 +611,6 @@ function tilingWm() {
   );
 }
 
-// Tests run the app against a throwaway folder, browser profile included.
-if (process.env.REVIEW_DATA_DIR) app.setPath('userData', path.join(process.env.REVIEW_DATA_DIR, 'profile'));
-
 // Real host candidates instead of `<uuid>.local` names: those need working
 // multicast DNS on both ends, which many networks (and Windows setups) lack.
 // Native apps (and the old Tauri shell) always offered real addresses.
@@ -530,6 +706,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     try {
+      if (!(await ensureDataDir())) return;
       registerScheme();
       const port = await startHost();
       const base = process.env.REVIEW_DESKTOP_URL || `http://127.0.0.1:${port}`;

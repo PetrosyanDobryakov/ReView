@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.2
+
+### You pick where the app keeps things
+- **First launch asks for a folder** (Documents/ReView suggested, or any folder you choose). Boards (`boards/`), media (`blobs/`) and the app's own browser data (`.review-app/`, hidden) all live there; nothing of substance stays in AppData. Only `location.json`, a pointer to that folder, remains in the app's config dir.
+- **Older data moves over by itself**: boards and media from `dev.zpro.review` and the 0.16.0-0.16.1 browser profile go into the chosen folder on the restart right after the choice, so nothing is lost.
+- **Settings, Connection shows the folder** and has "Change folder…": everything moves to the new folder and the app restarts. Moves run at startup, before the app opens any of the files.
+- A hub that keeps failing (the Cloudflare hub on networks that block `*.workers.dev`) is retried every 5 minutes after six attempts instead of every 30 s.
+
 ## 0.16.1
 
 ### Meet friends from any network

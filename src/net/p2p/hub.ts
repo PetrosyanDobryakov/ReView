@@ -11,6 +11,9 @@ export const HUB_PROTO = 1;
 const PING_MS = 20_000;
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
+/** A hub that keeps failing (blocked on this network) is tried rarely. */
+const RETRY_SLOW_AFTER = 6;
+const RETRY_SLOW_MS = 5 * 60_000;
 
 export type HubEvents = {
   /** Fresh roster after (re)connect. */
@@ -239,7 +242,8 @@ export class HubConnection implements SignalHub {
 
   private scheduleRetry(): void {
     if (this.closed) return;
-    const delay = Math.min(RETRY_BASE_MS * 2 ** this.attempt, RETRY_MAX_MS);
+    const delay =
+      this.attempt >= RETRY_SLOW_AFTER ? RETRY_SLOW_MS : Math.min(RETRY_BASE_MS * 2 ** this.attempt, RETRY_MAX_MS);
     this.attempt += 1;
     this.state = 'retrying';
     this.on.state();
