@@ -48,17 +48,41 @@ if (!existsSync(path.join(root, 'dist', 'index.html'))) {
   process.exit(2);
 }
 
-// E2E_HUB=cloudflare: the same run against cloudflare/worker.ts under wrangler dev.
+/** Static files with SPA fallback; no /lan, no hub. */
+async function staticServer(dir) {
+  const http = await import('node:http');
+  const fs = await import('node:fs');
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
+    '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.wasm': 'application/wasm' };
+  const server = http.createServer((req, res) => {
+    const clean = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\.\.+/g, '');
+    let file = path.join(dir, clean);
+    if (!file.startsWith(dir) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');
+    res.writeHead(200, { 'content-type': types[path.extname(file)] ?? 'application/octet-stream' });
+    fs.createReadStream(file).pipe(res);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { base: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
+}
+
+// E2E_HUB=cloudflare: the UI comes from a plain static server (no hub of its
+// own) and the only hub is cloudflare/worker.ts under wrangler dev, handed to
+// the page as an invite hint (`#hub=`), as a self-hosted UI would get it.
 const onCloudflare = process.env.E2E_HUB === 'cloudflare';
 let base;
+let hubBase;
+let hashHint = '';
 let killHub;
 let stopHub;
 if (onCloudflare) {
   const { startCfDev } = await import('./cf-dev.mjs');
-  const cf = await startCfDev({ assetsDir: path.join(root, 'dist'), hubName: 'cf-e2e' });
-  base = cf.base;
+  const cf = await startCfDev({ hubName: 'cf-e2e' });
+  hubBase = cf.base;
+  hashHint = `#hub=${encodeURIComponent(cf.hub)}`;
+  const ui = await staticServer(path.join(root, 'dist'));
+  base = ui.base;
   killHub = () => cf.kill('SIGKILL');
-  stopHub = () => cf.stop();
+  stopHub = () => { cf.stop(); ui.close(); };
 } else {
   execFileSync('cargo', ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'], {
     stdio: 'inherit',
@@ -69,6 +93,7 @@ if (onCloudflare) {
   });
   host.stdout.on('data', (d) => process.stdout.write(`[host] ${d}`));
   base = `http://127.0.0.1:${port}`;
+  hubBase = base;
   killHub = () => host.kill('SIGKILL');
   stopHub = () => host.kill('SIGTERM');
 }
@@ -78,7 +103,7 @@ async function hubPeers(room) {
   if (!onCloudflare) return (await (await fetch(`${base}/health`)).json()).peers;
   const { default: WebSocket } = await import('ws');
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/signal/${room}?peer=e2e-probe-${Date.now()}`);
+    const ws = new WebSocket(`${hubBase.replace(/^http/, 'ws')}/signal/${room}?peer=e2e-probe-${Date.now()}`);
     ws.on('message', (d) => {
       const m = JSON.parse(String(d));
       if (m.t === 'welcome') { resolve(m.peers.length); ws.close(); }
@@ -94,7 +119,7 @@ const consoleLog = [];
 try {
   await waitFor(async () => {
     try {
-      const r = await fetch(`${base}/health`);
+      const r = await fetch(`${hubBase}/health`);
       return r.ok;
     } catch {
       return false;
@@ -131,7 +156,7 @@ try {
   };
 
   // 1. A is alone and draws. Nothing goes anywhere: there is no server copy.
-  await a.goto(`${base}/board/${board}?netDebug=1`);
+  await a.goto(`${base}/board/${board}?netDebug=1${hashHint}`);
   await waitFor(async () => (await shapes(a)) >= 0, 10_000, 'A board ready');
   await a.waitForLoadState('networkidle');
   await a.waitForTimeout(1_000);
@@ -140,7 +165,7 @@ try {
   console.log(`p2p-e2e: A drew alone (${first} shape)`);
 
   // 2. B joins late and gets the board from A over the data channel.
-  await b.goto(`${base}/board/${board}?netDebug=1`);
+  await b.goto(`${base}/board/${board}?netDebug=1${hashHint}`);
   await waitFor(async () => (await linked(a)) === 1 && (await linked(b)) === 1, 20_000, 'data channel open');
   const snapA = await a.evaluate(() => window.reviewP2p());
   console.log('p2p-e2e: link open', JSON.stringify({ hubs: snapA.hubs.map((h) => [h.url, h.state]), path: snapA.peers[0].path }));
@@ -163,7 +188,7 @@ try {
   }
   const ctxC = await browser.newContext();
   const c = await ctxC.newPage();
-  await c.goto(`${base}/board/${board}?netDebug=1`);
+  await c.goto(`${base}/board/${board}?netDebug=1${hashHint}`);
   await waitFor(async () => (await hubPeers(room)) === 3, 10_000, 'C on hub');
   await ctxC.close();
   await waitFor(async () => (await hubPeers(room)) === 2, 10_000, 'hub forgets C');

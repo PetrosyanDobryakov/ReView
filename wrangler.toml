@@ -1,11 +1,8 @@
-# Worker **review** — https://review.zpro-driftman.workers.dev/
-# Serves the web UI (Assets) and a signaling hub (/signal/<room>, one Durable
-# Object per room). Same wire format as rust/review-host; the hub only
-# introduces peers and stores nothing. See docs/DEPLOY.md.
+# Optional static copy of the web UI: Worker **review** — https://review.zpro-driftman.workers.dev/
+# ReView is self-hosted P2P; there is no sync worker. See docs/DEPLOY.md.
 name = "review"
 account_id = "3058d81da41b02e06744d5d058570aab"
 compatibility_date = "2026-08-29"
-main = "cloudflare/worker.ts"
 
 # Wrangler runs this before `wrangler deploy` and `wrangler versions upload`.
 # Without it, Cloudflare uploads a stale/empty dist/.
@@ -15,17 +12,4 @@ command = "npm run build"
 
 [assets]
 directory = "./dist"
-binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/signal/*", "/lan", "/health", "/healthz"]
-
-[vars]
-HUB_NAME = "Cloudflare"
-
-[[durable_objects.bindings]]
-name = "ROOMS"
-class_name = "SignalRoom"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["SignalRoom"]

@@ -95,21 +95,32 @@ Run review-host with `--host 127.0.0.1 --no-mdns` there.
 - **Joined boards** are saved by default («Save others' boards» on Home), because no server keeps a copy. With it off, a joined board lasts only for the tab session.
 - **A board exists only while some device has it.** If you are alone and offline, your copy is the only one. **Export** writes a `.review` file you can import anywhere.
 
-## Cloudflare (UI + hub, no server of your own)
+## Cloudflare hub (introductions only)
 
-`wrangler.toml` deploys the Worker **review**: the web UI from Workers Assets, plus the same signaling hub as review-host, written for Workers (`cloudflare/worker.ts`).
+`cloudflare/` deploys the Worker **review-hub**. It is the same signaling hub as review-host, written for Workers, and it serves **no web UI**: people keep hosting the UI themselves (review-host, the desktop app, or any static host). Use it when friends are on different networks and nobody wants to run a VPS.
 
 ```bash
 npm ci
-bash scripts/deploy.sh      # npm run build, then wrangler deploy (needs a Cloudflare login)
+npx wrangler login          # once, or set CLOUDFLARE_API_TOKEN
+bash scripts/deploy.sh hub  # = npx wrangler deploy -c cloudflare/wrangler.toml
 ```
 
-Open `https://<worker>.workers.dev/board/<id>` and share that link. The page finds its own hub through `/lan`, the same way it does on review-host, and connects over `wss://`, so nothing needs configuring.
+Wrangler prints the hub address, for example `https://review-hub.<account>.workers.dev`. Clients connect to it as `wss://review-hub.<account>.workers.dev`. To use it, do any of these:
 
-- **Hub:** `/signal/<room>` routes each room to its own Durable Object (`SignalRoom`). Wire format, limits (64 peers per room, 64 KB text frames, binary refused) and the 75 s idle drop all match review-host.
-- **Nothing is stored.** Sockets use the hibernation API and the object keeps no data. The only thing written is the alarm that sweeps dead sockets while a room has members. A room forgets everyone once its last socket closes.
-- **Cost:** `{"t":"ping"}` (every 20 s per tab) is answered by the runtime without waking the object. What gets billed is joins and the WebRTC handshake, which is tens of small messages per link. Board data never passes through Cloudflare, and drawing costs nothing.
-- **What it does not do:** LAN discovery (`/lan` lists no addresses or hosts), relaying (no TURN), and global stats (`/health` has no counts, because each room lives in its own object).
-- `HUB_NAME` in `[vars]` sets the name peers see (default `Cloudflare`).
+- **Build it into your UI:** `VITE_HUBS=wss://review-hub.<account>.workers.dev npm run build` (or `npm run host`). Every page from that build joins it, and the P2P panel lists it as "built-in". Separate several hubs with commas.
+- **Add it by hand:** Settings → System → Connection (P2P) → Friend's hub.
+- **Put it in an invite:** `…/board/<id>#hub=wss://review-hub.<account>.workers.dev`.
 
-Test locally: `npm run test:cf` (protocol test under `wrangler dev`) and `npm run build && E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` (two Chromium tabs synced through the Worker).
+A page joins every hub it knows. A review-host on your LAN and the Cloudflare hub work together.
+
+- **Routes:** `/signal/<room>` (one Durable Object `SignalRoom` per room) and `/health`. Everything else returns 404. There is no `/lan`, no UI and no mDNS.
+- **Behavior matches review-host:** the same wire format, 64 peers per room, 64 KB text frames, binary refused, and silent sockets dropped after 75 s.
+- **Nothing is stored.** Sockets hibernate, and the object keeps no data. The only write is an alarm that sweeps dead sockets while a room has members. A room forgets everyone once its last socket closes.
+- **Cost:** the runtime answers `{"t":"ping"}` (every 20 s per tab) without waking the object. Only joins and WebRTC handshakes are billed, which is tens of small messages per link. Board data never passes through Cloudflare.
+- **Not done:** relaying (no TURN). `HUB_NAME` in `cloudflare/wrangler.toml` sets the name peers see (default `Cloudflare`).
+
+Test locally with `npm run test:cf` (a protocol test under `wrangler dev`) and `npm run build && E2E_HUB=cloudflare node scripts/p2p-e2e.mjs`. The e2e test serves the UI from a plain static server, and the Worker is the only hub.
+
+## Optional static copy of the UI
+
+`bash scripts/deploy.sh spa` publishes `dist/` to the Worker `review` (Assets only, root `wrangler.toml`). A static https copy has no hub of its own, so build it with `VITE_HUBS=wss://…`, or add a `wss://` hub in the P2P panel.

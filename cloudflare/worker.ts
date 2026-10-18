@@ -1,20 +1,20 @@
 /**
- * ReView on Cloudflare: the static web UI (Workers Assets) plus a signaling
- * hub that speaks the same wire format as `rust/review-host/src/hub.rs`
- * (proto 1). One Durable Object per room; sockets use the hibernation API,
- * so an idle room costs nothing and `{"t":"ping"}` is answered by the
- * runtime without waking the object.
+ * ReView signaling hub on Cloudflare Workers. It serves no web UI: people
+ * host that themselves (review-host, the desktop app, any static host) and
+ * point it here with `VITE_HUBS` or the P2P panel.
  *
- * Like review-host, the hub only introduces peers and forwards SDP/ICE text.
- * Binary frames are refused, nothing is written to storage, and a room
- * forgets everything when its last socket closes.
+ * Same wire format as `rust/review-host/src/hub.rs` (proto 1). One Durable
+ * Object per room; sockets use the hibernation API, so an idle room costs
+ * nothing and `{"t":"ping"}` is answered by the runtime without waking the
+ * object. The hub only introduces peers and forwards SDP/ICE text: binary
+ * frames are refused, no data is stored, and a room forgets everything when
+ * its last socket closes.
  */
 
 import { DurableObject } from 'cloudflare:workers';
 
 export interface Env {
   ROOMS: DurableObjectNamespace<SignalRoom>;
-  ASSETS: Fetcher;
   /** Name peers see for this hub (default "Cloudflare"). */
   HUB_NAME?: string;
 }
@@ -34,7 +34,6 @@ const CORS: Record<string, string> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, HEAD, OPTIONS',
   'access-control-allow-headers': '*',
-  'access-control-allow-private-network': 'true',
 };
 
 function json(body: unknown, status = 200): Response {
@@ -92,29 +91,15 @@ export default {
       return stub.fetch(new Request(fwd, req));
     }
 
-    if (url.pathname === '/lan') {
-      // Same shape as review-host. A Cloudflare hub has no LAN: no
-      // addresses, no mDNS. `ui: true` because Assets serve the app here.
-      return json({
-        ok: true,
-        service: 'review-host',
-        proto: PROTO,
-        id: 'cloudflare',
-        name: hubName(env),
-        port: Number(url.port) || (url.protocol === 'https:' ? 443 : 80),
-        addresses: [],
-        mdns: false,
-        ui: true,
-        hosts: [],
-      });
-    }
-
     if (url.pathname === '/health' || url.pathname === '/healthz') {
       // Rooms live in separate objects; there is no global count to report.
-      return json({ ok: true, service: 'review-host', proto: PROTO, runtime: 'cloudflare' });
+      return json({ ok: true, service: 'review-hub', proto: PROTO, name: hubName(env), runtime: 'cloudflare' });
     }
 
-    return env.ASSETS.fetch(req);
+    return new Response(
+      'ReView signaling hub. It serves no web UI; add this address as a hub (wss://<this host>) in ReView.\n',
+      { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', ...CORS } },
+    );
   },
 } satisfies ExportedHandler<Env>;
 
