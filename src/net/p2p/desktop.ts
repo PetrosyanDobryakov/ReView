@@ -6,6 +6,7 @@
 
 type ElectronBridge = {
   invoke(cmd: string, args?: unknown, headers?: Record<string, string>): Promise<unknown>;
+  onUpdateProgress?(cb: (p: { got: number; total: number }) => void): () => void;
 };
 
 function electron(): ElectronBridge | undefined {
@@ -100,4 +101,27 @@ export async function loadBlobFile(hash: string): Promise<{ bytes: Uint8Array; m
   const nl = raw.indexOf(10);
   if (nl < 0 || nl + 1 >= raw.length) return null;
   return { mime: new TextDecoder().decode(raw.subarray(0, nl)), bytes: raw.slice(nl + 1) };
+}
+
+/** The Electron app can download and install its own updates. */
+export function canSelfUpdate(): boolean {
+  return !!electron()?.onUpdateProgress;
+}
+
+/**
+ * Install the newest release of this line. Resolves `restarting` (the app
+ * quits and comes back updated), `opened` (an installer window is shown) or
+ * `latest`; rejects when this copy cannot update itself.
+ */
+export async function installDesktopUpdate(
+  onProgress: (fraction: number | null) => void,
+): Promise<'restarting' | 'opened' | 'latest'> {
+  const shell = electron();
+  if (!shell?.onUpdateProgress) throw new Error('no desktop shell');
+  const off = shell.onUpdateProgress(({ got, total }) => onProgress(total ? got / total : null));
+  try {
+    return (await shell.invoke('update_install')) as 'restarting' | 'opened' | 'latest';
+  } finally {
+    off();
+  }
 }

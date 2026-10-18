@@ -3,6 +3,7 @@
  * See `rust/review-host/src/hub.rs` for the wire format.
  */
 
+import { NOSTR_SCHEME, NostrHub } from './nostrHub';
 import type { HubSource, HubState } from './types';
 
 export const HUB_PROTO = 1;
@@ -21,10 +22,37 @@ export type HubEvents = {
   state(): void;
 };
 
-/** Normalize what a user types (`192.168.1.5:1234`, `http://x`, `wss://x/`) to a hub base. */
+/** What the mesh needs from a hub: a review-host socket or a Nostr relay. */
+export interface SignalHub {
+  readonly url: string;
+  readonly source: HubSource;
+  state: HubState;
+  name: string | null;
+  error: string | null;
+  readonly peers: Set<string>;
+  send(to: string, data: unknown): boolean;
+  close(): void;
+  retryNow(): void;
+}
+
+export function openHub(url: string, source: HubSource, room: string, self: string, on: HubEvents): SignalHub {
+  return url.startsWith(NOSTR_SCHEME)
+    ? new NostrHub(url, source, room, self, on)
+    : new HubConnection(url, source, room, self, on);
+}
+
+/**
+ * Normalize what a user types (`192.168.1.5:1234`, `http://x`, `wss://x/`) to a
+ * hub base. `nostr+wss://relay` (or `nostr:relay`) is a public Nostr relay.
+ */
 export function normalizeHubUrl(raw: string): string | null {
   let s = raw.trim();
   if (!s) return null;
+  const nostr = s.match(/^nostr(?:\+|:\/*)(.+)$/i);
+  if (nostr) {
+    const inner = normalizeHubUrl(/^wss?:\/\//i.test(nostr[1]!) ? nostr[1]! : `wss://${nostr[1]}`);
+    return inner ? `${NOSTR_SCHEME}${inner}` : null;
+  }
   if (/^https?:\/\//i.test(s)) s = s.replace(/^http/i, 'ws');
   else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && !/^wss?:\/\//i.test(s)) return null;
   if (!/^wss?:\/\//i.test(s)) s = `ws://${s}`;
@@ -50,7 +78,7 @@ export function hubBlockedByMixedContent(url: string, pageProtocol: string): boo
   }
 }
 
-export class HubConnection {
+export class HubConnection implements SignalHub {
   state: HubState = 'connecting';
   name: string | null = null;
   error: string | null = null;

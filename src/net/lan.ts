@@ -68,6 +68,14 @@ export function lanBoardUrl(boardId: string, lanHost: string, port = Number(uiPo
   return `${originFor(lanHost, port)}/board/${encodeURIComponent(boardId)}`;
 }
 
+/**
+ * Invite that works across the internet: the ReView app opens it (or it is
+ * pasted into Home), and both sides meet through the hubs and relays.
+ */
+export function appInviteUrl(boardId: string): string {
+  return `review://board/${encodeURIComponent(boardId)}`;
+}
+
 /** App home URL on a LAN host (for Settings "copy app URL"). */
 export function lanAppUrl(lanHost: string, port = Number(uiPort())): string {
   return `${originFor(lanHost, port)}/`;

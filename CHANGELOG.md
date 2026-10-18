@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.1
+
+### Meet friends from any network
+- **Public Nostr relays as hubs** (`src/net/p2p/nostrHub.ts`), joined by default next to the Cloudflare hub: `nos.lol`, `relay.primal.net`, `nostr.mom`, `offchain.pub`. Some networks cannot reach `*.workers.dev` at all (TLS is cut), so two apps there never met. Relays are reachable and need no account. They only introduce peers: each handshake goes out as an ephemeral event (kind 21078, relays forward it and keep nothing), tagged with a SHA-256 of the room and sealed with AES-GCM under a key derived from the board, so a relay sees neither the board id nor any address. Board data and media still go only device to device over WebRTC. Switch: Settings, Connection, "Meet through public relays". `nostr+wss://relay` hub addresses can be added by hand.
+- **Invite over the internet.** In the app, Members has "Copy invite link": a `review://board/<id>` link. The ReView app opens it (Windows, macOS, the .deb, and the AppImage, which now writes its own launcher entry), or the friend pastes it into the field on Home. The LAN link for a browser on the same Wi-Fi stays below it. Copy link on Home gives the same app link.
+- `npm run test:relay`: two browsers with no hub of their own meet only through the relays and sync a stroke.
+
+### Update button
+- **The app updates itself.** When a newer `p2p-desktop-v*` release exists, the version chip on Home becomes "Update to vX" and shows download progress. The AppImage replaces its own file and restarts; Windows installs silently over itself and restarts; the .deb and .dmg are downloaded and opened in the system installer. Other copies (unpacked dev builds) open the release page.
+
 ## 0.16.0
 
 First release of the peer-to-peer line (branch `claude/full-p2p-desktop`), on top of 0.15.58. Test builds of this line were tagged 1.0.x; those tags and prereleases are gone and this is the initial release.

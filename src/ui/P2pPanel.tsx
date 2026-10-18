@@ -301,7 +301,7 @@ export function P2pPanel({
                 >
                   <span className="sheet-mono p2p-url" title={h.url}>
                     {h.name ? `${h.name} · ` : ''}
-                    {h.url.replace(/^wss?:\/\//, '')}
+                    {h.url.replace(/^(nostr\+)?wss?:\/\//, '')}
                   </span>
                 </span>
                 <span className="p2p-tag">{t(locale, HUB_SOURCE_KEY[h.source])}</span>
@@ -383,6 +383,19 @@ export function P2pPanel({
           onClick={() => apply({ p2pLanDiscovery: !prefs.p2pLanDiscovery })}
         >
           <span>{t(locale, 'p2pLanDiscovery')}</span>
+          <span className="switch" aria-hidden="true">
+            <span className="switch-thumb" />
+          </span>
+        </button>
+        <button
+          type="button"
+          role="switch"
+          className={`sheet-switch p2p-gap${prefs.p2pRelays ? ' on' : ''}`}
+          aria-checked={prefs.p2pRelays}
+          title={t(locale, 'p2pRelaysHint')}
+          onClick={() => apply({ p2pRelays: !prefs.p2pRelays })}
+        >
+          <span>{t(locale, 'p2pRelays')}</span>
           <span className="switch" aria-hidden="true">
             <span className="switch-thumb" />
           </span>

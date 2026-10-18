@@ -22,7 +22,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { HubConnection } from './hub';
+import { openHub, type SignalHub } from './hub';
 import {
   Frame,
   PEER_PROTO,
@@ -132,7 +132,7 @@ const utf8 = new TextEncoder();
 const fromUtf8 = new TextDecoder();
 
 export class Mesh {
-  private readonly hubs = new Map<string, HubConnection>();
+  private readonly hubs = new Map<string, SignalHub>();
   private readonly entries = new Map<string, Entry>();
   private msgSeq = 0;
   private lastPendingResync = 0;
@@ -169,7 +169,7 @@ export class Mesh {
     }
     for (const [url, source] of want) {
       if (this.hubs.has(url)) continue;
-      const hub: HubConnection = new HubConnection(url, source, this.room, this.self, {
+      const hub: SignalHub = openHub(url, source, this.room, this.self, {
         welcome: (peers) => {
           for (const p of peers) this.notePeer(url, p);
         },
@@ -394,7 +394,7 @@ export class Mesh {
   }
 
   private sendSignal(e: Entry, data: unknown): void {
-    const ordered = [...e.hubs].map((u) => this.hubs.get(u)).filter((h): h is HubConnection => !!h);
+    const ordered = [...e.hubs].map((u) => this.hubs.get(u)).filter((h): h is SignalHub => !!h);
     ordered.sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open'));
     for (const h of ordered) if (h.send(e.peer, data)) return;
   }

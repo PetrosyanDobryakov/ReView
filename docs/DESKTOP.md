@@ -31,8 +31,17 @@ Environment:
 | `REVIEW_DATA_DIR` | Use this folder for boards, media and the browser profile (tests). |
 | `REVIEW_PERF=1` | Frame-pacing probe: `PERF {...}` lines on stdout (`electron/perf_probe.js`). |
 | `REVIEW_CONSOLE=1` | Page console on stdout. |
+| `REVIEW_UPDATE_FEED` | Releases JSON to update from instead of GitHub (tests). |
+
+## Updates
+
+The app checks this line's GitHub releases (`p2p-desktop-v*`). When one is newer, the version chip on Home turns into **Update to vX**: the AppImage downloads the new AppImage over itself and restarts, Windows runs the new installer silently and restarts, the .deb and .dmg are saved to Downloads and opened. An AppImage also writes `~/.local/share/applications/review-desktop.desktop` on launch, so it shows up in the app launcher and opens `review://` links.
 
 ## Inviting friends
+
+**Over the internet:** open a board, then **Members → Copy invite link**. It is a `review://board/<id>` link: your friend opens it in the ReView app (or pastes it into the field on Home). Both apps meet through the built-in hubs: the Cloudflare hub and public Nostr relays, which pass only a sealed handshake and keep nothing. The board itself then goes directly between the two devices.
+
+**On the same Wi-Fi, friend without the app:**
 
 Open a board, then **Members → Copy link for friends**. The link is `http://<your-lan-ip>:4455/board/<id>`. A friend opens it in any browser (no install), loads the UI from your app, and connects to you directly. Friends who also run the app see your host in **Connection (P2P) → Hubs** automatically (mDNS) and join it on their own.
 

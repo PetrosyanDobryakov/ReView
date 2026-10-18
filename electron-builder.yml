@@ -21,6 +21,9 @@ asar: true
 afterPack: electron/after-pack.cjs
 artifactName: ReView-${version}-${os}-${arch}.${ext}
 publish: null
+protocols:
+  - name: ReView invite
+    schemes: [review]
 linux:
   target: [AppImage, deb]
   category: Office

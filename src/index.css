@@ -5254,6 +5254,16 @@ h3 .swap-text,
 .home-version.warn:hover {
   text-decoration: underline;
 }
+button.home-version {
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.home-version:disabled {
+  cursor: progress;
+  text-decoration: none;
+}
 .home-version.dev {
   color: #b18cff;
   font-weight: 600;

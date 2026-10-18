@@ -57,6 +57,8 @@ export interface AppPrefs {
   p2pIce: string[] | null;
   /** Also join the hubs of review-hosts found on the LAN (mDNS). */
   p2pLanDiscovery: boolean;
+  /** Also meet peers through public Nostr relays (sealed handshakes only). */
+  p2pRelays: boolean;
   /** Custom toolbelt order per strip group + More shelf. null = defaults. */
   toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
 }
@@ -79,6 +81,7 @@ const DEFAULTS: AppPrefs = {
   p2pHubs: [],
   p2pIce: null,
   p2pLanDiscovery: true,
+  p2pRelays: true,
   toolbarOrder: null,
 };
 
@@ -194,6 +197,7 @@ function parsePrefs(raw: unknown): AppPrefs {
     p2pIce: Object.prototype.hasOwnProperty.call(parsed, 'p2pIce') ? normalizeIceList(parsed.p2pIce) : DEFAULTS.p2pIce,
     p2pLanDiscovery:
       typeof parsed.p2pLanDiscovery === 'boolean' ? parsed.p2pLanDiscovery : DEFAULTS.p2pLanDiscovery,
+    p2pRelays: typeof parsed.p2pRelays === 'boolean' ? parsed.p2pRelays : DEFAULTS.p2pRelays,
     toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
       ? normalizeToolbarOrder(parsed.toolbarOrder)
       : DEFAULTS.toolbarOrder,
