@@ -69,12 +69,6 @@ function ColorRow({
   );
 }
 
-/** First letter of a display name for presence avatars ("Гость-795" -> "Г"). */
-function initialOf(name: string): string {
-  const ch = [...name.trim()][0];
-  return ch ? ch.toUpperCase() : '?';
-}
-
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -112,7 +106,6 @@ export function MembersMenu({
 }) {
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const nickInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -207,7 +200,7 @@ export function MembersMenu({
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
-      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       close();
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -225,9 +218,9 @@ export function MembersMenu({
     };
   }, [open, close]);
 
-  const people: { color: string; key: string; name: string }[] = [
-    { color: user.color, key: 'self', name: user.name },
-    ...peers.slice(0, 3).map((p) => ({ color: p.color, key: `peer-${p.id}`, name: p.name })),
+  const faces: { color: string; key: string }[] = [
+    { color: user.color, key: 'self' },
+    ...peers.slice(0, 3).map((p) => ({ color: p.color, key: `peer-${p.id}` })),
   ];
   const overflow = Math.max(0, peers.length - 3);
   const statusLabel = !syncEnabled
@@ -401,8 +394,9 @@ export function MembersMenu({
       : null;
 
   return (
-    <div className="members-root" ref={rootRef}>
+    <div className="members-root">
       <button
+        ref={triggerRef}
         type="button"
         className={`members-trigger${online ? ' online' : ''}${open ? ' is-open' : ''}`}
         title={title}
@@ -413,30 +407,13 @@ export function MembersMenu({
         onClick={() => setOpen((v) => !v)}
       >
         <span className="members-stack" aria-hidden="true">
-          {people.map((f, i) => (
-            <span
-              key={f.key}
-              className="members-stack-item members-initial"
-              style={{ zIndex: people.length - i, background: f.color }}
-            >
-              {initialOf(f.name)}
+          {faces.map((f, i) => (
+            <span key={f.key} className="members-stack-item" style={{ zIndex: faces.length - i }}>
+              <Face color={f.color} />
             </span>
           ))}
           {overflow > 0 ? <span className="members-overflow">+{overflow}</span> : null}
         </span>
-      </button>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`invite-btn${open ? ' is-open' : ''}`}
-        title={t(locale, 'membersCopyInvite')}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Icon name="invite" size={19} />
-        <span className="invite-label">{t(locale, 'invite')}</span>
       </button>
       {menu}
     </div>

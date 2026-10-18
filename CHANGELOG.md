@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.5
+
+### Back to main's UI
+- **The 1.0 redesign is reverted on this line.** `8e4b354` had merged dev-warexpor 1.0 (Home redesign, board chrome, settings and icons) into the P2P branch, so the 1.0.3 and 1.0.4 desktop prereleases shipped that unfinished UI. This reverts that merge (`git revert -m 1 8e4b354`): the UI is main's again (0.15.57 plus the P2P line's own Settings, Connection panel). P2P, media by hash, the Cloudflare hub and the release workflow stay.
+- The desktop fixes from 1.0.4 are carried over to the old Home notice: boards-as-files text in the app, no "download desktop" link inside the app, and the link in a browser opens the P2P desktop releases.
+
 ## 1.0.4
 
 ### Desktop app fixes

@@ -35,7 +35,6 @@ export type UserPrefsSlice = Pick<
   | 'rotateSnap'
   | 'rotateHandleTop'
   | 'smoothPeerCursors'
-  | 'gridStyle'
 >;
 
 export interface UserProfileData {
@@ -88,7 +87,6 @@ function collectProfile(): UserProfileData {
       rotateSnap: prefs.rotateSnap,
       rotateHandleTop: prefs.rotateHandleTop,
       smoothPeerCursors: prefs.smoothPeerCursors,
-      gridStyle: prefs.gridStyle,
     },
     toolSettings: exportSettingsSnapshot(),
     keybinds: exportKeybinds(),
