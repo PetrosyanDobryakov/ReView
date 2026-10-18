@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.3
+
+### Desktop release for the P2P line
+- **`.github/workflows/desktop-release.yml`**: pushing a `p2p-desktop-v*` tag builds the Tauri app for Windows (NSIS + MSI), Linux (AppImage, deb, rpm) and macOS (Apple Silicon and Intel dmg) and publishes a GitHub prerelease, never marked latest. Builds bake in `VITE_HUBS=wss://review-hub.amicus-vamicus.workers.dev`, so two installs anywhere meet through the Cloudflare hub; board data still goes only device to device.
+- The app version now follows `package.json` (`tauri.conf.json` was stuck at 0.2.0).
+- Installers are unsigned: SmartScreen on Windows, `xattr -cr` on macOS (see the release notes).
+
 ## 1.0.2
 
 ### Cloudflare hub live
