@@ -10,7 +10,7 @@ name: Desktop release (P2P)
 # board. The hub only introduces peers; board data and media go device to
 # device over WebRTC.
 #
-#   git tag p2p-desktop-v1.0.7 && git push origin p2p-desktop-v1.0.7
+#   git tag p2p-desktop-v0.16.0 && git push origin p2p-desktop-v0.16.0
 
 on:
   push:
@@ -71,7 +71,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           prerelease: true
           draft: false
-          fail_on_unmatched_files: true
+          make_latest: false
           files: |
             release/*.exe
             release/*.dmg
