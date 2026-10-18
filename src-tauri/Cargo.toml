@@ -20,6 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.6", features = [] }
 tauri-plugin-log = "2"
+# Opens external links in the system browser (no JS API used).
+tauri-plugin-opener = "2"
 review-host = { path = "../rust/review-host" }
 # Native WebRTC for webviews that ship without it (Ubuntu/Debian WebKitGTK).
 # Exposed to the page as an RTCPeerConnection polyfill (src/net/p2p/nativeRtc.ts).

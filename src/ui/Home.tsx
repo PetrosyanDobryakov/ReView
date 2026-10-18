@@ -38,7 +38,7 @@ import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/c
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
 import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
-import { resolveInviteBoardUrl } from '../net';
+import { isDesktop, resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
 const REL_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
@@ -361,7 +361,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           {verStatus?.kind === 'outdated' ? (
             <a
               className="home-version warn"
-              href={RELEASES_URL}
+              href={verStatus.url}
               target="_blank"
               rel="noreferrer"
               title={`${t(locale, 'updateAvailable')} (${APP_BUILD})`}
@@ -649,7 +649,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         <footer className="home-foot">
           <p className="home-foot-note">
             <Icon name="warn" size={14} />
-            <span>{t(locale, 'storageNotice')}</span>
+            <span>{t(locale, isDesktop() ? 'storageNoticeDesktop' : 'storageNotice')}</span>
           </p>
           <div className="home-foot-row">
             <button
@@ -665,10 +665,11 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               </span>
               <span>{t(locale, 'saveRemoteBoards')}</span>
             </button>
-            {/* ponytail: desktop download placeholder — no URL yet, wire to the installer link later */}
-            <span className="home-foot-cta" role="link" aria-disabled="true" title={t(locale, 'desktopCta')}>
-              {t(locale, 'desktopCta')}
-            </span>
+            {!isDesktop() && (
+              <a className="home-foot-cta" href={RELEASES_URL} target="_blank" rel="noreferrer" title={t(locale, 'desktopCta')}>
+                {t(locale, 'desktopCta')}
+              </a>
+            )}
           </div>
         </footer>
       </main>

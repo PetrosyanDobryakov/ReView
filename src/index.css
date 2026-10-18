@@ -5233,7 +5233,11 @@ h3 .swap-text,
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--chrome-text-dim) 40%, transparent);
   text-underline-offset: 3px;
-  cursor: default;
+  cursor: pointer;
+}
+
+.home-foot-cta:hover {
+  color: var(--chrome-text);
 }
 
 .home-version {

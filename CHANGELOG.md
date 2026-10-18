@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.4
+
+### Desktop app fixes
+- **No false "update available".** The version check read the "2" in `p2p-desktop-v1.0.3` as version 2. It now reads only dotted versions and follows only this line's `p2p-desktop-v*` releases; the banner links to that release.
+- **Desktop footer tells the truth.** The app says boards are saved as files on this device (not in the browser cache) and no longer asks you to download the desktop app. In a browser, that link now opens the P2P desktop releases.
+- **External links open in the system browser** from the desktop app (`tauri-plugin-opener`); before, `target="_blank"` links did nothing.
+
 ## 1.0.3
 
 ### Desktop release for the P2P line

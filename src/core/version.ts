@@ -15,12 +15,18 @@ export const APP_BUILD: string =
     ? __REVIEW_BUILD__
     : `${APP_VERSION}+dev`;
 
-export const RELEASES_URL = 'https://github.com/PetrosyanDobryakov/ReView/releases/latest';
+/**
+ * This line (the P2P desktop build) only follows its own releases, tagged
+ * `p2p-desktop-v<version>` by .github/workflows/desktop-release.yml.
+ */
+export const RELEASE_TAG_PREFIX = 'p2p-desktop-v';
+export const RELEASES_URL = 'https://github.com/PetrosyanDobryakov/ReView/releases?q=p2p-desktop&expanded=true';
 
+/** Dotted numbers only, so a tag like `p2p-desktop-v1.0.3` reads as 1.0.3, not 2. */
 function parseVer(v: string): number[] {
-  const m = v.trim().replace(/^v/i, '').match(/\d+(\.\d+)*/);
+  const m = v.trim().match(/\d+(?:\.\d+)+/) ?? v.trim().match(/^v?(\d+)$/i);
   if (!m) return [];
-  return m[0].split('.').map(Number);
+  return (m[1] ?? m[0]).split('.').map(Number);
 }
 
 export function compareVersions(a: string, b: string): number {
@@ -37,12 +43,13 @@ export function compareVersions(a: string, b: string): number {
 
 export type VersionStatus =
   | { kind: 'latest' }
-  | { kind: 'outdated'; latest: string }
+  | { kind: 'outdated'; latest: string; url: string }
   | { kind: 'dev' }
   | { kind: 'unknown' };
 
 /**
- * Compare the running app version with GitHub releases.
+ * Compare the running app version with this line's GitHub releases
+ * (tags starting with RELEASE_TAG_PREFIX; drafts ignored).
  * - older than the newest release → 'outdated'
  * - not among published releases (unreleased or newer) → 'dev'
  * - equals the newest release → 'latest'
@@ -53,13 +60,15 @@ export async function checkAppVersion(): Promise<VersionStatus> {
       headers: { Accept: 'application/vnd.github+json' },
     });
     if (!res.ok) return { kind: 'unknown' };
-    const list = (await res.json()) as Array<{ tag_name?: string }>;
-    const versions = list.map((r) => r.tag_name ?? '').filter(Boolean);
-    if (!versions.length) return { kind: 'unknown' };
-    let latest = versions[0]!;
-    for (const v of versions) if (compareVersions(v, latest) > 0) latest = v;
+    const list = (await res.json()) as Array<{ tag_name?: string; html_url?: string; draft?: boolean }>;
+    const ours = list.filter((r) => !r.draft && r.tag_name?.startsWith(RELEASE_TAG_PREFIX));
+    if (!ours.length) return { kind: 'unknown' };
+    const versions = ours.map((r) => r.tag_name!.slice(RELEASE_TAG_PREFIX.length));
+    let newest = 0;
+    for (let i = 1; i < versions.length; i++) if (compareVersions(versions[i]!, versions[newest]!) > 0) newest = i;
+    const latest = versions[newest]!;
     if (compareVersions(APP_VERSION, latest) < 0) {
-      return { kind: 'outdated', latest };
+      return { kind: 'outdated', latest, url: ours[newest]!.html_url ?? RELEASES_URL };
     }
     if (versions.some((v) => compareVersions(v, APP_VERSION) === 0)) {
       return { kind: 'latest' };
