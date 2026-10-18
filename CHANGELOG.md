@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-## 0.15.61
+## 1.0.1
+
+The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-desktop`) merged onto 1.0.
 
 ### Cloudflare: hub only
 - The Cloudflare hub is now its own Worker, **review-hub** (`cloudflare/wrangler.toml`). It serves no web UI and no `/lan`, only `/signal/<room>` and `/health`. The UI stays self-hosted. The `review` Worker goes back to being an optional static UI copy.
@@ -10,20 +12,17 @@
 - `scripts/deploy.sh` targets: `hub` (default), `spa`, `all`.
 - `E2E_HUB=cloudflare` e2e serves the UI from a plain static server, and the Worker is the only hub. The test's wrangler runs in its own process group, so killing the hub cannot orphan workerd.
 
-## 0.15.60
 
 ### P2P
 - **Edits lost on a dying link are repaired.** Relay suppression trusted that a peer with a direct link to the author got each edit from it. If that link died with an edit still in flight, the edit never arrived, and later edits that built on it got stuck. Now, whenever a link closes, the remaining peers exchange state vectors and fill each other's gaps. A peer that receives an update with missing parents also asks its links for a resync (at most once per 2 s). This is the likely cause of the occasional `p2p-e2e` failure "B -> A with the hub dead": a write the third tab made on joining reached only one of the other two before it left.
 - Tests: `p2p-test` covers a lost in-flight edit. `p2p-e2e` checks that A and B agree before killing the hub, and dumps mesh state and console on failure.
 
-## 0.15.59
 
 ### Cloudflare hub
 - The Worker **review** now runs a signaling hub next to the web UI (`cloudflare/worker.ts`). It speaks the same wire format as review-host and gives each room its own Durable Object (`SignalRoom`). A page opened from the Worker finds the hub through `/lan` and connects over `wss://` with no setup.
 - Sockets hibernate, and the runtime answers the 20 s hub ping without waking the object, so idle rooms cost nothing. The hub refuses binary frames, writes no data (only a sweep alarm for dead sockets), and a room forgets everyone when it empties.
 - Tests: `npm run test:cf` (protocol test under `wrangler dev`) and `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` (two Chromium tabs synced through the Worker). `wrangler` and `@cloudflare/workers-types` are now dev dependencies.
 
-## 0.15.58
 
 ### Fully peer-to-peer, self-hosted
 - **No server holds boards any more.** Board data moves only between devices over WebRTC data channels and is stored only on those devices. The Cloudflare `review-sync` Durable Object, its room storage, compaction DELETE and the y-websocket client are gone.
@@ -42,6 +41,44 @@
 - `scripts/p2p-test.mjs` (in `npm test`): framing, hub addresses, mesh against a real review-host with in-memory links (late join, awareness, 300 KB chunked update, leave clears cursors, relay, duplicate-relay suppression).
 - `scripts/p2p-e2e.mjs` (`npm run test:e2e`): two headless Chromium browsers over real WebRTC: late join, live edits, hub forgets leavers, links survive the hub being killed.
 - Rust: hub unit tests and a websocket integration test in `rust/review-host`.
+
+## 1.0.0
+
+The 1.0 redesign: board chrome, settings and icons rebuilt around one idea, each corner of the screen has one job. Nothing about your boards changes; this is chrome, defaults and polish.
+
+### Board
+- **Top left is "where am I"**: Home, the board name and the page chip. Clicking the name opens a board menu with Rename, Copy link, Export as image and Download .review file (double-click still renames). Export left the top strip.
+- **Undo and zoom sit in a slim island next to it**: undo, redo and one "100%" button whose menu holds zoom in, zoom out, show all and 100%, each with its shortcut. The always-visible +, -, fit cluster is gone.
+- **Top right is "who is here"**: presence avatars now show initials, next to one primary **Invite** button (person-plus icon) that opens the members and invite panel. Settings sit alone in their own island at the edge.
+- **The toolbelt is tools only**: select, hand, pen, eraser, shapes, arrow, sticky, text, then Insert and shape recognition. Lasso lives under select and every shape (ellipse, diamond, flowchart shapes, frame) under the shapes button, as flyouts: click the active slot again, hold it or right-click to pick another. The slot remembers the last one you used. Insert holds file or image plus graph, calculator and table (still drag-to-reorder). Paste, copy, duplicate, delete, export and crop left the toolbelt.
+- **Active tool is a solid pill** in the strongest chrome color, 40px targets, and the pen button shows its ink as a dot.
+- **Selection bar floats over the selection**: duplicate, copy, crop (images), export, lock, delete and more (the full context menu). It follows pans and zooms, flips below when there is no room above, and steps aside while you drag, edit text or crop. Right-clicking empty board now also offers insert file, show all and export.
+- **Style island speaks visually**: marker and highlighter are icon toggles, the width slider became three size dots (click the active dot again to fine-tune).
+- **Dot grid**: a quiet dot lattice replaces the line grid as the default look (spacing stays 16-40px at any zoom). Lines and no grid are one click away in Appearance; the choice is per viewer, like paper.
+
+### Settings
+- **A centered two-pane dialog** instead of the side sheet with tabs: a rail with you on top (name you can edit in place, cursor color dots), then Appearance, Keys & gestures, Interface and Connection. Each pane scrolls on its own. On phones the rail is a list and each section opens full-screen with a back arrow.
+- **Appearance**: interface themes are tiny live previews in each theme's own colors; Orbit is always listed with an "exp." chip (its description is the tooltip) and picking it unlocks it. Board paper is its own row, "independent of the interface", with centered dot-grid swatches and a custom color; grid is None / Dots / Lines; ink adaptation below.
+- **Keys & gestures** (was "Binds"): search across actions and keys, two columns of real keycaps (click one, press the new key), color binds, the global shortcuts, and gestures as tiles.
+- **Interface**: language as a segmented control, UI scale and cursor size sliders, tool animation, hide-interface hint, and board behavior toggles (recognize shapes, rotate magnet, top rotate handle, smooth peer cursors).
+- **Connection**: a status line first (connected or not, people on the board, where the board is stored, connect / disconnect), then the same-Wi-Fi address with Copy, then "Save others' boards" and P2P. Server URL, P2P signaling, room and the net log fold under "For developers".
+
+### Icons
+- One hand for the whole set: 24px grid, 1.75 stroke, 2px corner radius on boxes, round caps and joins. Redrawn: select, hand, pen, eraser, rect, ellipse, diamond, triangle, sticky (a note, not a page), text, sparkles, highlighter (chisel marker), paste, export (out of a tray), insert image (picture with a plus), copy, duplicate, trash, calculator, graph, warning, a clean eight-tooth settings cog and a house with an arched door. New: invite, lock / unlock, insert, shapes, palette, keyboard, sliders, wifi, search. Flowchart shapes, table, image, file, frame and alignment glyphs follow the same corners. Tool cursors match the new glyphs.
+
+### First visit defaults
+- New visitors on a mouse-and-keyboard screen start at 90% UI scale (the same physical button size as the old 100% with the roomier 1.0 spacing); touch screens start at 100%. New visitors get the dot grid.
+- Anyone with ReView data from before 1.0 keeps line grid and their previous UI scale (100% unless they changed it). The check runs once per device.
+
+## 0.15.58
+
+### Home redesign
+- **One column instead of sidebar + table**: big "Boards" title with Import and New board on the right, one "paste a board link" field under it (the Join button appears once there is something to join), team tabs as pills with board counts, then the board list. The four explainer boxes in the sidebar are gone.
+- **Cleaner board rows**: a procedural mini-board thumbnail that follows the board name (ru / en / zh keywords): sprint or retro draws a kanban, architecture or DB a flowchart, moodboard or design image tiles and swatches, roadmap or onboarding a timeline, ideas a mind map, metrics a bar / line / pie chart, math a function plot, prototype or app a browser or phone wireframe, notes or meeting a checklist or page. Other names get a free sketch or a random scene. Layouts, counts and colors are seeded from the board id, so every board keeps its own picture. Then the name, and a relative "updated 5 hours ago" (exact time on hover) plus size. The "#" column, table header and board id (now the row tooltip) are gone; the storage badge only shows when a board is session-only, next to its Keep on device button.
+- **Actions on hover**: copy link and a ⋯ menu (Save as my board, Export, Rename, Delete) appear on hover or focus; always visible on touch.
+- **Teams**: "+" pill adds a team, double-click a team to rename it, the ⋯ at the end of the tab row renames or deletes the active team.
+- **Footer fine print**: the browser-cache warning, the "Save others' boards" switch (its explanation is now the tooltip) and the desktop-app note sit quietly at the bottom.
+- Empty team shows a dashed empty state with a New board button. Works across all interface themes, Orbit included, and on phones.
 
 ## 0.15.57
 

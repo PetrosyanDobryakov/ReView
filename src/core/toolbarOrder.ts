@@ -4,9 +4,9 @@ import type { ToolId } from '../engine/tools';
 
 export type StripGroup = 'nav' | 'create' | 'more';
 
-export const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
-export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
-/** Default More-shelf rows (specialty tools). */
+export const NAV_DEFAULTS: ToolId[] = ['select', 'pan'];
+export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'arrow', 'sticky', 'text'];
+/** Default Insert-shelf rows (specialty tools). */
 export const MORE_DEFAULTS: ToolId[] = ['graph', 'calculator', 'table'];
 export const SCHEME: ToolId[] = [
   'diamond',
@@ -20,11 +20,29 @@ export const SCHEME: ToolId[] = [
   'frame',
 ];
 
+/**
+ * 1.0 toolbelt: one slot per family. The slot (first id) is what the strip and
+ * shelf store; the button shows whichever member was used last and a flyout
+ * lists the rest. Lasso folds under select, every shape under rect.
+ */
+export const TOOL_FAMILIES: Partial<Record<ToolId, ToolId[]>> = {
+  select: ['select', 'lasso'],
+  rect: ['rect', 'ellipse', ...SCHEME],
+};
+
+/** Family slot a tool belongs to (itself when it has no family). */
+export function familySlot(id: ToolId): ToolId {
+  for (const [slot, members] of Object.entries(TOOL_FAMILIES) as Array<[ToolId, ToolId[]]>) {
+    if (members.includes(id)) return slot;
+  }
+  return id;
+}
+
 const PARKABLE_SET = new Set<string>([...NAV_DEFAULTS, ...CREATE_DEFAULTS, ...MORE_DEFAULTS]);
 
 /**
- * Tools that can live on the strip or be parked in the More shelf.
- * Scheme shapes stay in the nested fly-out submenu — never rows.
+ * Tools that can live on the strip or be parked in the Insert shelf.
+ * Family members (lasso, ellipse, scheme shapes) ride in their slot's flyout.
  */
 export function isParkable(id: string): id is ToolId {
   return PARKABLE_SET.has(id);
