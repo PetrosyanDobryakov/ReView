@@ -2,55 +2,9 @@
 
 ## Unreleased
 
-## 1.0.7
+## 0.16.0
 
-### Desktop app moves to Electron
-- **The desktop app is now Electron** (`electron/`, `electron-builder.yml`) instead of Tauri. WebKitGTK on Linux was the bottleneck: on NVIDIA under Wayland it either crashed (DMA-BUF renderer) or presented at about 60 fps with pan input arriving at 17-50 events a second, so panning felt like 15 fps. Chromium renders and delivers input at the display rate on every OS.
-- **Same host, same files.** The app starts the bundled `review-host` binary and loads the UI from it, exactly as before. Boards and media stay in `dev.zpro.review` under the OS data dir, so boards from the Tauri builds come back on first launch.
-- **No title bar on tiling Wayland/X11 window managers** (Hyprland, Sway, i3, niri, ...); other desktops keep their frame. No menu bar on Windows and Linux.
-- **Mouse side buttons pan the board** in the app (Chromium passes them to the page; WebKitGTK turned them into history navigation).
-- WebRTC offers real LAN addresses instead of mDNS `.local` names, so app-to-app and app-to-browser links on one network no longer depend on multicast DNS.
-- Panning clamps the camera once per frame instead of on every pointer and wheel event, and measures pan steps from `clientX/Y` (some engines round `movementX`).
-- `npm run test:desktop` drives the app with Playwright's Electron driver against a throwaway data folder. `review-host` reads `REVIEW_PORT_TRIES`.
-- Release workflow builds with electron-builder: Windows NSIS `.exe`, macOS arm64 and x64 `.dmg` (ad-hoc signed), Linux `.AppImage` and `.deb`. Android stays on Tauri.
-
-## 1.0.6
-
-### New Home page, rest stays main's UI
-- **Home is the redesigned single calm column** (from dev-warexpor `65346d4`, `0b7793d`, `440bf7b`), with the procedural, name-aware board thumbnails (`BoardGlyph`). Only Home is ported: board chrome, toolbar, settings and icons stay main's.
-- Keeps the desktop fixes on the new Home footer: boards-as-files text in the app, no "download desktop" link inside it, and in a browser the link opens the P2P desktop releases.
-
-## 1.0.5
-
-### Back to main's UI
-- **The 1.0 redesign is reverted on this line.** `8e4b354` had merged dev-warexpor 1.0 (Home redesign, board chrome, settings and icons) into the P2P branch, so the 1.0.3 and 1.0.4 desktop prereleases shipped that unfinished UI. This reverts that merge (`git revert -m 1 8e4b354`): the UI is main's again (0.15.57 plus the P2P line's own Settings, Connection panel). P2P, media by hash, the Cloudflare hub and the release workflow stay.
-- The desktop fixes from 1.0.4 are carried over to the old Home notice: boards-as-files text in the app, no "download desktop" link inside the app, and the link in a browser opens the P2P desktop releases.
-
-## 1.0.4
-
-### Desktop app fixes
-- **No false "update available".** The version check read the "2" in `p2p-desktop-v1.0.3` as version 2. It now reads only dotted versions and follows only this line's `p2p-desktop-v*` releases; the banner links to that release.
-- **Desktop footer tells the truth.** The app says boards are saved as files on this device (not in the browser cache) and no longer asks you to download the desktop app. In a browser, that link now opens the P2P desktop releases.
-- **External links open in the system browser** from the desktop app (`tauri-plugin-opener`); before, `target="_blank"` links did nothing.
-
-## 1.0.3
-
-### Desktop release for the P2P line
-- **`.github/workflows/desktop-release.yml`**: pushing a `p2p-desktop-v*` tag builds the Tauri app for Windows (NSIS + MSI), Linux (AppImage, deb, rpm) and macOS (Apple Silicon and Intel dmg) and publishes a GitHub prerelease, never marked latest. Builds bake in `VITE_HUBS=wss://review-hub.amicus-vamicus.workers.dev`, so two installs anywhere meet through the Cloudflare hub; board data still goes only device to device.
-- The app version now follows `package.json` (`tauri.conf.json` was stuck at 0.2.0).
-- Installers are unsigned: SmartScreen on Windows, `xattr -cr` on macOS (see the release notes).
-
-## 1.0.2
-
-### Cloudflare hub live
-- **review-hub is deployed** on the amicus account: `wss://review-hub.amicus-vamicus.workers.dev` (`/health` reports `service: "review-hub"`).
-- **`scripts/deploy.sh` no longer leaks the zpro account into the hub deploy.** It used to export `CLOUDFLARE_ACCOUNT_ID` = zpro for every target, which overrides `account_id` in `cloudflare/wrangler.toml`. Now each target gets its own account (`HUB_ACCOUNT_ID`, default amicus; `SPA_ACCOUNT_ID`, default zpro).
-- **Tests against a live hub.** `CF_HUB_URL=https://review-hub.<sub>.workers.dev` makes `cf-hub-test` and `E2E_HUB=cloudflare` `p2p-e2e` use that deployed Worker instead of `wrangler dev`. A live hub cannot be killed, so the e2e routes the browsers' hub sockets through Playwright and cuts them; it now also checks both tabs really lost the hub before the "hub dead" sync step.
-- `playwright` is a pinned dev dependency (1.63.0), so `npm run test:e2e` works after `npm ci`.
-
-## 1.0.1
-
-The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-desktop`) merged onto 1.0, plus media by content hash (ported from `dev-petrosyan-desktop`) carried peer to peer.
+First release of the peer-to-peer line (branch `claude/full-p2p-desktop`), on top of 0.15.58. Test builds of this line were tagged 1.0.x; those tags and prereleases are gone and this is the initial release.
 
 ### Media by content hash
 - **Images, videos and document pages are no longer stored inside the board.** Their bytes go into a local blob store keyed by SHA-256 (IndexedDB `review-blobs`, plus `<app data>/blobs/` on the desktop app); the shape keeps only the hash, a 256 px thumbnail hash, mime and size. A board with a 2 MB photo is now about 1.5 KB of document, so joining, syncing and saving stay fast however many pictures it holds.
@@ -59,10 +13,7 @@ The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-deskt
 - Far-away media paints from the thumbnail and loads full size when zoomed in (viewport LOD). Board export (`.review` v2) carries the bytes and asks peers for any this device lacks.
 - **Older boards**: a background migration adds hashes next to the inline copies, and compaction drops an inline copy once its bytes are held locally. Shared boards keep their inline copies (compaction never runs while others hold the board).
 - Ported from `dev-petrosyan-desktop` (blob store, thumbnails, LOD, migration, `.review` v2). Its WebSocket transport supervisor and y-webrtc signaling relay are not carried over: this line has neither.
-- Tests: `blobs-test`, `media-blobs-test` (including bytes from peers), `board-file-test`; `p2p-test` fetches 2 MB by hash, checks a live edit overtakes it and that a peer serving wrong bytes is refused; `p2p-e2e` drops a 1.9 MB photo on A and checks B gets it while the doc stays small; the desktop self-test round-trips a blob file.
-
-### Settings
-- Settings → Connection keeps the 1.0 dialog and hosts the P2P panel in place of the old sync URL and signaling fields.
+- Tests: `blobs-test`, `media-blobs-test` (including bytes from peers), `board-file-test`; `p2p-test` fetches 2 MB by hash, checks a live edit overtakes it and that a peer serving wrong bytes is refused; `p2p-e2e` drops a 1.9 MB photo on A and checks B gets it while the doc stays small; the desktop e2e round-trips a blob file.
 
 ### Cloudflare: hub only
 - The Cloudflare hub is now its own Worker, **review-hub** (`cloudflare/wrangler.toml`). It serves no web UI and no `/lan`, only `/signal/<room>` and `/health`. The UI stays self-hosted. The `review` Worker goes back to being an optional static UI copy.
@@ -70,11 +21,9 @@ The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-deskt
 - `scripts/deploy.sh` targets: `hub` (default), `spa`, `all`.
 - `E2E_HUB=cloudflare` e2e serves the UI from a plain static server, and the Worker is the only hub. The test's wrangler runs in its own process group, so killing the hub cannot orphan workerd.
 
-
 ### P2P
 - **Edits lost on a dying link are repaired.** Relay suppression trusted that a peer with a direct link to the author got each edit from it. If that link died with an edit still in flight, the edit never arrived, and later edits that built on it got stuck. Now, whenever a link closes, the remaining peers exchange state vectors and fill each other's gaps. A peer that receives an update with missing parents also asks its links for a resync (at most once per 2 s). This is the likely cause of the occasional `p2p-e2e` failure "B -> A with the hub dead": a write the third tab made on joining reached only one of the other two before it left.
 - Tests: `p2p-test` covers a lost in-flight edit. `p2p-e2e` checks that A and B agree before killing the hub, and dumps mesh state and console on failure.
-
 
 ### Fully peer-to-peer, self-hosted
 - **No server holds boards any more.** Board data moves only between devices over WebRTC data channels and is stored only on those devices. The Cloudflare `review-sync` Durable Object, its room storage, compaction DELETE and the y-websocket client are gone.
@@ -83,44 +32,31 @@ The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-deskt
 - **P2P panel** (Settings → System): on/off, invite address, live links (who, state, path, RTT, traffic), hubs (this host, LAN, added, from invite) with state, add a friend's hub, LAN discovery switch, STUN/TURN lines. Console helper `reviewP2p()`.
 - **Joined boards are saved on your device by default**, since there is no server copy.
 
-### Desktop app
-- Tauri app embeds review-host: it serves the UI to friends' browsers on your Wi-Fi (`http://<lan-ip>:4455/board/<id>`), runs the hub and finds other ReView hosts over mDNS. The window loads the UI from that host.
-- Boards are mirrored to files (`<app data>/boards/<id>.review` + `.json`) and restored on launch if the webview storage is missing. Closing the window flushes pending edits first. "Boards folder" button in the P2P panel.
-- Native WebRTC (webrtc-rs) behind an `RTCPeerConnection` polyfill for webviews built without it (Ubuntu/Debian WebKitGTK); desktop links interoperate with browsers.
-- `REVIEW_SELFTEST=1` self-check mode; `scripts/desktop-e2e.mjs` proves app <-> Chromium sync.
-
 ### Tests
 - `scripts/p2p-test.mjs` (in `npm test`): framing, hub addresses, mesh against a real review-host with in-memory links (late join, awareness, 300 KB chunked update, leave clears cursors, relay, duplicate-relay suppression).
 - `scripts/p2p-e2e.mjs` (`npm run test:e2e`): two headless Chromium browsers over real WebRTC: late join, live edits, hub forgets leavers, links survive the hub being killed.
 - Rust: hub unit tests and a websocket integration test in `rust/review-host`.
 
-## 1.0.0
+### Cloudflare hub live
+- **review-hub is deployed** on the amicus account: `wss://review-hub.amicus-vamicus.workers.dev` (`/health` reports `service: "review-hub"`).
+- **`scripts/deploy.sh` no longer leaks the zpro account into the hub deploy.** It used to export `CLOUDFLARE_ACCOUNT_ID` = zpro for every target, which overrides `account_id` in `cloudflare/wrangler.toml`. Now each target gets its own account (`HUB_ACCOUNT_ID`, default amicus; `SPA_ACCOUNT_ID`, default zpro).
+- **Tests against a live hub.** `CF_HUB_URL=https://review-hub.<sub>.workers.dev` makes `cf-hub-test` and `E2E_HUB=cloudflare` `p2p-e2e` use that deployed Worker instead of `wrangler dev`. A live hub cannot be killed, so the e2e routes the browsers' hub sockets through Playwright and cuts them; it now also checks both tabs really lost the hub before the "hub dead" sync step.
+- `playwright` is a pinned dev dependency (1.63.0), so `npm run test:e2e` works after `npm ci`.
 
-The 1.0 redesign: board chrome, settings and icons rebuilt around one idea, each corner of the screen has one job. Nothing about your boards changes; this is chrome, defaults and polish.
+### Desktop app
+- **Electron app** (`electron/`, `electron-builder.yml`). An earlier Tauri shell was dropped: WebKitGTK on Linux was the bottleneck: on NVIDIA under Wayland it either crashed (DMA-BUF renderer) or presented at about 60 fps with pan input arriving at 17-50 events a second, so panning felt like 15 fps. Chromium renders and delivers input at the display rate on every OS.
+- **The app is a host.** It starts the bundled `review-host` binary and loads the UI from it, serves the same UI to friends' browsers on the Wi-Fi (`http://<lan-ip>:4455/board/<id>`), runs the hub and finds other ReView hosts over mDNS. Boards and media are files in `dev.zpro.review` under the OS data dir (`boards/<id>.review` + `.json`, `blobs/<ab>/<sha256>`), restored on launch when the page storage lacks them; closing the window writes pending edits first. The earlier Tauri test builds used the same folder, so their boards come back.
+- **No title bar on tiling Wayland/X11 window managers** (Hyprland, Sway, i3, niri, ...); other desktops keep their frame. No menu bar on Windows and Linux.
+- **Mouse side buttons pan the board** in the app (Chromium passes them to the page; WebKitGTK turned them into history navigation).
+- WebRTC offers real LAN addresses as host candidates instead of mDNS `.local` names, so app-to-app and app-to-browser links on one network no longer depend on multicast DNS.
+- Panning clamps the camera once per frame instead of on every pointer and wheel event, and measures pan steps from `clientX/Y` (some engines round `movementX`).
+- `npm run test:desktop` drives the app with Playwright's Electron driver against a throwaway data folder. `review-host` reads `REVIEW_PORT_TRIES`.
+- **Releases**: pushing a `p2p-desktop-v*` tag (`.github/workflows/desktop-release.yml`) builds Windows NSIS `.exe`, macOS arm64 and x64 `.dmg` (ad-hoc signed) and Linux `.AppImage` and `.deb`, and publishes a GitHub prerelease, never marked latest. Builds bake in `VITE_HUBS=wss://review-hub.amicus-vamicus.workers.dev`. Installers are unsigned: SmartScreen on Windows, `xattr -cr` on macOS. Android stays on Tauri.
+- **Honest update check and footer.** The app follows only this line's `p2p-desktop-v*` releases and reads only dotted versions. It says boards are saved as files on this device and does not ask you to download the desktop app; in a browser that link opens the desktop releases. External links open in the system browser.
 
-### Board
-- **Top left is "where am I"**: Home, the board name and the page chip. Clicking the name opens a board menu with Rename, Copy link, Export as image and Download .review file (double-click still renames). Export left the top strip.
-- **Undo and zoom sit in a slim island next to it**: undo, redo and one "100%" button whose menu holds zoom in, zoom out, show all and 100%, each with its shortcut. The always-visible +, -, fit cluster is gone.
-- **Top right is "who is here"**: presence avatars now show initials, next to one primary **Invite** button (person-plus icon) that opens the members and invite panel. Settings sit alone in their own island at the edge.
-- **The toolbelt is tools only**: select, hand, pen, eraser, shapes, arrow, sticky, text, then Insert and shape recognition. Lasso lives under select and every shape (ellipse, diamond, flowchart shapes, frame) under the shapes button, as flyouts: click the active slot again, hold it or right-click to pick another. The slot remembers the last one you used. Insert holds file or image plus graph, calculator and table (still drag-to-reorder). Paste, copy, duplicate, delete, export and crop left the toolbelt.
-- **Active tool is a solid pill** in the strongest chrome color, 40px targets, and the pen button shows its ink as a dot.
-- **Selection bar floats over the selection**: duplicate, copy, crop (images), export, lock, delete and more (the full context menu). It follows pans and zooms, flips below when there is no room above, and steps aside while you drag, edit text or crop. Right-clicking empty board now also offers insert file, show all and export.
-- **Style island speaks visually**: marker and highlighter are icon toggles, the width slider became three size dots (click the active dot again to fine-tune).
-- **Dot grid**: a quiet dot lattice replaces the line grid as the default look (spacing stays 16-40px at any zoom). Lines and no grid are one click away in Appearance; the choice is per viewer, like paper.
-
-### Settings
-- **A centered two-pane dialog** instead of the side sheet with tabs: a rail with you on top (name you can edit in place, cursor color dots), then Appearance, Keys & gestures, Interface and Connection. Each pane scrolls on its own. On phones the rail is a list and each section opens full-screen with a back arrow.
-- **Appearance**: interface themes are tiny live previews in each theme's own colors; Orbit is always listed with an "exp." chip (its description is the tooltip) and picking it unlocks it. Board paper is its own row, "independent of the interface", with centered dot-grid swatches and a custom color; grid is None / Dots / Lines; ink adaptation below.
-- **Keys & gestures** (was "Binds"): search across actions and keys, two columns of real keycaps (click one, press the new key), color binds, the global shortcuts, and gestures as tiles.
-- **Interface**: language as a segmented control, UI scale and cursor size sliders, tool animation, hide-interface hint, and board behavior toggles (recognize shapes, rotate magnet, top rotate handle, smooth peer cursors).
-- **Connection**: a status line first (connected or not, people on the board, where the board is stored, connect / disconnect), then the same-Wi-Fi address with Copy, then "Save others' boards" and P2P. Server URL, P2P signaling, room and the net log fold under "For developers".
-
-### Icons
-- One hand for the whole set: 24px grid, 1.75 stroke, 2px corner radius on boxes, round caps and joins. Redrawn: select, hand, pen, eraser, rect, ellipse, diamond, triangle, sticky (a note, not a page), text, sparkles, highlighter (chisel marker), paste, export (out of a tray), insert image (picture with a plus), copy, duplicate, trash, calculator, graph, warning, a clean eight-tooth settings cog and a house with an arched door. New: invite, lock / unlock, insert, shapes, palette, keyboard, sliders, wifi, search. Flowchart shapes, table, image, file, frame and alignment glyphs follow the same corners. Tool cursors match the new glyphs.
-
-### First visit defaults
-- New visitors on a mouse-and-keyboard screen start at 90% UI scale (the same physical button size as the old 100% with the roomier 1.0 spacing); touch screens start at 100%. New visitors get the dot grid.
-- Anyone with ReView data from before 1.0 keeps line grid and their previous UI scale (100% unless they changed it). The check runs once per device.
+### New Home page, rest stays main's UI
+- **Home is the redesigned single calm column** (from dev-warexpor `65346d4`, `0b7793d`, `440bf7b`), with the procedural, name-aware board thumbnails (`BoardGlyph`). Only Home is ported: board chrome, toolbar, settings and icons stay main's.
+- Keeps the desktop fixes on the new Home footer: boards-as-files text in the app, no "download desktop" link inside it, and in a browser the link opens the P2P desktop releases.
 
 ## 0.15.58
 

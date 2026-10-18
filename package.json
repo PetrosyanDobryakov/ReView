@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "1.0.7",
+  "version": "0.16.0",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with self-hosted peer-to-peer sync (WebRTC mesh, Yjs). The host only introduces peers and stores nothing.",
   "type": "module",
@@ -64,6 +64,8 @@
     "esbuild@0.28.2": true
   },
   "overrides": {
-    "@xmldom/xmldom": "0.9.12"
+    "speech-rule-engine": {
+      "@xmldom/xmldom": "0.9.12"
+    }
   }
 }

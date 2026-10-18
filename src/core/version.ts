@@ -22,7 +22,7 @@ export const APP_BUILD: string =
 export const RELEASE_TAG_PREFIX = 'p2p-desktop-v';
 export const RELEASES_URL = 'https://github.com/PetrosyanDobryakov/ReView/releases?q=p2p-desktop&expanded=true';
 
-/** Dotted numbers only, so a tag like `p2p-desktop-v1.0.3` reads as 1.0.3, not 2. */
+/** Dotted numbers only, so a tag like `p2p-desktop-v0.16.0` reads as 0.16.0, not 2. */
 function parseVer(v: string): number[] {
   const m = v.trim().match(/\d+(?:\.\d+)+/) ?? v.trim().match(/^v?(\d+)$/i);
   if (!m) return [];
