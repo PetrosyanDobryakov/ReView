@@ -1,21 +1,30 @@
-# desktop-showcase — запуск в один клик
+# desktop-showcase — всё для запуска в одном месте
 
-## Сейчас (веб-версия из исходников)
+```
+desktop-showcase/
+├── Start.bat      ← двойной клик: запустить приложение (Windows)
+├── start.py       ← то же для Mac/Linux: python3 start.py
+├── README.md      ← этот файл
+├── boards/        ← твои доски (.review файлы): хранить и переносить
+└── releases/      ← сюда приедут установщики (.exe/.dmg), когда будут готовы
+```
 
-- Windows: двойной клик по **`Start.bat`** — сам проверит Node.js, докачает библиотеки (один раз),
-  запустит приложение и откроет его в браузере. Консоль не нужна. Пока работаешь — окно не закрывай.
-- Mac / Linux: `python3 start.py` (того же эффекта).
+## Запуск
+
+- Windows: двойной клик по **`Start.bat`**. Нужен только Node.js LTS
+  (https://nodejs.org). Всё остальное батник сделает сам и откроет
+  приложение в браузере. Окно не закрывай, пока работаешь.
+- Mac / Linux: `python3 start.py`.
 - Проверка без запуска: `python3 start.py --check`.
 
-Нужен только Node.js LTS (https://nodejs.org). Адрес приложения: http://localhost:5173/
+Адрес приложения: http://localhost:5173/
 
-## Позже (настоящий десктоп)
+## Доски
 
-Сюда будут выкладываться установщики с автообновлением:
+Кидай `.review` файлы в `boards/` и забирай их оттуда на другой компьютер.
+Подробности — в `boards/README.md`.
 
-- Windows: `ReView-Setup.exe`
-- macOS: `ReView.dmg`
-- Linux: `ReView.AppImage` / `.deb`
+## Установщики
 
-Бинарники в git не коммитятся — они публикуются через GitHub Releases, здесь лежат только
-ссылки и этот лаунчер. Статус сборки — в `docs/DESKTOP-PLAN.md` (ветка `dev-petrosyan-desktop`).
+Пока в разработке. Как появятся — лягут в `releases/`
+(точнее, ссылки на GitHub Releases). Статус — в `docs/DESKTOP-PLAN.md`.
