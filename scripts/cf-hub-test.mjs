@@ -59,6 +59,20 @@ try {
   assert.equal((await fetch(`${base}/signal/bad%2Froom?peer=peer-a1`)).status, 400);
   assert.equal((await fetch(`${base}/signal/review-x?peer=no`)).status, 400);
   assert.equal((await fetch(`${base}/signal/review-x?peer=peer-a1`)).status, 426);
+  // /turn: 404 without a TURN key (local wrangler dev), else short-lived Cloudflare TURN credentials.
+  const turn = await fetch(`${base}/turn`);
+  if (process.env.CF_HUB_URL) {
+    assert.equal(turn.status, 200, 'live hub mints TURN credentials');
+    const j = await turn.json();
+    const urls = j.iceServers.flatMap((s) => [].concat(s.urls));
+    assert.ok(j.ttl > 3600 && urls.some((u) => u.startsWith('turn:turn.cloudflare.com')), 'turn urls');
+    assert.ok(j.iceServers.every((s) => s.username && s.credential), 'credentials present');
+    assert.ok(!urls.some((u) => /:53\b/.test(u)), 'port 53 filtered');
+    console.log(`cf-hub-test: /turn gives ${urls.length} TURN urls, ttl ${j.ttl}s`);
+  } else {
+    assert.equal(turn.status, 404);
+    await turn.body?.cancel();
+  }
 
   const room = `review-cf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const a = connect(room, 'peer-aaaa');

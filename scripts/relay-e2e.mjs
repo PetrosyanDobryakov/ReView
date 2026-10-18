@@ -4,6 +4,9 @@
  * relays are the only way the peers can find each other. Needs internet.
  *
  *   npm run build && node scripts/relay-e2e.mjs
+ *
+ * TURN_ONLY=1 (build with VITE_HUBS pointing at a hub that serves /turn):
+ * the link may use only TURN relay candidates, so it proves the relay path.
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -28,7 +31,10 @@ const board = `relay${Date.now().toString(36)}`;
 const browser = await chromium.launch();
 let code = 1;
 const state = (p) => p.evaluate(() => ({ shapes: window.__reviewShapeCount?.(), p2p: window.reviewP2p?.() }));
-const [a, b] = [await browser.newPage(), await browser.newPage()];
+const turnOnly = process.env.TURN_ONLY === '1';
+const ctx = await browser.newContext();
+if (turnOnly) await ctx.addInitScript(() => localStorage.setItem('REVIEW_ICE_RELAY', '1'));
+const [a, b] = [await ctx.newPage(), await ctx.newPage()];
 try {
   for (const p of [a, b]) {
     p.on('pageerror', (e) => console.error('pageerror', e.message));
@@ -36,11 +42,15 @@ try {
     await p.waitForFunction(() => typeof window.reviewP2p === 'function');
   }
   const t0 = Date.now();
-  await a.waitForFunction(() => window.reviewP2p().peers.some((p) => p.state === 'open'), null, { timeout: 45_000 });
+  await a.waitForFunction(() => window.reviewP2p().peers.some((p) => p.state === 'open'), null, { timeout: turnOnly ? 90_000 : 45_000 });
   const snap = (await state(a)).p2p;
   console.log(`relay-e2e: linked in ${Date.now() - t0} ms`);
   console.log('relay-e2e: hubs', snap.hubs.map((h) => `${h.url} ${h.state} peers=${h.peers}`).join(', '));
-  if (snap.hubs.some((h) => !h.url.startsWith('nostr+'))) throw new Error('a non-relay hub was used');
+  if (!turnOnly && snap.hubs.some((h) => !h.url.startsWith('nostr+'))) throw new Error('a non-relay hub was used');
+  if (turnOnly) {
+    await a.waitForFunction(() => window.reviewP2p().peers.some((p) => p.path === 'relay'), null, { timeout: 15_000 });
+    console.log('relay-e2e: link runs through TURN');
+  }
   await a.mouse.click(200, 200);
   await a.keyboard.press('KeyP');
   await a.mouse.move(400, 300);

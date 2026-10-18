@@ -17,6 +17,43 @@ export interface Env {
   ROOMS: DurableObjectNamespace<SignalRoom>;
   /** Name peers see for this hub (default "Cloudflare"). */
   HUB_NAME?: string;
+  /** Cloudflare Realtime TURN key (secrets). Unset: `/turn` answers 404. */
+  TURN_KEY_ID?: string;
+  TURN_KEY_TOKEN?: string;
+}
+
+/**
+ * Short-lived TURN credentials for peers whose direct link fails (both behind
+ * one carrier NAT, strict firewalls). TURN forwards the already encrypted
+ * WebRTC stream and cannot read it; the hub itself still carries no board
+ * data. One credential per isolate, renewed well before it expires.
+ */
+const TURN_TTL_S = 24 * 3600;
+const TURN_REUSE_MS = 6 * 3600 * 1000;
+let turnCache: { at: number; body: string } | null = null;
+
+async function turnCredentials(env: Env): Promise<Response> {
+  if (!env.TURN_KEY_ID || !env.TURN_KEY_TOKEN) return json({ ok: false, error: 'no turn' }, 404);
+  if (!turnCache || Date.now() - turnCache.at > TURN_REUSE_MS) {
+    const res = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${env.TURN_KEY_TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ttl: TURN_TTL_S }),
+      },
+    );
+    if (!res.ok) return json({ ok: false, error: `turn ${res.status}` }, 502);
+    const data = (await res.json()) as { iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> };
+    // Port 53 is blocked in browsers and only costs a timeout.
+    const iceServers = (data.iceServers ?? [])
+      .map((s) => ({ ...s, urls: ([] as string[]).concat(s.urls).filter((u) => !/:53\b/.test(u)) }))
+      .filter((s) => s.username && s.urls.length);
+    turnCache = { at: Date.now(), body: JSON.stringify({ ok: true, ttl: TURN_TTL_S, iceServers }) };
+  }
+  return new Response(turnCache.body, {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...CORS },
+  });
 }
 
 const PROTO = 1;
@@ -90,6 +127,8 @@ export default {
       fwd.search = `?peer=${encodeURIComponent(peer)}&name=${encodeURIComponent(hubName(env))}`;
       return stub.fetch(new Request(fwd, req));
     }
+
+    if (url.pathname === '/turn') return turnCredentials(env);
 
     if (url.pathname === '/health' || url.pathname === '/healthz') {
       // Rooms live in separate objects; there is no global count to report.

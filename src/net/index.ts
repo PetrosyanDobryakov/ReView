@@ -7,6 +7,7 @@ export { normalizeHubUrl } from './p2p/hub';
 export { DEFAULT_ICE, findSelfHost, lanHostHub } from './p2p/hubs';
 export type { HostProbe } from './p2p/hubs';
 export { checkNat, type NatReport } from './p2p/natCheck';
+export { currentTurn } from './p2p/turn';
 export { canSelfUpdate, changeDataFolder, desktopHostInfo, installDesktopUpdate, isDesktop, openBoardsFolder } from './p2p/desktop';
 export {
   isNetLogEnabled,

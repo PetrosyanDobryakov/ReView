@@ -82,7 +82,10 @@ export type BlobBytes = { bytes: Uint8Array; mime: string };
 export type BlobSource = (hash: string) => Promise<BlobBytes | null>;
 
 export type MeshOptions = {
-  iceServers: RTCIceServer[];
+  /** Read when each link starts, so fresh TURN credentials apply to retries. */
+  iceServers: () => RTCIceServer[];
+  /** TURN credentials to pass to peers that may lack them, and where to keep theirs. */
+  turn?: { current(): unknown; adopt(grant: unknown): boolean };
   appVersion: string;
   onChange: () => void;
   log?: (msg: string, data?: Record<string, unknown>) => void;
@@ -294,8 +297,12 @@ export class Mesh {
 
   private notePeer(hub: string, peer: string): void {
     if (this.destroyed || peer === this.self) return;
+    const fresh = !this.entries.has(peer);
     const e = this.entry(peer);
     e.hubs.add(hub);
+    // A peer that cannot reach a hub with `/turn` can still relay through ours.
+    const grant = fresh ? this.opts.turn?.current() : null;
+    if (grant) this.sendSignal(e, { kind: 'turn', grant });
     this.ensureLink(e);
     this.changed();
   }
@@ -348,6 +355,10 @@ export class Mesh {
     const e = this.entry(from);
     e.hubs.add(hub);
     const kind = data && typeof data === 'object' ? (data as { kind?: unknown }).kind : null;
+    if (kind === 'turn') {
+      this.opts.turn?.adopt((data as { grant?: unknown }).grant);
+      return;
+    }
     if (kind === 'knock') {
       if (!isInitiator(this.self, from)) return;
       if (e.link && Date.now() - e.linkSince < KNOCK_GRACE_MS) return;
@@ -399,7 +410,7 @@ export class Mesh {
     };
     const link: PeerLink = this.opts.createLink
       ? this.opts.createLink(e.peer, initiator, events)
-      : new WebRtcLink(e.peer, initiator, this.opts.iceServers, events);
+      : new WebRtcLink(e.peer, initiator, this.opts.iceServers(), events);
     return link;
   }
 

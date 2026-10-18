@@ -136,7 +136,10 @@ export class WebRtcLink implements PeerLink {
     this.sid = sid;
     this.remoteSet = false;
     this.pendingIce = [];
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    // `localStorage.REVIEW_ICE_RELAY = '1'`: TURN only (tests, diagnosing a relay).
+    let relayOnly = false;
+    try { relayOnly = localStorage.getItem('REVIEW_ICE_RELAY') === '1'; } catch { /* no storage */ }
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, ...(relayOnly ? { iceTransportPolicy: 'relay' as const } : {}) });
     this.pc = pc;
     pc.onicecandidate = (ev) => {
       if (this.pc !== pc || !ev.candidate) return;

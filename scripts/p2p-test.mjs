@@ -147,7 +147,7 @@ function peer(id, net, room, blobs = null) {
   const doc = new Y.Doc();
   const awareness = new Awareness(doc);
   const mesh = new Mesh(doc, awareness, room, id, {
-    iceServers: [],
+    iceServers: () => [],
     appVersion: 'test',
     onChange: () => {},
     createLink: net(id),
