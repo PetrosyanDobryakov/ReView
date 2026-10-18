@@ -132,6 +132,13 @@ const launchOpts = existsSync('/opt/pw-browsers/chromium') ? {} : {};
 const browser = await chromium.launch(launchOpts);
 async function newContext(opts) {
   const ctx = await browser.newContext(opts);
+  // Only the hub under test: public relays would keep peers introduced after it dies.
+  await ctx.addInitScript(() => {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('review-prefs') || '{}');
+      if (prefs.p2pRelays !== false) localStorage.setItem('review-prefs', JSON.stringify({ ...prefs, p2pRelays: false }));
+    } catch { /* default prefs */ }
+  });
   if (liveHub) {
     await ctx.routeWebSocket((url) => url.href.startsWith(liveHub.prefix), (ws) => {
       if (liveHub.dead) return void ws.close({ code: 1001, reason: 'hub killed by test' });

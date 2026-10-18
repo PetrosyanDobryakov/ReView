@@ -12,8 +12,8 @@
 
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
-const { spawn } = require('node:child_process');
+const { app, BrowserWindow, Menu, ipcMain, net, shell } = require('electron');
+const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -210,6 +210,8 @@ const commands = {
     return true;
   },
 
+  update_install: () => installUpdate(),
+
   blob_load(args) {
     if (!validHash(args?.hash)) throw new Error('bad blob hash');
     try {
@@ -236,6 +238,186 @@ ipcMain.handle('review', (e, cmd, args, headers) => {
   if (!fn) throw new Error(`unknown command ${cmd}`);
   return fn(args, headers);
 });
+
+// ---- updates -----------------------------------------------------------
+//
+// Follows this line's GitHub releases (`p2p-desktop-v*`), like the page's
+// banner (src/core/version.ts). AppImage and Windows replace themselves and
+// restart; a .deb or .dmg is downloaded and opened for the system installer.
+
+// REVIEW_UPDATE_FEED: another releases JSON (tests).
+const RELEASES_API =
+  process.env.REVIEW_UPDATE_FEED || 'https://api.github.com/repos/PetrosyanDobryakov/ReView/releases?per_page=100';
+const TAG_PREFIX = 'p2p-desktop-v';
+
+function newer(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+/** How this copy was installed decides how it updates. */
+function installKind() {
+  if (!app.isPackaged) return null;
+  if (process.platform === 'win32') return 'exe';
+  if (process.platform === 'darwin') return 'dmg';
+  if (process.env.APPIMAGE) return 'appimage';
+  if (process.execPath.startsWith('/opt/')) return 'deb';
+  return null;
+}
+
+function assetSuffix(kind) {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  return {
+    exe: `-win-${arch}.exe`,
+    dmg: `-mac-${arch}.dmg`,
+    appimage: `-linux-${process.arch === 'arm64' ? 'arm64' : 'x86_64'}.AppImage`,
+    deb: `-linux-${process.arch === 'arm64' ? 'arm64' : 'amd64'}.deb`,
+  }[kind];
+}
+
+async function latestRelease() {
+  const res = await net.fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  let best = null;
+  for (const r of await res.json()) {
+    if (r.draft || !r.tag_name?.startsWith(TAG_PREFIX)) continue;
+    const version = r.tag_name.slice(TAG_PREFIX.length);
+    if (!best || newer(version, best.version)) best = { version, release: r };
+  }
+  return best;
+}
+
+async function download(url, file, onProgress) {
+  const res = await net.fetch(url);
+  if (!res.ok || !res.body) throw new Error(`download ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const out = fs.createWriteStream(file);
+  let got = 0;
+  let last = 0;
+  try {
+    for await (const chunk of res.body) {
+      got += chunk.length;
+      if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
+      if (Date.now() - last > 200) {
+        last = Date.now();
+        onProgress(got, total);
+      }
+    }
+  } finally {
+    await new Promise((r) => out.end(r));
+  }
+  onProgress(got, total);
+}
+
+let updating = false;
+
+/** Returns `restarting` (the app quits and comes back), `opened` (an installer is shown) or `latest`. */
+async function installUpdate() {
+  const kind = installKind();
+  if (!kind) throw new Error('this copy cannot update itself');
+  if (updating) throw new Error('update already running');
+  updating = true;
+  try {
+    const best = await latestRelease();
+    if (!best || !newer(best.version, app.getVersion())) return 'latest';
+    const suffix = assetSuffix(kind);
+    const asset = best.release.assets?.find((a) => a.name.endsWith(suffix));
+    if (!asset) throw new Error(`no ${suffix} in ${best.release.tag_name}`);
+    const progress = (got, total) => win?.webContents.send('review-update', { got, total });
+    if (kind === 'appimage') {
+      const target = process.env.APPIMAGE;
+      const tmp = `${target}.update`;
+      await download(asset.browser_download_url, tmp, progress);
+      fs.chmodSync(tmp, 0o755);
+      fs.renameSync(tmp, target);
+      app.relaunch({ execPath: target, args: [] });
+      setImmediate(() => win?.close());
+      return 'restarting';
+    }
+    const dir = kind === 'exe' ? app.getPath('temp') : app.getPath('downloads');
+    const file = path.join(dir, asset.name);
+    await download(asset.browser_download_url, file, progress);
+    if (kind === 'exe') {
+      // Silent NSIS install over this copy, then it starts the new version.
+      spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+      setImmediate(() => win?.close());
+      return 'restarting';
+    }
+    const err = await shell.openPath(file);
+    if (err) throw new Error(err);
+    return 'opened';
+  } finally {
+    updating = false;
+  }
+}
+
+// ---- review:// invite links ---------------------------------------------
+
+const SCHEME = 'review';
+
+function boardFromArgs(argv) {
+  for (const a of argv) {
+    const m = /^review:\/\/board\/([A-Za-z0-9_-]{1,64})/i.exec(String(a));
+    if (m) return m[1];
+  }
+  return null;
+}
+
+let pendingBoard = boardFromArgs(process.argv);
+
+function openBoard(id) {
+  if (!win || !hostPort) {
+    pendingBoard = id;
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.focus();
+  void win.loadURL(`${new URL(win.webContents.getURL() || `http://127.0.0.1:${hostPort}/`).origin}/board/${id}`);
+}
+
+/**
+ * Make `review://` links open this app. Installers register the scheme on
+ * Windows, macOS and for the .deb; an AppImage has no install step, so it
+ * writes its own desktop entry (also putting the app in the launcher).
+ */
+function registerScheme() {
+  if (!app.isPackaged) return;
+  if (process.platform === 'linux' && process.env.APPIMAGE) {
+    try {
+      const apps = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'applications');
+      const icons = path.join(path.dirname(apps), 'icons', 'hicolor', '512x512', 'apps');
+      fs.mkdirSync(apps, { recursive: true });
+      fs.mkdirSync(icons, { recursive: true });
+      fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(icons, 'review-desktop.png'));
+      const entry = [
+        '[Desktop Entry]',
+        'Name=ReView',
+        'Comment=Local-first whiteboard with peer-to-peer sync',
+        `Exec="${process.env.APPIMAGE}" %U`,
+        'Icon=review-desktop',
+        'Type=Application',
+        'Categories=Office;',
+        'StartupWMClass=review-desktop',
+        `MimeType=x-scheme-handler/${SCHEME};`,
+        '',
+      ].join('\n');
+      const file = path.join(apps, 'review-desktop.desktop');
+      if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== entry) fs.writeFileSync(file, entry);
+      execFile('xdg-mime', ['default', 'review-desktop.desktop', `x-scheme-handler/${SCHEME}`], () => {});
+      execFile('update-desktop-database', [apps], () => {});
+    } catch (err) {
+      console.warn('[review] desktop entry:', err);
+    }
+    return;
+  }
+  app.setAsDefaultProtocolClient(SCHEME);
+}
 
 // ---- window ------------------------------------------------------------
 
@@ -331,17 +513,28 @@ if (!app.requestSingleInstanceLock()) {
   // A second copy would start a second host on another port (another origin).
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
+    const id = boardFromArgs(argv);
+    if (id) return openBoard(id);
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.focus();
+  });
+  // macOS hands links over as an event, possibly before the window exists.
+  app.on('open-url', (e, url) => {
+    e.preventDefault();
+    const id = boardFromArgs([url]);
+    if (id) openBoard(id);
   });
 
   app.whenReady().then(async () => {
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     try {
+      registerScheme();
       const port = await startHost();
-      createWindow(process.env.REVIEW_DESKTOP_URL || `http://127.0.0.1:${port}/`);
+      const base = process.env.REVIEW_DESKTOP_URL || `http://127.0.0.1:${port}`;
+      createWindow(`${base.replace(/\/$/, '')}/${pendingBoard ? `board/${pendingBoard}` : ''}`);
+      pendingBoard = null;
     } catch (err) {
       console.error('[review] could not start the embedded host:', err);
       app.exit(1);

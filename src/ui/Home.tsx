@@ -38,7 +38,7 @@ import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/c
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
 import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
-import { isDesktop, resolveInviteBoardUrl } from '../net';
+import { appInviteUrl, canSelfUpdate, installDesktopUpdate, isDesktop, resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
 const REL_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
@@ -87,6 +87,23 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [weightsReady, setWeightsReady] = useState(false);
   const weightsGen = useRef(0);
   const [verStatus, setVerStatus] = useState<VersionStatus | null>(null);
+  /** Desktop self-update: null idle, a number while downloading (0..1, or -1 unknown size). */
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateNote, setUpdateNote] = useState<string | null>(null);
+  const runUpdate = async () => {
+    setUpdateNote(null);
+    setUpdateProgress(0);
+    try {
+      const r = await installDesktopUpdate((f) => setUpdateProgress(f ?? -1));
+      if (r === 'opened') setUpdateNote(t(locale, 'updateOpened'));
+      if (r === 'latest') setVerStatus({ kind: 'latest' });
+      if (r !== 'restarting') setUpdateProgress(null);
+    } catch {
+      setUpdateProgress(null);
+      setUpdateNote(t(locale, 'updateFailed'));
+      if (verStatus?.kind === 'outdated') window.open(verStatus.url, '_blank', 'noreferrer');
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -188,7 +205,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   };
   const handleCopyLink = async (id: string) => {
     let url = `${window.location.origin}${boardUrl(id)}`;
-    try {
+    if (isDesktop()) url = appInviteUrl(id);
+    else try {
       const invite = await resolveInviteBoardUrl(id);
       url = invite.url;
     } catch {
@@ -202,14 +220,10 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const handleJoin = () => {
     const v = joinLink.trim();
     if (!v) return;
-    let id = v;
-    try {
-      const u = new URL(v, window.location.origin);
-      const m = u.pathname.match(/\/board\/([^/]+)/);
-      if (m) id = m[1];
-    } catch {
-      /* use raw */
-    }
+    // `https://host/board/<id>`, `review://board/<id>` or the bare id.
+    const m = v.match(/(?:^|[/:])board\/([A-Za-z0-9_-]+)/);
+    let id = m ? m[1]! : v;
+    try { id = decodeURIComponent(id); } catch { /* keep */ }
     id = id.trim();
     if (!id) return;
     if (!getBoard(id)) {
@@ -358,7 +372,21 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
           <div className="island-sep" />
-          {verStatus?.kind === 'outdated' ? (
+          {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
+            <button
+              type="button"
+              className="home-version warn"
+              disabled={updateProgress !== null}
+              title={updateNote ?? `${t(locale, 'updateAvailable')} (${APP_BUILD})`}
+              onClick={() => void runUpdate()}
+            >
+              {updateProgress === null
+                ? updateNote ?? `${t(locale, 'updateInstall')} v${verStatus.latest}`
+                : updateProgress < 0
+                  ? t(locale, 'updateDownloading')
+                  : `${t(locale, 'updateDownloading')} ${Math.round(updateProgress * 100)}%`}
+            </button>
+          ) : verStatus?.kind === 'outdated' ? (
             <a
               className="home-version warn"
               href={verStatus.url}

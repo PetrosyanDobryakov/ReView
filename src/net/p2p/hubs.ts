@@ -44,6 +44,18 @@ function hostPort(): string {
 }
 
 /**
+ * Public Nostr relays every build joins. They pass only sealed handshakes
+ * (see nostrHub.ts) and keep nothing, and they are reachable from networks
+ * that block the Cloudflare hub. Peers on several of them link once.
+ */
+export const DEFAULT_RELAYS: readonly string[] = [
+  'nostr+wss://nos.lol',
+  'nostr+wss://relay.primal.net',
+  'nostr+wss://nostr.mom',
+  'nostr+wss://offchain.pub',
+];
+
+/**
  * Hubs baked into this build (`VITE_HUBS`, comma or space separated), e.g.
  * a Cloudflare hub everyone can reach: `VITE_HUBS=wss://review-hub.example.workers.dev`.
  */
@@ -190,6 +202,7 @@ export async function resolveHubs(): Promise<{ specs: HubSpec[]; self: HostProbe
     for (const h of self.hosts) if (h.id !== self.id) add(lanHostHub(h), 'lan');
   }
   for (const u of presetHubs()) add(u, 'preset');
+  if (prefs.p2pRelays) for (const u of DEFAULT_RELAYS) add(u, 'preset');
   for (const u of prefs.p2pHubs) add(normalizeHubUrl(u), 'custom');
   for (const u of readInviteHubs()) add(u, 'invite');
   return { specs, self };

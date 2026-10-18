@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.16.0",
+  "version": "0.16.1",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with self-hosted peer-to-peer sync (WebRTC mesh, Yjs). The host only introduces peers and stores nothing.",
   "type": "module",
@@ -30,11 +30,14 @@
     "test:cf": "tsc -p cloudflare/tsconfig.json && node scripts/cf-hub-test.mjs",
     "test:desktop": "npm run build && node scripts/desktop.mjs --host && node scripts/desktop-e2e.mjs",
     "sync:github": "bash scripts/sync-github.sh",
-    "sync:github:dry": "bash scripts/sync-github.sh --dry-run"
+    "sync:github:dry": "bash scripts/sync-github.sh --dry-run",
+    "test:relay": "npm run build && node scripts/relay-e2e.mjs"
   },
   "dependencies": {
     "@fontsource/onest": "^5.3.0",
     "@fontsource/space-grotesk": "^5.3.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@tauri-apps/api": "~2.11.0",
     "lib0": "^0.2.119",
     "mathjax-full": "^3.2.1",

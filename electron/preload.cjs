@@ -7,4 +7,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('reviewDesktop', {
   invoke: (cmd, args, headers) => ipcRenderer.invoke('review', cmd, args, headers),
+  /** Download progress of `update_install`: `{ got, total }` bytes. */
+  onUpdateProgress: (cb) => {
+    const fn = (_e, p) => cb(p);
+    ipcRenderer.on('review-update', fn);
+    return () => ipcRenderer.removeListener('review-update', fn);
+  },
 });

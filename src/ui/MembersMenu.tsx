@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import type { LocaleId } from '../core/locale';
 import type { PeerCursor } from '../net';
 import {
+  appInviteUrl,
   fetchLanAddresses,
   inviteHostname,
+  isDesktop,
   isLocalHostname,
   lanBoardUrl,
   resolveInviteBoardUrl,
@@ -234,6 +236,14 @@ export function MembersMenu({
 
   const primaryHost = inviteHostname(lanHosts);
 
+  const [appFlash, setAppFlash] = useState<'ok' | 'fail' | null>(null);
+  const handleCopyAppInvite = async () => {
+    const url = appInviteUrl(boardId);
+    const ok = (await shareUrl(url, 'ReView')) || (await copyText(url));
+    setAppFlash(ok ? 'ok' : 'fail');
+    window.setTimeout(() => setAppFlash(null), 2000);
+  };
+
   const handleCopyInvite = async () => {
     try {
       const { url } = await resolveInviteBoardUrl(boardId);
@@ -271,6 +281,25 @@ export function MembersMenu({
             className="members-menu island"
             style={{ left: menuStyle.left, top: menuStyle.top }}
           >
+            {isDesktop() ? (
+              <section className="members-section">
+                <div className="members-section-head">
+                  <h3 className="members-section-title">{t(locale, 'membersInviteNet')}</h3>
+                </div>
+                <p className="members-empty">{t(locale, 'membersInviteNetHint')}</p>
+                <button
+                  type="button"
+                  className="style-btn active members-invite-btn"
+                  onClick={() => void handleCopyAppInvite()}
+                >
+                  {appFlash === 'ok'
+                    ? t(locale, 'membersInviteCopied')
+                    : appFlash === 'fail'
+                      ? t(locale, 'membersInviteFail')
+                      : t(locale, 'membersCopyAppInvite')}
+                </button>
+              </section>
+            ) : null}
             <section className="members-section">
               <div className="members-section-head">
                 <h3 className="members-section-title">{t(locale, 'membersInvite')}</h3>
