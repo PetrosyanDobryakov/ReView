@@ -40,6 +40,7 @@ export type { LanInfo } from './lan';
 import { syncClient } from './client';
 import { p2pClient } from './p2p';
 import { boardRoomName, isP2pEnabled } from './config';
+import { startTransportSupervisor, stopTransportSupervisor } from './supervisorWire';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { UserInfo } from '../core/user';
 import type * as Y from 'yjs';
@@ -48,6 +49,7 @@ import type * as Y from 'yjs';
 export function attachSync(doc: Y.Doc, boardId: string): void {
   syncClient.attach(doc, boardId);
   if (isP2pEnabled()) p2pClient.attach(doc, boardId);
+  startTransportSupervisor();
 }
 
 /** True when any other awareness client is in the room, including another tab of the same user. */
@@ -65,6 +67,7 @@ export function hasDistinctRemoteCollaborators(): boolean {
 
 /** Leave the board session (stops WS + p2p, clears attachment). */
 export function detachSync(): void {
+  stopTransportSupervisor();
   syncClient.detach();
   p2pClient.detach();
 }

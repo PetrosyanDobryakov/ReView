@@ -63,6 +63,14 @@ Baseline 2026-10-17: аккаунт `zpro.driftman@gmail.com`; live SPA `1.0.4+1
   put с re-hash, иначе доска удаляется); UI-прегард в Home поднят до v2-потолка.
   Проверено: `board-file-test` зелен, весь `npm test` зелен (кроме `sync-test` — нет cargo),
   `npm run build` собирается. Прод не затронут.
+- [x] Шаг 2а супервизор каналов (2026-10-17): чистая политика `src/net/supervisor.ts`
+  (сон WS только при полном P2P-покрытии, grace 10s на ростер, соло никогда не спит,
+  побудка каждые 5 мин), проводка `supervisorWire.ts` через готовые suspend/resume
+  (сокет рвется, провайдер и часы awareness целы), старт/стоп в attach/detachSync,
+  преф `transportSave` (default on) + тумблер в настройках (ru/en/zh). Сервер и Cloudflare
+  не тронуты. Проверено: `transport-supervisor-test` зелен, весь `npm test` зелен (кроме
+  `sync-test` — нет cargo), `npm run build` собирается. Прод не затронут.
+- [ ] Шаг 2б: сигналинг через DO (тип сообщений в BoardRoom) + замер % P2P + TURN по факту.
 - [ ] Этап 1: файловое хранилище досок (детект `__TAURI__`, снятие лимита 32 МБ локально).
 - [ ] Этап 2: картинки как блобы по content-hash (Y.Doc хранит только ссылку) — главный рычаг веса и CF-нагрузки.
 - [ ] Этап 3: каскад транспортов LAN → P2P → Cloudflare + свой signaling (+ TURN при необходимости).

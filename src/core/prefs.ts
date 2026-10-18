@@ -61,6 +61,11 @@ export interface AppPrefs {
   p2pUserSet: boolean;
   /** Signaling servers for y-webrtc. null = defaults. */
   p2pSignaling: string | null;
+  /**
+   * When true (default), the transport supervisor sleeps the WS hub leg while
+   * every live peer is reachable over P2P (periodic wake to flush + relearn).
+   */
+  transportSave: boolean;
   /** Custom toolbelt order per strip group + More shelf. null = defaults. */
   toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
   /**
@@ -111,6 +116,7 @@ const DEFAULTS: AppPrefs = {
   p2pEnabled: false,
   p2pUserSet: false,
   p2pSignaling: null,
+  transportSave: true,
   toolbarOrder: null,
   gridStyle: 'dots',
 };
@@ -216,6 +222,8 @@ function parsePrefs(raw: unknown): AppPrefs {
     p2pSignaling: Object.prototype.hasOwnProperty.call(parsed, 'p2pSignaling')
       ? normalizeP2pSignaling(parsed.p2pSignaling)
       : DEFAULTS.p2pSignaling,
+    transportSave:
+      typeof parsed.transportSave === 'boolean' ? parsed.transportSave : DEFAULTS.transportSave,
     toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
       ? normalizeToolbarOrder(parsed.toolbarOrder)
       : DEFAULTS.toolbarOrder,
@@ -269,6 +277,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
     orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
     p2pEnabled: patch.p2pEnabled !== undefined ? Boolean(patch.p2pEnabled) : cur.p2pEnabled,
+    transportSave: patch.transportSave !== undefined ? Boolean(patch.transportSave) : cur.transportSave,
     p2pUserSet:
       patch.p2pEnabled !== undefined
         ? true
