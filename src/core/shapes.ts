@@ -1,5 +1,5 @@
 import { formulaImage, renderFormula } from './formula';
-import { resolvedBlobUrl, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
+import { ensureBlobUrl, resolvedBlobUrl, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
@@ -357,6 +357,56 @@ export function shapeHasTextField(type: ShapeType): boolean {
 export function docPageIndex(page: number | null | undefined, count: number): number {
   if (count <= 0) return 0;
   return Math.min(Math.max(0, page ?? 0), count - 1);
+}
+
+/** Page count of a doc shape: legacy dataURL pages or content-addressed page blobs. */
+export function docPageCount(v: Pick<ShapeView, 'pages' | 'pageBlobs'>): number {
+  return Math.max(v.pages?.length ?? 0, v.pageBlobs?.length ?? 0);
+}
+
+/**
+ * Full-resolution URL of an image or video: the loaded blob, else the legacy
+ * inline `src`. Empty while blob bytes are still loading (a load is started).
+ */
+export function mediaUrl(v: Pick<ShapeView, 'blob' | 'src'>): string {
+  if (v.blob) {
+    const url = resolvedBlobUrl(v.blob);
+    if (url) return url;
+    void ensureBlobUrl(v.blob);
+  }
+  return v.src ?? '';
+}
+
+/** Full-resolution URL of one doc page (see {@link mediaUrl}). */
+export function docPageUrl(v: Pick<ShapeView, 'pages' | 'pageBlobs'>, index: number): string {
+  const hash = v.pageBlobs?.[index];
+  if (hash) {
+    const url = resolvedBlobUrl(hash);
+    if (url) return url;
+    void ensureBlobUrl(hash);
+  }
+  return v.pages?.[index] ?? '';
+}
+
+/**
+ * Self-contained `data:` URL for export. Inline sources pass through; a loaded
+ * blob image is re-encoded from the canvas cache. Empty when not loaded yet.
+ */
+export function inlineImageUrl(url: string, mime?: string): string {
+  if (!url || url.startsWith('data:')) return url;
+  const img = getImage(url);
+  if (!img || !img.complete || !img.naturalWidth || typeof document === 'undefined') return '';
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    if (!ctx) return '';
+    ctx.drawImage(img, 0, 0);
+    return mime === 'image/jpeg' ? c.toDataURL('image/jpeg', 0.9) : c.toDataURL('image/png');
+  } catch {
+    return '';
+  }
 }
 
 /** Next/prev from a possibly out-of-range stored page (display uses the clamp). */
@@ -2069,7 +2119,7 @@ export function drawShape(
     }
     case 'doc': {
       const pages = v.pages ?? [];
-      const idx = docPageIndex(v.page, pages.length);
+      const idx = docPageIndex(v.page, docPageCount(v));
       const src = pages[idx] ?? '';
       // Stage 2 read path: resolved page blob wins, legacy page paints meanwhile.
       const pageBlob = v.pageBlobs?.[idx];
@@ -3018,10 +3068,10 @@ export function isVideoPlaying(src: string | undefined): boolean {
 }
 
 /** True when the board needs continuous RAF paints for GIF / playing video. */
-export function boardNeedsMediaPaint(views: Iterable<Pick<ShapeView, 'type' | 'src'>>): boolean {
+export function boardNeedsMediaPaint(views: Iterable<Pick<ShapeView, 'type' | 'src' | 'blob' | 'mime'>>): boolean {
   for (const v of views) {
-    if (v.type === 'image' && v.src && v.src.startsWith('data:image/gif')) return true;
-    if (v.type === 'video' && isVideoPlaying(v.src)) return true;
+    if (v.type === 'image' && (v.mime === 'image/gif' || (v.src && v.src.startsWith('data:image/gif')))) return true;
+    if (v.type === 'video' && isVideoPlaying(v.blob ? resolvedBlobUrl(v.blob) ?? v.src : v.src)) return true;
   }
   return false;
 }

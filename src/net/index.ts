@@ -1,6 +1,7 @@
 export { isSyncEnabled, boardRoomName } from './config';
 export { p2pClient, attachP2p, detachP2p, reconnectP2p } from './p2p';
 export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser, PeerConfettiBurst } from './types';
+export type { BlobBytes, BlobSource } from './p2p/mesh';
 export type { MeshSnapshot, HubInfo, PeerInfo, LinkPath, LinkState, HubState, HubSource } from './p2p/types';
 export { normalizeHubUrl } from './p2p/hub';
 export { DEFAULT_ICE, findSelfHost, lanHostHub } from './p2p/hubs';
@@ -31,6 +32,7 @@ import { p2pClient } from './p2p';
 import { boardRoomName } from './config';
 import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
 import type { MeshSnapshot } from './p2p/types';
+import type { BlobBytes, BlobSource } from './p2p/mesh';
 import type { UserInfo } from '../core/user';
 import type * as Y from 'yjs';
 
@@ -55,6 +57,21 @@ export function hasDistinctRemoteCollaborators(): boolean {
 /** Leave the board session (closes every link and hub socket). */
 export function detachSync(): void {
   p2pClient.detach();
+}
+
+/** Answer peers' media requests from `source` (the local blob store). */
+export function setBlobSource(source: BlobSource | null): void {
+  p2pClient.setBlobSource(source);
+}
+
+/** Media bytes by SHA-256 from direct peers; null when none has them. */
+export function fetchBlobFromPeers(hash: string): Promise<BlobBytes | null> {
+  return p2pClient.fetchBlob(hash);
+}
+
+/** Runs whenever a data channel to a peer opens. */
+export function onPeerLinkOpen(cb: (peer: string) => void): () => void {
+  return p2pClient.onLinkOpen(cb);
 }
 
 /** Rebuild the mesh after prefs change. */

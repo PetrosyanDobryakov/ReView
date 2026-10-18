@@ -20,6 +20,8 @@
     "allow-board-list",
     "allow-board-delete",
     "allow-open-boards-folder",
+    "allow-blob-save",
+    "allow-blob-load",
     "allow-selftest-report",
     "allow-rtc-create",
     "allow-rtc-create-data-channel",

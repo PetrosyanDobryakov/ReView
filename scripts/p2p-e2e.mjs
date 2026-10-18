@@ -180,6 +180,31 @@ try {
   const statsA = await a.evaluate(() => window.reviewP2p().peers[0]);
   if (!(statsA.bytesOut > 0 && statsA.bytesIn > 0)) fail('no bytes on the link');
 
+  // 3b. A drops a photo. Only its hash goes into the board; B pulls the bytes from A.
+  const media = (page) => page.evaluate(() => window.__reviewMedia());
+  const photoBytes = await a.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 900;
+    c.height = 600;
+    const g = c.getContext('2d');
+    // Noise does not compress: a ~2 MB PNG, many slices on the wire.
+    const px = g.createImageData(900, 600);
+    for (let i = 0; i < px.data.length; i++) px.data[i] = i % 4 === 3 ? 255 : (Math.random() * 256) | 0;
+    g.putImageData(px, 0, 0);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'photo.png', { type: 'image/png' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: 600, clientY: 400, bubbles: true, cancelable: true }));
+    return blob.size;
+  });
+  await waitFor(async () => (await media(a)).refs >= 1, 10_000, 'photo stored as a blob on A');
+  const mediaA = await media(a);
+  if (mediaA.inline !== 0) fail(`A kept an inline copy: ${JSON.stringify(mediaA)}`);
+  await waitFor(async () => (await media(b)).held === (await media(b)).refs && (await media(b)).refs >= 1, 15_000, 'B fetched the photo from A');
+  const mediaB = await media(b);
+  if (mediaB.docBytes > photoBytes / 4) fail(`board doc carries the photo: ${JSON.stringify(mediaB)} vs ${photoBytes}`);
+  console.log(`p2p-e2e: photo (${photoBytes} B) reached B over the mesh; board doc is ${mediaB.docBytes} B`);
+
   // 4. A third tab joins and leaves: the hub forgets it at once.
   const room = `review-${board}`;
   if (!onCloudflare) {

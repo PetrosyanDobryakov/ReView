@@ -1,10 +1,13 @@
 /**
- * Media ingest into the blob store — Stage 2, phase A (dual-write).
+ * Media by content hash. Image, video and document-page bytes live in the
+ * blob store (SHA-256 keyed); shapes carry only `blob`/`thumb` (`pageBlobs`/
+ * `pageThumbs` for docs), so the board document stays small. Bytes this
+ * device lacks come from peers over the P2P mesh (`setRemoteBlobFetcher`).
  *
- * New inserts keep writing `src`/`pages` exactly as before (old clients and all
- * render paths keep working) and additionally store the bytes content-addressed
- * plus a `blob`/`thumb` reference patched onto the shape. Nothing here ever
- * throws to callers: failures resolve to null and the board keeps its `src`.
+ * Boards from before this keep their inline `src`/`pages`: a background
+ * migration adds the blob refs, and compaction drops the inline copy once the
+ * bytes are held locally. Nothing here ever throws to callers: failures
+ * resolve to null and the shape keeps whatever it had.
  *
  * DOM-free at import time (thumb rendering degrades to null without canvas);
  * the shape patcher is injected so Node tests never touch the real store.
@@ -22,6 +25,8 @@ import {
   type BlobRef,
   type BlobStore,
 } from './blobs.ts';
+import { DesktopFileBlobStore } from './desktopBlobs.ts';
+import { isDesktop } from '../net/p2p/desktop.ts';
 
 /** Upper bound for one ingested payload (mirrors the 32 MB transfer cap). */
 export const INGEST_MAX_BYTES = 32 * 1024 * 1024;
@@ -42,10 +47,14 @@ export interface DecodedDataUrl {
 
 let sharedStore: BlobStore | null = null;
 
-/** App-wide two-level media cache (memory → IndexedDB `review-blobs`). */
+/**
+ * App-wide media store: memory → IndexedDB `review-blobs`, and on the desktop
+ * app → files in its data folder (the durable copy there).
+ */
 export function mediaBlobStore(): BlobStore {
   if (!sharedStore) {
-    sharedStore = new CompositeBlobStore(new MemoryBlobStore(), new IdbBlobStore());
+    const durable = isDesktop() ? new CompositeBlobStore(new IdbBlobStore(), new DesktopFileBlobStore()) : new IdbBlobStore();
+    sharedStore = new CompositeBlobStore(new MemoryBlobStore(), durable);
   }
   return sharedStore;
 }
@@ -313,6 +322,39 @@ export function collectBlobHashes(shapes: Iterable<[string, ShapeFields]>): stri
 }
 
 /**
+ * Pull every listed blob this device lacks, one at a time (peers pace their
+ * replies, so this never crowds out live edits). Without servers, a board's
+ * media only survives on the devices that hold it, so every member keeps a
+ * full copy just as when the bytes lived inside the document. Returns how
+ * many blobs were fetched. Never throws.
+ */
+export async function prefetchBlobs(
+  hashes: string[],
+  opts: { isCurrent: () => boolean; store?: BlobStore; have?: Set<string> }
+): Promise<number> {
+  const store = opts.store ?? mediaBlobStore();
+  let fetched = 0;
+  for (const hash of hashes) {
+    if (!opts.isCurrent()) break;
+    if (opts.have?.has(hash)) continue;
+    try {
+      if (await store.has(hash)) {
+        opts.have?.add(hash);
+        continue;
+      }
+      if (!remoteFetch) continue;
+      if (await loadBlob(hash, store)) {
+        opts.have?.add(hash);
+        fetched += 1;
+      }
+    } catch {
+      /* next one */
+    }
+  }
+  return fetched;
+}
+
+/**
  * Read path: blob hash → renderable object URL.
  *
  * Synchronous paint code uses {@link resolvedBlobUrl} (cache hit only) and
@@ -331,6 +373,49 @@ const negativeUntil = new Map<string, number>();
 /** How long a store miss suppresses retries (ms). */
 export const BLOB_NEGATIVE_TTL_MS = 30_000;
 
+/** Bytes from somewhere other than this device (peers over the P2P mesh). */
+export type RemoteBlobFetch = (hash: string) => Promise<{ bytes: Uint8Array; mime: string } | null>;
+let remoteFetch: RemoteBlobFetch | null = null;
+const resolvedListeners = new Set<(hash: string) => void>();
+
+/** Where to ask when the local store lacks a blob. Fetched bytes are stored locally. */
+export function setRemoteBlobFetcher(fn: RemoteBlobFetch | null): void {
+  remoteFetch = fn;
+}
+
+/** Seed the resolver with a URL we already hold for these bytes (fresh inserts paint at once). */
+export function primeBlobUrl(hash: string, url: string): void {
+  if (!resolvedUrls.has(hash)) resolvedUrls.set(hash, url);
+}
+
+/** Forget recent misses (a new peer may have them). */
+export function clearBlobMisses(): void {
+  negativeUntil.clear();
+}
+
+/** Fired when a blob URL becomes available, so the canvas can repaint. */
+export function onBlobResolved(cb: (hash: string) => void): () => void {
+  resolvedListeners.add(cb);
+  return () => {
+    resolvedListeners.delete(cb);
+  };
+}
+
+/**
+ * Local store first, then peers. Peer bytes are written to the local store
+ * (which re-hashes them) so this device can serve them on in turn.
+ */
+export async function loadBlob(hash: string, store?: BlobStore): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  const s = store ?? mediaBlobStore();
+  const row = await s.get(hash);
+  if (row) return row;
+  if (!remoteFetch) return null;
+  const got = await remoteFetch(hash);
+  if (!got) return null;
+  await s.put(hash, got.bytes, got.mime);
+  return got;
+}
+
 /** Sync cache read for paint. Null = not loaded (yet or at all). */
 export function resolvedBlobUrl(hash: string): string | null {
   return resolvedUrls.get(hash) ?? null;
@@ -346,7 +431,7 @@ export function ensureBlobUrl(hash: string, store?: BlobStore): Promise<string |
   if (quietUntil > Date.now()) return Promise.resolve(null);
   const job = (async (): Promise<string | null> => {
     try {
-      const row = await (store ?? mediaBlobStore()).get(hash);
+      const row = await loadBlob(hash, store);
       if (!row) {
         negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);
         return null;
@@ -358,6 +443,13 @@ export function ensureBlobUrl(hash: string, store?: BlobStore): Promise<string |
         return null;
       }
       resolvedUrls.set(hash, url);
+      for (const l of [...resolvedListeners]) {
+        try {
+          l(hash);
+        } catch {
+          /* listener error */
+        }
+      }
       return url;
     } catch {
       negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);

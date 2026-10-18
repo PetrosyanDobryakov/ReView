@@ -5,10 +5,10 @@ import type { ShapeView, ShapeType } from '../core/shapes';
 import { bumpBoardUpdated, flushBoardUpdated, getBoard, isBoardPersistedLocally } from '../core/boards';
 import { loadUser } from './user';
 import { readPrefs } from '../core/prefs';
-import { attachSync, detachSync, hasDistinctRemoteCollaborators, hasRemoteCollaborators, isAwarenessLeader, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
+import { attachSync, detachSync, fetchBlobFromPeers, hasDistinctRemoteCollaborators, hasRemoteCollaborators, isAwarenessLeader, onPeerLinkOpen, publishBoardView, publishDraft, publishErasePreview, publishSelection, setBlobSource } from '../net';
 import { attachDesktopMirror } from './desktopBoards';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
-import { attachDocBlobs, attachImageBlobs, collectLegacyMedia } from './mediaBlobs';
+import { attachDocBlobs, attachImageBlobs, clearBlobMisses, collectBlobHashes, collectLegacyMedia, mediaBlobStore, prefetchBlobs, setRemoteBlobFetcher } from './mediaBlobs';
 import {
   boardHadRemoteCollaborators,
   compactSavesEnough,
@@ -61,6 +61,9 @@ export let persistence: IndexeddbPersistence | null = null;
 
 let lastDocLog = 0;
 function logDocUpdate(size: number, origin: unknown, tr?: unknown): void {
+  boardMediaRefs = null;
+  // A peer's edit may reference media this device does not hold yet.
+  if (origin !== LOCAL_ORIGIN && !(origin instanceof IndexeddbPersistence)) scheduleMediaPrefetch();
   const now = Date.now();
   if (now - lastDocLog < 1000) return;
   lastDocLog = now;
@@ -121,6 +124,7 @@ function attachPersistence(boardId: string): void {
     void maybeAutoCompact();
     // Stage 2: move legacy dataURL bytes into the blob store (background, best-effort).
     maybeMigrateBoardMedia();
+    scheduleMediaPrefetch();
   };
   if ((persistence as unknown as { synced: boolean }).synced) {
     onSynced();
@@ -165,6 +169,65 @@ async function maybeAutoCompact(): Promise<void> {
     if (res.didCompact) netLog.info('autoCompact done', () => res);
   } catch (e) {
     netLog.warn('autoCompact failed', () => ({ err: String(e) }));
+  }
+}
+
+// --- Media over P2P: serve our blobs to peers, fetch what we lack ---
+/** Wait for edits to settle before scanning the board for missing media. */
+const MEDIA_PREFETCH_DELAY_MS = 2_000;
+let mediaPrefetchTimer: ReturnType<typeof setTimeout> | null = null;
+let mediaPrefetchBusy = false;
+let mediaPrefetchAgain = false;
+/** Hashes confirmed in the local store (the store is shared by all boards). */
+const mediaHave = new Set<string>();
+
+/** Hashes the open board references (rebuilt after any doc change). */
+let boardMediaRefs: { boardId: string | null; hashes: Set<string> } | null = null;
+
+// Peers get only media this board uses: the store is shared by every board,
+// and a peer must not learn what else this device holds.
+setBlobSource(async (hash) => {
+  if (!boardMediaRefs || boardMediaRefs.boardId !== currentBoardId) {
+    boardMediaRefs = { boardId: currentBoardId, hashes: new Set(collectBlobHashes(board.entries())) };
+  }
+  return boardMediaRefs.hashes.has(hash) ? mediaBlobStore().get(hash) : null;
+});
+setRemoteBlobFetcher((hash) => fetchBlobFromPeers(hash));
+onPeerLinkOpen(() => {
+  clearBlobMisses();
+  scheduleMediaPrefetch();
+});
+
+/** Keep a full local copy of the board's media (debounced, one run at a time). */
+function scheduleMediaPrefetch(delay = MEDIA_PREFETCH_DELAY_MS): void {
+  if (!currentBoardId || mediaPrefetchTimer) return;
+  mediaPrefetchTimer = setTimeout(() => {
+    mediaPrefetchTimer = null;
+    void runMediaPrefetch();
+  }, delay);
+}
+
+async function runMediaPrefetch(): Promise<void> {
+  const boardId = currentBoardId;
+  if (!boardId) return;
+  if (mediaPrefetchBusy) {
+    mediaPrefetchAgain = true;
+    return;
+  }
+  mediaPrefetchBusy = true;
+  try {
+    const hashes = collectBlobHashes(board.entries()).filter((h) => !mediaHave.has(h));
+    if (!hashes.length) return;
+    const got = await prefetchBlobs(hashes, { isCurrent: () => currentBoardId === boardId, have: mediaHave });
+    if (got) netLog.info('media prefetched from peers', () => ({ boardId, got, wanted: hashes.length }));
+  } catch {
+    /* best effort */
+  } finally {
+    mediaPrefetchBusy = false;
+    if (mediaPrefetchAgain) {
+      mediaPrefetchAgain = false;
+      scheduleMediaPrefetch();
+    }
   }
 }
 
@@ -422,6 +485,7 @@ export function initBoard(boardId: string): void {
     emitBoardReady();
     // Stage 2: session boards migrate too (patches sync back to the host).
     maybeMigrateBoardMedia();
+    scheduleMediaPrefetch();
   }
 }
 
@@ -905,7 +969,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
-  // Stage 2 blob refs (phase A dual-write; render still reads `src`).
+  // Media by content hash; bytes live in the blob store, not in the doc.
   if (v.blob) m.set('blob', v.blob);
   if (v.thumb !== undefined && v.thumb !== null) m.set('thumb', v.thumb);
   if (v.mime) m.set('mime', v.mime);
@@ -914,6 +978,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     const arr = new Y.Array<string>();
     arr.insert(0, v.pageBlobs);
     m.set('pageBlobs', arr);
+    if (!v.pages) m.set('page', docPageIndex(v.page, v.pageBlobs.length));
   }
   if (v.pageThumbs) {
     const arr = new Y.Array<unknown>();
@@ -1036,11 +1101,13 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       m.set(key, value);
     }
   }
-  if (patch.page !== undefined || patch.pages) {
+  if (patch.page !== undefined || patch.pages || patch.pageBlobs) {
     const pages = m.get('pages') as Y.Array<string> | undefined;
-    if (!pages || typeof pages.length !== 'number') return;
+    const pageBlobs = m.get('pageBlobs') as Y.Array<string> | undefined;
+    const count = Math.max(pages?.length ?? 0, pageBlobs?.length ?? 0);
+    if (!count) return;
     const stored = (m.get('page') as number) ?? 0;
-    const clamped = docPageIndex(patch.page !== undefined ? Number(patch.page) : stored, pages.length);
+    const clamped = docPageIndex(patch.page !== undefined ? Number(patch.page) : stored, count);
     if (clamped !== stored) m.set('page', clamped);
   }
 }
@@ -1132,6 +1199,17 @@ function bumpCurrentBoard(): void {
  * Rebuilds a fresh Y.Doc with only live shapes/meta/order/pages,
  * and wipes IndexedDB `review-v1-*`.
  */
+/** True when every byte the shape inlines also sits in the local blob store. */
+function inlineMediaHeld(m: Y.Map<unknown>, held: Set<string>): boolean {
+  const blob = m.get('blob');
+  if (typeof blob === 'string' && blob) return held.has(blob);
+  const pageBlobs = m.get('pageBlobs');
+  const inline = m.get('pages');
+  if (!(pageBlobs instanceof Y.Array) || !(inline instanceof Y.Array)) return false;
+  const hashes = pageBlobs.toArray() as unknown[];
+  return hashes.length === inline.length && hashes.every((h) => typeof h === 'string' && held.has(h));
+}
+
 export async function compactBoard(): Promise<{ before: number; after: number; didCompact: boolean }> {
   if (!currentBoardId || compactInFlight) return { before: 0, after: 0, didCompact: false };
   compactInFlight = true;
@@ -1151,6 +1229,15 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
       netLog.info('compact skipped (replicas present)', () => ({ boardId, before }));
       return { before, after: before, didCompact: false };
     }
+    // Media whose bytes this device holds can drop its inline copy in the rebuild.
+    const held = new Set<string>();
+    try {
+      const blobStore = mediaBlobStore();
+      for (const h of collectBlobHashes(board.entries())) if (await blobStore.has(h)) held.add(h);
+    } catch {
+      /* keep every inline copy */
+    }
+    if (currentBoardId !== boardId || compactHasLiveReplica()) return { before, after: before, didCompact: false };
     // Build compact doc
     const compact = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
     const cBoard = compact.getMap<Y.Map<unknown>>('shapes');
@@ -1160,7 +1247,9 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     for (const [k, v] of meta.entries()) cMeta.set(k, v);
     for (const [key, m] of board.entries()) {
       const nm = new Y.Map<unknown>();
+      const dropInline = inlineMediaHeld(m as Y.Map<unknown>, held);
       for (const [k, v] of (m as Y.Map<unknown>).entries()) {
+        if (dropInline && (k === 'src' || k === 'pages')) continue;
         if (v instanceof Y.Array) {
           const arr = new Y.Array<unknown>();
           arr.insert(0, v.toArray() as unknown[]);
@@ -1267,6 +1356,15 @@ if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__maybeAutoCompact = maybeAutoCompact;
   // Live shape count for console checks and the P2P end-to-end script.
   (window as unknown as Record<string, unknown>).__reviewShapeCount = () => board.size;
+  // Media check for the end-to-end script: refs in the doc, inline copies, bytes held here.
+  (window as unknown as Record<string, unknown>).__reviewMedia = async () => {
+    const hashes = collectBlobHashes(board.entries());
+    let inline = 0;
+    for (const m of board.values()) if (m.get('src') || m.get('pages')) inline += 1;
+    let held = 0;
+    for (const h of hashes) if (await mediaBlobStore().has(h)) held += 1;
+    return { refs: hashes.length, inline, held, docBytes: Y.encodeStateAsUpdate(doc).length };
+  };
 }
 
 export function clearShapeKeys(id: string, keys: string[]): void {

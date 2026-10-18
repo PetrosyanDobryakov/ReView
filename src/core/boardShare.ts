@@ -19,7 +19,7 @@ import {
   sniffMime,
   type BoardFileV2,
 } from './boardFileV2';
-import { collectBlobHashes, mediaBlobStore } from './mediaBlobs';
+import { collectBlobHashes, loadBlob, mediaBlobStore } from './mediaBlobs';
 
 const FILE_VERSION = 1;
 const FILE_EXT = '.review';
@@ -187,9 +187,10 @@ function safeFileName(name: string): string {
 }
 
 /**
- * Collect the blob bytes referenced by a doc update (Stage 2 v2 export).
- * Null = no media (stay on legacy v1 for max compat) or bytes missing locally
- * (v1 still carries `src`, so the legacy file stays complete in phase A).
+ * Collect the blob bytes referenced by a doc update (v2 export).
+ * Null = no media (stay on legacy v1 for max compat). Bytes this device lacks
+ * are asked from peers; whatever nobody has is left out (those shapes show a
+ * placeholder, exactly as they do on the board itself).
  */
 async function buildBoardFileV2Payload(update: Uint8Array): Promise<Map<string, Uint8Array> | null> {
   try {
@@ -201,12 +202,10 @@ async function buildBoardFileV2Payload(update: Uint8Array): Promise<Map<string, 
         shapes.entries() as unknown as Iterable<[string, { get(key: string): unknown }]>
       );
       if (!hashes.length) return null;
-      const store = mediaBlobStore();
       const out = new Map<string, Uint8Array>();
       for (const hash of hashes) {
-        const row = await store.get(hash);
-        if (!row) return null;
-        out.set(hash, row.bytes);
+        const row = await loadBlob(hash);
+        if (row) out.set(hash, row.bytes);
       }
       return out;
     } finally {

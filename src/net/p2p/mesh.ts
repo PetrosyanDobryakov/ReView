@@ -9,6 +9,12 @@
  * Updates a peer receives are relayed to its other links unless the target
  * already has a direct link to the sender (from its NEIGHBORS frame), so a
  * partial mesh (A-B-C where A and C cannot reach each other) still converges.
+ *
+ * Media bytes are not in the document: shapes carry a SHA-256, and a peer
+ * that lacks one asks its direct links for it (BLOB_WANT). Replies go out in
+ * slices only while the link's send buffer is short, so a large image never
+ * holds up live edits behind it. Blobs are not relayed; every peer prefetches
+ * the board's media, so a middle peer can serve it.
  */
 
 import * as Y from 'yjs';
@@ -20,9 +26,17 @@ import { HubConnection } from './hub';
 import {
   Frame,
   PEER_PROTO,
+  MAX_BLOB,
   Reassembler,
+  bytesToHex,
+  decodeBlobMiss,
+  decodeBlobPart,
+  decodeBlobWant,
   decodeHello,
   decodePing,
+  encodeBlobMiss,
+  encodeBlobPart,
+  encodeBlobWant,
   encodeHello,
   encodePing,
   frame,
@@ -49,16 +63,33 @@ const KNOCK_GRACE_MS = 2_000;
 /** Minimum gap between resyncs asked for because an update arrived with missing parents. */
 const PENDING_RESYNC_MS = 2_000;
 
+/** Media is sent in slices of this size... */
+const BLOB_SLICE = 64 * 1024;
+/** ...and only while less than this is waiting in the link's send buffer. */
+const BLOB_PACE_BYTES = 256 * 1024;
+/** A blob request with no reply for this long is given up (then the next peer is asked). */
+const BLOB_IDLE_MS = 15_000;
+/** Outstanding requests a peer may queue with us; extra ones are answered "miss". */
+const BLOB_SERVE_QUEUE = 256;
+
 /** Origin for awareness removals the mesh does locally; never re-broadcast. */
 const LOCAL_DROP = Symbol('mesh-drop');
 
 export type HubSpec = { url: string; source: HubSource };
+
+export type BlobBytes = { bytes: Uint8Array; mime: string };
+/** Local media lookup by SHA-256 hex, used to answer peers. */
+export type BlobSource = (hash: string) => Promise<BlobBytes | null>;
 
 export type MeshOptions = {
   iceServers: RTCIceServer[];
   appVersion: string;
   onChange: () => void;
   log?: (msg: string, data?: Record<string, unknown>) => void;
+  /** Serve media to peers from here. Without it every request gets a miss. */
+  blobs?: BlobSource;
+  /** A data channel to `peer` opened (media prefetch hooks in here). */
+  onLinkOpen?: (peer: string) => void;
   /** Transport factory. Defaults to WebRTC; tests pass an in-memory link. */
   createLink?: (peer: string, initiator: boolean, events: LinkEvents) => PeerLink;
 };
@@ -78,7 +109,24 @@ type Entry = {
   rtt: number | null;
   pingSeq: number;
   lastHeard: number;
+  /** Media requests from this peer waiting to be served, in order. */
+  serveQueue: Array<{ req: number; hash: string }>;
+  serving: boolean;
 };
+
+type BlobRequest = {
+  entry: Entry;
+  buf: Uint8Array | null;
+  got: number;
+  mime: string;
+  timer: ReturnType<typeof setTimeout> | null;
+  done: (result: BlobBytes | null) => void;
+};
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  return bytesToHex(new Uint8Array(digest));
+}
 
 const utf8 = new TextEncoder();
 const fromUtf8 = new TextDecoder();
@@ -88,6 +136,9 @@ export class Mesh {
   private readonly entries = new Map<string, Entry>();
   private msgSeq = 0;
   private lastPendingResync = 0;
+  private blobSeq = 0;
+  private readonly blobReqs = new Map<number, BlobRequest>();
+  private readonly blobFetches = new Map<string, Promise<BlobBytes | null>>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
 
@@ -198,6 +249,7 @@ export class Mesh {
       if (e.retryTimer) clearTimeout(e.retryTimer);
       e.link?.close();
     }
+    for (const r of [...this.blobReqs.values()]) r.done(null);
     this.entries.clear();
     for (const h of this.hubs.values()) h.close();
     this.hubs.clear();
@@ -222,6 +274,8 @@ export class Mesh {
         rtt: null,
         pingSeq: 0,
         lastHeard: 0,
+        serveQueue: [],
+        serving: false,
       };
       this.entries.set(peer, e);
     }
@@ -258,6 +312,7 @@ export class Mesh {
     e.link = null;
     link?.close();
     this.dropClients(e);
+    this.failBlobs(e);
     this.entries.delete(e.peer);
     this.announceNeighbors();
     if (link) this.resync(null);
@@ -359,6 +414,7 @@ export class Mesh {
     }
     this.announceNeighbors();
     this.changed();
+    try { this.opts.onLinkOpen?.(e.peer); } catch { /* listener error */ }
   }
 
   private onLinkClose(e: Entry, link: PeerLink, reason: string): void {
@@ -367,6 +423,7 @@ export class Mesh {
     e.rtt = null;
     e.neighbors.clear();
     this.dropClients(e);
+    this.failBlobs(e);
     this.opts.log?.('link closed', { peer: e.peer, reason });
     this.announceNeighbors();
     if (this.destroyed) return;
@@ -453,6 +510,22 @@ export class Mesh {
         this.changed();
         return;
       }
+      case Frame.BlobWant: {
+        const want = decodeBlobWant(body);
+        if (want) this.onBlobWant(e, want.req, want.hash);
+        return;
+      }
+      case Frame.BlobPart: {
+        const part = decodeBlobPart(body);
+        if (part) this.onBlobPart(e, part);
+        return;
+      }
+      case Frame.BlobMiss: {
+        const req = decodeBlobMiss(body);
+        const r = req === null ? null : this.blobReqs.get(req);
+        if (r && r.entry === e) r.done(null);
+        return;
+      }
       case NEIGHBORS: {
         try {
           const list = JSON.parse(fromUtf8.decode(body)) as unknown;
@@ -463,6 +536,135 @@ export class Mesh {
       default:
         return;
     }
+  }
+
+  // ---- media -------------------------------------------------------------
+
+  /** Peers with an open link, fastest first. */
+  private blobCandidates(): Entry[] {
+    return [...this.entries.values()]
+      .filter((e) => e.link?.state === 'open')
+      .sort((a, b) => (a.rtt ?? Infinity) - (b.rtt ?? Infinity));
+  }
+
+  /**
+   * Fetch media bytes by SHA-256 from direct peers, one peer at a time until
+   * one has it. Resolves null when nobody does. The bytes are hash-checked.
+   */
+  fetchBlob(hash: string): Promise<BlobBytes | null> {
+    const inflight = this.blobFetches.get(hash);
+    if (inflight) return inflight;
+    const run = async (): Promise<BlobBytes | null> => {
+      const tried = new Set<string>();
+      while (!this.destroyed) {
+        const next = this.blobCandidates().find((e) => !tried.has(e.peer));
+        if (!next) return null;
+        tried.add(next.peer);
+        const got = await this.requestBlob(next, hash);
+        if (!got) continue;
+        if ((await sha256Hex(got.bytes)) === hash) return got;
+        this.opts.log?.('blob hash mismatch', { peer: next.peer, hash });
+      }
+      return null;
+    };
+    const p = run().finally(() => this.blobFetches.delete(hash));
+    this.blobFetches.set(hash, p);
+    return p;
+  }
+
+  private requestBlob(e: Entry, hash: string): Promise<BlobBytes | null> {
+    return new Promise((resolve) => {
+      this.blobSeq = (this.blobSeq + 1) >>> 0;
+      const req = this.blobSeq;
+      const msg = encodeBlobWant(req, hash);
+      if (!msg) {
+        resolve(null);
+        return;
+      }
+      const r: BlobRequest = {
+        entry: e,
+        buf: null,
+        got: 0,
+        mime: '',
+        timer: null,
+        done: (result) => {
+          if (r.timer) clearTimeout(r.timer);
+          if (this.blobReqs.get(req) !== r) return;
+          this.blobReqs.delete(req);
+          resolve(result);
+        },
+      };
+      r.timer = setTimeout(() => r.done(null), BLOB_IDLE_MS);
+      this.blobReqs.set(req, r);
+      this.sendTo(e, msg);
+    });
+  }
+
+  private onBlobPart(e: Entry, part: { req: number; total: number; offset: number; mime: string; bytes: Uint8Array }): void {
+    const r = this.blobReqs.get(part.req);
+    if (!r || r.entry !== e) return;
+    if (!r.buf) {
+      r.buf = new Uint8Array(part.total);
+      r.mime = part.mime;
+    }
+    if (r.buf.length !== part.total) {
+      r.done(null);
+      return;
+    }
+    r.buf.set(part.bytes, part.offset);
+    r.got += part.bytes.length;
+    if (r.timer) clearTimeout(r.timer);
+    r.timer = setTimeout(() => r.done(null), BLOB_IDLE_MS);
+    if (r.got >= part.total) r.done({ bytes: r.buf, mime: r.mime });
+  }
+
+  private onBlobWant(e: Entry, req: number, hash: string): void {
+    if (!this.opts.blobs || e.serveQueue.length >= BLOB_SERVE_QUEUE) {
+      this.sendTo(e, encodeBlobMiss(req));
+      return;
+    }
+    e.serveQueue.push({ req, hash });
+    void this.serveBlobs(e);
+  }
+
+  /** Answer queued requests in order, a slice at a time, behind whatever sync traffic is waiting. */
+  private async serveBlobs(e: Entry): Promise<void> {
+    if (e.serving) return;
+    e.serving = true;
+    try {
+      while (e.serveQueue.length && !this.destroyed) {
+        const link = e.link;
+        if (!link || link.state !== 'open') return;
+        const { req, hash } = e.serveQueue.shift()!;
+        let blob: BlobBytes | null = null;
+        try {
+          blob = await this.opts.blobs!(hash);
+        } catch {
+          blob = null;
+        }
+        if (!blob || blob.bytes.length === 0 || blob.bytes.length > MAX_BLOB) {
+          this.sendTo(e, encodeBlobMiss(req));
+          continue;
+        }
+        const total = blob.bytes.length;
+        for (let offset = 0; offset < total; offset += BLOB_SLICE) {
+          while (link.state === 'open' && (link.buffered ?? 0) > BLOB_PACE_BYTES) {
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          if (e.link !== link || link.state !== 'open' || this.destroyed) return;
+          const bytes = blob.bytes.subarray(offset, offset + BLOB_SLICE);
+          this.sendTo(e, encodeBlobPart({ req, total, offset, mime: blob.mime, bytes }));
+        }
+      }
+    } finally {
+      e.serving = false;
+    }
+  }
+
+  /** A link went away: its pending requests fail over to the next peer, its queue is dropped. */
+  private failBlobs(e: Entry): void {
+    e.serveQueue = [];
+    for (const r of [...this.blobReqs.values()]) if (r.entry === e) r.done(null);
   }
 
   /** Remember which awareness clients arrived over this link (header-only parse). */

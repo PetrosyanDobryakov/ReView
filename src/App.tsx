@@ -408,7 +408,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           setError(t(locale, 'docFailed'));
           return;
         }
-        live.addDocument(pages, ratio, pos, pageId);
+        void live.addDocument(pages, ratio, pos, pageId);
         if (truncated) setError(t(locale, 'docTruncated'));
       })
       .catch(() => {

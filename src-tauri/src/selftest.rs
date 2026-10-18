@@ -67,6 +67,15 @@ const PROBE: &str = r#"
     out.boardListed = list.some((b) => b.id === 'selftest' && b.meta && b.meta.name === 'selftest');
     await ipc.invoke('board_delete', { id: 'selftest' });
   } catch (e) { out.boardError = String(e); }
+  try {
+    const bytes = new Uint8Array([5, 6, 7]);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    const hash = Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+    await ipc.invoke('blob_save', bytes, { headers: { 'x-blob-hash': hash, 'x-blob-mime': 'image/png' } });
+    const raw = new Uint8Array(await ipc.invoke('blob_load', { hash }));
+    const nl = raw.indexOf(10);
+    out.blobFile = new TextDecoder().decode(raw.subarray(0, nl)) + '|' + Array.from(raw.subarray(nl + 1)).join(',');
+  } catch (e) { out.blobError = String(e); }
   out.mesh = typeof window.reviewP2p === 'function';
   const board = __BOARD__;
   if (board) {
@@ -137,6 +146,7 @@ pub fn selftest_report<R: Runtime>(app: AppHandle<R>, report: String) {
         && v["lanService"] == "review-host"
         && v["boardFile"] == "1,2,3,4"
         && v["boardListed"] == true
+        && v["blobFile"] == "image/png|5,6,7"
         && v["mesh"] == true
         && (std::env::var("REVIEW_SELFTEST_BOARD").is_err()
           || (v["shapesFromPeer"].as_u64().unwrap_or(0) > 0 && v["boardFileBytes"].as_u64().unwrap_or(0) > 100))

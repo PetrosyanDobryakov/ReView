@@ -1,10 +1,12 @@
 /**
  * P2P mesh against a real review-host, with in-memory links instead of WebRTC.
  * Covers: wire framing, hub introductions, Yjs + awareness sync, chunked big
- * updates, relay through a middle peer, and that the hub keeps no state.
+ * updates, relay through a middle peer, that the hub keeps no state, and
+ * media fetched by hash from peers (paced behind live edits, hash-checked).
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as Y from 'yjs';
@@ -67,6 +69,7 @@ function linkNet(blocked = new Set(), lossy = new Set()) {
       path: 'lan',
       bytesIn: 0,
       bytesOut: 0,
+      buffered: 0,
       other: null,
       send(data) {
         if (this.state !== 'open' || !this.other) return false;
@@ -75,7 +78,9 @@ function linkNet(blocked = new Set(), lossy = new Set()) {
         if (lossy.has(`${self}>${peer}`)) return true;
         const other = this.other;
         const copy = data.slice();
+        this.buffered += copy.length;
         setTimeout(() => {
+          this.buffered -= copy.length;
           if (other.state !== 'open') return;
           other.bytesIn += copy.length;
           other.ev.message(copy);
@@ -138,7 +143,7 @@ const health = async () => {
 };
 
 const meshes = [];
-function peer(id, net, room) {
+function peer(id, net, room, blobs = null) {
   const doc = new Y.Doc();
   const awareness = new Awareness(doc);
   const mesh = new Mesh(doc, awareness, room, id, {
@@ -146,6 +151,7 @@ function peer(id, net, room) {
     appVersion: 'test',
     onChange: () => {},
     createLink: net(id),
+    blobs: blobs ? async (hash) => blobs.get(hash) ?? null : undefined,
   });
   mesh.setHubs([{ url: hub, source: 'self' }]);
   meshes.push({ mesh, doc, awareness });
@@ -240,6 +246,47 @@ try {
     b.doc.getArray('order').push(['fromB']);
     await waitFor(() => a.doc.getArray('order').toArray().join() === 'fromC,fromB', 'B -> A after repair');
     console.log('p2p-test: lost edit on a dying link repaired by survivors');
+  }
+  // Media by hash: fetched from whichever peer has it, paced so a live edit
+  // overtakes a big transfer, and bytes that do not match the hash are refused.
+  {
+    const sha = (b) => createHash('sha256').update(b).digest('hex');
+    const big = new Uint8Array(randomBytes(2_000_000));
+    const bigHash = sha(big);
+    const net = linkNet();
+    const a = peer('peer-aaaa', net, 'review-p2ptest5', new Map([[bigHash, { bytes: big, mime: 'image/png' }]]));
+    // C claims to have it but serves garbage.
+    const c = peer('peer-cccc', net, 'review-p2ptest5', new Map([[bigHash, { bytes: new Uint8Array(1000), mime: 'image/png' }]]));
+    const b = peer('peer-bbbb', net, 'review-p2ptest5');
+    await waitFor(() => [a, b, c].every((p) => p.mesh.openLinks() === 2), 'full mesh');
+    let blobDone = 0;
+    let editSeen = 0;
+    b.doc.getMap('shapes').observe(() => { if (!editSeen) editSeen = performance.now(); });
+    const fetched = b.mesh.fetchBlob(bigHash).then((r) => { blobDone = performance.now(); return r; });
+    await new Promise((r) => setTimeout(r, 30));
+    a.doc.getMap('shapes').set('during', 1);
+    const got = await fetched;
+    assert.ok(got, 'blob fetched');
+    assert.equal(got.mime, 'image/png');
+    assert.equal(sha(got.bytes), bigHash, 'bytes match the hash (the liar was skipped)');
+    assert.ok(editSeen && editSeen < blobDone, 'live edit was not stuck behind the 2 MB transfer');
+    assert.equal(await b.mesh.fetchBlob(sha(new Uint8Array([1, 2, 3]))), null, 'nobody has it');
+    assert.equal(await b.mesh.fetchBlob('not-a-hash'), null);
+    // Concurrent asks for one hash share a single transfer.
+    const before = a.mesh.snapshot().peers.reduce((n, x) => n + x.bytesOut, 0);
+    const [r1, r2] = await Promise.all([b.mesh.fetchBlob(bigHash), b.mesh.fetchBlob(bigHash)]);
+    assert.equal(r1, r2);
+    const sentByA = a.mesh.snapshot().peers.reduce((n, x) => n + x.bytesOut, 0) - before;
+    assert.ok(sentByA < big.length * 1.5, `one transfer for two asks (${sentByA} bytes)`);
+    // A peer leaving mid-transfer: the request fails over instead of hanging.
+    const d = peer('peer-dddd', net, 'review-p2ptest5');
+    await waitFor(() => d.mesh.openLinks() === 3, 'D joined');
+    const pending = d.mesh.fetchBlob(bigHash);
+    await new Promise((r) => setTimeout(r, 15));
+    a.mesh.destroy();
+    const after = await pending;
+    assert.ok(after === null || sha(after.bytes) === bigHash, 'no wrong bytes after failover');
+    console.log('p2p-test: media fetched by hash, paced behind edits, liar refused');
   }
   console.log('p2p-test: OK');
 } finally {

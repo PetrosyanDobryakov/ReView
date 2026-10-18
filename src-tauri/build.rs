@@ -8,6 +8,8 @@ const COMMANDS: &[&str] = &[
   "board_list",
   "board_delete",
   "open_boards_folder",
+  "blob_save",
+  "blob_load",
   "selftest_report",
   "rtc_create",
   "rtc_create_data_channel",
