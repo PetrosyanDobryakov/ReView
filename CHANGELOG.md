@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.6
+
+### New Home page, rest stays main's UI
+- **Home is the redesigned single calm column** (from dev-warexpor `65346d4`, `0b7793d`, `440bf7b`), with the procedural, name-aware board thumbnails (`BoardGlyph`). Only Home is ported: board chrome, toolbar, settings and icons stay main's.
+- Keeps the desktop fixes on the new Home footer: boards-as-files text in the app, no "download desktop" link inside it, and in a browser the link opens the P2P desktop releases.
+
 ## 1.0.5
 
 ### Back to main's UI
