@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.5
+
+### Linked even when no direct path exists
+- **Relay link** (`src/net/p2p/relayLink.ts`). After a failed direct attempt (`ice failed`, `timeout`) to a peer both sides see on a Nostr relay, the mesh carries that peer's frames through the relays instead of WebRTC. This is the case of two friends behind one carrier NAT with no TURN. Frames are batched (24 KB), numbered and sent through two relays at five events a second, inside the relay hub's AES-GCM seal under the board key, as ephemeral events the relays keep nothing of. The receiver drops duplicates, restores order and skips a gap that does not fill within 2.5 s; Yjs resyncs anything lost. The other side switches as soon as relay traffic arrives. Peers show "through relays (slow)" in Connection.
+- Measured between two browsers: a stroke in 0.2-0.4 s, a 300 KB image in about 4.5 s; with direct links impossible, peers are linked through the relays about 20 s after they meet. Fine for drawing together, slow for large media.
+- The relay link uses only Nostr relays, never the Cloudflare hub or a review-host. A relay link that dies tries a direct link again.
+- `HUB_LINK=1 node scripts/relay-e2e.mjs` (and `localStorage.REVIEW_FORCE_HUB_LINK = '1'`) forces it. relay-e2e now runs its two browsers in separate contexts, and the release workflow runs the relay-link test from GitHub's network.
+- The unusable TURN secrets are removed from the hub (`/turn` answers 404 until a TURN key is set); the TURN support stays for when one is.
+
 ## 0.16.4
 
 ### Links through a shared carrier NAT

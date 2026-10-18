@@ -61,7 +61,10 @@ try {
   assert.equal((await fetch(`${base}/signal/review-x?peer=peer-a1`)).status, 426);
   // /turn: 404 without a TURN key (local wrangler dev), else short-lived Cloudflare TURN credentials.
   const turn = await fetch(`${base}/turn`);
-  if (process.env.CF_HUB_URL) {
+  if (process.env.CF_HUB_URL && turn.status === 404) {
+    console.log('cf-hub-test: live hub has no TURN key (secrets TURN_KEY_ID / TURN_KEY_TOKEN unset)');
+    await turn.body?.cancel();
+  } else if (process.env.CF_HUB_URL) {
     assert.equal(turn.status, 200, 'live hub mints TURN credentials');
     const j = await turn.json();
     const urls = j.iceServers.flatMap((s) => [].concat(s.urls));

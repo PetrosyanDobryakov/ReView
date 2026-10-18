@@ -23,6 +23,8 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { openHub, type SignalHub } from './hub';
+import { NOSTR_SCHEME } from './nostrHub';
+import { isRelayMsg, RelayLink, type RelayMsg } from './relayLink';
 import {
   Frame,
   PEER_PROTO,
@@ -59,6 +61,10 @@ const NEIGHBORS = 0x07;
  * discover each other at the same moment).
  */
 const KNOCK_GRACE_MS = 2_000;
+/** Direct (WebRTC) failures before a peer is linked through the Nostr relays instead. */
+const RELAY_AFTER_FAILS = 1;
+/** Relays that carry one link's frames (duplicates are dropped on arrival). */
+const RELAY_FANOUT = 2;
 
 /** Minimum gap between resyncs asked for because an update arrived with missing parents. */
 const PENDING_RESYNC_MS = 2_000;
@@ -121,7 +127,14 @@ type Entry = {
   serving: boolean;
   lastError: string | null;
   lastIce: { local: string[]; remote: string[] } | null;
+  /** Direct links that failed in a row; at RELAY_AFTER_FAILS the peer goes through relays. */
+  directFails: number;
+  relayed: boolean;
 };
+
+function forceHubLink(): boolean {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('REVIEW_FORCE_HUB_LINK') === '1'; } catch { return false; }
+}
 
 type BlobRequest = {
   entry: Entry;
@@ -289,6 +302,8 @@ export class Mesh {
         serving: false,
         lastError: null,
         lastIce: null,
+        directFails: 0,
+        relayed: forceHubLink(),
       };
       this.entries.set(peer, e);
     }
@@ -345,9 +360,9 @@ export class Mesh {
     e.reasm.clear();
     const link: PeerLink = this.newLink(e, initiator);
     e.link = link;
-    this.opts.log?.('link start', { peer: e.peer, initiator, attempt: e.attempts });
+    this.opts.log?.('link start', { peer: e.peer, initiator, attempt: e.attempts, relayed: e.relayed });
     // The initiator may be in a retry backoff; ask it to offer now.
-    if (!initiator) this.sendSignal(e, { kind: 'knock' });
+    if (!initiator && !e.relayed) this.sendSignal(e, { kind: 'knock' });
   }
 
   private onSignal(hub: string, from: string, data: unknown): void {
@@ -357,6 +372,20 @@ export class Mesh {
     const kind = data && typeof data === 'object' ? (data as { kind?: unknown }).kind : null;
     if (kind === 'turn') {
       this.opts.turn?.adopt((data as { grant?: unknown }).grant);
+      return;
+    }
+    if (isRelayMsg(data)) {
+      if (!(e.link instanceof RelayLink)) {
+        if (data.kind === 'relay-bye') return;
+        // The peer gave up on a direct path: meet it on the relays.
+        const old = e.link;
+        e.link = null;
+        old?.close();
+        if (e.retryTimer) { clearTimeout(e.retryTimer); e.retryTimer = null; }
+        e.relayed = true;
+        this.ensureLink(e);
+      }
+      e.link?.signal(data);
       return;
     }
     if (kind === 'knock') {
@@ -408,9 +437,11 @@ export class Mesh {
       close: (reason) => this.onLinkClose(e, link, reason),
       signal: (data) => this.sendSignal(e, data),
     };
-    const link: PeerLink = this.opts.createLink
-      ? this.opts.createLink(e.peer, initiator, events)
-      : new WebRtcLink(e.peer, initiator, this.opts.iceServers(), events);
+    const link: PeerLink = e.relayed
+      ? new RelayLink(e.peer, (msg) => this.sendRelay(e, msg), events)
+      : this.opts.createLink
+        ? this.opts.createLink(e.peer, initiator, events)
+        : new WebRtcLink(e.peer, initiator, this.opts.iceServers(), events);
     return link;
   }
 
@@ -418,6 +449,22 @@ export class Mesh {
     const ordered = [...e.hubs].map((u) => this.hubs.get(u)).filter((h): h is SignalHub => !!h);
     ordered.sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open'));
     for (const h of ordered) if (h.send(e.peer, data)) return;
+  }
+
+  /** Relay-link traffic goes only through Nostr relays, never through a hub of ours. */
+  private sendRelay(e: Entry, msg: RelayMsg): boolean {
+    let sent = 0;
+    for (const url of e.hubs) {
+      if (!url.startsWith(NOSTR_SCHEME)) continue;
+      const h = this.hubs.get(url);
+      if (h?.state === 'open' && h.send(e.peer, msg)) sent += 1;
+      if (sent >= RELAY_FANOUT) break;
+    }
+    return sent > 0;
+  }
+
+  private hasRelayHub(e: Entry): boolean {
+    return [...e.hubs].some((u) => u.startsWith(NOSTR_SCHEME) && this.hubs.get(u)?.state === 'open');
   }
 
   private onLinkOpen(e: Entry, link: PeerLink): void {
@@ -444,6 +491,16 @@ export class Mesh {
     e.link = null;
     e.lastError = reason;
     if (link.iceLocal) e.lastIce = iceOf(link);
+    if (link instanceof RelayLink) {
+      // Relays did not work either: try direct again next time.
+      if (link.state === 'failed') { e.relayed = forceHubLink(); e.directFails = 0; }
+    } else if (/ice failed|timeout|disconnected/.test(reason)) {
+      e.directFails += 1;
+      if (e.directFails >= RELAY_AFTER_FAILS && this.hasRelayHub(e)) {
+        e.relayed = true;
+        this.opts.log?.('link via relays', { peer: e.peer, after: reason });
+      }
+    }
     e.rtt = null;
     e.neighbors.clear();
     this.dropClients(e);

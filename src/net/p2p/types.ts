@@ -25,9 +25,10 @@ export type LinkState = 'connecting' | 'open' | 'failed' | 'closed';
 /**
  * How the bytes travel once a link is open, from the selected ICE pair:
  * `lan` = host candidates (same network), `direct` = through NAT via STUN,
- * `relay` = through a TURN server the user configured, `unknown` = stats not read yet.
+ * `relay` = through a TURN server, `hub` = frames carried through Nostr relays
+ * (no WebRTC path at all), `unknown` = stats not read yet.
  */
-export type LinkPath = 'lan' | 'direct' | 'relay' | 'unknown';
+export type LinkPath = 'lan' | 'direct' | 'relay' | 'hub' | 'unknown';
 
 export type PeerInfo = {
   /** Mesh peer id (one per tab). */

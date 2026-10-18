@@ -56,6 +56,7 @@ const PATH_KEY: Record<PeerInfo['path'], MessageKey | null> = {
   lan: 'p2pPathLan',
   direct: 'p2pPathDirect',
   relay: 'p2pPathRelay',
+  hub: 'p2pPathHub',
   unknown: null,
 };
 
