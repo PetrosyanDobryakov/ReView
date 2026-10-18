@@ -8,6 +8,8 @@
  *
  *   npm run build && node scripts/p2p-e2e.mjs
  *   E2E_HUB=cloudflare node scripts/p2p-e2e.mjs   (hub = cloudflare/worker.ts under wrangler dev)
+ *   E2E_HUB=cloudflare CF_HUB_URL=https://review-hub.<sub>.workers.dev node scripts/p2p-e2e.mjs
+ *     (hub = the deployed Worker; "killing" it cuts the browsers' hub sockets)
  *
  * Needs Playwright (local or global install) and a Chromium.
  */
@@ -74,14 +76,27 @@ let hubBase;
 let hashHint = '';
 let killHub;
 let stopHub;
+// A live hub (CF_HUB_URL) cannot be killed, so every browser context routes
+// its hub sockets through Playwright and `killHub` cuts them all instead.
+let liveHub = null;
 if (onCloudflare) {
-  const { startCfDev } = await import('./cf-dev.mjs');
-  const cf = await startCfDev({ hubName: 'cf-e2e' });
+  const { hubTarget } = await import('./cf-dev.mjs');
+  const cf = await hubTarget({ hubName: 'cf-e2e' });
   hubBase = cf.base;
   hashHint = `#hub=${encodeURIComponent(cf.hub)}`;
   const ui = await staticServer(path.join(root, 'dist'));
   base = ui.base;
-  killHub = () => cf.kill('SIGKILL');
+  if (cf.live) {
+    console.log(`p2p-e2e: live hub ${cf.base} (${cf.name})`);
+    liveHub = { prefix: cf.hub, dead: false, routes: new Set() };
+    killHub = () => {
+      liveHub.dead = true;
+      for (const r of liveHub.routes) r.close({ code: 1001, reason: 'hub killed by test' }).catch(() => {});
+      liveHub.routes.clear();
+    };
+  } else {
+    killHub = () => cf.kill('SIGKILL');
+  }
   stopHub = () => { cf.stop(); ui.close(); };
 } else {
   execFileSync('cargo', ['build', '--manifest-path', path.join(root, 'rust', 'Cargo.toml'), '-p', 'review-host'], {
@@ -115,6 +130,18 @@ async function hubPeers(room) {
 const { chromium } = await loadPlaywright();
 const launchOpts = existsSync('/opt/pw-browsers/chromium') ? {} : {};
 const browser = await chromium.launch(launchOpts);
+async function newContext(opts) {
+  const ctx = await browser.newContext(opts);
+  if (liveHub) {
+    await ctx.routeWebSocket((url) => url.href.startsWith(liveHub.prefix), (ws) => {
+      if (liveHub.dead) return void ws.close({ code: 1001, reason: 'hub killed by test' });
+      ws.connectToServer();
+      liveHub.routes.add(ws);
+      ws.onClose(() => liveHub.routes.delete(ws));
+    });
+  }
+  return ctx;
+}
 const consoleLog = [];
 try {
   await waitFor(async () => {
@@ -128,8 +155,8 @@ try {
 
   const board = `e2e${Date.now().toString(36)}`;
   const t0 = Date.now();
-  const ctxA = await browser.newContext({ viewport: { width: 1100, height: 760 } });
-  const ctxB = await browser.newContext({ viewport: { width: 1100, height: 760 } });
+  const ctxA = await newContext({ viewport: { width: 1100, height: 760 } });
+  const ctxB = await newContext({ viewport: { width: 1100, height: 760 } });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
   for (const [name, page] of [['A', a], ['B', b]]) {
@@ -211,7 +238,7 @@ try {
     const live = await (await fetch(`${base}/health`)).json();
     if (live.rooms !== 1 || live.peers !== 2) fail(`expected 1 room / 2 peers, got ${JSON.stringify(live)}`);
   }
-  const ctxC = await browser.newContext();
+  const ctxC = await newContext();
   const c = await ctxC.newPage();
   await c.goto(`${base}/board/${board}?netDebug=1${hashHint}`);
   await waitFor(async () => (await hubPeers(room)) === 3, 10_000, 'C on hub');
@@ -222,7 +249,8 @@ try {
 
   // 5. Kill the hub. Open links keep working: board data never used it.
   killHub();
-  await new Promise((r) => setTimeout(r, 1_500));
+  const hubOpen = (page) => page.evaluate(() => window.reviewP2p().hubs.some((h) => h.state === 'open'));
+  await waitFor(async () => !(await hubOpen(a)) && !(await hubOpen(b)), 10_000, 'both tabs lost the hub');
   const third = await draw(b);
   await waitFor(async () => (await shapes(a)) === third, 10_000, 'B -> A with the hub dead');
   console.log(`p2p-e2e: hub killed, B -> A still synced (${third} shapes)`);
