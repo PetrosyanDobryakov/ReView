@@ -59,6 +59,8 @@ export interface AppPrefs {
   p2pLanDiscovery: boolean;
   /** Also meet peers through public Nostr relays (sealed handshakes only). */
   p2pRelays: boolean;
+  /** Fall back to Cloudflare TURN (from the hub) when a direct link fails. */
+  p2pTurn: boolean;
   /** Custom toolbelt order per strip group + More shelf. null = defaults. */
   toolbarOrder: { nav: ToolId[]; create: ToolId[]; more?: ToolId[] } | null;
 }
@@ -82,6 +84,7 @@ const DEFAULTS: AppPrefs = {
   p2pIce: null,
   p2pLanDiscovery: true,
   p2pRelays: true,
+  p2pTurn: true,
   toolbarOrder: null,
 };
 
@@ -198,6 +201,7 @@ function parsePrefs(raw: unknown): AppPrefs {
     p2pLanDiscovery:
       typeof parsed.p2pLanDiscovery === 'boolean' ? parsed.p2pLanDiscovery : DEFAULTS.p2pLanDiscovery,
     p2pRelays: typeof parsed.p2pRelays === 'boolean' ? parsed.p2pRelays : DEFAULTS.p2pRelays,
+    p2pTurn: typeof parsed.p2pTurn === 'boolean' ? parsed.p2pTurn : DEFAULTS.p2pTurn,
     toolbarOrder: Object.prototype.hasOwnProperty.call(parsed, 'toolbarOrder')
       ? normalizeToolbarOrder(parsed.toolbarOrder)
       : DEFAULTS.toolbarOrder,

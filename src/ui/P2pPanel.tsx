@@ -5,6 +5,7 @@ import { parseIceLines, readPrefs, writePrefs, type AppPrefs } from '../core/pre
 import { APP_BUILD } from '../core/version';
 import {
   checkNat,
+  currentTurn,
   type NatReport,
   DEFAULT_ICE,
   fetchLanAddresses,
@@ -118,6 +119,8 @@ export function P2pPanel({
         ua: navigator.userAgent,
         at: new Date().toISOString(),
         nat: report,
+        turn: currentTurn() ? { exp: new Date(currentTurn()!.exp).toISOString() } : null,
+        turnPref: readPrefs().p2pTurn,
         room: mesh.room,
         self: mesh.self,
         hubs: mesh.hubs.map((h) => ({ url: h.url, state: h.state, peers: h.peers, error: h.error })),
@@ -494,6 +497,19 @@ export function P2pPanel({
           onClick={() => apply({ p2pRelays: !prefs.p2pRelays })}
         >
           <span>{t(locale, 'p2pRelays')}</span>
+          <span className="switch" aria-hidden="true">
+            <span className="switch-thumb" />
+          </span>
+        </button>
+        <button
+          type="button"
+          role="switch"
+          className={`sheet-switch p2p-gap${prefs.p2pTurn ? ' on' : ''}`}
+          aria-checked={prefs.p2pTurn}
+          title={t(locale, 'p2pTurnHint')}
+          onClick={() => apply({ p2pTurn: !prefs.p2pTurn })}
+        >
+          <span>{t(locale, 'p2pTurn')}</span>
           <span className="switch" aria-hidden="true">
             <span className="switch-thumb" />
           </span>

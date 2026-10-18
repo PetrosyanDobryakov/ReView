@@ -23,6 +23,23 @@ env:
   VITE_HUBS: wss://review-hub.amicus-vamicus.workers.dev
 
 jobs:
+  # The live hub from a network that reaches workers.dev: signaling, /turn
+  # credentials, and two browsers linked only through TURN.
+  hub-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: CF_HUB_URL=https://review-hub.amicus-vamicus.workers.dev npm run test:cf
+      - run: npm run build
+      - run: TURN_ONLY=1 node scripts/relay-e2e.mjs
+
   build:
     strategy:
       fail-fast: false

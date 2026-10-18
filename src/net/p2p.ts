@@ -18,6 +18,7 @@ import { clampConfettiPower, parsePeerConfetti, type PeerConfettiBurst } from '.
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
 import { Mesh, type BlobBytes, type BlobSource } from './p2p/mesh';
 import { captureInviteHub, iceServers, resolveHubs } from './p2p/hubs';
+import { adoptTurn, currentTurn, refreshTurn, turnEnabled, turnServers } from './p2p/turn';
 import { randomPeerId } from './p2p/protocol';
 import { webrtcAvailable } from './p2p/webrtcLink';
 import { installNativeRtc } from './p2p/nativeRtc';
@@ -129,7 +130,8 @@ class P2pClient {
     const awareness = new Awareness(doc);
     this.awareness = awareness;
     this.mesh = new Mesh(doc, awareness, boardRoomName(boardId), this.peerId, {
-      iceServers: iceServers(),
+      iceServers: () => [...iceServers(), ...turnServers()],
+      turn: { current: () => (turnEnabled() ? currentTurn() : null), adopt: adoptTurn },
       appVersion: appVersion(),
       onChange: () => {
         this.emitStatus();
@@ -165,6 +167,7 @@ class P2pClient {
     if (this.mesh !== mesh || gen !== this.hubGen) return;
     this.noHub = specs.length === 0;
     mesh.setHubs(specs);
+    void refreshTurn(specs.map((s) => s.url));
     this.emitStatus();
   }
 

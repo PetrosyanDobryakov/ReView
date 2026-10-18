@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.4
+
+### Links through a shared carrier NAT
+- **TURN fallback.** Two friends behind the same ISP's carrier NAT (both public addresses from one pool, no IPv6) found each other through the relays but every direct link ended in `ice failed`: the ISP does not route between two of its own customers' public mappings. The Cloudflare hub now serves `/turn`, short-lived Cloudflare Realtime TURN credentials (24 h, minted with a TURN key kept as Worker secrets, renewed every 6 h per isolate). The app adds them to ICE, so a link goes through `turn.cloudflare.com` only when no direct pair works; TURN forwards the DTLS-encrypted stream and cannot read the board. Settings, Connection: "Relay through TURN when a direct link fails" (on by default; off, or ICE set to LAN only, disables it).
+- **Credentials travel between peers.** A side that cannot reach the hub (networks that block `*.workers.dev`) gets them from a peer that could, over signaling. Only `turn.cloudflare.com` entries are accepted from peers.
+- Diagnostics report whether TURN credentials are held. `localStorage.REVIEW_ICE_RELAY = '1'` forces TURN-only links (testing).
+- The release workflow checks the live hub first from GitHub's network: `/turn` returns credentials, and two browsers link through TURN only (`TURN_ONLY=1 node scripts/relay-e2e.mjs`).
+
 ## 0.16.3
 
 ### Why two devices do not link
