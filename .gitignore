@@ -18,3 +18,7 @@ Thumbs.db
 # Rust host
 rust/target/
 scripts/p2p-bundle.mjs
+
+# Leftover Rust worker build output from older branches
+worker/target/
+worker/build/

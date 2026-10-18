@@ -67,3 +67,19 @@ new_sqlite_classes = ["SignalRoom"]
   }
   return { base, hub: base.replace(/^http/, 'ws'), port, child, kill, stop, output: () => output };
 }
+
+/**
+ * The hub a test should talk to. With `CF_HUB_URL` set (https:// or wss://,
+ * e.g. https://review-hub.<sub>.workers.dev) it is that deployed hub, left
+ * running; otherwise a throwaway `wrangler dev`. `live` tells tests which.
+ */
+export async function hubTarget(opts = {}) {
+  const raw = process.env.CF_HUB_URL?.trim();
+  if (!raw) return { live: false, name: opts.hubName ?? 'test-hub', ...(await startCfDev(opts)) };
+  const base = raw.replace(/\/+$/, '').replace(/^ws(s?):/, 'http$1:');
+  if (!/^https?:\/\//.test(base)) throw new Error(`CF_HUB_URL must be http(s):// or ws(s)://, got ${raw}`);
+  const health = await (await fetch(`${base}/health`)).json();
+  if (health.service !== 'review-hub') throw new Error(`${base}/health is not a review-hub: ${JSON.stringify(health)}`);
+  const noop = () => {};
+  return { live: true, name: health.name, base, hub: base.replace(/^http/, 'ws'), kill: noop, stop: noop, output: () => '' };
+}

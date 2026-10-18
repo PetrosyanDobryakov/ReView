@@ -3,13 +3,17 @@
  * workerd): same wire format as review-host, hibernation ping auto-reply,
  * reconnect replacement, binary refusal, no web UI, and that a room forgets
  * its members.
+ *
+ *   node scripts/cf-hub-test.mjs                                   (wrangler dev)
+ *   CF_HUB_URL=https://review-hub.<sub>.workers.dev node scripts/cf-hub-test.mjs
  */
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
-import { startCfDev } from './cf-dev.mjs';
+import { hubTarget } from './cf-dev.mjs';
 
-const cf = await startCfDev();
-const { base, hub } = cf;
+const cf = await hubTarget();
+const { base, hub, name } = cf;
+if (cf.live) console.log(`cf-hub-test: live hub ${base} (${name})`);
 const cleanup = () => cf.stop();
 
 /** Socket with a message queue so tests can await the next frame. */
@@ -48,7 +52,7 @@ try {
   const health = await (await fetch(`${base}/health`)).json();
   assert.equal(health.service, 'review-hub');
   assert.equal(health.proto, 1);
-  assert.equal(health.name, 'test-hub');
+  assert.equal(health.name, name);
   const root = await fetch(`${base}/board/abc`);
   assert.equal(root.status, 404, 'no web UI on the hub');
   assert.equal((await fetch(`${base}/lan`)).status, 404, 'no /lan: the hub is not a page host');
@@ -56,10 +60,10 @@ try {
   assert.equal((await fetch(`${base}/signal/review-x?peer=no`)).status, 400);
   assert.equal((await fetch(`${base}/signal/review-x?peer=peer-a1`)).status, 426);
 
-  const room = `review-cf-${Date.now()}`;
+  const room = `review-cf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const a = connect(room, 'peer-aaaa');
   const w1 = await a.next();
-  assert.deepEqual(w1, { t: 'welcome', proto: 1, peer: 'peer-aaaa', peers: [], host: 'test-hub' });
+  assert.deepEqual(w1, { t: 'welcome', proto: 1, peer: 'peer-aaaa', peers: [], host: name });
 
   const b = connect(room, 'peer-bbbb');
   assert.deepEqual((await b.next()).peers, ['peer-aaaa']);

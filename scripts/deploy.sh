@@ -17,7 +17,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-3058d81da41b02e06744d5d058570aab}"
+# Each Worker pins its account in its own wrangler.toml (hub: amicus, spa: zpro).
+# A CLOUDFLARE_ACCOUNT_ID env var would override that, so it is cleared per
+# target below unless HUB_ACCOUNT_ID / SPA_ACCOUNT_ID say otherwise.
+HUB_ACCOUNT_ID="${HUB_ACCOUNT_ID:-2f8144b0acc394459de5ca531dcfddf5}"
+SPA_ACCOUNT_ID="${SPA_ACCOUNT_ID:-3058d81da41b02e06744d5d058570aab}"
 
 TARGET="${1:-hub}"
 
@@ -36,7 +40,7 @@ esac
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "deploy: CLOUDFLARE_API_TOKEN unset — using wrangler OAuth if present"
 else
-  echo "deploy: using CLOUDFLARE_API_TOKEN (account ${CLOUDFLARE_ACCOUNT_ID})"
+  echo "deploy: using CLOUDFLARE_API_TOKEN"
 fi
 
 command -v npx >/dev/null 2>&1 || {
@@ -51,13 +55,13 @@ fi
 
 if [[ "$TARGET" == "hub" || "$TARGET" == "all" ]]; then
   echo "==> review-hub (signaling hub)"
-  npx wrangler deploy -c cloudflare/wrangler.toml
+  CLOUDFLARE_ACCOUNT_ID="$HUB_ACCOUNT_ID" npx wrangler deploy -c cloudflare/wrangler.toml
 fi
 
 if [[ "$TARGET" == "spa" || "$TARGET" == "review" || "$TARGET" == "all" ]]; then
   echo "==> review (static web UI)"
   # Root wrangler.toml [build] runs `npm run build` before upload.
-  npx wrangler deploy
+  CLOUDFLARE_ACCOUNT_ID="$SPA_ACCOUNT_ID" npx wrangler deploy
 fi
 
 echo "deploy: done"

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.2
+
+### Cloudflare hub live
+- **review-hub is deployed** on the amicus account: `wss://review-hub.amicus-vamicus.workers.dev` (`/health` reports `service: "review-hub"`).
+- **`scripts/deploy.sh` no longer leaks the zpro account into the hub deploy.** It used to export `CLOUDFLARE_ACCOUNT_ID` = zpro for every target, which overrides `account_id` in `cloudflare/wrangler.toml`. Now each target gets its own account (`HUB_ACCOUNT_ID`, default amicus; `SPA_ACCOUNT_ID`, default zpro).
+- **Tests against a live hub.** `CF_HUB_URL=https://review-hub.<sub>.workers.dev` makes `cf-hub-test` and `E2E_HUB=cloudflare` `p2p-e2e` use that deployed Worker instead of `wrangler dev`. A live hub cannot be killed, so the e2e routes the browsers' hub sockets through Playwright and cuts them; it now also checks both tabs really lost the hub before the "hub dead" sync step.
+- `playwright` is a pinned dev dependency (1.63.0), so `npm run test:e2e` works after `npm ci`.
+
 ## 1.0.1
 
 The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-desktop`) merged onto 1.0, plus media by content hash (ported from `dev-petrosyan-desktop`) carried peer to peer.

@@ -121,6 +121,8 @@ A page joins every hub it knows. A review-host on your LAN and the Cloudflare hu
 
 Test locally with `npm run test:cf` (a protocol test under `wrangler dev`) and `npm run build && E2E_HUB=cloudflare node scripts/p2p-e2e.mjs`. The e2e test serves the UI from a plain static server, and the Worker is the only hub.
 
+Against the deployed hub, set `CF_HUB_URL` (https:// or wss://): `CF_HUB_URL=https://review-hub.amicus-vamicus.workers.dev node scripts/cf-hub-test.mjs`, and the same with `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs`. The hub deploys to the amicus account (`HUB_ACCOUNT_ID` in `scripts/deploy.sh`); the static UI copy (`spa`) stays on zpro (`SPA_ACCOUNT_ID`).
+
 ## Optional static copy of the UI
 
 `bash scripts/deploy.sh spa` publishes `dist/` to the Worker `review` (Assets only, root `wrangler.toml`). A static https copy has no hub of its own, so build it with `VITE_HUBS=wss://…`, or add a `wss://` hub in the P2P panel.
