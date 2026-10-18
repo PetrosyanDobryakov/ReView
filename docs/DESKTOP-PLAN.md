@@ -70,7 +70,17 @@ Baseline 2026-10-17: аккаунт `zpro.driftman@gmail.com`; live SPA `1.0.4+1
   преф `transportSave` (default on) + тумблер в настройках (ru/en/zh). Сервер и Cloudflare
   не тронуты. Проверено: `transport-supervisor-test` зелен, весь `npm test` зелен (кроме
   `sync-test` — нет cargo), `npm run build` собирается. Прод не затронут.
-- [ ] Шаг 2б: сигналинг через DO (тип сообщений в BoardRoom) + замер % P2P + TURN по факту.
+- [x] Шаг 2б свой сигналинг для LAN (2026-10-17): релей-ядро `sync/signalRelay.mjs`
+  (точный протокол y-webrtc: subscribe/unsubscribe/publish+clients/ping-pong, лимиты,
+  чистка топиков), `scripts/signal-server.mjs` (:1235, `REVIEW_SIGNAL_PORT`, `/health`,
+  ws-ping, кап сокетов; автостарт в `npm run dev`), деривация URL в `p2pPolicy`
+  (loopback/LAN sync → свой релей, остальные → публичный список; свой-преф и
+  `VITE_P2P_SIGNALING` как были). Rust/DO-релей отложен в Шаг 2в: на этой машине нет
+  cargo/rustup/WSL — Rust-код здесь не собирается и не проверяется, только через CI/деплой.
+  Доки по :1235 в DEPLOY. Проверено: юнит + интеграция через настоящие сокеты + дымовой
+  запуск сервера — зелено; весь `npm test` зелен (кроме `sync-test` — нет cargo); сборка ок.
+  Прод и Cloudflare не тронуты.
+- [ ] Шаг 2в: сигналинг через DO (нужен тулчейн: Verstka CI или машина с cargo) + замер % P2P + TURN по факту.
 - [ ] Этап 1: файловое хранилище досок (детект `__TAURI__`, снятие лимита 32 МБ локально).
 - [ ] Этап 2: картинки как блобы по content-hash (Y.Doc хранит только ссылку) — главный рычаг веса и CF-нагрузки.
 - [ ] Этап 3: каскад транспортов LAN → P2P → Cloudflare + свой signaling (+ TURN при необходимости).
