@@ -2,7 +2,7 @@
 
 > Global (ported from `~/.cursor/AGENTS.md` → `~/.grok/AGENTS.md`): No extra global drive. Cursor defaults + pstack + project index at `~/.cursor/PROJECTS.md` (mirrored to `~/.claude/PROJECTS.md`). Old handoffs at `~/.cursor/SESSION-MEMORY.md`. Per-project truth is this file + `.cursor/rules`. WSL/UNC: do not move agent to WSL root — use `wsl`/UNC. Git: inspect `git remote -v` first; WSL only for `origin.cursor.com`, native Windows Git for `github.com` and others.
 
-Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and peer-to-peer Yjs sync over WebRTC. Self-hosted: `review-host` (Rust) serves the UI and a stateless signaling hub; the Cloudflare Worker (`cloudflare/worker.ts`) does the same on Workers + Durable Objects. No server stores or relays board data. Desktop/Android app in `src-tauri/` (Tauri 2) embeds the same host.
+Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and peer-to-peer Yjs sync over WebRTC. Self-hosted: `review-host` (Rust) serves the UI and a stateless signaling hub; an optional Cloudflare Worker (`cloudflare/`, `review-hub`) runs the same hub only (no UI) on Workers + Durable Objects. No server stores or relays board data. Desktop/Android app in `src-tauri/` (Tauri 2) embeds the same host.
 
 ## Git operations
 
@@ -12,7 +12,7 @@ Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and pee
 - Use WSL for Git only if a remote is still on `origin.cursor.com`. For `github.com`, use native Git / `gh`.
 - Check `git remote -v` before choosing the Git environment.
 - Optional GitHub `main` catch-up: `bash scripts/sync-github.sh` (pushes tip to `dev-warexpor` + `main`). Run only when Warexpor asks to FF `main`.
-- Cloudflare: `bash scripts/deploy.sh` publishes Worker `review` = UI (Assets) + signaling hub (`cloudflare/worker.ts`, one Durable Object `SignalRoom` per room, hibernating sockets, stores nothing). Same wire format as review-host; keep both in step. Doc-only / agent-notes ships usually **push tip without deploy** unless Warexpor asks to publish.
+- Cloudflare: `bash scripts/deploy.sh` (= `hub`) publishes Worker `review-hub` from `cloudflare/wrangler.toml`: signaling hub only, no UI (one Durable Object `SignalRoom` per room, hibernating sockets, stores nothing). Same wire format as review-host; keep both in step. `deploy.sh spa` publishes the optional static UI copy `review` (root `wrangler.toml`). Builds join extra hubs from `VITE_HUBS`. Doc-only / agent-notes ships usually **push tip without deploy** unless Warexpor asks to publish.
 
 ## Versioning
 
@@ -20,7 +20,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 
 1. **Every ship that changes product behavior, agent-facing ship docs (`AGENTS.md`, deploy gotchas), or ships to preview** bumps the version and adds a `CHANGELOG.md` section for that version. Do not reuse a version string already on `dev-warexpor` / live.
 2. **Patch** (`0.15.N` → `0.15.N+1`) for fixes and polish. **Minor** only when Warexpor JR asks. Do not invent majors.
-3. **After every version bump:** push `dev-warexpor` to GitHub. If the Cloudflare worker is in use, also `bash scripts/deploy.sh`. Never leave https://review.zpro-driftman.workers.dev/ ahead of `origin/dev-warexpor` as the normal state after a product ship.
+3. **After every version bump:** push `dev-warexpor` to GitHub. If the Cloudflare workers are in use, also `bash scripts/deploy.sh all`. Never leave https://review.zpro-driftman.workers.dev/ ahead of `origin/dev-warexpor` as the normal state after a product ship.
 4. **`main`:** fast-forward only when Warexpor explicitly says the tip is stable enough — not automatic on every patch.
 5. **One tip lineage:** work from latest `origin/dev-warexpor`. If two agents race the same next version, rebase and take the next free patch — do not publish duplicate `0.15.N` tips.
 6. **Verify live:** Home `v{version}+{sha}` / `node scripts/check-live-version.mjs` / `<meta name="review-build">` should match the pushed tip after deploy.
@@ -41,7 +41,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 | Hub only | `npm run server` (Rust `review-host` binary; `scripts/rust-server.mjs`) |
 | Self-host (UI + hub on :1234) | `npm run host` |
 | Run tests | `npm test` (includes `scripts/p2p-test.mjs`: mesh against a real review-host) |
-| Browser e2e | `npm run test:e2e` (two headless Chromium contexts sync over WebRTC); `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` runs it through the Worker |
+| Browser e2e | `npm run test:e2e` (two headless Chromium contexts sync over WebRTC); `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` serves the UI statically with the Worker as the only hub |
 | Cloudflare hub test | `npm run test:cf` (`cloudflare/worker.ts` under `wrangler dev`) |
 | Desktop app | `npm run desktop` / `npm run desktop:build`; e2e `xvfb-run -a node scripts/desktop-e2e.mjs` |
 | Production build | `npm run build` |
@@ -60,7 +60,7 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 
 - `localhost` and `127.0.0.1` are different origins — IndexedDB will not follow you between them. Pick one and stay there.
 - **Architecture:** board data moves only over WebRTC data channels between peers (`src/net/p2p/`: `mesh.ts` = Yjs sync + awareness + relay via neighbours, `webrtcLink.ts`, `hub.ts`, `protocol.ts` frames + 16 KiB chunks). Hubs (`rust/review-host/src/hub.rs`, and its Workers twin `cloudflare/worker.ts`) only introduce peers and forward SDP/ICE; binary frames are refused and empty rooms vanish immediately. A link survives its hub dying. Do not add any server-side board storage or data relay; that is a product rule, not an omission.
-- **Hub discovery:** the page's own origin if it is a review-host (`GET /lan` with `service: "review-host"`), else `:1234` on the same hostname (dev), the desktop shell's host (`host_info` IPC), mDNS LAN hosts from `/lan.hosts`, user hubs (`prefs.p2pHubs`), and `#hub=` invite hints. https pages cannot use `ws://` hubs except loopback (shown as blocked).
+- **Hub discovery:** the page's own origin if it is a review-host (`GET /lan` with `service: "review-host"`), else `:1234` on the same hostname (dev), the desktop shell's host (`host_info` IPC), mDNS LAN hosts from `/lan.hosts`, build-time hubs (`VITE_HUBS`, tagged built-in), user hubs (`prefs.p2pHubs`), and `#hub=` invite hints. https pages cannot use `ws://` hubs except loopback (shown as blocked).
 - **ICE:** public STUN by default (`prefs.p2pIce`, null = defaults, [] = LAN only). No TURN unless the user adds their own.
 - **Desktop:** window loads `http://127.0.0.1:<port>/` from the embedded host (not `tauri://`). IPC permissions are generated from `src-tauri/build.rs` `COMMANDS` and granted in `capabilities/default.json` for loopback origins only; adding a command means updating both. Ubuntu WebKitGTK has no WebRTC: `src/net/p2p/nativeRtc.ts` polyfills `RTCPeerConnection` over `src-tauri/src/rtc.rs` (webrtc-rs). Board files: `<app data>/boards/<id>.review` + `.json`, restored on boot when IndexedDB lacks them; compaction rewrites the file without merging the old one back.
 - **Net debug logs:** **off by default**, console only. Client: `?netDebug=1` (or `?netLog=1`), Settings → System, `localStorage.REVIEW_NET_DEBUG='1'`, or Console `reviewNetDebug(true)`. Host: `--verbose` / `REVIEW_VERBOSE=1` prints joins, leaves and frame sizes.

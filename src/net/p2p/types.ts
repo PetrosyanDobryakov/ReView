@@ -4,7 +4,7 @@
  */
 
 /** Where a hub address came from. Hubs only introduce peers; they carry no board data. */
-export type HubSource = 'self' | 'lan' | 'custom' | 'invite';
+export type HubSource = 'self' | 'lan' | 'preset' | 'custom' | 'invite';
 
 export type HubState = 'connecting' | 'open' | 'retrying' | 'blocked' | 'error';
 

@@ -35,9 +35,23 @@ export const DEFAULT_ICE: readonly string[] = [
   'stun:stun.cloudflare.com:3478',
 ];
 
+function viteEnv(): Record<string, string | undefined> {
+  return (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+}
+
 function hostPort(): string {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  return env?.VITE_HOST_PORT || '1234';
+  return viteEnv().VITE_HOST_PORT || '1234';
+}
+
+/**
+ * Hubs baked into this build (`VITE_HUBS`, comma or space separated), e.g.
+ * a Cloudflare hub everyone can reach: `VITE_HUBS=wss://review-hub.example.workers.dev`.
+ */
+export function presetHubs(): string[] {
+  return (viteEnv().VITE_HUBS ?? '')
+    .split(/[\s,]+/)
+    .map((s) => normalizeHubUrl(s))
+    .filter((u): u is string => !!u);
 }
 
 async function probe(httpBase: string): Promise<HostProbe | null> {
@@ -175,6 +189,7 @@ export async function resolveHubs(): Promise<{ specs: HubSpec[]; self: HostProbe
   if (self && prefs.p2pLanDiscovery) {
     for (const h of self.hosts) if (h.id !== self.id) add(lanHostHub(h), 'lan');
   }
+  for (const u of presetHubs()) add(u, 'preset');
   for (const u of prefs.p2pHubs) add(normalizeHubUrl(u), 'custom');
   for (const u of readInviteHubs()) add(u, 'invite');
   return { specs, self };

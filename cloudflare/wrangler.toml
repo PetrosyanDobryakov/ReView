@@ -1,0 +1,18 @@
+# Worker **review-hub**: ReView signaling hub only (no web UI, no storage).
+# Deploy: bash scripts/deploy.sh hub   (or: npx wrangler deploy -c cloudflare/wrangler.toml)
+# Then build your UI with VITE_HUBS=wss://review-hub.<account>.workers.dev
+name = "review-hub"
+account_id = "3058d81da41b02e06744d5d058570aab"
+compatibility_date = "2026-08-29"
+main = "worker.ts"
+
+[vars]
+HUB_NAME = "Cloudflare"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "SignalRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRoom"]

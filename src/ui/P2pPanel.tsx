@@ -34,6 +34,7 @@ const HUB_STATE_KEY: Record<HubInfo['state'], MessageKey> = {
 const HUB_SOURCE_KEY: Record<HubInfo['source'], MessageKey> = {
   self: 'p2pHubSelf',
   lan: 'p2pHubLan',
+  preset: 'p2pHubPreset',
   custom: 'p2pHubCustom',
   invite: 'p2pHubInvite',
 };

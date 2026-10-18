@@ -1,7 +1,7 @@
 /**
  * The Cloudflare hub (`cloudflare/worker.ts`) under `wrangler dev` (local
  * workerd): same wire format as review-host, hibernation ping auto-reply,
- * reconnect replacement, binary refusal, /lan shape, and that a room forgets
+ * reconnect replacement, binary refusal, no web UI, and that a room forgets
  * its members.
  */
 import assert from 'node:assert/strict';
@@ -45,14 +45,13 @@ function connect(room, peer) {
 }
 
 try {
-  const lan = await (await fetch(`${base}/lan`)).json();
-  assert.equal(lan.service, 'review-host');
-  assert.equal(lan.proto, 1);
-  assert.equal(lan.name, 'test-hub');
-  assert.deepEqual(lan.addresses, []);
-  assert.equal(lan.ui, true);
-  assert.equal((await fetch(`${base}/lan`)).headers.get('access-control-allow-origin'), '*');
-  assert.match(await (await fetch(`${base}/board/abc`)).text(), /ReView/, 'SPA fallback');
+  const health = await (await fetch(`${base}/health`)).json();
+  assert.equal(health.service, 'review-hub');
+  assert.equal(health.proto, 1);
+  assert.equal(health.name, 'test-hub');
+  const root = await fetch(`${base}/board/abc`);
+  assert.equal(root.status, 404, 'no web UI on the hub');
+  assert.equal((await fetch(`${base}/lan`)).status, 404, 'no /lan: the hub is not a page host');
   assert.equal((await fetch(`${base}/signal/bad%2Froom?peer=peer-a1`)).status, 400);
   assert.equal((await fetch(`${base}/signal/review-x?peer=no`)).status, 400);
   assert.equal((await fetch(`${base}/signal/review-x?peer=peer-a1`)).status, 426);

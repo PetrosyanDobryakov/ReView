@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.15.61
+
+### Cloudflare: hub only
+- The Cloudflare hub is now its own Worker, **review-hub** (`cloudflare/wrangler.toml`). It serves no web UI and no `/lan`, only `/signal/<room>` and `/health`. The UI stays self-hosted. The `review` Worker goes back to being an optional static UI copy.
+- `VITE_HUBS=wss://…` at build time bakes hubs into the UI, so every page from that build joins them. The P2P panel shows them as "built-in".
+- `scripts/deploy.sh` targets: `hub` (default), `spa`, `all`.
+- `E2E_HUB=cloudflare` e2e serves the UI from a plain static server, and the Worker is the only hub. The test's wrangler runs in its own process group, so killing the hub cannot orphan workerd.
+
 ## 0.15.60
 
 ### P2P

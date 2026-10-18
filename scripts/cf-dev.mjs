@@ -1,6 +1,6 @@
 /**
  * Boot `cloudflare/worker.ts` under `wrangler dev` (local workerd) with a
- * throwaway config: no [build] step, assets from `assetsDir`.
+ * throwaway config (hub only, like cloudflare/wrangler.toml).
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,23 +10,13 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-export async function startCfDev({ assetsDir, hubName = 'test-hub', log = false } = {}) {
+export async function startCfDev({ hubName = 'test-hub', log = false } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-cf-'));
-  if (!assetsDir) {
-    assetsDir = path.join(tmp, 'assets');
-    fs.mkdirSync(assetsDir);
-    fs.writeFileSync(path.join(assetsDir, 'index.html'), '<!doctype html><title>ReView</title>');
-  }
   fs.writeFileSync(
     path.join(tmp, 'wrangler.toml'),
     `name = "review-test"
 compatibility_date = "2026-08-29"
 main = ${JSON.stringify(path.join(root, 'cloudflare', 'worker.ts'))}
-[assets]
-directory = ${JSON.stringify(assetsDir)}
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-run_worker_first = ["/signal/*", "/lan", "/health", "/healthz"]
 [vars]
 HUB_NAME = ${JSON.stringify(hubName)}
 [[durable_objects.bindings]]
