@@ -81,6 +81,18 @@ Baseline 2026-10-17: аккаунт `zpro.driftman@gmail.com`; live SPA `1.0.4+1
   запуск сервера — зелено; весь `npm test` зелен (кроме `sync-test` — нет cargo); сборка ок.
   Прод и Cloudflare не тронуты.
 - [ ] Шаг 2в: сигналинг через DO (нужен тулчейн: Verstka CI или машина с cargo) + замер % P2P + TURN по факту.
+- [x] Showcase по-человечески (2026-10-17): `Start.bat` + `start.py` + README,
+  `boards/` (инструкция импорт/экспорт), `releases/` (заглушка под установщики, бинарники
+  только через Releases).
+- [x] Шаг 3 оболочка, начало (2026-10-17): `isDesktop()` + пути данных (`src/core/desktop.ts`,
+  в браузере деградируют в null, `desktop-test` зелен); JS-зависимости Tauri установлены;
+  `tauri.conf` (версия 1.0.0, updater-endpoint Releases, pubkey TODO); capabilities
+  (fs recursive app-scopes + dialog/opener/updater `:default` — сверено с доками);
+  Rust-плагины в Cargo/lib.rs. Rust-часть НЕ проверена сборкой (см. блокер).
+- [ ] БЛОКЕР ТУЛЧЕЙНА: на этой машине нет cargo/rustup/MSVC — `tauri build`, `npm run dev`
+  (нужен review-sync) и живой прогон P2P в браузере невозможны. Нужно: поставить Rust +
+  VS Build Tools на машину / выделить машину с тулчейном / собирать через CI. Без этого
+  первая сборка .exe невозможна; весь JS-задел выше уже проверен сборкой и тестами.
 - [ ] Этап 1: файловое хранилище досок (детект `__TAURI__`, снятие лимита 32 МБ локально).
 - [ ] Этап 2: картинки как блобы по content-hash (Y.Doc хранит только ссылку) — главный рычаг веса и CF-нагрузки.
 - [ ] Этап 3: каскад транспортов LAN → P2P → Cloudflare + свой signaling (+ TURN при необходимости).
