@@ -130,7 +130,7 @@ This is the default collab path.
 3. Friends open that `http://<lan-ip>:5173/board/<id>` link on the same network.
 4. Sync follows automatically (`ws://<same-ip>:1234`). No Sync URL paste needed.
 
-The sync server binds `0.0.0.0:1234` and exposes `GET /lan` with private IPv4 addresses so a host on `localhost` can still copy a usable invite. If phones cannot connect, allow Node through the OS firewall on private networks.
+The sync server binds `0.0.0.0:1234` and exposes `GET /lan` with private IPv4 addresses so a host on `localhost` can still copy a usable invite. If phones cannot connect, allow Node through the OS firewall on private networks. With P2P on (LAN default path), also allow the signaling relay on `0.0.0.0:1235` (`REVIEW_SIGNAL_PORT`, `GET /health`) — without it browsers fall back to the public signaling server.
 
 Do **not** expose port `1234` to the public internet unprotected. File logging (`GET`/`POST /net-log`) is off unless `REVIEW_NET_LOG=1`. `DELETE /room/<name>` (host-side compaction) is **not** a LAN API: it requires a loopback client (`127.0.0.1` / `::1`) or `REVIEW_COMPACT_TOKEN` / `REVIEW_ROOM_DELETE_TOKEN` (`X-Review-Compact-Token`, `X-Review-Room-Delete-Token`, or `Authorization: Bearer`). Unauthorized DELETE returns `403 { ok: false }`. Invalid room names return `400`. Websocket payloads are capped at 32 MB (same as `.review` export). `GET /health` reports room count, payload cap, and GC window. The Cloudflare worker allows unauthenticated DELETE only when the room has zero sockets (occupied rooms still need the secret).
 
@@ -154,6 +154,8 @@ npm run server
 ```
 
 Listens on `0.0.0.0:1234`. Rooms are per board: `review-<boardId>` (letters, digits, `.`, `_`, `-`; max 200 chars). The browser connects to `ws(s)://<same-host>:1234`. Websocket messages up to 32 MB. Empty in-memory rooms are GC'd after 5 minutes (`REVIEW_ROOM_GC_MS`). Cap live rooms with `REVIEW_MAX_ROOMS` (default 512).
+
+Next to it, the P2P signaling relay (`scripts/signal-server.mjs`, started automatically by `npm run dev`) listens on `0.0.0.0:1235` (`REVIEW_SIGNAL_PORT`). It speaks the stock y-webrtc JSON protocol, so no client changes are needed beyond the URL: on loopback/LAN sync the app prefers `ws(s)://<same-host>:1235` over the public server (see `p2pSignalingUrls`). Cap sockets with `REVIEW_SIGNAL_MAX_SOCKETS` (default 512).
 
 If the page is served over HTTPS, the client uses `wss://`. Put a reverse proxy in front of the websocket, or terminate TLS on the same host.
 

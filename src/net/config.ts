@@ -1,5 +1,10 @@
 import { readPrefs } from '../core/prefs';
-import { DEFAULT_P2P_SIGNALING, resolveP2pEnabled } from './p2pPolicy';
+import {
+  DEFAULT_P2P_SIGNALING,
+  DEFAULT_SIGNAL_PORT,
+  resolveP2pEnabled,
+  resolveSignalingUrls,
+} from './p2pPolicy';
 
 const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
 const host = typeof location !== 'undefined' ? location.hostname : 'localhost';
@@ -104,7 +109,6 @@ export function isP2pEnabled(): boolean {
 
 export function p2pSignalingUrls(): string[] {
   const custom = readPrefs().p2pSignaling;
-  if (custom) return [custom];
   const env = (typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string,string> }).env?.VITE_P2P_SIGNALING) || '';
   if (env) {
     const validated = env
@@ -115,7 +119,18 @@ export function p2pSignalingUrls(): string[] {
       .map(s => s.replace(/\/$/, ''));
     if (validated.length) return validated;
   }
-  return [...DEFAULT_P2P_SIGNALING];
+  // Own relay (scripts/signal-server.mjs) when syncing over loopback/LAN —
+  // no public signaling traffic for local lessons. Public hosts keep the
+  // public list until the Cloudflare signaling leg lands (plan Step 2c).
+  const signalPort =
+    (typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string,string> }).env?.VITE_SIGNAL_PORT) ||
+    DEFAULT_SIGNAL_PORT;
+  return resolveSignalingUrls({
+    custom,
+    syncUrl: effectiveSyncUrl(),
+    signalPort,
+    fallback: DEFAULT_P2P_SIGNALING,
+  });
 }
 
 /** Yjs room name for a board. Legacy fallback when no board is active. */
