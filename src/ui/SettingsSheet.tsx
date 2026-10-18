@@ -1003,6 +1003,15 @@ export function SettingsSheet({
             reconnectSync();
           }}
         />
+        <Toggle
+          label={t(locale, 'transportSave')}
+          hint={t(locale, 'transportSaveHint')}
+          on={prefs.transportSave}
+          disabled={!boardSession}
+          onChange={(v) => {
+            setPrefs(writePrefs({ transportSave: v }));
+          }}
+        />
         {isStaticHost() && !isSyncAvailable() && !p2pOn && (
           <p className="sd-note">
             <strong>{t(locale, 'staticMode')}</strong> {t(locale, 'staticModeHint')}
