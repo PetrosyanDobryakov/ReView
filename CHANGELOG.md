@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.16.3
+
+### Why two devices do not link
+- **Settings, Connection, Network check**: one ICE round against the STUN servers tells whether this network allows direct links (`ok`), only gives each server a different port (`symmetric`: a friend behind a similar router cannot be reached directly) or gets no STUN reply (`blocked`). Console: `reviewNat()`.
+- **Copy diagnostics** puts a JSON report on the clipboard: app version, network check, every hub's state and error, and every peer's link state, attempts, last close reason and the ICE candidate types both sides offered. Both people paste theirs to see which step fails.
+- Peer rows show why the last link closed (`ice failed`, `timeout`, ...) while it is not open.
+
 ## 0.16.2
 
 ### You pick where the app keeps things

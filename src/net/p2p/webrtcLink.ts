@@ -66,6 +66,9 @@ export class WebRtcLink implements PeerLink {
     if (initiator) void this.offer();
   }
 
+  readonly iceLocal = new Set<string>();
+  readonly iceRemote = new Set<string>();
+
   get buffered(): number {
     return (this.dc?.bufferedAmount ?? 0) + this.queuedBytes;
   }
@@ -91,6 +94,10 @@ export class WebRtcLink implements PeerLink {
       return;
     }
     if (msg.sid !== this.sid) return;
+    if (msg.kind === 'ice') {
+      const typ = /\btyp (\w+)/.exec(msg.candidate?.candidate ?? '')?.[1];
+      if (typ) this.iceRemote.add(typ);
+    }
     if (msg.kind === 'answer') {
       if (!this.initiator || !this.pc || this.remoteSet) return;
       void this.pc
@@ -133,6 +140,7 @@ export class WebRtcLink implements PeerLink {
     this.pc = pc;
     pc.onicecandidate = (ev) => {
       if (this.pc !== pc || !ev.candidate) return;
+      if (ev.candidate.type) this.iceLocal.add(ev.candidate.type);
       this.on.signal({ kind: 'ice', sid, candidate: ev.candidate.toJSON() });
     };
     pc.onconnectionstatechange = () => {
