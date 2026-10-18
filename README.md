@@ -20,7 +20,7 @@ Home is `/`. Each board lives at `/board/:id` with its own IndexedDB (`review-v1
 - Per-board IndexedDB persistence (`review-v1-<id>`)
 - Peer-to-peer sync (Yjs over WebRTC data channels) with a P2P panel that shows each link's path (LAN, direct, TURN), latency and traffic
 - Self-hosting with `review-host`: web UI, stateless signaling hub, LAN discovery (mDNS)
-- Desktop app (Tauri 2) that hosts for friends on your Wi-Fi and keeps boards as files
+- Desktop app (Electron) that hosts for friends on your Wi-Fi and keeps boards as files
 - Save and share boards as `.review` files (local import/export)
 - UI in Russian (default), English, Chinese
 - Chrome skins and board paper are separate settings

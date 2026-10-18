@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { orbitView } from '../core/orbit';
+import { perfHook } from '../core/perfHook';
 
 /**
  * Orbit deep-space backdrop under the transparent board canvas. Four parallax
@@ -733,6 +734,7 @@ export function OrbitSpace() {
       if (idleDue) fieldDirty = true;
       if (!useCache && lightDirty) fieldDirty = true;
       if (!fieldDirty && !lightDirty) return;
+      const p0 = performance.now();
 
       const z = Math.max(0.01, zoom);
       if (fieldDirty) {
@@ -759,11 +761,13 @@ export function OrbitSpace() {
         fieldDirty = false;
         lightDirty = false;
         lastField = t;
+        perfHook()?.orbit(performance.now() - p0);
         return;
       }
 
       paintCompose();
       lightDirty = false;
+      perfHook()?.orbit(performance.now() - p0);
     };
 
     const ensure = () => {

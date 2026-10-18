@@ -1,11 +1,12 @@
 # Desktop (and Android) app
 
-`src-tauri/` is a Tauri 2 app. Running it makes your computer a ReView host:
+The desktop app is Electron (`electron/`, packaged by `electron-builder.yml`). Android stays on Tauri 2 (`src-tauri/`). Running the desktop app makes your computer a ReView host:
 
-- **Embedded `review-host`** (`rust/review-host`, the same code as the standalone binary). It listens on `0.0.0.0:4455`, or the next free port up to `4475`. It serves this same web UI to friends' browsers on your network, runs the signaling hub, and advertises itself over mDNS so other ReView apps on the Wi-Fi find it.
-- **The window loads the UI from that host** (`http://127.0.0.1:<port>/`). The app and a friend's browser therefore follow the same origin rules, and `ws://` hubs on the LAN are never blocked as mixed content. Dev builds load Vite instead (`REVIEW_DESKTOP_EMBEDDED=1` forces the embedded UI).
-- **Boards are files.** Every saved board is mirrored to `<app data>/boards/<id>.review` (Yjs snapshot) plus `<id>.json` (name, team). On Linux, `<app data>` is `~/.local/share/dev.zpro.review`. The files are the durable copy. If the webview storage is lost or the port (origin) changes, boards come back from the files on launch. Closing the window first writes any pending edit. **Settings → System → Connection (P2P) → Boards folder** opens the folder. Images and other media sit next to it in `<app data>/blobs/`, one file per SHA-256.
-- **Native WebRTC where the webview has none.** Ubuntu/Debian WebKitGTK is built without WebRTC. The app then serves `RTCPeerConnection` from Rust (webrtc-rs, `src-tauri/src/rtc.rs`) through a small polyfill (`src/net/p2p/nativeRtc.ts`). It speaks standard WebRTC, so a desktop on Linux connects to Chrome, Firefox, Safari and other desktops. On Windows (WebView2), macOS (WKWebView) and Android the webview's own WebRTC is used. On Linux the app also switches WebKitGTK's own WebRTC setting on, for distro builds that have it.
+- **Embedded `review-host`** (`rust/review-host`, the same binary as the standalone host, shipped inside the app). It listens on `0.0.0.0:4455`, or the next free port up to `4475`. It serves this same web UI to friends' browsers on your network, runs the signaling hub, and advertises itself over mDNS so other ReView apps on the Wi-Fi find it.
+- **The window loads the UI from that host** (`http://127.0.0.1:<port>/`). The app and a friend's browser therefore follow the same origin rules, and `ws://` hubs on the LAN are never blocked as mixed content.
+- **Boards are files.** Every saved board is mirrored to `<app data>/boards/<id>.review` (Yjs snapshot) plus `<id>.json` (name, team). `<app data>` is `~/.local/share/dev.zpro.review` on Linux, `%APPDATA%\dev.zpro.review` on Windows, `~/Library/Application Support/dev.zpro.review` on macOS (the same folder the earlier Tauri builds used, so their boards come back). The files are the durable copy. If the page storage is lost or the port (origin) changes, boards come back from the files on launch. Closing the window first writes any pending edit. **Settings → System → Connection (P2P) → Boards folder** opens the folder. Images and other media sit next to it in `<app data>/blobs/`, one file per SHA-256.
+- **WebRTC is Chromium's own.** The app offers real LAN addresses as ICE host candidates (not mDNS `.local` names), like a native app.
+- **IPC** is one channel (`electron/preload.cjs` exposes `window.reviewDesktop.invoke`; the command table is in `electron/main.cjs`). It answers only the app's own page on `http://127.0.0.1` / `localhost`.
 
 Nothing in the app stores or forwards board data for anyone else: other people's boards reach this machine only over direct peer links.
 
@@ -13,11 +14,11 @@ Nothing in the app stores or forwards board data for anyone else: other people's
 
 ```bash
 npm ci
-npm run desktop          # tauri dev: Vite + hot reload, embedded host on :4455
-npm run desktop:build    # release bundles under src-tauri/target/release/bundle/
+npm run desktop          # builds review-host (release) and the UI, then starts Electron
+npm run desktop:build    # installers under release/ (AppImage + deb, NSIS exe, dmg by platform)
 ```
 
-Linux build dependencies: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev patchelf`. Windows and macOS need the usual [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+`node scripts/desktop.mjs --dist -- --linux deb` passes extra flags to electron-builder; `--target <rust triple>` cross-builds review-host (CI: Intel macOS on Apple runners). Only Rust and Node are needed; no system webview packages.
 
 Environment:
 
@@ -26,9 +27,10 @@ Environment:
 | `REVIEW_DESKTOP_PORT` | First port to try for the embedded host (default `4455`). |
 | `REVIEW_NAME` | Name other peers see for this host (default: hostname). |
 | `REVIEW_MDNS=0` | Do not advertise or browse the LAN. |
-| `REVIEW_DESKTOP_EMBEDDED=1` | Dev build: load the UI from the embedded host instead of Vite. |
-| `REVIEW_SELFTEST=1` | Boot, run checks inside the webview, print `REVIEW_SELFTEST {json}`, exit 0/1. |
-| `REVIEW_SELFTEST_BOARD=<id>` | With the self-test: also open that board and wait for a peer's stroke (see below). |
+| `REVIEW_DESKTOP_URL` | Load the UI from this URL instead (dev: `http://localhost:5173` with `npm run dev`). |
+| `REVIEW_DATA_DIR` | Use this folder for boards, media and the browser profile (tests). |
+| `REVIEW_PERF=1` | Frame-pacing probe: `PERF {...}` lines on stdout (`electron/perf_probe.js`). |
+| `REVIEW_CONSOLE=1` | Page console on stdout. |
 
 ## Inviting friends
 
@@ -38,17 +40,14 @@ For friends outside your network, see [DEPLOY.md](DEPLOY.md#friends-outside-your
 
 ## Security notes
 
-- IPC (board files, native WebRTC) is granted only to the app's own window on `http://127.0.0.1:*` / `http://localhost:*` (`src-tauri/capabilities/default.json`). Pages served to LAN friends get no IPC; they run in the friend's browser.
+- File IPC (boards, media) answers only the app's own page on `http://127.0.0.1:*` / `http://localhost:*`. Pages served to LAN friends run in the friend's browser and get none. The page runs sandboxed with context isolation and no Node.
+- Links to other sites open in the system browser; the window never navigates away from its host.
 - The embedded host accepts only text signaling frames, keeps nothing after a socket closes, and caps rooms and peers (see DEPLOY.md).
 - If you do not want to host for the LAN, set `REVIEW_HOST=127.0.0.1` to bind loopback only.
 
-## Verified on this repo's CI box (Linux x86_64, Ubuntu 24.04, WebKitGTK 2.52 without WebRTC)
+## Tests
 
-- `REVIEW_SELFTEST=1 xvfb-run -a src-tauri/target/debug/review-desktop` reports: native WebRTC installed, a loopback data channel delivered `ping`, the embedded host answered `/lan`, and board files round-tripped over IPC.
-- `xvfb-run -a node scripts/desktop-e2e.mjs`: the app and a headless Chromium join one board through the app's host. A stroke drawn in Chromium arrives in the app over a direct WebRTC link (Rust stack on one side, Chromium's on the other) and lands in the board file on disk.
-- `npx tauri build --bundles deb` produced the release `.deb`.
-
-Not built here: Windows, macOS, Android APK. They use the same code; Android and Apple webviews have WebRTC built in.
+`npm run test:desktop` builds the UI and review-host, starts the app on a throwaway data folder (Playwright's Electron driver) and checks WebRTC, `host_info`, board and media files over IPC, then has headless Chromium join the same board through the app's host and draw. The stroke has to arrive in the app over a direct link and land in the board file on disk. Needs a display (`xvfb-run -a` on a headless box) and a non-loopback network interface (Chromium gathers no loopback ICE candidates).
 
 ## Android
 

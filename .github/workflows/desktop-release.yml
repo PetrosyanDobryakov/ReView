@@ -4,11 +4,13 @@ name: Desktop release (P2P)
 # `p2p-desktop-v*` is pushed (tag a commit on claude/full-p2p-desktop) and
 # publishes a GitHub prerelease, never marked "latest".
 #
-# The apps are built with the Cloudflare hub baked in (VITE_HUBS), so two
-# installs anywhere on the internet meet on the same board. The hub only
-# introduces peers; board data and media go device to device over WebRTC.
+# The app is Electron (electron/, electron-builder.yml) with review-host
+# (rust/review-host) shipped beside it. Builds bake in the Cloudflare hub
+# (VITE_HUBS), so two installs anywhere on the internet meet on the same
+# board. The hub only introduces peers; board data and media go device to
+# device over WebRTC.
 #
-#   git tag p2p-desktop-v1.0.3 && git push origin p2p-desktop-v1.0.3
+#   git tag p2p-desktop-v1.0.7 && git push origin p2p-desktop-v1.0.7
 
 on:
   push:
@@ -27,23 +29,21 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            args: ''
+            host: ''
+            args: --win --x64
           - os: ubuntu-22.04
-            args: ''
+            host: ''
+            args: --linux --x64
           - os: macos-latest
-            args: '--target aarch64-apple-darwin'
+            host: ''
+            args: --mac --arm64
           - os: macos-latest
-            args: '--target x86_64-apple-darwin'
+            host: x86_64-apple-darwin
+            args: --mac --x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: Linux packages
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -52,33 +52,42 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ startsWith(matrix.os, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.host }}
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: rust -> target
 
       - run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build installers
+        shell: bash
+        run: node scripts/desktop.mjs --dist ${{ matrix.host && format('--target {0}', matrix.host) || '' }} -- ${{ matrix.args }}
+
+      - uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'ReView P2P desktop ${{ github.ref_name }}'
-          releaseCommitish: ${{ github.sha }}
+          tag_name: ${{ github.ref_name }}
+          name: 'ReView P2P desktop ${{ github.ref_name }}'
+          target_commitish: ${{ github.sha }}
           prerelease: true
-          releaseDraft: false
-          args: ${{ matrix.args }}
-          releaseBody: |
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+          body: |
             Desktop app for the peer-to-peer line (branch `claude/full-p2p-desktop`). Not the main ReView release.
 
             Boards and media go only between your devices over WebRTC. The built-in hub `wss://review-hub.amicus-vamicus.workers.dev` just introduces peers and stores nothing.
 
             **Install**
-            - Windows: `*_x64-setup.exe` (or `.msi`). Unsigned, so SmartScreen warns: More info, Run anyway.
-            - macOS: `*_aarch64.dmg` (Apple Silicon) or `*_x64.dmg` (Intel). Unsigned: after copying to Applications run `xattr -cr /Applications/ReView.app`, then open it.
-            - Linux: `.AppImage` (`chmod +x`), `.deb` or `.rpm`.
+            - Windows: `ReView-<version>-win-x64.exe`. Unsigned, so SmartScreen warns: More info, Run anyway.
+            - macOS: `*-mac-arm64.dmg` (Apple Silicon) or `*-mac-x64.dmg` (Intel). Unsigned: after copying to Applications run `xattr -cr /Applications/ReView.app`, then open it.
+            - Linux: `.AppImage` (`chmod +x`) or `.deb`.
+
+            Boards saved by the earlier (Tauri) desktop builds are picked up automatically: the app keeps using the same data folder.
 
             **Board with a friend**
             1. Both install and open the app.

@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { perfHook } from '../core/perfHook';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
@@ -534,6 +535,10 @@ export class Engine {
   /** True only when this press called `dragTool.onDown` (chrome clicks must not fire onUp). */
   private toolArmed = false;
   private panDrag = false;
+  /** Camera moved by pan / wheel since the last frame; clamp before painting. */
+  private clampPending = false;
+  /** Pointer position at the last pan step. */
+  private panLast = { x: 0, y: 0 };
   private lastStats = '';
   private dragTool: Tool;
   private offImageLoad: () => void = () => {};
@@ -3771,6 +3776,7 @@ export class Engine {
     if (e.button === 1 || e.button === 2 || e.button === 4) {
       this.panDrag = true;
       this.panStart = { x: e.clientX, y: e.clientY };
+      this.panLast = { x: e.clientX, y: e.clientY };
       this.camera.instant = true;
       this.setCursor('grabbing');
       e.preventDefault();
@@ -3936,8 +3942,11 @@ export class Engine {
       return;
     }
     if (this.panDrag) {
-      this.camera.panBy(e.movementX, e.movementY);
-      this.clampCameraToContent();
+      // Deltas from clientX, not movementX: some engines round movementX to
+      // whole CSS px, which at fractional display scales makes the pan stutter.
+      this.camera.panBy(e.clientX - this.panLast.x, e.clientY - this.panLast.y);
+      this.panLast = { x: e.clientX, y: e.clientY };
+      this.clampPending = true;
       return;
     }
     if (!this.pointerDown && !this.connecting && this.selection.size) {
@@ -4170,7 +4179,7 @@ export class Engine {
     // Wheel / trackpad scroll always zooms (pan is Space/MMB/hand only).
     const dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
     this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-dy * 0.0022));
-    this.clampCameraToContent();
+    this.clampPending = true;
     this.dirty = true;
   };
 
@@ -4942,6 +4951,12 @@ export class Engine {
       const dt = Math.min((t - this.lastT) / 1000 || 0.016, 0.05);
       this.lastT = t;
       this.frameDt = dt;
+      // Pan / wheel input can arrive many times per frame (1000 Hz mice,
+      // smooth wheels); bounding the board once per frame is enough.
+      if (this.clampPending) {
+        this.clampPending = false;
+        this.clampCameraToContent();
+      }
       this.camera.update(dt);
       this.updateConfetti(dt);
       this.orbitFx.update(dt);
@@ -4955,6 +4970,7 @@ export class Engine {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
+        perfHook()?.render(performance.now() - t0);
         if (paintPeers && typeof performance !== 'undefined') {
           notePeerRenderDt((performance.now() - t0) / 1000, {
             peersAnimating: paintPeers,

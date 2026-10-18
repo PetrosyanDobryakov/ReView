@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.0.7
+
+### Desktop app moves to Electron
+- **The desktop app is now Electron** (`electron/`, `electron-builder.yml`) instead of Tauri. WebKitGTK on Linux was the bottleneck: on NVIDIA under Wayland it either crashed (DMA-BUF renderer) or presented at about 60 fps with pan input arriving at 17-50 events a second, so panning felt like 15 fps. Chromium renders and delivers input at the display rate on every OS.
+- **Same host, same files.** The app starts the bundled `review-host` binary and loads the UI from it, exactly as before. Boards and media stay in `dev.zpro.review` under the OS data dir, so boards from the Tauri builds come back on first launch.
+- **No title bar on tiling Wayland/X11 window managers** (Hyprland, Sway, i3, niri, ...); other desktops keep their frame. No menu bar on Windows and Linux.
+- **Mouse side buttons pan the board** in the app (Chromium passes them to the page; WebKitGTK turned them into history navigation).
+- WebRTC offers real LAN addresses instead of mDNS `.local` names, so app-to-app and app-to-browser links on one network no longer depend on multicast DNS.
+- Panning clamps the camera once per frame instead of on every pointer and wheel event, and measures pan steps from `clientX/Y` (some engines round `movementX`).
+- `npm run test:desktop` drives the app with Playwright's Electron driver against a throwaway data folder. `review-host` reads `REVIEW_PORT_TRIES`.
+- Release workflow builds with electron-builder: Windows NSIS `.exe`, macOS arm64 and x64 `.dmg` (ad-hoc signed), Linux `.AppImage` and `.deb`. Android stays on Tauri.
+
 ## 1.0.6
 
 ### New Home page, rest stays main's UI

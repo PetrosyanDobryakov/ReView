@@ -1,7 +1,18 @@
 /**
- * Bridge to the Tauri desktop shell. Everything here is a no-op in a plain
- * browser so the web build never needs the desktop to exist.
+ * Bridge to the desktop shell: Electron (`electron/preload.cjs` exposes
+ * `window.reviewDesktop`) on desktop, Tauri on Android. Everything here is a
+ * no-op in a plain browser so the web build never needs the shell to exist.
  */
+
+type ElectronBridge = {
+  invoke(cmd: string, args?: unknown, headers?: Record<string, string>): Promise<unknown>;
+};
+
+function electron(): ElectronBridge | undefined {
+  return typeof window !== 'undefined'
+    ? (window as unknown as { reviewDesktop?: ElectronBridge }).reviewDesktop
+    : undefined;
+}
 
 export type LanHost = { id: string; name: string; addresses: string[]; port: number };
 
@@ -18,7 +29,7 @@ export type DesktopHostInfo = {
 };
 
 export function isDesktop(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  return typeof window !== 'undefined' && (!!electron() || '__TAURI_INTERNALS__' in window);
 }
 
 async function call<T>(
@@ -28,6 +39,8 @@ async function call<T>(
 ): Promise<T | null> {
   if (!isDesktop()) return null;
   try {
+    const shell = electron();
+    if (shell) return (await shell.invoke(cmd, args, headers)) as T;
     const { invoke } = await import('@tauri-apps/api/core');
     return await invoke<T>(cmd, args, headers ? { headers } : undefined);
   } catch (e) {
@@ -50,9 +63,9 @@ export async function saveBoardFile(id: string, metaJson: string, update: Uint8A
 }
 
 export async function loadBoardFile(id: string): Promise<Uint8Array | null> {
-  const data = await call<ArrayBuffer | number[]>('board_load', { id });
+  const data = await call<ArrayBuffer | Uint8Array | number[]>('board_load', { id });
   if (!data) return null;
-  const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data);
+  const bytes = new Uint8Array(data);
   return bytes.length ? bytes : null;
 }
 
@@ -81,9 +94,9 @@ export async function saveBlobFile(hash: string, mime: string, bytes: Uint8Array
 
 /** Media bytes from disk, or null when this device does not have them. */
 export async function loadBlobFile(hash: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
-  const data = await call<ArrayBuffer | number[]>('blob_load', { hash });
+  const data = await call<ArrayBuffer | Uint8Array | number[]>('blob_load', { hash });
   if (!data) return null;
-  const raw = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data);
+  const raw = new Uint8Array(data);
   const nl = raw.indexOf(10);
   if (nl < 0 || nl + 1 >= raw.length) return null;
   return { mime: new TextDecoder().decode(raw.subarray(0, nl)), bytes: raw.slice(nl + 1) };
