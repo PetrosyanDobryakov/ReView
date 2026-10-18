@@ -1,0 +1,88 @@
+name: Desktop release (P2P)
+
+# Desktop installers for the peer-to-peer line only. Runs when a tag
+# `p2p-desktop-v*` is pushed (tag a commit on claude/full-p2p-desktop) and
+# publishes a GitHub prerelease, never marked "latest".
+#
+# The apps are built with the Cloudflare hub baked in (VITE_HUBS), so two
+# installs anywhere on the internet meet on the same board. The hub only
+# introduces peers; board data and media go device to device over WebRTC.
+#
+#   git tag p2p-desktop-v1.0.3 && git push origin p2p-desktop-v1.0.3
+
+on:
+  push:
+    tags: ['p2p-desktop-v*']
+
+permissions:
+  contents: write
+
+env:
+  VITE_HUBS: wss://review-hub.amicus-vamicus.workers.dev
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ''
+          - os: ubuntu-22.04
+            args: ''
+          - os: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - os: macos-latest
+            args: '--target x86_64-apple-darwin'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux packages
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ startsWith(matrix.os, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ReView P2P desktop ${{ github.ref_name }}'
+          releaseCommitish: ${{ github.sha }}
+          prerelease: true
+          releaseDraft: false
+          args: ${{ matrix.args }}
+          releaseBody: |
+            Desktop app for the peer-to-peer line (branch `claude/full-p2p-desktop`). Not the main ReView release.
+
+            Boards and media go only between your devices over WebRTC. The built-in hub `wss://review-hub.amicus-vamicus.workers.dev` just introduces peers and stores nothing.
+
+            **Install**
+            - Windows: `*_x64-setup.exe` (or `.msi`). Unsigned, so SmartScreen warns: More info, Run anyway.
+            - macOS: `*_aarch64.dmg` (Apple Silicon) or `*_x64.dmg` (Intel). Unsigned: after copying to Applications run `xattr -cr /Applications/ReView.app`, then open it.
+            - Linux: `.AppImage` (`chmod +x`), `.deb` or `.rpm`.
+
+            **Board with a friend**
+            1. Both install and open the app.
+            2. One creates a board and copies its invite link from Members.
+            3. The other opens that link (or pastes the board link into the app). Both should show as linked in Settings, Connection.
+
+            Behind strict networks (CGNAT, locked-down wifi) both may sit in the room without linking; that needs a TURN server under Settings, Connection, Advanced.
