@@ -2,7 +2,7 @@
 
 > Global (ported from `~/.cursor/AGENTS.md` → `~/.grok/AGENTS.md`): No extra global drive. Cursor defaults + pstack + project index at `~/.cursor/PROJECTS.md` (mirrored to `~/.claude/PROJECTS.md`). Old handoffs at `~/.cursor/SESSION-MEMORY.md`. Per-project truth is this file + `.cursor/rules`. WSL/UNC: do not move agent to WSL root — use `wsl`/UNC. Git: inspect `git remote -v` first; WSL only for `origin.cursor.com`, native Windows Git for `github.com` and others.
 
-Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and peer-to-peer Yjs sync over WebRTC. Self-hosted: `review-host` (Rust) serves the UI and a stateless signaling hub; an optional Cloudflare Worker (`cloudflare/`, `review-hub`) runs the same hub only (no UI) on Workers + Durable Objects. No server stores or relays board data. Desktop/Android app in `src-tauri/` (Tauri 2) embeds the same host.
+Local-first infinite whiteboard built with React 19, Vite 7, TypeScript, and peer-to-peer Yjs sync over WebRTC. Self-hosted: `review-host` (Rust) serves the UI and a stateless signaling hub; an optional Cloudflare Worker (`cloudflare/`, `review-hub`) runs the same hub only (no UI) on Workers + Durable Objects. No server stores or relays board data. Desktop app in `electron/` (Electron) runs the same host binary beside it; Android stays in `src-tauri/` (Tauri 2).
 
 ## Git operations
 
@@ -43,7 +43,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 | Run tests | `npm test` (includes `scripts/p2p-test.mjs`: mesh against a real review-host) |
 | Browser e2e | `npm run test:e2e` (two headless Chromium contexts sync over WebRTC); `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` serves the UI statically with the Worker as the only hub |
 | Cloudflare hub test | `npm run test:cf` (`cloudflare/worker.ts` under `wrangler dev`) |
-| Desktop app | `npm run desktop` / `npm run desktop:build`; e2e `xvfb-run -a node scripts/desktop-e2e.mjs` |
+| Desktop app | `npm run desktop` / `npm run desktop:build` (installers in `release/`); e2e `npm run test:desktop` (needs a display) |
 | Production build | `npm run build` |
 | Preview production build | `npm run preview` |
 
@@ -63,7 +63,7 @@ The dev server starts automatically in the **dev** terminal. Vite listens on por
 - **Media:** images, videos and doc pages are blobs by SHA-256 (`src/core/blobs.ts`, `mediaBlobs.ts`); shapes carry `blob`/`thumb`/`mime`/`bytes` (`pageBlobs`/`pageThumbs` for docs), not bytes. Use `mediaUrl(v)` / `docPageUrl(v, i)` / `docPageCount(v)` from `shapes.ts` instead of reading `src`/`pages`, which only legacy shapes have. Missing bytes come from peers (`Mesh.fetchBlob`, frames 0x08-0x0a, paced, hash-checked) and every member prefetches the board's media (`store.ts`). Do not put media bytes back into the Y.Doc.
 - **Hub discovery:** the page's own origin if it is a review-host (`GET /lan` with `service: "review-host"`), else `:1234` on the same hostname (dev), the desktop shell's host (`host_info` IPC), mDNS LAN hosts from `/lan.hosts`, build-time hubs (`VITE_HUBS`, tagged built-in), user hubs (`prefs.p2pHubs`), and `#hub=` invite hints. https pages cannot use `ws://` hubs except loopback (shown as blocked).
 - **ICE:** public STUN by default (`prefs.p2pIce`, null = defaults, [] = LAN only). No TURN unless the user adds their own.
-- **Desktop:** window loads `http://127.0.0.1:<port>/` from the embedded host (not `tauri://`). IPC permissions are generated from `src-tauri/build.rs` `COMMANDS` and granted in `capabilities/default.json` for loopback origins only; adding a command means updating both. Ubuntu WebKitGTK has no WebRTC: `src/net/p2p/nativeRtc.ts` polyfills `RTCPeerConnection` over `src-tauri/src/rtc.rs` (webrtc-rs). Board files: `<app data>/boards/<id>.review` + `.json`, restored on boot when IndexedDB lacks them; compaction rewrites the file without merging the old one back. Media files: `<app data>/blobs/<ab>/<sha256>` (`<mime>\n<bytes>`, commands `blob_save` / `blob_load`).
+- **Desktop:** Electron (`electron/main.cjs`) spawns `review-host` (shipped in `resources/bin`, dev: `rust/target/{release,debug}`) and loads `http://127.0.0.1:<port>/` from it. IPC is one `review` channel (`electron/preload.cjs` → `window.reviewDesktop.invoke`), answered only for loopback page origins; `src/net/p2p/desktop.ts` falls back to Tauri `invoke` on Android. Board files: `<app data>/boards/<id>.review` + `.json` (`<app data>` = `dev.zpro.review` under the OS data dir, same as the old Tauri builds), restored on boot when IndexedDB lacks them; compaction rewrites the file without merging the old one back. Media files: `<app data>/blobs/<ab>/<sha256>` (`<mime>\n<bytes>`, commands `blob_save` / `blob_load`). Release: `p2p-desktop-v*` tag → `.github/workflows/desktop-release.yml` (electron-builder).
 - **Net debug logs:** **off by default**, console only. Client: `?netDebug=1` (or `?netLog=1`), Settings → System, `localStorage.REVIEW_NET_DEBUG='1'`, or Console `reviewNetDebug(true)`. Host: `--verbose` / `REVIEW_VERBOSE=1` prints joins, leaves and frame sizes.
 - Remote boards skip IndexedDB only when the home toggle is off and the user has not clicked Save locally.
 - UI defaults to Russian; English and Chinese are available in settings (`ru` / `en` / `zh`).

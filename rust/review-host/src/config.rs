@@ -49,7 +49,7 @@ impl Default for Config {
 
 impl Config {
     /// `REVIEW_HOST`, `REVIEW_PORT` (or legacy `REVIEW_SYNC_PORT`), `REVIEW_DIST`,
-    /// `REVIEW_MDNS=0`, `REVIEW_NAME`, `REVIEW_VERBOSE=1`, plus `--dist <dir>`,
+    /// `REVIEW_PORT_TRIES`, `REVIEW_MDNS=0`, `REVIEW_NAME`, `REVIEW_VERBOSE=1`, plus `--dist <dir>`,
     /// `--port <n>`, `--no-mdns`, `--verbose` flags.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
@@ -77,6 +77,9 @@ impl Config {
             if !n.trim().is_empty() {
                 cfg.name = n.trim().to_string();
             }
+        }
+        if let Some(n) = env::var("REVIEW_PORT_TRIES").ok().and_then(|s| s.parse().ok()) {
+            cfg.port_tries = n;
         }
         cfg.verbose = matches!(env::var("REVIEW_VERBOSE").as_deref(), Ok("1") | Ok("true"));
         let mut args = env::args().skip(1);

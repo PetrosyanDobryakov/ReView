@@ -1,0 +1,43 @@
+# Desktop installers (Electron). The UI (dist/) and the review-host binary
+# (build/bin/, built by scripts/desktop.mjs) ship as plain resources.
+appId: dev.zpro.review
+productName: ReView
+executableName: review-desktop
+copyright: Apache-2.0
+directories:
+  output: release
+  buildResources: src-tauri/icons
+files:
+  - electron/**
+  - '!electron/after-pack.cjs'
+  - package.json
+  - '!node_modules/**'
+extraResources:
+  - from: dist
+    to: dist
+  - from: build/bin
+    to: bin
+asar: true
+afterPack: electron/after-pack.cjs
+artifactName: ReView-${version}-${os}-${arch}.${ext}
+publish: null
+linux:
+  target: [AppImage, deb]
+  category: Office
+  syncDesktopName: true
+  icon: src-tauri/icons/icon.png
+  maintainer: ReView
+  synopsis: Local-first whiteboard with peer-to-peer sync
+deb:
+  depends: []
+win:
+  target: [nsis]
+  icon: src-tauri/icons/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: [dmg]
+  icon: src-tauri/icons/icon.icns
+  category: public.app-category.productivity
+  identity: null
