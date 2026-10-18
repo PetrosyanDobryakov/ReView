@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import type { LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import { parseIceLines, readPrefs, writePrefs, type AppPrefs } from '../core/prefs';
+import { APP_BUILD } from '../core/version';
 import {
+  checkNat,
+  type NatReport,
   DEFAULT_ICE,
   fetchLanAddresses,
   getBoardRoomName,
@@ -97,6 +100,48 @@ export function P2pPanel({
   const [iceError, setIceError] = useState(false);
   const boardSession = Boolean(getCurrentBoardId());
   const desktop = isDesktop();
+  const [nat, setNat] = useState<NatReport | 'checking' | null>(null);
+  const [diagCopied, setDiagCopied] = useState(false);
+  const runNat = async (): Promise<NatReport> => {
+    setNat('checking');
+    const r = await checkNat().catch((): NatReport => ({ kind: 'unknown', publicIp: null, mapped: [], stunServers: 0 }));
+    setNat(r);
+    return r;
+  };
+  const copyDiagnostics = async () => {
+    const report = nat && nat !== 'checking' ? nat : await runNat();
+    const mesh = p2pClient.getMeshSnapshot();
+    const text = JSON.stringify(
+      {
+        app: APP_BUILD,
+        desktop,
+        ua: navigator.userAgent,
+        at: new Date().toISOString(),
+        nat: report,
+        room: mesh.room,
+        self: mesh.self,
+        hubs: mesh.hubs.map((h) => ({ url: h.url, state: h.state, peers: h.peers, error: h.error })),
+        peers: mesh.peers.map((p) => ({
+          peer: p.peer.slice(0, 8),
+          state: p.state,
+          path: p.path,
+          attempts: p.attempts,
+          lastError: p.lastError,
+          ice: p.ice,
+          hubs: p.hubs,
+          app: p.app,
+        })),
+      },
+      null,
+      1,
+    );
+    if (await copy(text)) {
+      setDiagCopied(true);
+      window.setTimeout(() => setDiagCopied(false), 2000);
+    } else {
+      prompt(t(locale, 'p2pDiagCopy'), text);
+    }
+  };
   const [dataDir, setDataDir] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   useEffect(() => {
@@ -306,12 +351,35 @@ export function P2pPanel({
                       </span>
                     ) : null}
                     {p.attempts > 1 && p.state !== 'open' ? <span>#{p.attempts}</span> : null}
+                    {p.state !== 'open' && p.lastError ? <span className="p2p-warn">{p.lastError}</span> : null}
                   </span>
                 </li>
               );
             })}
           </ul>
         )}
+      </div>
+
+      <div className="lan-block">
+        <h4 className="lan-block-title">{t(locale, 'p2pNetCheck')}</h4>
+        {nat === 'checking' ? (
+          <p className="sheet-hint">{t(locale, 'p2pNatChecking')}</p>
+        ) : nat ? (
+          <p className={`sheet-hint${nat.kind === 'ok' ? '' : ' p2p-warn'}`}>
+            {t(locale, nat.kind === 'ok' ? 'p2pNatOk' : nat.kind === 'symmetric' ? 'p2pNatSymmetric' : nat.kind === 'blocked' ? 'p2pNatBlocked' : 'p2pNatUnknown')}
+            {nat.publicIp ? ` (${nat.mapped.join(', ')})` : ''}
+          </p>
+        ) : (
+          <p className="sheet-hint">{t(locale, 'p2pNetCheckHint')}</p>
+        )}
+        <div className="sheet-actions">
+          <button type="button" className="style-btn" disabled={nat === 'checking'} onClick={() => void runNat()}>
+            {t(locale, 'p2pNatRun')}
+          </button>
+          <button type="button" className="style-btn" disabled={nat === 'checking'} onClick={() => void copyDiagnostics()}>
+            {diagCopied ? t(locale, 'syncLanCopied') : t(locale, 'p2pDiagCopy')}
+          </button>
+        </div>
       </div>
 
       <div className="lan-block">

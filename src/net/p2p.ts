@@ -5,6 +5,7 @@
  * each peer's own local storage.
  */
 
+import { checkNat } from './p2p/natCheck';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { loadUser } from '../core/user';
@@ -516,6 +517,7 @@ export const p2pClient = new P2pClient();
 if (typeof window !== 'undefined') {
   // Console helper: `reviewP2p()` prints hubs, links, paths and RTT.
   (window as unknown as { reviewP2p?: () => MeshSnapshot }).reviewP2p = () => p2pClient.getMeshSnapshot();
+  (window as unknown as { reviewNat?: typeof checkNat }).reviewNat = checkNat;
 }
 
 export function attachP2p(doc: Y.Doc, boardId: string): void { p2pClient.attach(doc, boardId); }

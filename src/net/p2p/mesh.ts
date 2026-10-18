@@ -94,6 +94,10 @@ export type MeshOptions = {
   createLink?: (peer: string, initiator: boolean, events: LinkEvents) => PeerLink;
 };
 
+function iceOf(link: PeerLink): { local: string[]; remote: string[] } {
+  return { local: [...(link.iceLocal ?? [])], remote: [...(link.iceRemote ?? [])] };
+}
+
 type Entry = {
   peer: string;
   hubs: Set<string>;
@@ -112,6 +116,8 @@ type Entry = {
   /** Media requests from this peer waiting to be served, in order. */
   serveQueue: Array<{ req: number; hash: string }>;
   serving: boolean;
+  lastError: string | null;
+  lastIce: { local: string[]; remote: string[] } | null;
 };
 
 type BlobRequest = {
@@ -220,6 +226,8 @@ export class Mesh {
       clients: [...e.clients],
       hubs: [...e.hubs],
       attempts: e.attempts,
+      lastError: e.lastError,
+      ice: e.link?.iceLocal ? iceOf(e.link) : e.lastIce,
     }));
     return { room: this.room, self: this.self, enabled: true, webrtc: this.canLink(), hubs, peers };
   }
@@ -276,6 +284,8 @@ export class Mesh {
         lastHeard: 0,
         serveQueue: [],
         serving: false,
+        lastError: null,
+        lastIce: null,
       };
       this.entries.set(peer, e);
     }
@@ -402,6 +412,7 @@ export class Mesh {
   private onLinkOpen(e: Entry, link: PeerLink): void {
     if (e.link !== link) return;
     e.attempts = 0;
+    e.lastError = null;
     e.lastHeard = Date.now();
     this.opts.log?.('link open', { peer: e.peer });
     this.sendTo(e, encodeHello({ proto: PEER_PROTO, app: this.opts.appVersion }));
@@ -420,6 +431,8 @@ export class Mesh {
   private onLinkClose(e: Entry, link: PeerLink, reason: string): void {
     if (e.link !== link) return;
     e.link = null;
+    e.lastError = reason;
+    if (link.iceLocal) e.lastIce = iceOf(link);
     e.rtt = null;
     e.neighbors.clear();
     this.dropClients(e);

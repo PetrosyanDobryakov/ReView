@@ -46,6 +46,10 @@ export type PeerInfo = {
   hubs: string[];
   /** Connection attempts since the peer appeared. */
   attempts: number;
+  /** Why the last link to this peer closed (`ice failed`, `timeout`, ...), null if none did. */
+  lastError: string | null;
+  /** ICE candidate types of the current or last link: ours and the peer's. */
+  ice: { local: string[]; remote: string[] } | null;
 };
 
 export type MeshSnapshot = {
@@ -69,6 +73,9 @@ export interface PeerLink {
   readonly bytesOut: number;
   /** Bytes accepted by send() but not yet on the wire (optional; used to pace media). */
   readonly buffered?: number;
+  /** ICE candidate types seen so far (host, srflx, prflx, relay), for diagnostics. */
+  readonly iceLocal?: ReadonlySet<string>;
+  readonly iceRemote?: ReadonlySet<string>;
   /** Queue one framed message (already split to MAX_FRAME). False if the link is not open. */
   send(frame: Uint8Array): boolean;
   /** Feed a signaling payload that the hub delivered from this peer. */
