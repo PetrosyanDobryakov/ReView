@@ -52,6 +52,7 @@ export class WebRtcLink implements PeerLink {
   private remoteSet = false;
   private pendingIce: RTCIceCandidateInit[] = [];
   private queue: Uint8Array[] = [];
+  private queuedBytes = 0;
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,11 +66,16 @@ export class WebRtcLink implements PeerLink {
     if (initiator) void this.offer();
   }
 
+  get buffered(): number {
+    return (this.dc?.bufferedAmount ?? 0) + this.queuedBytes;
+  }
+
   send(frame: Uint8Array): boolean {
     const dc = this.dc;
     if (this.state !== 'open' || !dc || dc.readyState !== 'open') return false;
     if (this.queue.length || dc.bufferedAmount > HIGH_WATER) {
       this.queue.push(frame);
+      this.queuedBytes += frame.length;
       return true;
     }
     return this.write(frame);
@@ -114,6 +120,7 @@ export class WebRtcLink implements PeerLink {
     this.clearTimers();
     this.teardownPc();
     this.queue = [];
+    this.queuedBytes = 0;
     this.on.close(reason);
   }
 
@@ -227,7 +234,9 @@ export class WebRtcLink implements PeerLink {
     const dc = this.dc;
     if (!dc || dc.readyState !== 'open') return;
     while (this.queue.length && dc.bufferedAmount <= HIGH_WATER) {
-      if (!this.write(this.queue.shift()!)) return;
+      const next = this.queue.shift()!;
+      this.queuedBytes -= next.length;
+      if (!this.write(next)) return;
     }
   }
 

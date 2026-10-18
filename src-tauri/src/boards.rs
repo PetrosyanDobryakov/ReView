@@ -1,6 +1,8 @@
 //! Boards as plain files: `<app data>/boards/<id>.review` holds the Yjs
 //! snapshot, `<id>.json` the board's name and team. This is the durable copy
 //! on the desktop; the webview's IndexedDB is a cache in front of it.
+//! Media lives beside them by content hash: `<app data>/blobs/<ab>/<sha256>`
+//! holds `<mime>\n<bytes>`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +13,7 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Manager};
 
 const MAX_BOARD_BYTES: usize = 512 * 1024 * 1024;
+const MAX_BLOB_BYTES: usize = 64 * 1024 * 1024;
 
 pub fn boards_dir(app: &AppHandle) -> Result<PathBuf, String> {
   let dir = app
@@ -180,6 +183,64 @@ pub fn open_boards_folder(app: AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+fn valid_hash(hash: &str) -> bool {
+  hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn blob_path(app: &AppHandle, hash: &str) -> Result<PathBuf, String> {
+  let dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| e.to_string())?
+    .join("blobs")
+    .join(&hash[..2]);
+  fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir.join(hash))
+}
+
+/// Store media bytes under their SHA-256 (the webview checked the hash).
+#[tauri::command]
+pub fn blob_save(app: AppHandle, request: Request<'_>) -> Result<bool, String> {
+  let header = |name: &str| {
+    request
+      .headers()
+      .get(name)
+      .and_then(|v| v.to_str().ok())
+      .unwrap_or("")
+      .to_string()
+  };
+  let hash = header("x-blob-hash");
+  let mime = header("x-blob-mime");
+  if !valid_hash(&hash) || mime.len() > 100 || mime.contains('\n') {
+    return Err("bad blob".into());
+  }
+  let InvokeBody::Raw(bytes) = request.body() else {
+    return Err("expected raw bytes".into());
+  };
+  if bytes.is_empty() || bytes.len() > MAX_BLOB_BYTES {
+    return Err("bad blob size".into());
+  }
+  let path = blob_path(&app, &hash)?;
+  if path.exists() {
+    return Ok(true);
+  }
+  let mut out = Vec::with_capacity(mime.len() + 1 + bytes.len());
+  out.extend_from_slice(mime.as_bytes());
+  out.push(b'\n');
+  out.extend_from_slice(bytes);
+  write_atomic(&path, &out)?;
+  Ok(true)
+}
+
+/// `<mime>\n<bytes>`, or empty when this device does not have it.
+#[tauri::command]
+pub fn blob_load(app: AppHandle, hash: String) -> Result<Response, String> {
+  if !valid_hash(&hash) {
+    return Err("bad blob hash".into());
+  }
+  Ok(Response::new(fs::read(blob_path(&app, &hash)?).unwrap_or_default()))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -192,5 +253,8 @@ mod tests {
     assert_eq!(percent_decode("%7B%22a%22%3A1%7D"), "{\"a\":1}");
     assert_eq!(percent_decode("100%"), "100%");
     assert_eq!(percent_decode("%E2%9C%93"), "\u{2713}");
+    assert!(valid_hash(&"ab".repeat(32)));
+    assert!(!valid_hash(&"AB".repeat(32)));
+    assert!(!valid_hash("../../etc/passwd"));
   }
 }

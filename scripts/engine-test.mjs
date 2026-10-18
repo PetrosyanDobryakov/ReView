@@ -56,7 +56,15 @@ const fakeReq = {
   error: null,
   addEventListener() {},
 };
-globalThis.indexedDB = { open: () => fakeReq };
+globalThis.indexedDB = {
+  open: (name) => {
+    if (name !== 'review-blobs') return fakeReq;
+    // The media store fails fast here, so inserts fall back to inline src.
+    const req = { onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null, error: new Error('no idb') };
+    setTimeout(() => req.onerror?.(), 0);
+    return req;
+  },
+};
 
 const ctxProxy = new Proxy(
   {},
@@ -4323,6 +4331,8 @@ assert.equal(sysPasted.w, 18, 'toolbar paste prefers the system shape marker ove
 assert.ok(Math.abs(sysPasted.x + sysPasted.w / 2 - 229000) < 1, 'system-marker paste still uses pasteAt');
 if (prevClip) Object.defineProperty(nav, 'clipboard', prevClip);
 
+// Media inserts hash the bytes (async) before the shape is written.
+const settleMedia = () => new Promise((r) => setTimeout(r, 30));
 const readers = [];
 globalThis.FileReader = class {
   result = 'data:image/png;base64,aaa';
@@ -4361,6 +4371,7 @@ store.flushPendingPatches();
 assert.notEqual(store.currentPageId(), originPage, 'page switch happens before the image decodes');
 assert.equal(readers.length, 1, 'image paste starts a FileReader');
 readers[0].onload();
+await settleMedia();
 store.flushPendingPatches();
 let imgKey = null;
 for (const key of store.board.keys()) {
@@ -4731,7 +4742,7 @@ store.addPage();
 store.flushPendingPatches();
 const destPage = store.currentPageId();
 assert.notEqual(destPage, docOrigin, 'page switch happens before the document lands');
-const docId = engine.addDocument(['data:image/png;base64,xx'], 0.707, { x: 239000, y: 239000 }, docOrigin);
+const docId = await engine.addDocument(['data:image/png;base64,xx'], 0.707, { x: 239000, y: 239000 }, docOrigin);
 store.flushPendingPatches();
 assert.ok(docId, 'addDocument returns an id');
 if (docOrigin === 'main') {
@@ -5356,6 +5367,7 @@ document.createElement = (tag) => {
 };
 engine.insertImageFile(new File([new Uint8Array([1, 2, 3, 4])], 'a.webp', { type: 'image/webp' }));
 webpReaders[0].onload();
+await settleMedia();
 assert.ok(webpCalls.includes('image/png'), 'WebP import encodes as PNG so alpha is kept');
 assert.ok(!webpCalls.includes('image/jpeg'), 'WebP import does not go through JPEG');
 document.createElement = prevCreateEl;
@@ -5401,6 +5413,7 @@ document.createElement = (tag) => {
 const gifBefore = store.board.size;
 engine.insertImageFile(new File([new Uint8Array([1, 2, 3])], 'a.gif', { type: 'image/gif' }));
 gifReaders[0].onload();
+await settleMedia();
 assert.equal(store.board.size, gifBefore + 1, 'GIF import inserts an image shape');
 {
   let gifId = null;
@@ -5460,9 +5473,8 @@ document.createElement = (tag) => {
 const vidBefore = store.board.size;
 engine.insertVideoFile(new File([new Uint8Array([1, 2, 3, 4])], 'clip.mp4', { type: 'video/mp4' }));
 vidReaders[0].onload();
-// onloadedmetadata is queued microtask
-await Promise.resolve();
-await Promise.resolve();
+// onloadedmetadata is queued microtask, then the bytes are hashed
+await settleMedia();
 assert.equal(store.board.size, vidBefore + 1, 'video import inserts a shape');
 {
   let vidId = null;
@@ -5554,6 +5566,7 @@ document.createElement = (tag) => {
 const ctxFailBefore = store.board.size;
 engine.insertImageFile(new File([new Uint8Array([1])], 'fail.png', { type: 'image/png' }));
 ctxFailReaders[0].onload();
+await settleMedia();
 assert.ok(ctxFailErr, 'missing 2d context surfaces an image error');
 assert.equal(store.board.size, ctxFailBefore, 'missing 2d context does not insert an image');
 document.createElement = ctxFailPrevCE;
@@ -6293,6 +6306,7 @@ engine.destroy();
 assert.equal(cropAtDestroy, false, 'destroy cancels crop so a board switch cannot leave Apply armed');
 assert.equal(engine.alive, false, 'destroy marks the engine dead');
 staleReaders[0].onload();
+await settleMedia();
 assert.equal(store.board.size, staleDropBefore, 'image decode after destroy does not write into the next board');
 globalThis.FileReader = stalePrevFR;
 globalThis.Image = stalePrevImg;

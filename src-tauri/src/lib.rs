@@ -131,6 +131,8 @@ pub fn run() {
       boards::board_list,
       boards::board_delete,
       boards::open_boards_folder,
+      boards::blob_save,
+      boards::blob_load,
       selftest::selftest_report,
       rtc::rtc_create,
       rtc::rtc_create_data_channel,

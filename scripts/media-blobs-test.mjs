@@ -1,5 +1,6 @@
 /**
- * Unit checks for media ingest into the blob store (Stage 2, phase A).
+ * Unit checks for media in the blob store: ingest, LOD paint selection,
+ * legacy migration scan, and bytes fetched from peers when missing locally.
  * Run: node --experimental-strip-types scripts/media-blobs-test.mjs
  * (Thumbnail rendering needs DOM canvas; in Node it degrades to null.)
  */
@@ -13,8 +14,13 @@ import {
   collectLegacyMedia,
   decodeDataUrl,
   ensureBlobUrl,
+  clearBlobMisses,
   ingestDataUrlAsBlob,
+  loadBlob,
   makeThumbBytes,
+  onBlobResolved,
+  prefetchBlobs,
+  setRemoteBlobFetcher,
   releaseResolvedBlobUrl,
   resolvedBlobUrl,
   selectBlobKind,
@@ -276,6 +282,68 @@ assert.equal(selectDocPaintSrc(undefined, null, null), '');
   );
   assert.equal(found[0].srcs[0], PIXEL_PNG);
   assert.deepEqual(collectLegacyMedia([]), []);
+}
+
+// --- bytes from peers ---------------------------------------------------------
+{
+  __clearBlobResolverForTests();
+  const local = new MemoryBlobStore();
+  const remote = new MemoryBlobStore();
+  const bytes = enc.encode('peer media');
+  const hash = await hashBytes(bytes);
+  await remote.put(hash, bytes, 'image/png');
+  const missing = await hashBytes(enc.encode('nobody'));
+  let asked = 0;
+  setRemoteBlobFetcher(async (h) => {
+    asked += 1;
+    return remote.get(h);
+  });
+  try {
+    const got = await loadBlob(hash, local);
+    assert.equal(got?.mime, 'image/png');
+    assert.ok(await local.has(hash), 'peer bytes kept locally (so this device can serve them on)');
+    assert.equal(await loadBlob(missing, local), null);
+    // A peer that lies about the bytes is refused by the store's hash check.
+    const liarHash = await hashBytes(enc.encode('the real thing'));
+    setRemoteBlobFetcher(async () => ({ bytes: enc.encode('garbage'), mime: 'image/png' }));
+    await assert.rejects(loadBlob(liarHash, local));
+    assert.equal(await local.has(liarHash), false);
+    setRemoteBlobFetcher(async (h) => {
+      asked += 1;
+      return remote.get(h);
+    });
+
+    // The resolver repaints when a missing blob arrives, and a miss is retried after clearBlobMisses().
+    const late = enc.encode('arrives later');
+    const lateHash = await hashBytes(late);
+    const fresh = new MemoryBlobStore();
+    const seen = [];
+    const off = onBlobResolved((h) => seen.push(h));
+    assert.equal(await ensureBlobUrl(lateHash, fresh), null);
+    await remote.put(lateHash, late, 'image/jpeg');
+    assert.equal(await ensureBlobUrl(lateHash, fresh), null, 'negative cache holds');
+    clearBlobMisses();
+    if (typeof URL.createObjectURL === 'function') {
+      assert.ok(await ensureBlobUrl(lateHash, fresh));
+      assert.deepEqual(seen, [lateHash]);
+    }
+    off();
+
+    // Prefetch pulls what is missing, skips what is held.
+    const store = new MemoryBlobStore();
+    const have = new Set();
+    asked = 0;
+    const n = await prefetchBlobs([hash, missing, lateHash], { isCurrent: () => true, store, have });
+    assert.equal(n, 2);
+    assert.deepEqual([...have].sort(), [hash, lateHash].sort());
+    asked = 0;
+    assert.equal(await prefetchBlobs([hash, lateHash], { isCurrent: () => true, store, have }), 0);
+    assert.equal(asked, 0, 'held blobs are not asked for again');
+    assert.equal(await prefetchBlobs([missing], { isCurrent: () => false, store }), 0);
+  } finally {
+    setRemoteBlobFetcher(null);
+    __clearBlobResolverForTests();
+  }
 }
 
 console.log('media-blobs-test: ok');

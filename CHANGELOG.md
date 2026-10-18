@@ -4,7 +4,19 @@
 
 ## 1.0.1
 
-The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-desktop`) merged onto 1.0.
+The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-desktop`) merged onto 1.0, plus media by content hash (ported from `dev-petrosyan-desktop`) carried peer to peer.
+
+### Media by content hash
+- **Images, videos and document pages are no longer stored inside the board.** Their bytes go into a local blob store keyed by SHA-256 (IndexedDB `review-blobs`, plus `<app data>/blobs/` on the desktop app); the shape keeps only the hash, a 256 px thumbnail hash, mime and size. A board with a 2 MB photo is now about 1.5 KB of document, so joining, syncing and saving stay fast however many pictures it holds.
+- **Peers fetch media from each other** over the same data channel (`BLOB_WANT` / `BLOB_PART` / `BLOB_MISS`). Replies go out in 64 KB slices only while the link's send buffer is short, so live edits never wait behind a big transfer. The receiver checks the hash, so a peer cannot slip in other bytes. A peer serves only media the open board references.
+- **Everyone keeps a full copy.** With no server, media survives only on devices that hold it, so each member quietly prefetches the board's missing media in the background, as when the bytes lived inside the document.
+- Far-away media paints from the thumbnail and loads full size when zoomed in (viewport LOD). Board export (`.review` v2) carries the bytes and asks peers for any this device lacks.
+- **Older boards**: a background migration adds hashes next to the inline copies, and compaction drops an inline copy once its bytes are held locally. Shared boards keep their inline copies (compaction never runs while others hold the board).
+- Ported from `dev-petrosyan-desktop` (blob store, thumbnails, LOD, migration, `.review` v2). Its WebSocket transport supervisor and y-webrtc signaling relay are not carried over: this line has neither.
+- Tests: `blobs-test`, `media-blobs-test` (including bytes from peers), `board-file-test`; `p2p-test` fetches 2 MB by hash, checks a live edit overtakes it and that a peer serving wrong bytes is refused; `p2p-e2e` drops a 1.9 MB photo on A and checks B gets it while the doc stays small; the desktop self-test round-trips a blob file.
+
+### Settings
+- Settings → Connection keeps the 1.0 dialog and hosts the P2P panel in place of the old sync URL and signaling fields.
 
 ### Cloudflare: hub only
 - The Cloudflare hub is now its own Worker, **review-hub** (`cloudflare/wrangler.toml`). It serves no web UI and no `/lan`, only `/signal/<room>` and `/health`. The UI stays self-hosted. The `review` Worker goes back to being an optional static UI copy.
@@ -16,12 +28,6 @@ The peer-to-peer line (developed as 0.15.58 to 0.15.61 on `claude/full-p2p-deskt
 ### P2P
 - **Edits lost on a dying link are repaired.** Relay suppression trusted that a peer with a direct link to the author got each edit from it. If that link died with an edit still in flight, the edit never arrived, and later edits that built on it got stuck. Now, whenever a link closes, the remaining peers exchange state vectors and fill each other's gaps. A peer that receives an update with missing parents also asks its links for a resync (at most once per 2 s). This is the likely cause of the occasional `p2p-e2e` failure "B -> A with the hub dead": a write the third tab made on joining reached only one of the other two before it left.
 - Tests: `p2p-test` covers a lost in-flight edit. `p2p-e2e` checks that A and B agree before killing the hub, and dumps mesh state and console on failure.
-
-
-### Cloudflare hub
-- The Worker **review** now runs a signaling hub next to the web UI (`cloudflare/worker.ts`). It speaks the same wire format as review-host and gives each room its own Durable Object (`SignalRoom`). A page opened from the Worker finds the hub through `/lan` and connects over `wss://` with no setup.
-- Sockets hibernate, and the runtime answers the 20 s hub ping without waking the object, so idle rooms cost nothing. The hub refuses binary frames, writes no data (only a sweep alarm for dead sockets), and a room forgets everyone when it empties.
-- Tests: `npm run test:cf` (protocol test under `wrangler dev`) and `E2E_HUB=cloudflare node scripts/p2p-e2e.mjs` (two Chromium tabs synced through the Worker). `wrangler` and `@cloudflare/workers-types` are now dev dependencies.
 
 
 ### Fully peer-to-peer, self-hosted

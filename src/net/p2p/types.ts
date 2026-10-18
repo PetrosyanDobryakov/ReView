@@ -67,6 +67,8 @@ export interface PeerLink {
   readonly path: LinkPath;
   readonly bytesIn: number;
   readonly bytesOut: number;
+  /** Bytes accepted by send() but not yet on the wire (optional; used to pace media). */
+  readonly buffered?: number;
   /** Queue one framed message (already split to MAX_FRAME). False if the link is not open. */
   send(frame: Uint8Array): boolean;
   /** Feed a signaling payload that the hub delivered from this peer. */

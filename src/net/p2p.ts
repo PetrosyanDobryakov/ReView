@@ -15,7 +15,7 @@ import { boardRoomName, isSyncEnabled } from './config';
 import { netLog, registerNetDebugPeek } from './log';
 import { clampConfettiPower, parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
-import { Mesh } from './p2p/mesh';
+import { Mesh, type BlobBytes, type BlobSource } from './p2p/mesh';
 import { captureInviteHub, iceServers, resolveHubs } from './p2p/hubs';
 import { randomPeerId } from './p2p/protocol';
 import { webrtcAvailable } from './p2p/webrtcLink';
@@ -69,6 +69,8 @@ class P2pClient {
   private readonly peerListeners = new Set<PeerListener>();
   private readonly lifecycleListeners = new Set<LifecycleListener>();
   private readonly meshListeners = new Set<MeshListener>();
+  private readonly linkOpenListeners = new Set<(peer: string) => void>();
+  private blobSource: BlobSource | null = null;
   private offPeerDisplay: (() => void) | null = null;
   private readonly hotAwareness = new AwarenessBatch((patch) => this.applyHotAwareness(patch));
 
@@ -133,6 +135,10 @@ class P2pClient {
         this.emitMesh();
       },
       log: (msg, data) => netLog.info(`p2p ${msg}`, data),
+      blobs: (hash) => this.blobSource?.(hash) ?? Promise.resolve(null),
+      onLinkOpen: (peer) => {
+        for (const l of [...this.linkOpenListeners]) l(peer);
+      },
     });
     this.bind(awareness);
     this.write('user', this.lastUser ?? loadUser());
@@ -159,6 +165,24 @@ class P2pClient {
     this.noHub = specs.length === 0;
     mesh.setHubs(specs);
     this.emitStatus();
+  }
+
+  /** Where peers' media requests are answered from (the local blob store). */
+  setBlobSource(source: BlobSource | null): void {
+    this.blobSource = source;
+  }
+
+  /** Ask direct peers for media bytes by SHA-256. Null when no peer has them. */
+  fetchBlob(hash: string): Promise<BlobBytes | null> {
+    return this.mesh?.fetchBlob(hash) ?? Promise.resolve(null);
+  }
+
+  /** Called whenever a data channel to a peer opens. */
+  onLinkOpen(cb: (peer: string) => void): () => void {
+    this.linkOpenListeners.add(cb);
+    return () => {
+      this.linkOpenListeners.delete(cb);
+    };
   }
 
   isAttached(): boolean {

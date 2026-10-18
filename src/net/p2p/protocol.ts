@@ -9,6 +9,13 @@
  *   0x04 PONG       echo of the PING body
  *   0x05 HELLO      UTF-8 JSON {@link Hello}
  *   0x06 CHUNK      u32 msgId, u32 index, u32 total, slice of the inner message
+ *   0x07 NEIGHBORS  UTF-8 JSON array of peer ids with open links (mesh.ts)
+ *   0x08 BLOB_WANT  u32 req, 32-byte SHA-256 of the media bytes
+ *   0x09 BLOB_PART  u32 req, u32 total, u32 offset, u8 mime length, mime, bytes
+ *   0x0a BLOB_MISS  u32 req (the peer does not have it)
+ *
+ * Media bytes live outside the Yjs document, keyed by content hash; peers
+ * fetch them from each other on demand and the receiver checks the hash.
  */
 
 export const PEER_PROTO = 1;
@@ -20,6 +27,9 @@ export const Frame = {
   Pong: 0x04,
   Hello: 0x05,
   Chunk: 0x06,
+  BlobWant: 0x08,
+  BlobPart: 0x09,
+  BlobMiss: 0x0a,
 } as const;
 export type Frame = (typeof Frame)[keyof typeof Frame];
 
@@ -141,6 +151,78 @@ export function decodeHello(body: Uint8Array): Hello | null {
   } catch {
     return null;
   }
+}
+
+/** Largest media blob a peer will accept (the app caps a file at 32 MB). */
+export const MAX_BLOB = 64 * 1024 * 1024;
+
+const HEX_RE = /^[0-9a-f]{64}$/;
+
+function hexToBytes(hex: string): Uint8Array | null {
+  if (!HEX_RE.test(hex)) return null;
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+export function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function encodeBlobWant(req: number, hash: string): Uint8Array | null {
+  const raw = hexToBytes(hash);
+  if (!raw) return null;
+  const out = new Uint8Array(1 + 4 + 32);
+  out[0] = Frame.BlobWant;
+  new DataView(out.buffer).setUint32(1, req >>> 0);
+  out.set(raw, 5);
+  return out;
+}
+
+export function decodeBlobWant(body: Uint8Array): { req: number; hash: string } | null {
+  if (body.length !== 36) return null;
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  return { req: view.getUint32(0), hash: bytesToHex(body.subarray(4)) };
+}
+
+export type BlobPart = { req: number; total: number; offset: number; mime: string; bytes: Uint8Array };
+
+export function encodeBlobPart(p: BlobPart): Uint8Array {
+  const mime = utf8.encode(p.mime.slice(0, 100));
+  const out = new Uint8Array(1 + 12 + 1 + mime.length + p.bytes.length);
+  out[0] = Frame.BlobPart;
+  const view = new DataView(out.buffer);
+  view.setUint32(1, p.req >>> 0);
+  view.setUint32(5, p.total);
+  view.setUint32(9, p.offset);
+  out[13] = mime.length;
+  out.set(mime, 14);
+  out.set(p.bytes, 14 + mime.length);
+  return out;
+}
+
+export function decodeBlobPart(body: Uint8Array): BlobPart | null {
+  if (body.length < 13) return null;
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  const mimeLen = body[12];
+  if (body.length < 13 + mimeLen) return null;
+  const total = view.getUint32(4);
+  const offset = view.getUint32(8);
+  const bytes = body.subarray(13 + mimeLen);
+  if (total > MAX_BLOB || offset + bytes.length > total) return null;
+  return { req: view.getUint32(0), total, offset, mime: fromUtf8.decode(body.subarray(13, 13 + mimeLen)), bytes };
+}
+
+export function encodeBlobMiss(req: number): Uint8Array {
+  const out = new Uint8Array(5);
+  out[0] = Frame.BlobMiss;
+  new DataView(out.buffer).setUint32(1, req >>> 0);
+  return out;
+}
+
+export function decodeBlobMiss(body: Uint8Array): number | null {
+  if (body.length < 4) return null;
+  return new DataView(body.buffer, body.byteOffset, body.byteLength).getUint32(0);
 }
 
 /** Short random id. `crypto.getRandomValues` works on plain-http LAN origins; `randomUUID` does not. */

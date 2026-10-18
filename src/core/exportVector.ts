@@ -7,7 +7,11 @@ import {
   boardFont,
   cropFractions,
   defaultFontSizeFor,
+  docPageCount,
   docPageIndex,
+  docPageUrl,
+  inlineImageUrl,
+  mediaUrl,
   describeArrow,
   displayInk,
   frameHeaderHeight,
@@ -381,20 +385,21 @@ export function shapesToSvg(
       parts.push(label(v, x, y, xf, inkPaper));
       continue;
     }
-    if (v.type === 'image' && v.src) {
+    const href = v.type === 'image' ? (v.src || inlineImageUrl(mediaUrl(v), v.mime)) : '';
+    if (v.type === 'image' && href) {
       if (imageHasCrop(v)) {
         const f = cropFractions(v);
         if (!(f.x === 0 && f.y === 0 && f.w === 1 && f.h === 1)) {
           const full = uncroppedBox({ x, y, w: v.w, h: v.h, cropX: v.cropX, cropY: v.cropY, cropW: v.cropW, cropH: v.cropH });
           const clipId = `c${parts.length}`;
           parts.push(
-            `<g${opacity}${xf}><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}"/></clipPath><image href="${esc(v.src)}" x="${full.x}" y="${full.y}" width="${full.w}" height="${full.h}" preserveAspectRatio="none" clip-path="url(#${clipId})"/></g>`
+            `<g${opacity}${xf}><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}"/></clipPath><image href="${esc(href)}" x="${full.x}" y="${full.y}" width="${full.w}" height="${full.h}" preserveAspectRatio="none" clip-path="url(#${clipId})"/></g>`
           );
           continue;
         }
       }
       parts.push(
-        `<image href="${esc(v.src)}" x="${x}" y="${y}" width="${v.w}" height="${v.h}"${opacity}${xf}/>`
+        `<image href="${esc(href)}" x="${x}" y="${y}" width="${v.w}" height="${v.h}"${opacity}${xf}/>`
       );
       continue;
     }
@@ -405,8 +410,9 @@ export function shapesToSvg(
       );
       continue;
     }
-    if (v.type === 'doc' && v.pages?.length) {
-      const src = v.pages[docPageIndex(v.page, v.pages.length)] ?? v.pages[0];
+    if (v.type === 'doc' && docPageCount(v)) {
+      const idx = docPageIndex(v.page, docPageCount(v));
+      const src = v.pages?.[idx] || inlineImageUrl(docPageUrl(v, idx));
       if (src) {
         parts.push(
           `<image href="${esc(src)}" x="${x}" y="${y}" width="${v.w}" height="${v.h}"${opacity}${xf}/>`

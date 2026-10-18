@@ -69,3 +69,22 @@ export async function deleteBoardFile(id: string): Promise<void> {
 export async function openBoardsFolder(): Promise<void> {
   await call('open_boards_folder');
 }
+
+/** Keep media bytes in `<app data>/blobs` (raw IPC body). */
+export async function saveBlobFile(hash: string, mime: string, bytes: Uint8Array): Promise<boolean> {
+  const ok = await call<boolean>('blob_save', bytes as unknown as Record<string, unknown>, {
+    'x-blob-hash': hash,
+    'x-blob-mime': mime,
+  });
+  return ok === true;
+}
+
+/** Media bytes from disk, or null when this device does not have them. */
+export async function loadBlobFile(hash: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  const data = await call<ArrayBuffer | number[]>('blob_load', { hash });
+  if (!data) return null;
+  const raw = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data);
+  const nl = raw.indexOf(10);
+  if (nl < 0 || nl + 1 >= raw.length) return null;
+  return { mime: new TextDecoder().decode(raw.subarray(0, nl)), bytes: raw.slice(nl + 1) };
+}

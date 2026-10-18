@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, defaultFontSizeFor, docPageIndex, docPageStep, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
+import { COLORS, defaultFontSizeFor, docPageCount, docPageIndex, docPageStep, mediaUrl, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -38,7 +38,7 @@ import {
   imageDownloadExt,
   videoDownloadExt,
 } from '../core/media';
-import { attachDocBlobs, attachImageBlobs, warmVisibleBlobMedia } from '../core/mediaBlobs';
+import { ingestDataUrlAsBlob, onBlobResolved, primeBlobUrl, warmVisibleBlobMedia } from '../core/mediaBlobs';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
 import {
   ROTATE_CW_DISC_RADIUS_SCALE,
@@ -545,6 +545,7 @@ export class Engine {
   private lastStats = '';
   private dragTool: Tool;
   private offImageLoad: () => void = () => {};
+  private offBlobResolved: () => void = () => {};
   private offVideoLoad: () => void = () => {};
   private offFormulaLoad: () => void = () => {};
   private offPrefs: () => void = () => {};
@@ -651,6 +652,9 @@ export class Engine {
     });
     this.boundPageId = store.currentPageId();
     this.offImageLoad = onImageLoad(() => {
+      this.dirty = true;
+    });
+    this.offBlobResolved = onBlobResolved(() => {
       this.dirty = true;
     });
     this.offVideoLoad = onVideoLoad(() => {
@@ -1046,6 +1050,7 @@ export class Engine {
     store.setLiveViewApplier(null);
     this.offPageChange();
     this.offImageLoad();
+    this.offBlobResolved();
     this.offVideoLoad();
     this.offFormulaLoad();
     this.offPrefs();
@@ -1925,8 +1930,9 @@ export class Engine {
     let blob: Blob | null = null;
     if (ids.length === 1) {
       const v = this.views.get(ids[0]);
-      if (v && v.type === 'image' && v.src && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
-        try { blob = await (await fetch(v.src)).blob(); } catch {}
+      const url = v && v.type === 'image' ? mediaUrl(v) : '';
+      if (v && url && v.cropW === undefined && v.cropH === undefined && this.annotationsOn(v).length === 0) {
+        try { blob = await (await fetch(url)).blob(); } catch {}
       }
     }
     if (!blob) {
@@ -2004,26 +2010,28 @@ export class Engine {
     if (!this.selection.size) return;
     const ids = [...this.selection];
     const v = this.views.get(ids[0]);
+    const url = v && (v.type === 'image' || v.type === 'video') ? mediaUrl(v) : '';
+    const kind = v?.mime ? `data:${v.mime}` : url;
     // Raw src only when a lone image has no annotations; otherwise bake the canvas
     // (same path as copy-as-image) so pens/stickies/text on the photo are included.
     if (
       ids.length === 1 &&
       v?.type === 'image' &&
-      v.src &&
+      url &&
       v.cropW === undefined &&
       v.cropH === undefined &&
       this.annotationsOn(v).length === 0
     ) {
       const a = document.createElement('a');
-      a.href = v.src;
-      a.download = `review-image.${imageDownloadExt(v.src)}`;
+      a.href = url;
+      a.download = `review-image.${imageDownloadExt(kind)}`;
       a.click();
       return;
     }
-    if (ids.length === 1 && v?.type === 'video' && v.src && this.annotationsOn(v).length === 0) {
+    if (ids.length === 1 && v?.type === 'video' && url && this.annotationsOn(v).length === 0) {
       const a = document.createElement('a');
-      a.href = v.src;
-      a.download = `review-video.${videoDownloadExt(v.src)}`;
+      a.href = url;
+      a.download = `review-video.${videoDownloadExt(kind)}`;
       a.click();
       return;
     }
@@ -2044,13 +2052,13 @@ export class Engine {
       let nw = 0;
       let nh = 0;
       if (v.type === 'image') {
-        const img = getImage(v.src ?? '');
+        const img = getImage(mediaUrl(v));
         if (!img || !img.complete || !img.naturalWidth) continue;
         const f = cropFractions(v);
         nw = img.naturalWidth * f.w;
         nh = img.naturalHeight * f.h;
       } else {
-        const vid = getVideo(v.src ?? '');
+        const vid = getVideo(mediaUrl(v));
         if (!vid || !vid.videoWidth) continue;
         nw = vid.videoWidth;
         nh = vid.videoHeight;
@@ -2129,17 +2137,17 @@ export class Engine {
       lines.push(`${g.cols} × ${g.rows}`);
     }
     if (v.type === 'image') {
-      const img = getImage(v.src ?? '');
+      const img = getImage(mediaUrl(v));
       if (img && img.complete && img.naturalWidth) {
         lines.push(`${t(locale, 'infoPixels')}: ${img.naturalWidth} × ${img.naturalHeight}`);
       }
     }
     if (v.type === 'video') {
-      const vid = getVideo(v.src ?? '');
+      const vid = getVideo(mediaUrl(v));
       if (vid && vid.videoWidth) {
         lines.push(`${t(locale, 'infoPixels')}: ${vid.videoWidth} × ${vid.videoHeight}`);
       }
-      lines.push(isVideoPlaying(v.src) ? t(locale, 'videoPlaying') : t(locale, 'videoPaused'));
+      lines.push(isVideoPlaying(mediaUrl(v)) ? t(locale, 'videoPlaying') : t(locale, 'videoPaused'));
     }
     if (v.locked) lines.push(t(locale, 'infoLocked'));
     return { title: t(locale, typeKey as unknown as import('../ui/i18n').MessageKey), lines };
@@ -2150,15 +2158,28 @@ export class Engine {
   }
 
   /**
-   * Stage 2 phase-A blob deps for the board that started this insert.
-   * Patches are untracked (no undo item); render keeps using `src`.
+   * Media goes into the local blob store by SHA-256 and the shape carries only
+   * the hash, so the board document stays small; peers fetch the bytes over
+   * the mesh. Falls back to inline `src` when the store is unavailable.
    */
-  private blobDepsFor(boardId: string | null) {
-    return {
-      isCurrent: () => store.getCurrentBoardId() === boardId,
-      patch: (sid: string, p: Record<string, unknown>) =>
-        store.patchShapesUntracked([[sid, p as Partial<ShapeView>]]),
-    };
+  private async mediaFields(src: string): Promise<Partial<ShapeView>> {
+    const ref = await ingestDataUrlAsBlob(src);
+    if (!ref) return { src };
+    primeBlobUrl(ref.blob, src);
+    return { blob: ref.blob, thumb: ref.thumb, mime: ref.mime, bytes: ref.bytes };
+  }
+
+  private async docFields(pages: string[]): Promise<Partial<ShapeView>> {
+    const pageBlobs: string[] = [];
+    const pageThumbs: Array<string | null> = [];
+    for (const page of pages) {
+      const ref = await ingestDataUrlAsBlob(page);
+      if (!ref) return { pages };
+      primeBlobUrl(ref.blob, page);
+      pageBlobs.push(ref.blob);
+      pageThumbs.push(ref.thumb);
+    }
+    return { pageBlobs, pageThumbs };
   }
 
   insertImageFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
@@ -2183,7 +2204,7 @@ export class Engine {
       const rawSrc = String(reader.result);
       const img = new Image();
       img.onerror = () => this.events.onError?.(t(locale, 'imageFailed'));
-      img.onload = () => {
+      img.onload = async () => {
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         let src: string;
         let sw: number;
@@ -2214,6 +2235,8 @@ export class Engine {
         const showScale = Math.min(1, maxShow / Math.max(sw, sh));
         const w = Math.max(1, sw * showScale);
         const h = Math.max(1, sh * showScale);
+        const media = await this.mediaFields(src);
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const id = store.addShape(
           {
             type: 'image',
@@ -2224,12 +2247,10 @@ export class Engine {
             fill: 'transparent',
             stroke: 'transparent',
             strokeWidth: 0,
-            src,
+            ...media,
           },
           page
         );
-        // Stage 2 phase A: stash bytes content-addressed alongside `src` (best-effort).
-        void attachImageBlobs(id, src, this.blobDepsFor(boardId));
         this.setSelection([id]);
         this.dirty = true;
       };
@@ -2261,7 +2282,7 @@ export class Engine {
       video.muted = true;
       video.preload = 'metadata';
       video.onerror = () => this.events.onError?.(t(locale, 'videoFailed'));
-      video.onloadedmetadata = () => {
+      video.onloadedmetadata = async () => {
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const vw = Math.max(1, video.videoWidth || 640);
         const vh = Math.max(1, video.videoHeight || 360);
@@ -2269,6 +2290,8 @@ export class Engine {
         const showScale = Math.min(1, maxShow / Math.max(vw, vh));
         const w = Math.max(1, vw * showScale);
         const h = Math.max(1, vh * showScale);
+        const media = await this.mediaFields(src);
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const id = store.addShape(
           {
             type: 'video',
@@ -2279,12 +2302,10 @@ export class Engine {
             fill: 'transparent',
             stroke: 'transparent',
             strokeWidth: 0,
-            src,
+            ...media,
           },
           page
         );
-        // Stage 2 phase A: stash bytes content-addressed alongside `src` (best-effort).
-        void attachImageBlobs(id, src, this.blobDepsFor(boardId));
         // Warm the shared cache so paint/play use the same element.
         getVideo(src);
         this.setSelection([id]);
@@ -2300,8 +2321,9 @@ export class Engine {
     const sid = id ?? (this.selection.size === 1 ? [...this.selection][0] : null);
     if (!sid) return;
     const v = this.views.get(sid);
-    if (!v || v.type !== 'video' || !v.src || v.locked) return;
-    toggleVideoPlayback(v.src);
+    const url = v && v.type === 'video' ? mediaUrl(v) : '';
+    if (!v || !url || v.locked) return;
+    toggleVideoPlayback(url);
     this.dirty = true;
   }
 
@@ -2311,13 +2333,15 @@ export class Engine {
     return Boolean(v && v.type === 'image' && !v.locked);
   }
 
-  addDocument(pages: string[], ratio: number, at?: { x: number; y: number }, pageId?: string): string | null {
+  async addDocument(pages: string[], ratio: number, at?: { x: number; y: number }, pageId?: string): Promise<string | null> {
     if (!pages.length) return null;
     const maxShow = 560;
     const w = maxShow;
     const h = Math.round(maxShow / (ratio || 0.707));
     const pos = at ?? { x: this.camera.x, y: this.camera.y };
     const boardId = store.getCurrentBoardId();
+    const media = await this.docFields(pages);
+    if (!this.alive || store.getCurrentBoardId() !== boardId) return null;
     const id = store.addShape(
       {
         type: 'doc',
@@ -2328,13 +2352,11 @@ export class Engine {
         fill: 'transparent',
         stroke: 'transparent',
         strokeWidth: 0,
-        pages,
+        ...media,
         page: 0,
       },
       pageId
     );
-    // Stage 2 phase A: stash pages content-addressed alongside `pages` (best-effort).
-    void attachDocBlobs(id, pages, this.blobDepsFor(boardId));
     this.setSelection([id]);
     return id;
   }
@@ -2342,7 +2364,7 @@ export class Engine {
   private selectedDoc(): ShapeView | null {
     if (this.selection.size !== 1) return null;
     const v = this.views.get([...this.selection][0]);
-    return v && v.type === 'doc' && (v.pages?.length ?? 0) > 1 ? v : null;
+    return v && v.type === 'doc' && docPageCount(v) > 1 ? v : null;
   }
 
   /** Screen-space page-flip arrow zones for the selected doc. */
@@ -2395,7 +2417,7 @@ export class Engine {
       ctx.lineJoin = 'round';
       ctx.stroke();
     }
-    const total = v.pages?.length ?? 0;
+    const total = docPageCount(v);
     const page = docPageIndex(v.page, total) + 1;
     ctx.font = '12px "Space Grotesk", Onest, system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -2422,7 +2444,7 @@ export class Engine {
     const r = this.docArrowRadius() + 4;
     for (const zone of this.docArrowZones(v)) {
       if (Math.hypot(sx - zone.x, sy - zone.y) <= r) {
-        const pages = v.pages?.length ?? 0;
+        const pages = docPageCount(v);
         const next = docPageStep(v.page, pages, zone.side === 'prev' ? -1 : 1);
         if (next !== (v.page ?? 0)) store.patchShape(v.id, { page: next });
         this.dirty = true;
@@ -4621,7 +4643,7 @@ export class Engine {
     const s = 1 / this.camera.zoom;
     ctx.save();
     withShapeRotation(ctx, v, () => {
-    const img = getImage(v.src ?? '');
+    const img = getImage(mediaUrl(v));
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.globalAlpha = 0.35;
       ctx.drawImage(img, c.full.x, c.full.y, c.full.w, c.full.h);
@@ -5043,7 +5065,7 @@ export class Engine {
       if (v.type === 'image' || v.type === 'video' || v.type === 'doc') {
         const screenPx = Math.max(v.w, v.h) * this.camera.zoom;
         const pageIndex =
-          v.type === 'doc' ? docPageIndex(v.page, (v.pages ?? []).length) : undefined;
+          v.type === 'doc' ? docPageIndex(v.page, docPageCount(v)) : undefined;
         warmVisibleBlobMedia(v, screenPx, pageIndex);
       }
       // hide canvas text of the shape being edited — the overlay renders it.
