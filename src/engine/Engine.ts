@@ -371,6 +371,14 @@ function toolBindExplicitlyCleared(tool: ToolId, binds: Record<ToolId, string>):
 
 const PAPER_MS = 280;
 
+/** Dot lattice ink: a touch stronger than line grid, since dots cover less area. */
+function dotGridInk(paper: string): string {
+  const rgb = parseHex(paper);
+  if (!rgb) return 'rgba(236, 234, 228, 0.13)';
+  const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+  return lum > 0.5 ? 'rgba(28, 28, 26, 0.17)' : 'rgba(236, 234, 228, 0.13)';
+}
+
 function parseHex(color: string): [number, number, number] | null {
   const raw = color.trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
@@ -4974,6 +4982,7 @@ export class Engine {
     // Grid stays optional via meta — Orbit paper swaps lines for a dot lattice.
     if (store.metaGrid()) {
       if (orbitPaper) this.drawOrbitGrid(ctx);
+      else if (readPrefs().gridStyle === 'dots') this.drawDotGrid(ctx, paperBg);
       else this.drawGrid(ctx, theme.grid);
     }
     setPaintZoom(z);
@@ -5385,6 +5394,31 @@ export class Engine {
       ctx.lineTo(x0 + w, y);
     }
     ctx.stroke();
+  }
+
+  /**
+   * 1.0 default grid: a quiet dot lattice. Spacing stays 16–40 screen px by
+   * halving/doubling the world step, so dots never turn into noise or vanish.
+   */
+  private drawDotGrid(ctx: CanvasRenderingContext2D, paper: string): void {
+    const { x: cx, y: cy, zoom: z } = this.camera;
+    const w = this.w / z;
+    const h = this.h / z;
+    const x0 = cx - w / 2;
+    const y0 = cy - h / 2;
+    let step = 25;
+    while (step * z < 16) step *= 2;
+    while (step * z > 40) step /= 2;
+    ctx.fillStyle = dotGridInk(paper);
+    const r = 1.1 / z;
+    ctx.beginPath();
+    for (let x = Math.floor(x0 / step) * step; x <= x0 + w; x += step) {
+      for (let y = Math.floor(y0 / step) * step; y <= y0 + h; y += step) {
+        ctx.moveTo(x + r, y);
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+      }
+    }
+    ctx.fill();
   }
 
   /** Orbit look for tool overlays (lasso, marquee): live Orbit paper, motion or not. */

@@ -4,6 +4,7 @@ import {
   CREATE_DEFAULTS,
   MORE_DEFAULTS,
   NAV_DEFAULTS,
+  familySlot,
   moveToolInOrders,
   readOrders,
 } from '../src/core/toolbarOrder.ts';
@@ -22,8 +23,16 @@ const messy = readOrders({
   create: ['pen', 'eraser', 'eraser'],
   more: ['graph', 'triangle', 'select'],
 });
-assert.deepEqual(messy.nav, ['select', 'pen', 'lasso', 'pan'], 'nav cleaned + backfilled');
-assert.deepEqual(messy.create, ['eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled');
+assert.deepEqual(messy.nav, ['select', 'pen', 'pan'], 'nav cleaned + backfilled');
+assert.deepEqual(messy.create, ['eraser', 'rect', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled');
+
+// 1.0 families: lasso rides under select, ellipse + scheme under rect
+assert.equal(familySlot('lasso'), 'select');
+assert.equal(familySlot('ellipse'), 'rect');
+assert.equal(familySlot('hexagon'), 'rect');
+assert.equal(familySlot('pen'), 'pen');
+const legacy = readOrders({ nav: ['select', 'lasso', 'pan'], create: ['pen', 'ellipse', 'rect'] });
+assert.ok(!legacy.nav.includes('lasso') && !legacy.create.includes('ellipse'), 'legacy strips drop family members');
 assert.deepEqual(messy.more, [...MORE_DEFAULTS], 'shelf keeps only parkable, no dupes');
 
 // park eraser on the shelf, pull graph out to the strip
