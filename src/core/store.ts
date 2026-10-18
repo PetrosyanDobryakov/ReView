@@ -8,6 +8,7 @@ import { readPrefs } from '../core/prefs';
 import { attachSync, detachSync, hasDistinctRemoteCollaborators, hasRemoteCollaborators, isAwarenessLeader, publishBoardView, publishDraft, publishErasePreview, publishSelection } from '../net';
 import { attachDesktopMirror } from './desktopBoards';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
+import { attachDocBlobs, attachImageBlobs, collectLegacyMedia } from './mediaBlobs';
 import {
   boardHadRemoteCollaborators,
   compactSavesEnough,
@@ -118,6 +119,8 @@ function attachPersistence(boardId: string): void {
     // ponytail: auto-compact huge tombstone-bloated boards (gc:false never frees deletes)
     // e.g. bmtag6hutf6x9 was 372MB with 8 shapes after mass delete
     void maybeAutoCompact();
+    // Stage 2: move legacy dataURL bytes into the blob store (background, best-effort).
+    maybeMigrateBoardMedia();
   };
   if ((persistence as unknown as { synced: boolean }).synced) {
     onSynced();
@@ -163,6 +166,105 @@ async function maybeAutoCompact(): Promise<void> {
   } catch (e) {
     netLog.warn('autoCompact failed', () => ({ err: String(e) }));
   }
+}
+
+// --- Stage 2 media migration (legacy dataURL bytes → blob store, phase A) ---
+const BLOB_MIGRATION_META = 'blobV';
+/** Cap shapes migrated per board open (huge boards resume on the next open). */
+const BLOB_MIGRATE_PER_RUN = 100;
+/** Let the initial sync settle before scanning the merged doc. */
+const BLOB_MIGRATE_SETTLE_MS = 4000;
+let blobMigrationFlightFor: string | null = null;
+let blobMigrationDoneFor: string | null = null;
+
+/** Kick a background migration once per board open. Never throws. */
+export function maybeMigrateBoardMedia(): void {
+  try {
+    const boardId = currentBoardId;
+    if (!boardId) return;
+    if (blobMigrationDoneFor === boardId || blobMigrationFlightFor === boardId) return;
+    if (meta.get(BLOB_MIGRATION_META) === 1) {
+      blobMigrationDoneFor = boardId;
+      return;
+    }
+    blobMigrationFlightFor = boardId;
+    void runBlobMigration(boardId).finally(() => {
+      if (blobMigrationFlightFor === boardId) blobMigrationFlightFor = null;
+    });
+  } catch {
+    /* migration is best-effort */
+  }
+}
+
+async function waitForVisibleBoard(boardId: string): Promise<boolean> {
+  for (let i = 0; i < 30; i++) {
+    if (currentBoardId !== boardId) return false;
+    if (typeof document === 'undefined' || !document.hidden) return true;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return currentBoardId === boardId;
+}
+
+async function runBlobMigration(boardId: string): Promise<void> {
+  await new Promise((r) => setTimeout(r, BLOB_MIGRATE_SETTLE_MS));
+  if (currentBoardId !== boardId) return;
+  try {
+    if (meta.get(BLOB_MIGRATION_META) === 1) {
+      blobMigrationDoneFor = boardId;
+      return;
+    }
+  } catch {
+    return;
+  }
+  // Leader-or-alone: never migrate under a live peer setup we don't lead.
+  try {
+    if (hasRemoteCollaborators() && !isAwarenessLeader()) return;
+  } catch {
+    /* sync unavailable — solo board, proceed */
+  }
+  let items;
+  try {
+    items = collectLegacyMedia(board.entries());
+  } catch {
+    return;
+  }
+  if (!items.length) {
+    markBlobMigrated(boardId);
+    return;
+  }
+  const batch = items.slice(0, BLOB_MIGRATE_PER_RUN);
+  const deps = {
+    isCurrent: () => currentBoardId === boardId,
+    patch: (id: string, p: Record<string, unknown>) =>
+      patchShapesUntracked([[id, p as Partial<ShapeView>]]),
+  };
+  for (const item of batch) {
+    if (currentBoardId !== boardId) return;
+    if (!(await waitForVisibleBoard(boardId))) return;
+    try {
+      if (item.kind === 'doc') await attachDocBlobs(item.id, item.srcs, deps);
+      else await attachImageBlobs(item.id, item.srcs[0], deps);
+    } catch {
+      /* per-item best effort */
+    }
+    // Yield so a huge board never freezes the tab.
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  if (currentBoardId !== boardId) return;
+  // Capped runs leave `blobV` unset so the rest resumes on the next open.
+  if (batch.length >= items.length) markBlobMigrated(boardId);
+}
+
+function markBlobMigrated(boardId: string): void {
+  if (currentBoardId !== boardId) return;
+  try {
+    transact(() => {
+      meta.set(BLOB_MIGRATION_META, 1);
+    });
+  } catch {
+    return;
+  }
+  blobMigrationDoneFor = boardId;
 }
 
 const boardReadyListeners = new Set<() => void>();
@@ -318,6 +420,8 @@ export function initBoard(boardId: string): void {
   if (!persistence) {
     migratePointsSpace();
     emitBoardReady();
+    // Stage 2: session boards migrate too (patches sync back to the host).
+    maybeMigrateBoardMedia();
   }
 }
 
@@ -691,7 +795,21 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     highlight: m.get('highlight') === true,
     alpha: m.get('alpha') as number | undefined,
     src: m.get('src') as string | undefined,
+    blob: typeof m.get('blob') === 'string' ? (m.get('blob') as string) : undefined,
+    thumb: typeof m.get('thumb') === 'string' ? (m.get('thumb') as string) : undefined,
+    mime: typeof m.get('mime') === 'string' ? (m.get('mime') as string) : undefined,
+    bytes: typeof m.get('bytes') === 'number' ? (m.get('bytes') as number) : undefined,
     pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
+    pageBlobs: (() => {
+      const p = m.get('pageBlobs');
+      if (p instanceof Y.Array) return (p.toArray() as unknown[]).filter((x): x is string => typeof x === 'string');
+      return Array.isArray(p) ? p.filter((x): x is string => typeof x === 'string') : undefined;
+    })(),
+    pageThumbs: (() => {
+      const p = m.get('pageThumbs');
+      const arr = p instanceof Y.Array ? (p.toArray() as unknown[]) : Array.isArray(p) ? p : undefined;
+      return arr?.map((x) => (typeof x === 'string' ? x : null));
+    })(),
     page: m.get('page') as number | undefined,
     locked: m.get('locked') as boolean | undefined,
     cropX: m.get('cropX') as number | undefined,
@@ -787,6 +905,21 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.src) m.set('src', v.src);
+  // Stage 2 blob refs (phase A dual-write; render still reads `src`).
+  if (v.blob) m.set('blob', v.blob);
+  if (v.thumb !== undefined && v.thumb !== null) m.set('thumb', v.thumb);
+  if (v.mime) m.set('mime', v.mime);
+  if (v.bytes !== undefined) m.set('bytes', v.bytes);
+  if (v.pageBlobs) {
+    const arr = new Y.Array<string>();
+    arr.insert(0, v.pageBlobs);
+    m.set('pageBlobs', arr);
+  }
+  if (v.pageThumbs) {
+    const arr = new Y.Array<unknown>();
+    arr.insert(0, v.pageThumbs as unknown[]);
+    m.set('pageThumbs', arr);
+  }
   if (v.locked) m.set('locked', true);
   if (v.cropW !== undefined || v.cropH !== undefined) {
     m.set('cropX', v.cropX ?? 0);
@@ -875,6 +1008,10 @@ function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
       const arr = new Y.Array<string>();
       arr.insert(0, value as string[]);
       m.set('pages', arr);
+    } else if ((key === 'pageBlobs' || key === 'pageThumbs') && Array.isArray(value)) {
+      const arr = new Y.Array<unknown>();
+      arr.insert(0, value as unknown[]);
+      m.set(key, arr);
     } else if (key === 'cells' && Array.isArray(value)) {
       const arr = new Y.Array<string>();
       arr.insert(0, (value as unknown[]).filter((x): x is string => typeof x === 'string'));

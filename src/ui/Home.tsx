@@ -21,7 +21,7 @@ import {
 import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
-import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_FILE_BYTES } from '../core/boardShare';
+import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_V2_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
@@ -265,7 +265,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (typeof file.size === 'number' && file.size > MAX_FILE_BYTES) {
+    // Pre-guard at the v2 ceiling; version-specific caps apply inside the importer.
+    if (typeof file.size === 'number' && file.size > MAX_V2_FILE_BYTES) {
       showCopyToast(t(locale, 'importErrorTooLarge'));
       return;
     }

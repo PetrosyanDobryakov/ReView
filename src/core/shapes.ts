@@ -1,4 +1,5 @@
 import { formulaImage, renderFormula } from './formula';
+import { resolvedBlobUrl, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
@@ -75,7 +76,14 @@ export interface ShapeView {
   textAlign?: TextAlign;
   highlight?: boolean;
   src?: string;
+  /** Stage 2 blob ref (phase A: written alongside `src`; render still uses `src`). */
+  blob?: string;
+  thumb?: string | null;
+  mime?: string;
+  bytes?: number;
   pages?: string[];
+  pageBlobs?: string[];
+  pageThumbs?: Array<string | null>;
   page?: number;
   locked?: boolean;
   cropX?: number;
@@ -2020,7 +2028,8 @@ export function drawShape(
       drawArrow(ctx, v, boardBg);
       break;
     case 'image': {
-      const img = getImage(v.src ?? '');
+      // Stage 2 read path: resolved blob wins, legacy `src` paints meanwhile.
+      const img = getImage(resolveBlobPaintSrc(v));
       if (img && img.complete && img.naturalWidth > 0) {
         if (imageHasCrop(v)) {
           const f = cropFractions(v);
@@ -2042,7 +2051,8 @@ export function drawShape(
       break;
     }
     case 'video': {
-      const vid = getVideo(v.src ?? '');
+      // Stage 2 read path: resolved blob wins, legacy `src` paints meanwhile.
+      const vid = getVideo(resolveBlobPaintSrc(v));
       const ready = vid && vid.readyState >= 2 && vid.videoWidth > 0;
       if (ready && vid) {
         ctx.drawImage(vid, v.x, v.y, v.w, v.h);
@@ -2059,8 +2069,14 @@ export function drawShape(
     }
     case 'doc': {
       const pages = v.pages ?? [];
-      const src = pages[docPageIndex(v.page, pages.length)] ?? '';
-      const img = src ? getImage(src) : null;
+      const idx = docPageIndex(v.page, pages.length);
+      const src = pages[idx] ?? '';
+      // Stage 2 read path: resolved page blob wins, legacy page paints meanwhile.
+      const pageBlob = v.pageBlobs?.[idx];
+      const pageThumb = v.pageThumbs?.[idx];
+      const blobSrc = pageBlob ? resolvedBlobUrl(pageBlob) : null;
+      const thumbSrc = !blobSrc && pageThumb ? resolvedBlobUrl(pageThumb) : null;
+      const img = getImage(selectDocPaintSrc(src, blobSrc, thumbSrc));
       if (img && img.complete && img.naturalWidth > 0) {
         ctx.drawImage(img, v.x, v.y, v.w, v.h);
       } else {
@@ -2892,6 +2908,17 @@ function niceStep(raw: number): number {
   const norm = raw / pow;
   const nice = norm >= 5 ? 5 : norm >= 2 ? 2 : 1;
   return nice * pow;
+}
+
+/**
+ * Paint source for a single-src media view (Stage 2 read path).
+ * A resolved blob URL wins (full, else thumb); otherwise the legacy `src`
+ * paints while bytes load in the background (see `warmVisibleBlobMedia`).
+ */
+function resolveBlobPaintSrc(v: ShapeView): string {
+  const full = v.blob ? resolvedBlobUrl(v.blob) : null;
+  const thumb = !full && v.thumb ? resolvedBlobUrl(v.thumb) : null;
+  return selectPaintSrc(v.src, full, thumb);
 }
 
 const imageCache = new Map<string, HTMLImageElement>();
