@@ -56,7 +56,8 @@ try {
   const snap = (await state(a)).p2p;
   console.log(`relay-e2e: linked in ${Date.now() - t0} ms`);
   console.log('relay-e2e: hubs', snap.hubs.map((h) => `${h.url} ${h.state} peers=${h.peers}`).join(', '));
-  if (!turnOnly && snap.hubs.some((h) => !h.url.startsWith('nostr+'))) throw new Error('a non-relay hub was used');
+  // Only built-in hubs (relays, plus VITE_HUBS when the build has them): no review-host to meet through.
+  if (snap.hubs.some((h) => h.source !== 'preset')) throw new Error('a non-built-in hub was used');
   if (hubLink) {
     if (!(await state(a)).p2p.peers.some((p) => p.path === 'hub')) throw new Error('link is not through the relays');
     console.log('relay-e2e: link runs through the relays (no WebRTC)');
