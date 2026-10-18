@@ -177,6 +177,16 @@ pub fn run() {
         .title("ReView")
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 600.0)
+        // `target="_blank"` links (update banner, release page) open in the
+        // system browser instead of a bare app window.
+        .on_new_window(|url, _| {
+          if matches!(url.scheme(), "http" | "https") {
+            if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
+              log::warn!("open {url}: {e}");
+            }
+          }
+          tauri::webview::NewWindowResponse::Deny
+        })
         .build()?;
       enable_webrtc(&window);
       guard_close(&window);
