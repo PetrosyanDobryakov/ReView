@@ -27,6 +27,8 @@ export type DesktopHostInfo = {
   mdns: boolean;
   /** Where board snapshots are written on disk. */
   boardsDir: string;
+  /** The folder the user chose for boards, media and app data (Electron). */
+  dataDir?: string;
 };
 
 export function isDesktop(): boolean {
@@ -78,6 +80,11 @@ export async function listBoardFiles(): Promise<BoardFile[]> {
 
 export async function deleteBoardFile(id: string): Promise<void> {
   await call('board_delete', { id });
+}
+
+/** Ask for another data folder; the app moves everything there and restarts. Null when cancelled. */
+export async function changeDataFolder(): Promise<string | null> {
+  return (await call<string | null>('data_dir_change')) ?? null;
 }
 
 export async function openBoardsFolder(): Promise<void> {

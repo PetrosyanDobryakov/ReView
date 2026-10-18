@@ -6,7 +6,7 @@ export type { MeshSnapshot, HubInfo, PeerInfo, LinkPath, LinkState, HubState, Hu
 export { normalizeHubUrl } from './p2p/hub';
 export { DEFAULT_ICE, findSelfHost, lanHostHub } from './p2p/hubs';
 export type { HostProbe } from './p2p/hubs';
-export { canSelfUpdate, installDesktopUpdate, isDesktop, openBoardsFolder } from './p2p/desktop';
+export { canSelfUpdate, changeDataFolder, desktopHostInfo, installDesktopUpdate, isDesktop, openBoardsFolder } from './p2p/desktop';
 export {
   isNetLogEnabled,
   setNetLogEnabled,
