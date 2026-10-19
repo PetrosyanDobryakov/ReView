@@ -108,6 +108,12 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   All 3 pairs failing (incl. cross-ISP) with exchanged srflx points at the
   network path (UDP filtering/firewall), not the handshake. 0.16.7 ships F1 to
   confirm by data; periodic direct re-probe while relayed (F2) on hold until then.
+- F1 VALIDATED 2026-10-19 (0.16.7 live reports): both sides show
+  `lastDirectError: "ice failed"`, symmetric, srflx exchanged both ways.
+  Handshake completes, connectivity checks die both directions = packets die
+  between the peers (same-pool CGNAT hairpin). Not a code bug. Fix = TURN on
+  our hub (key still pending owner); F2 re-probe won't help this pair
+  (structurally blocked, not transient).
 - Friend 2 joined (78.30.206.27, different ISP, NAT ok, srflx both sides) — and
   STILL relay-only to both peers. Same-ISP CGNAT can't explain this pair, so
   suspicion shifts app-side: either systematic handshake/consent failure or
