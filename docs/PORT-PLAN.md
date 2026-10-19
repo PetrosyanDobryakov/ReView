@@ -9,6 +9,11 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
 
 - Version line here is `0.16.x`. Never invent `1.0.x` (that line belongs elsewhere).
 - No deploys (amicus or zpro) without the owner's explicit word. Read-only by default.
+- Cloudflare граница (2026-10-19): мои инструменты авторизованы как zpro, доступа
+  к amicus-аккаунту друга у меня нет и не будет без его токена. Живой хаб друга
+  (`review-hub` на amicus) я не трогаю вообще — ни чтение метрик, ни тем более
+  изменения. Если понадобится — только через друга или его явную просьбу.
+  Наш zpro-прод — тоже руки прочь. Рабочая зона: только код в `dev-petrosyan-p2p`.
 - Friend's `docs/HANDOFF.md` is their source of truth — re-read before touching
   shared areas (`mediaBlobs`, hub protocol, Electron packaging).
 - Overlaps go through the owner/friend first; no silent rewrites of their mesh.
