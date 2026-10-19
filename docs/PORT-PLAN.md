@@ -133,6 +133,10 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   local firewall eating inbound UDP (STUN-out works, peer-in dies). Next: ship
   F1 in 0.16.7 so reports carry the real close reason, then tune by data.
 
+- F4-tune + L5 telemetry (this branch, 0.16.11): draft tip feeds every frame
+  (held pen zeroes velocity — no more comet tails), lead 0.25 s / 48 px cap;
+  relay counters (batches, hot/bulk bytes, failures, queued lanes), per-peer
+  `awareAgeMs`/`queued`, >10 s awareness gaps logged. relay-e2e green locally.
 - F3 relay hot lane (this branch, 0.16.7+): liveness frames
   (awareness/cursor/draft, ping, hello, neighbors) jump ahead of bulk
   sync/media inside every relay batch (hot cap 8 KiB/tick so bulk never

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.11
+
+### No comet tails, real telemetry
+
+- **Draft tip stops overshooting.** The dead-reckon now feeds every frame (a
+  held pen zeroes its velocity instead of coasting on stale speed), with a
+  shorter window and tighter lead cap.
+- **Relay and awareness telemetry.** Relay links count batches, hot/bulk bytes
+  and send failures; every peer reports awareness age and queued bytes. Copy
+  diagnostics carries it all, and a >10 s awareness stall is logged on rejoin.
+
 ## 0.16.10
 
 ### Remote strokes glide on slow links

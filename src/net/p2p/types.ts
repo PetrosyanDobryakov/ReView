@@ -57,6 +57,19 @@ export type PeerInfo = {
   lastDirectError: string | null;
   /** ICE candidate types of the current or last link: ours and the peer's. */
   ice: { local: string[]; remote: string[] } | null;
+  /** Ms since the last awareness frame from this peer (null = none yet). */
+  awareAgeMs: number | null;
+  /** Bytes accepted but not yet on the wire (link backpressure). */
+  queued: number;
+  /** Relay pump counters; null on direct links. */
+  relay: {
+    batches: number;
+    hotBytes: number;
+    bulkBytes: number;
+    sendFailures: number;
+    queuedHot: number;
+    queuedBulk: number;
+  } | null;
 };
 
 export type MeshSnapshot = {

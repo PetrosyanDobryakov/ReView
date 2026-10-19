@@ -129,6 +129,8 @@ type Entry = {
   lastIce: { local: string[]; remote: string[] } | null;
   /** Why the last direct link died; survives the relay fallback (see PeerInfo). */
   lastDirectError: string | null;
+  /** Last received awareness frame timestamp (0 = none yet). */
+  lastAwareAt: number;
   /** Direct links that failed in a row; at RELAY_AFTER_FAILS the peer goes through relays. */
   directFails: number;
   relayed: boolean;
@@ -225,6 +227,7 @@ export class Mesh {
   }
 
   snapshot(): MeshSnapshot {
+    const nowSnap = Date.now();
     const hubs: HubInfo[] = [...this.hubs.values()].map((h) => ({
       url: h.url,
       source: h.source,
@@ -247,6 +250,9 @@ export class Mesh {
       lastError: e.lastError,
       lastDirectError: e.lastDirectError,
       ice: e.link?.iceLocal ? iceOf(e.link) : e.lastIce,
+      awareAgeMs: e.lastAwareAt ? Math.max(0, nowSnap - e.lastAwareAt) : null,
+      queued: e.link?.buffered ?? 0,
+      relay: e.link instanceof RelayLink ? e.link.stats() : null,
     }));
     return { room: this.room, self: this.self, enabled: true, webrtc: this.canLink(), hubs, peers };
   }
@@ -306,6 +312,7 @@ export class Mesh {
         lastError: null,
         lastIce: null,
         lastDirectError: null,
+        lastAwareAt: 0,
         directFails: 0,
         relayed: forceHubLink(),
       };
@@ -572,6 +579,14 @@ export class Mesh {
         return;
       }
       case Frame.Awareness: {
+        const nowAware = Date.now();
+        if (e.lastAwareAt !== 0 && nowAware - e.lastAwareAt > 10_000) {
+          this.opts.log?.('awareness resumed', {
+            peer: e.peer,
+            gapMs: nowAware - e.lastAwareAt,
+          });
+        }
+        e.lastAwareAt = nowAware;
         this.trackClients(e, body);
         try {
           awarenessProtocol.applyAwarenessUpdate(this.awareness, body, e);
