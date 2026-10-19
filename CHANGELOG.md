@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.6
+
+### Own hub, own installers
+
+- **Release line on `dev-petrosyan-p2p`.** Same code as 0.16.5; installers bake in
+  our own hub `wss://review-hub.petrosyan-dobryakov.workers.dev` (a clean-room
+  deploy of the same hub worker on our own Cloudflare account — the friend's
+  amicus hub keeps running untouched as backup). The release workflow checks
+  our live hub from GitHub's network before building.
+- No TURN key on our hub yet (`/turn` answers 404): direct links and the Nostr
+  relay fallback carry strict networks until one is set.
+
 ## 0.16.5
 
 ### Linked even when no direct path exists

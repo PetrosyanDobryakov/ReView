@@ -1,8 +1,9 @@
 name: Desktop release (P2P)
 
 # Desktop installers for the peer-to-peer line only. Runs when a tag
-# `p2p-desktop-v*` is pushed (tag a commit on claude/full-p2p-desktop) and
-# publishes a GitHub prerelease, never marked "latest".
+# `p2p-desktop-v*` is pushed and publishes a GitHub prerelease, never marked
+# "latest". Our releases build from branch `dev-petrosyan-p2p` (own hub baked
+# in, see below); the friend's line releases from `claude/full-p2p-desktop`.
 #
 # The app is Electron (electron/, electron-builder.yml) with review-host
 # (rust/review-host) shipped beside it. Builds bake in the Cloudflare hub
@@ -10,7 +11,7 @@ name: Desktop release (P2P)
 # board. The hub only introduces peers; board data and media go device to
 # device over WebRTC.
 #
-#   git tag p2p-desktop-v0.16.0 && git push origin p2p-desktop-v0.16.0
+#   git tag p2p-desktop-v0.16.6 && git push origin p2p-desktop-v0.16.6
 
 on:
   push:
@@ -20,7 +21,7 @@ permissions:
   contents: write
 
 env:
-  VITE_HUBS: wss://review-hub.amicus-vamicus.workers.dev
+  VITE_HUBS: wss://review-hub.petrosyan-dobryakov.workers.dev
 
 jobs:
   # The live hub from a network that reaches workers.dev (signaling, /turn
@@ -37,7 +38,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: CF_HUB_URL=https://review-hub.amicus-vamicus.workers.dev npm run test:cf
+      - run: CF_HUB_URL=https://review-hub.petrosyan-dobryakov.workers.dev npm run test:cf
       - run: npm run build
       - run: HUB_LINK=1 node scripts/relay-e2e.mjs
 
@@ -96,9 +97,9 @@ jobs:
             release/*.AppImage
             release/*.deb
           body: |
-            Desktop app for the peer-to-peer line (branch `claude/full-p2p-desktop`). Not the main ReView release.
+            Desktop app for the peer-to-peer line (branch `dev-petrosyan-p2p`). Not the main ReView release.
 
-            Boards and media go only between your devices over WebRTC. The built-in hub `wss://review-hub.amicus-vamicus.workers.dev` just introduces peers and stores nothing.
+            Boards and media go only between your devices over WebRTC. The built-in hub `wss://review-hub.petrosyan-dobryakov.workers.dev` just introduces peers and stores nothing.
 
             **Install**
             - Windows: `ReView-<version>-win-x64.exe`. Unsigned, so SmartScreen warns: More info, Run anyway.
