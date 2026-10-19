@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.10
+
+### Remote strokes glide on slow links
+
+- **Draft tip dead-reckoning.** A peer's live stroke used to grow in jumps at
+  packet rate. The stroke tip now rides the same motion machine as cursors:
+  between packets it glides forward along its velocity (0.4 s window, lead
+  capped at 64 screen px, teleports snap). Fast links render exactly as before
+  (dense samples leave no age to bridge); relay links feel continuous instead
+  of steppy. Verified by the relay e2e (strokes both ways, photo ~1 s).
+
 ## 0.16.9
 
 ### Copy buttons cannot red-screen the app

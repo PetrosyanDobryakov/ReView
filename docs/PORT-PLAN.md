@@ -143,6 +143,13 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   on relay paths; bulk speed unchanged by design.
 - Next candidate F4: sparse-draft tip extrapolation (self-tuning by update gap,
   no link-path plumbing). Not started.
+- F4 DONE (this branch): draft tip rides the cursor motion machine
+  (`draftTipPoints` in Engine, `DRAFT_TIP_LEAD_SEC = 0.4`, lead capped at
+  64 screen px, teleport snap, only when smoothing on). Dense links render
+  byte-identical; sparse links glide between packets. tsc + build green.
+- E2E milestone: Playwright Chromium installed here; `relay-e2e` passes
+  locally with F3+F4 in the build (linked 731ms, stroke 2ms both ways,
+  300KB photo ~1s). First live-mesh verification on this machine.
 
 ## Open blockers (carried over)
 
