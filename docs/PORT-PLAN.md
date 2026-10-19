@@ -133,6 +133,12 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   local firewall eating inbound UDP (STUN-out works, peer-in dies). Next: ship
   F1 in 0.16.7 so reports carry the real close reason, then tune by data.
 
+- L5 VALIDATED 2026-10-19 (0.16.11 live reports): both sides show relay counters
+  (batches ~20, hotBytes KBs, bulkBytes ~100 B, failures 0, queues 0) and
+  `awareAgeMs` 4–7 s. Reading: relay healthy both ways, hot lane flowing, no
+  backpressure; the age reflects idle peers (dedupe sends nothing when still),
+  not a stall. Cursor-disappearance incident NOT reproduced in this snapshot —
+  need diagnostics taken DURING the symptom + console `awareness resumed` lines.
 - F4-tune + L5 telemetry (this branch, 0.16.11): draft tip feeds every frame
   (held pen zeroes velocity — no more comet tails), lead 0.25 s / 48 px cap;
   relay counters (batches, hot/bulk bytes, failures, queued lanes), per-peer
