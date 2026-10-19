@@ -11,6 +11,7 @@ import { Awareness } from 'y-protocols/awareness';
 import { loadUser } from '../core/user';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
+import { downsamplePolyline } from '../core/pointsSpace';
 import { awarenessChangeIsLocalOnly } from './awarenessChange';
 import { boardRoomName, isSyncEnabled } from './config';
 import { netLog, registerNetDebugPeek } from './log';
@@ -28,6 +29,14 @@ import type { UserInfo } from '../core/user';
 
 /** Re-read hubs (LAN neighbours come and go) this often while a board is open. */
 const HUB_REFRESH_MS = 15_000;
+
+/**
+ * Cap live-stroke preview vertices on the wire. A minute-long line is
+ * thousands of vertices; at ~20 awareness flushes/s the full array backlogs
+ * a thin link for seconds after pen-up. The tip stays detailed
+ * (downsamplePolyline keeps the last 24), the committed shape is unaffected.
+ */
+const DRAFT_MAX_VERTICES = 96;
 
 declare const __REVIEW_BUILD__: string;
 
@@ -384,10 +393,29 @@ class P2pClient {
     this.hotAwareness.queue({ cursor: pos });
     if (!pos) this.hotAwareness.flushNow();
   }
+  /**
+   * Live stroke preview (awareness only, never the doc). The full point array
+   * would grow unbounded during a long line and, at ~20 flushes/s, backlog a
+   * thin relay for seconds after pen-up — so slim it here: the wire carries
+   * at most DRAFT_MAX_VERTICES with a detailed tip. Renderers already draw
+   * whatever arrives; the committed shape still carries every vertex.
+   */
   publishDraft(d: PeerDraft | null): void {
-    this.lastDraft = d;
-    this.hotAwareness.queue({ draft: d });
-    if (!d) this.hotAwareness.flushNow();
+    if (!d) {
+      this.lastDraft = null;
+      this.hotAwareness.queue({ draft: null });
+      this.hotAwareness.flushNow();
+      return;
+    }
+    const slim: PeerDraft = {
+      kind: 'pen',
+      points: downsamplePolyline(d.points, DRAFT_MAX_VERTICES),
+      stroke: d.stroke,
+      strokeWidth: d.strokeWidth,
+      ...(d.alpha !== undefined ? { alpha: d.alpha } : {}),
+    };
+    this.lastDraft = slim;
+    this.hotAwareness.queue({ draft: slim });
   }
   publishErasePreview(p: PeerErasePreview | null): void {
     this.lastErase = p;
