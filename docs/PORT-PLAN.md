@@ -67,6 +67,13 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
 - Needed from owner: (1) workers.dev subdomain claimed (open Workers & Pages
   once), (2) Account ID, (3) API token (Workers Scripts Edit), (4) later: TURN
   key (Realtime) for `/turn`.
+- Deploy status 2026-10-19: `review-hub` uploaded to the new account
+  (`cloudflare/wrangler.petrosyan.toml`, version `b150e9b1`), URL
+  `https://review-hub.petrosyan-dobryakov.workers.dev` — edge returns TLS
+  handshake failure, i.e. the workers.dev subdomain is NOT claimed yet.
+  Action for owner: open Workers & Pages in the new account once, then tell me
+  and I re-verify `/health` + run `cf-hub-test` against it. Friend's hub
+  verified healthy in parallel (`review-hub.amicus-…` → 200, proto 1).
 
 ## Open blockers (carried over)
 

@@ -1,0 +1,20 @@
+# Worker **review-hub** on the Petrosyan Dobryakov account (our clone of the
+# friend's hub — same code, separate account, separate data (rooms are
+# ephemeral anyway). Friend's amicus hub stays live untouched.
+# Deploy: CLOUDFLARE_API_TOKEN=... npx wrangler deploy -c cloudflare/wrangler.petrosyan.toml
+# (token via env only, never in git). DO NOT point scripts/deploy.sh at this file.
+name = "review-hub"
+account_id = "082e98373f38feff9c0335d371dc7a31"
+compatibility_date = "2026-08-29"
+main = "worker.ts"
+
+[vars]
+HUB_NAME = "Cloudflare"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "SignalRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRoom"]
