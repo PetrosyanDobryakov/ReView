@@ -49,6 +49,12 @@ export type PeerInfo = {
   attempts: number;
   /** Why the last link to this peer closed (`ice failed`, `timeout`, ...), null if none did. */
   lastError: string | null;
+  /**
+   * Why the last DIRECT (WebRTC) link died. Unlike lastError it survives the
+   * relay fallback taking over, so diagnostics keep the real cause. Cleared
+   * only when a direct link opens.
+   */
+  lastDirectError: string | null;
   /** ICE candidate types of the current or last link: ours and the peer's. */
   ice: { local: string[]; remote: string[] } | null;
 };

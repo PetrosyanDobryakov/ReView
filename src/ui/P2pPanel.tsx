@@ -131,6 +131,7 @@ export function P2pPanel({
           path: p.path,
           attempts: p.attempts,
           lastError: p.lastError,
+          lastDirectError: p.lastDirectError,
           ice: p.ice,
           hubs: p.hubs,
           app: p.app,
