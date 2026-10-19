@@ -9,12 +9,31 @@
  * drops duplicates, puts them back in order and skips a gap that does not
  * fill in time (Yjs resyncs whatever was lost). Throughput is modest: fine
  * for edits and cursors, slow for big media.
+ *
+ * Two lanes: liveness frames (awareness/cursor/draft, ping, hello) jump ahead
+ * of bulk sync/media in every batch, so a big update never starves the live
+ * feeling even at 5 events a second.
  */
 
 import type { LinkEvents, LinkPath, LinkState, PeerLink } from './types';
+import { Frame } from './protocol.ts';
 
 /** Raw bytes per relay event (base64 makes it ~4/3 of this). */
 const MAX_BATCH = 24 * 1024;
+/**
+ * Hot lane per pump tick. Liveness frames are bytes-to-KBs, so 8 KiB is
+ * effectively "all of them" while a hypothetical awareness flood can never
+ * starve bulk sync behind it.
+ */
+const HOT_PER_TICK = 8 * 1024;
+/** Frame types that ride the hot lane (liveness, not bulk). */
+const HOT_FRAMES = new Set<number>([
+  Frame.Awareness,
+  Frame.Ping,
+  Frame.Pong,
+  Frame.Hello,
+  0x07, // NEIGHBORS (mesh-level gossip, defined in mesh.ts)
+]);
 /** Events per second per link, kept under public relays' rate limits. */
 const SEND_INTERVAL_MS = 200;
 const HELLO_EVERY_MS = 2_000;
@@ -54,8 +73,11 @@ export class RelayLink implements PeerLink {
   bytesIn = 0;
   bytesOut = 0;
 
-  private queue: Uint8Array[] = [];
-  private queued = 0;
+  /** Hot lane (liveness) and bulk lane (sync/media), in FIFO order each. */
+  private hot: Uint8Array[] = [];
+  private bulk: Uint8Array[] = [];
+  private hotBytes = 0;
+  private bulkBytes = 0;
   private seq = 0;
   private next = 0;
   private readonly held = new Map<number, Uint8Array>();
@@ -66,12 +88,15 @@ export class RelayLink implements PeerLink {
   private lastHeard = Date.now();
   private lastSent = Date.now();
 
+  readonly peer: string;
+  private readonly sendMsg: (msg: RelayMsg) => boolean;
+  private readonly on: LinkEvents;
+
   /** `send` delivers one message to the peer through the relays (false: no relay up). */
-  constructor(
-    readonly peer: string,
-    private readonly sendMsg: (msg: RelayMsg) => boolean,
-    private readonly on: LinkEvents,
-  ) {
+  constructor(peer: string, sendMsg: (msg: RelayMsg) => boolean, on: LinkEvents) {
+    this.peer = peer;
+    this.sendMsg = sendMsg;
+    this.on = on;
     this.hello(false);
     this.helloTimer = setInterval(() => this.hello(false), HELLO_EVERY_MS);
     this.openTimer = setTimeout(() => this.shutdown('failed', 'relay timeout'), OPEN_TIMEOUT_MS);
@@ -79,13 +104,19 @@ export class RelayLink implements PeerLink {
   }
 
   get buffered(): number {
-    return this.queued;
+    return this.hotBytes + this.bulkBytes;
   }
 
   send(frame: Uint8Array): boolean {
     if (this.state !== 'open') return false;
-    this.queue.push(frame);
-    this.queued += frame.length;
+    // Hot lane first: a big sync behind a cursor must not delay liveness.
+    if (frame.length > 0 && HOT_FRAMES.has(frame[0]!)) {
+      this.hot.push(frame);
+      this.hotBytes += frame.length;
+    } else {
+      this.bulk.push(frame);
+      this.bulkBytes += frame.length;
+    }
     return true;
   }
 
@@ -133,28 +164,41 @@ export class RelayLink implements PeerLink {
     this.on.open();
   }
 
-  /** Send one batch of queued frames, or a keepalive. */
+  /** Send one batch of queued frames, hot lane first, or a keepalive. */
   private pump(): void {
     if (this.state !== 'open') return;
     if (Date.now() - this.lastHeard > SILENT_MS) {
       this.shutdown('failed', 'relay silent');
       return;
     }
-    if (!this.queue.length) {
+    if (!this.hot.length && !this.bulk.length) {
       if (Date.now() - this.lastSent > KEEPALIVE_MS) {
         this.lastSent = Date.now();
         this.sendMsg({ kind: 'relay-hello', open: true });
       }
       return;
     }
-    const parts: Uint8Array[] = [];
-    let size = 0;
-    while (this.queue.length && (size === 0 || size + 4 + this.queue[0]!.length <= MAX_BATCH)) {
-      const f = this.queue.shift()!;
-      this.queued -= f.length;
-      parts.push(f);
-      size += 4 + f.length;
+    const hotParts: Uint8Array[] = [];
+    let hotSize = 0;
+    while (this.hot.length && hotSize + 4 + this.hot[0]!.length <= HOT_PER_TICK) {
+      const f = this.hot.shift()!;
+      this.hotBytes -= f.length;
+      hotParts.push(f);
+      hotSize += 4 + f.length;
     }
+    const bulkParts: Uint8Array[] = [];
+    let bulkSize = 0;
+    while (
+      this.bulk.length &&
+      (hotSize + bulkSize === 0 || hotSize + bulkSize + 4 + this.bulk[0]!.length <= MAX_BATCH)
+    ) {
+      const f = this.bulk.shift()!;
+      this.bulkBytes -= f.length;
+      bulkParts.push(f);
+      bulkSize += 4 + f.length;
+    }
+    const parts = [...hotParts, ...bulkParts];
+    const size = hotSize + bulkSize;
     const batch = new Uint8Array(size);
     const view = new DataView(batch.buffer);
     let at = 0;
@@ -168,9 +212,11 @@ export class RelayLink implements PeerLink {
       this.bytesOut += size;
       this.lastSent = Date.now();
     } else {
-      // No relay up right now: put the frames back in front.
-      this.queue.unshift(...parts);
-      this.queued += size - 4 * parts.length;
+      // No relay up right now: put the frames back in front, lanes intact.
+      this.hot.unshift(...hotParts);
+      this.bulk.unshift(...bulkParts);
+      this.hotBytes += hotSize - 4 * hotParts.length;
+      this.bulkBytes += bulkSize - 4 * bulkParts.length;
     }
   }
 
@@ -215,8 +261,10 @@ export class RelayLink implements PeerLink {
     for (const t of [this.openTimer, this.gapTimer]) if (t) clearTimeout(t);
     this.helloTimer = this.sendTimer = null;
     this.openTimer = this.gapTimer = null;
-    this.queue = [];
-    this.queued = 0;
+    this.hot = [];
+    this.bulk = [];
+    this.hotBytes = 0;
+    this.bulkBytes = 0;
     this.held.clear();
     this.on.close(reason);
   }
