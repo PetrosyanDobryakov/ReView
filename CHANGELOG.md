@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.7
+
+### Failed direct links keep their reason
+
+- **Direct-link failures stay visible.** The mesh used to wipe the close reason
+  (`ice failed`, `timeout`, …) the moment the Nostr relay link opened, so every
+  pasted diagnostics report said `lastError: null` and dead direct links could
+  not be told apart. The reason now survives as `lastDirectError` in the peer
+  snapshot and Copy diagnostics, cleared only when a direct link actually
+  opens. First step of the direct-link investigation (same-ISP pair and a
+  cross-ISP pair both stuck on relays despite good NAT on all sides).
+
 ## 0.16.6
 
 ### Own hub, own installers
