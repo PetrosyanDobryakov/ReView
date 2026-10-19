@@ -80,6 +80,18 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   to the account). Without it `/turn` answers 404 and strict-NAT peers fall
   back to Nostr relay — acceptable interim state.
 
+## Incident 2026-10-19: "Cloudflare doesn't work" (0.16.6 desktop)
+
+- Diagnostics show our CF hub signaling WORKS (state open, 2 peers on the hub).
+  Both peers are linked with `path: "hub"` = Nostr relay fallback, `attempts: 0`,
+  direct WebRTC never established. NAT on reporter side `ok` (srflx gathered).
+- So: hub introduces fine, direct link fails, relay carries. Root cause of the
+  direct failure unknown — need the other side's diagnostics (NAT kind, link
+  close reasons) + symptom description.
+- `turn: null` on our hub (no key yet) — TURN fallback unavailable; relay is
+  the only fallback. TURN key still pending owner action (dashboard Realtime).
+- `offchain.pub` Nostr error ("web of trust") is benign: 3 other relays open.
+
 ## Open blockers (carried over)
 
 - No cargo/rustup/MSVC on this machine: `npm test` (needs review-host build),
