@@ -53,6 +53,21 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   If tutors hit that limit, our persist experience is the reference — but it
   contradicts their product rule (no server-side board data), so proposal-only.
 
+## New clean account strategy (2026-10-19, owner decision)
+
+- Owner created a fresh empty Cloudflare account ("Petrosyan Dobryakov").
+- Friend's amicus infra stays the live backup; we clone the hub code (in git)
+  onto the new account and develop against the clone. zpro prod untouched too.
+- Key fact: the hub is stateless (signaling only, rooms vanish when empty) —
+  there is NO data to migrate. "Transfer" = deploy the same worker code under
+  the new account + fresh TURN secrets. Zero risk to amicus/zpro by construction.
+- Blocker: my Cloudflare tools are authed as zpro only — I cannot log in as
+  someone else. Deploy to the new account goes via `wrangler` CLI with an API
+  token the owner pastes (used via env var, never committed to git).
+- Needed from owner: (1) workers.dev subdomain claimed (open Workers & Pages
+  once), (2) Account ID, (3) API token (Workers Scripts Edit), (4) later: TURN
+  key (Realtime) for `/turn`.
+
 ## Open blockers (carried over)
 
 - No cargo/rustup/MSVC on this machine: `npm test` (needs review-host build),
