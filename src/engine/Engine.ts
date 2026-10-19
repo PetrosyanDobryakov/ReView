@@ -113,6 +113,12 @@ import { drawOrbitDotGrid, drawOrbitEraseMark, drawOrbitLock, ORBIT_LOCK_MS, orb
 import { OrbitFx } from './orbitFx';
 import type { PeerDraft, PeerErasePreview } from '../net/types';
 
+/**
+ * Draft-tip dead-reckon window (F4): bridges ~5 Hz relay batches plus jitter.
+ * Self-tuning — dense samples keep the age tiny so the aim equals the sample.
+ */
+const DRAFT_TIP_LEAD_SEC = 0.4;
+
 /** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
 function peerDraftPaintDirty(a: PeerDraft | null | undefined, b: PeerDraft | null | undefined): boolean {
   if (Boolean(a) !== Boolean(b)) return true;
@@ -422,6 +428,11 @@ export class Engine {
    * Purely local — awareness rate unchanged.
    */
   private peerLerp = new Map<number, PeerMotionState>();
+  /**
+   * Draft-tip motion per peer (F4). Same motion machine as cursors, fed with
+   * the stroke tip so sparse links dead-reckon between packets.
+   */
+  private peerDraftTip = new Map<number, PeerMotionState>();
   private peersAnimating = false;
   private frameDt = 1 / 60;
   /** Spring-follow remote cursors; default on = smooth follow, off snaps to latest sample. */
@@ -442,6 +453,9 @@ export class Engine {
         this.peerLerp.delete(id);
         shouldPaint = true;
       }
+    }
+    for (const id of [...this.peerDraftTip.keys()]) {
+      if (!live.has(id)) this.peerDraftTip.delete(id);
     }
     for (const id of [...this.peerConfettiSeen.keys()]) {
       if (!live.has(id)) this.peerConfettiSeen.delete(id);
@@ -5184,6 +5198,39 @@ export class Engine {
     this.dirty = u < 1 || this.peersAnimating || this.orbitLockLive;
   }
 
+  /**
+   * Draft-tip dead-reckon for sparse links (F4). The stroke tip rides the same
+   * motion machine as cursors: on fast links samples arrive dense, the aim
+   * equals the sample and the render is identical to raw points; on slow links
+   * (relay batches) the tip glides forward between packets instead of jumping
+   * at packet rate. Teleports (new stroke) hard-snap; the lead is screen-
+   * bounded so a stop can never fling the tip across the board.
+   */
+  private draftTipPoints(peer: PeerCursor, d: PeerDraft, now: number, s: number): number[] {
+    const pts = d.points;
+    const n = pts.length;
+    const tx = pts[n - 2] ?? 0;
+    const ty = pts[n - 1] ?? 0;
+    let st = this.peerDraftTip.get(peer.id);
+    if (!st) {
+      this.peerDraftTip.set(peer.id, initPeerMotion(tx, ty, now));
+      return pts;
+    }
+    if (tx !== st.tx || ty !== st.ty) {
+      if (Math.hypot(tx - st.tx, ty - st.ty) > 256 * s) {
+        this.peerDraftTip.set(peer.id, initPeerMotion(tx, ty, now));
+        return pts;
+      }
+      pushPeerSample(st, tx, ty, now);
+    }
+    const age = Math.max(0, (now - st.sampleAt) / 1000);
+    if (age < 1 / 120 || age > DRAFT_TIP_LEAD_SEC) return pts;
+    const aim = aimPeerMotion(st, now, { leadSec: DRAFT_TIP_LEAD_SEC, maxLead: 64 * s });
+    if (aim.x === tx && aim.y === ty) return pts;
+    this.peersAnimating = true;
+    return [...pts.slice(0, n - 2), aim.x, aim.y];
+  }
+
   private drawPeers(ctx: CanvasRenderingContext2D): void {
     this.peersAnimating = false;
     if (!this.remotePeers.length) return;
@@ -5215,7 +5262,7 @@ export class Engine {
         const d = peer.draft;
         drawPenStroke(
           ctx,
-          d.points,
+          smooth ? this.draftTipPoints(peer, d, now, s) : d.points,
           d.strokeWidth,
           displayInk(d.stroke, boardBg),
           d.alpha ?? 0.85
@@ -5223,6 +5270,7 @@ export class Engine {
         // Do not set peersAnimating from a static draft — setPeers already
         // dirties when tip/geometry changes (peerDraftPaintDirty). Keeping the
         // flag hot forced full-board paints after the tip went stable.
+        // (draftTipPoints sets it only while dead-reckoning between packets.)
       }
 
       if (peer.erasePreview) {
