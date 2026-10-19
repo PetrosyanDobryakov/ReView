@@ -549,6 +549,14 @@ if (typeof window !== 'undefined') {
   // Console helper: `reviewP2p()` prints hubs, links, paths and RTT.
   (window as unknown as { reviewP2p?: () => MeshSnapshot }).reviewP2p = () => p2pClient.getMeshSnapshot();
   (window as unknown as { reviewNat?: typeof checkNat }).reviewNat = checkNat;
+  // Live peer roster for the cursor-lag probe (id, cursor, tool, viewing).
+  (window as unknown as { __reviewPeers?: () => Array<{ id: string; x: number | null; y: number | null }> }).__reviewPeers =
+    () =>
+      p2pClient.collectPeers().map((p) => ({
+        id: p.userId || String(p.id),
+        x: p.x,
+        y: p.y,
+      }));
 }
 
 export function attachP2p(doc: Y.Doc, boardId: string): void { p2pClient.attach(doc, boardId); }

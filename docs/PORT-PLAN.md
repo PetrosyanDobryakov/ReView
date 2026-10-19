@@ -139,6 +139,14 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   backpressure; the age reflects idle peers (dedupe sends nothing when still),
   not a stall. Cursor-disappearance incident NOT reproduced in this snapshot —
   need diagnostics taken DURING the symptom + console `awareness resumed` lines.
+- Cursor-lag probe (this branch): `__reviewPeers` hook + `scripts/cursor-lag-probe.mjs`
+  (`RELAY_ONLY=1` forces relay path). Measured here: direct 13–100 ms/step,
+  relay 117–355 ms/step, zero stale steps — the mechanism delivers; the
+  "one step behind" symptom pointed at wedged liveness, not transport.
+- F3 follow-up: hot lane missed the head-frame escape, so one oversize frame
+  (>8 KiB — easy with uncapped drafts on 0.16.11) wedged ALL later liveness
+  behind it permanently. Fixed with the same `size === 0` escape the bulk lane
+  has (unreleased yet; F5's cap already makes the wedge unreachable in practice).
 - F5 draft cap (this branch, 0.16.12): sender slims live previews to 96 verts
   (was: full raw array ~20/s → MBs of backlog on relay, stroke drew on long
   after pen-up). Receive side untouched (old full previews still render).
