@@ -91,6 +91,12 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
 - `turn: null` on our hub (no key yet) — TURN fallback unavailable; relay is
   the only fallback. TURN key still pending owner action (dashboard Realtime).
 - `offchain.pub` Nostr error ("web of trust") is benign: 3 other relays open.
+- Update: both sides' diagnostics received. Both NAT `ok` with srflx, both see
+  each other, both on relay path, attempts 0. Public IPs 109.110.91.204 and
+  .157 — same ISP pool. Verdict: same-ISP CGNAT hairpinning (documented 0.16.4
+  case) — provider doesn't route between its own clients' public mappings, so
+  direct can't establish despite good NAT checks. Fix = TURN on our hub (key
+  pending); same-Wi-Fi meetup would confirm via instant host-candidate link.
 
 ## Open blockers (carried over)
 
