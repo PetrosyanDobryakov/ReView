@@ -76,6 +76,39 @@ async function copy(text: string): Promise<boolean> {
 }
 
 /**
+ * Last-resort copy when the async clipboard API is denied. A hidden textarea
+ * plus execCommand works in Chromium/Electron renderers; a bare `prompt()`
+ * call must never run unchecked — it does not exist in the sandboxed app
+ * shell and throws, red-screening the window. Returns true when the text is
+ * on the clipboard or shown for manual copy.
+ */
+async function copyFallback(text: string, manualTitle: string): Promise<boolean> {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (ok) return true;
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (typeof window.prompt === 'function') {
+      window.prompt(manualTitle, text);
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
  * The P2P control surface: on/off, this device's host and invite address,
  * live peer links (path, latency, traffic), hubs, and ICE settings.
  */
@@ -143,8 +176,15 @@ export function P2pPanel({
     if (await copy(text)) {
       setDiagCopied(true);
       window.setTimeout(() => setDiagCopied(false), 2000);
+    } else if (await copyFallback(text, t(locale, 'p2pDiagCopy'))) {
+      setDiagCopied(true);
+      window.setTimeout(() => setDiagCopied(false), 2000);
     } else {
-      prompt(t(locale, 'p2pDiagCopy'), text);
+      try {
+        console.warn('[review] copy diagnostics failed');
+      } catch {
+        /* ignore */
+      }
     }
   };
   const [dataDir, setDataDir] = useState<string | null>(null);
@@ -279,8 +319,15 @@ export function P2pPanel({
               if (await copy(url)) {
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 2000);
+              } else if (await copyFallback(url, t(locale, 'syncLanCopyApp'))) {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 2000);
               } else {
-                prompt(t(locale, 'syncLanCopyApp'), url);
+                try {
+                  console.warn('[review] copy invite link failed');
+                } catch {
+                  /* ignore */
+                }
               }
             }}
           >
