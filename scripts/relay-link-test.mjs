@@ -66,6 +66,23 @@ function openLink(capture) {
   link.close();
 }
 
+// --- pump stats ---------------------------------------------------------------
+{
+  const sent = [];
+  const link = openLink(sent);
+  link.send(frame(Frame.Awareness, new Uint8Array([1, 2, 3])));
+  link.send(frame(Frame.Sync, new Uint8Array(1024)));
+  await new Promise((r) => setTimeout(r, 350));
+  const st = link.stats();
+  assert.ok(st.batches >= 1);
+  assert.equal(st.hotBytes, 4);
+  assert.equal(st.bulkBytes, 1025);
+  assert.equal(st.sendFailures, 0);
+  assert.equal(st.queuedHot, 0);
+  assert.equal(st.queuedBulk, 0);
+  link.close();
+}
+
 // --- FIFO preserved inside each lane ---------------------------------------------
 {
   const sent = [];

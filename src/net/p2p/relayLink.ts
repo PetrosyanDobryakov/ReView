@@ -87,6 +87,11 @@ export class RelayLink implements PeerLink {
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHeard = Date.now();
   private lastSent = Date.now();
+  /** Pump telemetry for diagnostics (cumulative, never reset except on destroy). */
+  private statBatches = 0;
+  private statHotBytes = 0;
+  private statBulkBytes = 0;
+  private statSendFailures = 0;
 
   readonly peer: string;
   private readonly sendMsg: (msg: RelayMsg) => boolean;
@@ -105,6 +110,25 @@ export class RelayLink implements PeerLink {
 
   get buffered(): number {
     return this.hotBytes + this.bulkBytes;
+  }
+
+  /** Snapshot for diagnostics: what rode which lane, and what never left. */
+  stats(): {
+    batches: number;
+    hotBytes: number;
+    bulkBytes: number;
+    sendFailures: number;
+    queuedHot: number;
+    queuedBulk: number;
+  } {
+    return {
+      batches: this.statBatches,
+      hotBytes: this.statHotBytes,
+      bulkBytes: this.statBulkBytes,
+      sendFailures: this.statSendFailures,
+      queuedHot: this.hotBytes,
+      queuedBulk: this.bulkBytes,
+    };
   }
 
   send(frame: Uint8Array): boolean {
@@ -210,9 +234,13 @@ export class RelayLink implements PeerLink {
     if (this.sendMsg({ kind: 'relay', s: this.seq, d: b64(batch) })) {
       this.seq += 1;
       this.bytesOut += size;
+      this.statBatches += 1;
+      this.statHotBytes += hotSize - 4 * hotParts.length;
+      this.statBulkBytes += bulkSize - 4 * bulkParts.length;
       this.lastSent = Date.now();
     } else {
       // No relay up right now: put the frames back in front, lanes intact.
+      this.statSendFailures += 1;
       this.hot.unshift(...hotParts);
       this.bulk.unshift(...bulkParts);
       this.hotBytes += hotSize - 4 * hotParts.length;

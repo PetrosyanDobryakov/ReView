@@ -116,8 +116,9 @@ import type { PeerDraft, PeerErasePreview } from '../net/types';
 /**
  * Draft-tip dead-reckon window (F4): bridges ~5 Hz relay batches plus jitter.
  * Self-tuning — dense samples keep the age tiny so the aim equals the sample.
+ * Kept short on purpose: a stop must settle fast, not leave a comet tail.
  */
-const DRAFT_TIP_LEAD_SEC = 0.4;
+const DRAFT_TIP_LEAD_SEC = 0.25;
 
 /** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
 function peerDraftPaintDirty(a: PeerDraft | null | undefined, b: PeerDraft | null | undefined): boolean {
@@ -5216,16 +5217,16 @@ export class Engine {
       this.peerDraftTip.set(peer.id, initPeerMotion(tx, ty, now));
       return pts;
     }
-    if (tx !== st.tx || ty !== st.ty) {
-      if (Math.hypot(tx - st.tx, ty - st.ty) > 256 * s) {
-        this.peerDraftTip.set(peer.id, initPeerMotion(tx, ty, now));
-        return pts;
-      }
-      pushPeerSample(st, tx, ty, now);
+    // Push every frame, not just on change: identical samples zero the velocity
+    // so a held pen stops gliding instead of coasting on stale speed.
+    if (Math.hypot(tx - st.tx, ty - st.ty) > 256 * s) {
+      this.peerDraftTip.set(peer.id, initPeerMotion(tx, ty, now));
+      return pts;
     }
+    pushPeerSample(st, tx, ty, now);
     const age = Math.max(0, (now - st.sampleAt) / 1000);
     if (age < 1 / 120 || age > DRAFT_TIP_LEAD_SEC) return pts;
-    const aim = aimPeerMotion(st, now, { leadSec: DRAFT_TIP_LEAD_SEC, maxLead: 64 * s });
+    const aim = aimPeerMotion(st, now, { leadSec: DRAFT_TIP_LEAD_SEC, maxLead: 48 * s });
     if (aim.x === tx && aim.y === ty) return pts;
     this.peersAnimating = true;
     return [...pts.slice(0, n - 2), aim.x, aim.y];
