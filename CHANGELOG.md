@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.12
+
+### Long strokes stop backlogging thin links
+
+- **Live-stroke previews are capped at 96 vertices.** The sender used to push
+  the full raw point array ~20 times a second, so a minute-long line piled
+  megabytes behind a thin relay and kept drawing long after pen-up. The wire
+  now carries at most 96 vertices with a detailed tip; the committed shape
+  still keeps every vertex. Old clients' full previews keep rendering.
+
 ## 0.16.11
 
 ### No comet tails, real telemetry

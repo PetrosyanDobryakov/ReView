@@ -139,6 +139,10 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   backpressure; the age reflects idle peers (dedupe sends nothing when still),
   not a stall. Cursor-disappearance incident NOT reproduced in this snapshot —
   need diagnostics taken DURING the symptom + console `awareness resumed` lines.
+- F5 draft cap (this branch, 0.16.12): sender slims live previews to 96 verts
+  (was: full raw array ~20/s → MBs of backlog on relay, stroke drew on long
+  after pen-up). Receive side untouched (old full previews still render).
+  `draft-slim-test` green, relay-e2e green.
 - F4-tune + L5 telemetry (this branch, 0.16.11): draft tip feeds every frame
   (held pen zeroes velocity — no more comet tails), lead 0.25 s / 48 px cap;
   relay counters (batches, hot/bulk bytes, failures, queued lanes), per-peer
