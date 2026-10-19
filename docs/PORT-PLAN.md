@@ -103,6 +103,11 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   by `onLinkOpen`, hence `lastError: null` in every pasted report). Now in
   `PeerInfo`, snapshot and Copy-diagnostics JSON; cleared only by a direct open.
   tsc + build green; mesh e2e needs cargo (CI/friend), live check pending.
+- Friend 2 joined (78.30.206.27, different ISP, NAT ok, srflx both sides) — and
+  STILL relay-only to both peers. Same-ISP CGNAT can't explain this pair, so
+  suspicion shifts app-side: either systematic handshake/consent failure or
+  local firewall eating inbound UDP (STUN-out works, peer-in dies). Next: ship
+  F1 in 0.16.7 so reports carry the real close reason, then tune by data.
 
 ## Open blockers (carried over)
 
