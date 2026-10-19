@@ -79,6 +79,11 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   — needs owner action in dashboard (old key cannot be copied: keys are bound
   to the account). Without it `/turn` answers 404 and strict-NAT peers fall
   back to Nostr relay — acceptable interim state.
+- TURN economics (docs 2026-09-22): $0.05/GB egress, first 1000 GB/month free
+  (shared SFU+TURN). Whiteboard traffic is KB/s (a lesson ≈ tens of MB), TURN
+  only for pairs that can't go direct. Tutor scale fits the free tier with huge
+  headroom; usage visible in dashboard. Fallback if it ever grows: own coturn
+  on a VPS (~$5/mo flat).
 
 ## Incident 2026-10-19: "Cloudflare doesn't work" (0.16.6 desktop)
 
