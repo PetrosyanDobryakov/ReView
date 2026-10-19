@@ -119,6 +119,14 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   between the peers (same-pool CGNAT hairpin). Not a code bug. Fix = TURN on
   our hub (key still pending owner); F2 re-probe won't help this pair
   (structurally blocked, not transient).
+- Radmin objection answered (owner: "Radmin connects fine, same idea"). Official
+  Radmin docs: "Relay/TCP is established when a direct connection cannot be
+  established... most likely on your provider side" — i.e. Radmin itself falls
+  back to relay through its servers, exactly like our Nostr fallback. "Works"
+  ≠ "direct". Check: Radmin shows per-peer connection type (Direct vs
+  Relay/TCP) — if Relay, provider confirmed. Workaround today: with Radmin up,
+  our host candidates include 26.x virtual IPs → direct link through the VPN
+  tunnel, no TURN needed (verify: peer path should read `lan`).
 - Friend 2 joined (78.30.206.27, different ISP, NAT ok, srflx both sides) — and
   STILL relay-only to both peers. Same-ISP CGNAT can't explain this pair, so
   suspicion shifts app-side: either systematic handshake/consent failure or
