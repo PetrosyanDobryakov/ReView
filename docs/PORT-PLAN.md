@@ -68,12 +68,17 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   once), (2) Account ID, (3) API token (Workers Scripts Edit), (4) later: TURN
   key (Realtime) for `/turn`.
 - Deploy status 2026-10-19: `review-hub` uploaded to the new account
-  (`cloudflare/wrangler.petrosyan.toml`, version `b150e9b1`), URL
-  `https://review-hub.petrosyan-dobryakov.workers.dev` — edge returns TLS
-  handshake failure, i.e. the workers.dev subdomain is NOT claimed yet.
-  Action for owner: open Workers & Pages in the new account once, then tell me
-  and I re-verify `/health` + run `cf-hub-test` against it. Friend's hub
-  verified healthy in parallel (`review-hub.amicus-…` → 200, proto 1).
+  (`cloudflare/wrangler.petrosyan.toml`), live at
+  `https://review-hub.petrosyan-dobryakov.workers.dev` — `/health` 200
+  (`service: review-hub, proto: 1`) and the full `cf-hub-test` suite passes
+  against it (welcome/join/signal/gone, hibernation ping, binary refused,
+  room isolation). The early TLS failure was edge propagation, resolved
+  itself; no dashboard clicks were needed. Friend's hub verified healthy in
+  parallel (`review-hub.amicus-…` → 200, proto 1).
+- Remaining on the new account: TURN key (Cloudflare Realtime) for `/turn`
+  — needs owner action in dashboard (old key cannot be copied: keys are bound
+  to the account). Without it `/turn` answers 404 and strict-NAT peers fall
+  back to Nostr relay — acceptable interim state.
 
 ## Open blockers (carried over)
 
