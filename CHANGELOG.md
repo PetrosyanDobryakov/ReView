@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.9
+
+### Copy buttons cannot red-screen the app
+
+- **No more bare `prompt()`.** In the sandboxed desktop shell `prompt` does not
+  exist, so copying diagnostics or an invite link with a denied clipboard threw
+  and covered the window in red. Copy now falls back to a hidden textarea
+  first, asks `prompt` only where it exists, and otherwise logs instead of
+  throwing.
+
 ## 0.16.8
 
 ### Relay link feels live
