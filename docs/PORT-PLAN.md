@@ -133,6 +133,17 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   local firewall eating inbound UDP (STUN-out works, peer-in dies). Next: ship
   F1 in 0.16.7 so reports carry the real close reason, then tune by data.
 
+- F3 relay hot lane (this branch, 0.16.7+): liveness frames
+  (awareness/cursor/draft, ping, hello, neighbors) jump ahead of bulk
+  sync/media inside every relay batch (hot cap 8 KiB/tick so bulk never
+  starves). Before: a 300 KB sync blocked cursors for seconds; now liveness
+  rides the first tick. `relay-link-test` green (hot-first, FIFO per lane,
+  requeue intact); full Node suite green except cargo-bound `p2p-test`;
+  `npm run build` green. Live check: peer drafts/cursors should feel instant
+  on relay paths; bulk speed unchanged by design.
+- Next candidate F4: sparse-draft tip extrapolation (self-tuning by update gap,
+  no link-path plumbing). Not started.
+
 ## Open blockers (carried over)
 
 - No cargo/rustup/MSVC on this machine: `npm test` (needs review-host build),
