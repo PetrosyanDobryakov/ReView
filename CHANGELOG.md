@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.8
+
+### Relay link feels live
+
+- **Liveness jumps the queue.** Relay batches used to carry frames strictly in
+  arrival order, so one 300 KB sync update held cursors and live strokes behind
+  it for seconds. The relay link now has two lanes: liveness frames (cursors,
+  drafts, pings) ride first in every batch, bulk sync and media after (a hot
+  cap per tick keeps bulk from starving). Order inside each lane is preserved,
+  failed sends requeue lanes intact. Peer drafts and cursors feel near-instant
+  on relay paths; bulk speed is unchanged by design.
+
 ## 0.16.7
 
 ### Failed direct links keep their reason
