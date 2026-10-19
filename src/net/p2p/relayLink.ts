@@ -204,7 +204,10 @@ export class RelayLink implements PeerLink {
     }
     const hotParts: Uint8Array[] = [];
     let hotSize = 0;
-    while (this.hot.length && hotSize + 4 + this.hot[0]!.length <= HOT_PER_TICK) {
+    // The size===0 escape mirrors the bulk lane (and the pre-lane pump): the
+    // head frame always goes, so one oversize frame can delay liveness by a
+    // tick but never wedge the lane behind itself.
+    while (this.hot.length && (hotSize === 0 || hotSize + 4 + this.hot[0]!.length <= HOT_PER_TICK)) {
       const f = this.hot.shift()!;
       this.hotBytes -= f.length;
       hotParts.push(f);
