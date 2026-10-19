@@ -97,6 +97,12 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   case) — provider doesn't route between its own clients' public mappings, so
   direct can't establish despite good NAT checks. Fix = TURN on our hub (key
   pending); same-Wi-Fi meetup would confirm via instant host-candidate link.
+- Second friend (78.30.206.27, other ISP) sent diagnostics with `room: null` —
+  not on the board at all. Asked to open the invite and resend from the board.
+- F1 fix (this branch): `lastDirectError` survives the relay takeover (was wiped
+  by `onLinkOpen`, hence `lastError: null` in every pasted report). Now in
+  `PeerInfo`, snapshot and Copy-diagnostics JSON; cleared only by a direct open.
+  tsc + build green; mesh e2e needs cargo (CI/friend), live check pending.
 
 ## Open blockers (carried over)
 

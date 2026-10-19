@@ -127,6 +127,8 @@ type Entry = {
   serving: boolean;
   lastError: string | null;
   lastIce: { local: string[]; remote: string[] } | null;
+  /** Why the last direct link died; survives the relay fallback (see PeerInfo). */
+  lastDirectError: string | null;
   /** Direct links that failed in a row; at RELAY_AFTER_FAILS the peer goes through relays. */
   directFails: number;
   relayed: boolean;
@@ -243,6 +245,7 @@ export class Mesh {
       hubs: [...e.hubs],
       attempts: e.attempts,
       lastError: e.lastError,
+      lastDirectError: e.lastDirectError,
       ice: e.link?.iceLocal ? iceOf(e.link) : e.lastIce,
     }));
     return { room: this.room, self: this.self, enabled: true, webrtc: this.canLink(), hubs, peers };
@@ -302,6 +305,7 @@ export class Mesh {
         serving: false,
         lastError: null,
         lastIce: null,
+        lastDirectError: null,
         directFails: 0,
         relayed: forceHubLink(),
       };
@@ -471,6 +475,8 @@ export class Mesh {
     if (e.link !== link) return;
     e.attempts = 0;
     e.lastError = null;
+    // A relay taking over must not erase why direct died; a direct open clears it.
+    if (!(link instanceof RelayLink)) e.lastDirectError = null;
     e.lastHeard = Date.now();
     this.opts.log?.('link open', { peer: e.peer });
     this.sendTo(e, encodeHello({ proto: PEER_PROTO, app: this.opts.appVersion }));
@@ -496,6 +502,7 @@ export class Mesh {
       if (link.state === 'failed') { e.relayed = forceHubLink(); e.directFails = 0; }
     } else if (/ice failed|timeout|disconnected/.test(reason)) {
       e.directFails += 1;
+      e.lastDirectError = reason;
       if (e.directFails >= RELAY_AFTER_FAILS && this.hasRelayHub(e)) {
         e.relayed = true;
         this.opts.log?.('link via relays', { peer: e.peer, after: reason });
