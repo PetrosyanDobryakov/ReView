@@ -9,6 +9,8 @@ import { checkNat } from './p2p/natCheck';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { loadUser } from '../core/user';
+import { readPrefs } from '../core/prefs';
+import { APP_BUILD } from '../core/version';
 import { getPeerDisplay, onPeerDisplayChange } from '../core/peerDisplay';
 import { AwarenessBatch, type AwarenessPatch } from './awarenessBatch';
 import { downsamplePolyline } from '../core/pointsSpace';
@@ -17,7 +19,7 @@ import { boardRoomName, isSyncEnabled } from './config';
 import { netLog, registerNetDebugPeek } from './log';
 import { clampConfettiPower, parsePeerConfetti, type PeerConfettiBurst } from './peerConfetti';
 import { parsePeerSelection, samePeerSelection, slimPeerSelection } from './peerSelection';
-import { Mesh, type BlobBytes, type BlobSource } from './p2p/mesh';
+import { Mesh, type BlobBytes, type BlobSource, type MeshEvent } from './p2p/mesh';
 import { captureInviteHub, iceServers, resolveHubs } from './p2p/hubs';
 import { adoptTurn, currentTurn, refreshTurn, turnEnabled, turnServers } from './p2p/turn';
 import { randomPeerId } from './p2p/protocol';
@@ -188,6 +190,15 @@ class P2pClient {
   /** Ask direct peers for media bytes by SHA-256. Null when no peer has them. */
   fetchBlob(hash: string): Promise<BlobBytes | null> {
     return this.mesh?.fetchBlob(hash) ?? Promise.resolve(null);
+  }
+
+  /** Link/hub lifecycle ring for one-shot diagnostics (oldest first). */
+  getRecentEvents(): MeshEvent[] {
+    try {
+      return this.mesh?.recentEvents() ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** Called whenever a data channel to a peer opens. */
@@ -549,6 +560,77 @@ if (typeof window !== 'undefined') {
   // Console helper: `reviewP2p()` prints hubs, links, paths and RTT.
   (window as unknown as { reviewP2p?: () => MeshSnapshot }).reviewP2p = () => p2pClient.getMeshSnapshot();
   (window as unknown as { reviewNat?: typeof checkNat }).reviewNat = checkNat;
+  /**
+   * One-shot diagnostics for a single test session with a friend:
+   * `await reviewDiag()` runs the NAT check, snapshots the mesh, attaches the
+   * link event ring and prefs (ICE passwords redacted), copies the JSON to the
+   * clipboard when allowed and returns the object. Paste the result from both
+   * sides — that is enough to separate signaling, NAT, firewall and handshake
+   * failures without a second run.
+   */
+  (window as unknown as { reviewDiag?: () => Promise<Record<string, unknown>> }).reviewDiag = async () => {
+    const nat = await checkNat().catch(() => ({ kind: 'unknown', publicIp: null, mapped: [], stunServers: 0 }));
+    const snap = p2pClient.getMeshSnapshot();
+    let prefsIce: string[] | null = null;
+    let relays = true;
+    let turnPref = true;
+    let lanDiscovery = true;
+    let syncEnabled = true;
+    try {
+      const prefs = readPrefs();
+      relays = prefs.p2pRelays;
+      turnPref = prefs.p2pTurn;
+      lanDiscovery = prefs.p2pLanDiscovery;
+      syncEnabled = prefs.syncEnabled !== false;
+      prefsIce = prefs.p2pIce ? prefs.p2pIce.map((line) => {
+        const parts = line.split('|').map((s) => s.trim());
+        if (parts.length >= 3) return `${parts[0]}|${parts[1]}|(set)`;
+        return line;
+      }) : null;
+    } catch { /* defaults stand */ }
+    let viteHubs = '';
+    try {
+      viteHubs = String((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HUBS ?? '');
+    } catch { /* ignore */ }
+    const diag: Record<string, unknown> = {
+      app: APP_BUILD,
+      at: new Date().toISOString(),
+      origin: typeof location !== 'undefined' ? location.origin : null,
+      ua: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      viteHubs,
+      syncEnabled,
+      webrtc: snap.webrtc,
+      nat,
+      turn: currentTurn() ? { exp: new Date(currentTurn()!.exp).toISOString() } : null,
+      turnPref,
+      prefs: { p2pRelays: relays, p2pTurn: turnPref, p2pLanDiscovery: lanDiscovery, p2pIce: prefsIce },
+      room: snap.room,
+      self: snap.self,
+      hubs: snap.hubs.map((h) => ({ url: h.url, state: h.state, peers: h.peers, error: h.error })),
+      peers: snap.peers.map((p) => ({
+        peer: p.peer.slice(0, 8),
+        state: p.state,
+        path: p.path,
+        attempts: p.attempts,
+        lastError: p.lastError,
+        lastDirectError: p.lastDirectError,
+        awareAgeMs: p.awareAgeMs,
+        queued: p.queued,
+        relay: p.relay,
+        ice: p.ice,
+        hubs: p.hubs,
+        app: p.app,
+      })),
+      events: p2pClient.getRecentEvents(),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diag, null, 1));
+    } catch { /* console return is the fallback */ }
+    try {
+      console.warn('[review:net] reviewDiag', diag);
+    } catch { /* ignore */ }
+    return diag;
+  };
   // Live peer roster for the cursor-lag probe (id, cursor, tool, viewing).
   (window as unknown as { __reviewPeers?: () => Array<{ id: string; x: number | null; y: number | null }> }).__reviewPeers =
     () =>

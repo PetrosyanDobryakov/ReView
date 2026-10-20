@@ -87,6 +87,14 @@ export type BlobBytes = { bytes: Uint8Array; mime: string };
 /** Local media lookup by SHA-256 hex, used to answer peers. */
 export type BlobSource = (hash: string) => Promise<BlobBytes | null>;
 
+/** One link/hub lifecycle line for one-shot diagnostics (JSON-safe, capped). */
+export type MeshEvent = {
+  at: string;
+  msg: string;
+  peer?: string;
+  data?: Record<string, string | number | boolean | null>;
+};
+
 export type MeshOptions = {
   /** Read when each link starts, so fresh TURN credentials apply to retries. */
   iceServers: () => RTCIceServer[];
@@ -167,6 +175,8 @@ export class Mesh {
   private readonly blobFetches = new Map<string, Promise<BlobBytes | null>>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
+  /** Ring of recent link/hub lifecycle lines for one-shot diagnostics. */
+  private readonly events: MeshEvent[] = [];
 
   constructor(
     readonly doc: Y.Doc,
@@ -326,6 +336,7 @@ export class Mesh {
     const fresh = !this.entries.has(peer);
     const e = this.entry(peer);
     e.hubs.add(hub);
+    if (fresh) this.evt('seen', peer, { hub });
     // A peer that cannot reach a hub with `/turn` can still relay through ours.
     const grant = fresh ? this.opts.turn?.current() : null;
     if (grant) this.sendSignal(e, { kind: 'turn', grant });
@@ -337,6 +348,7 @@ export class Mesh {
     const e = this.entries.get(peer);
     if (!e) return;
     e.hubs.delete(hub);
+    this.evt('hub lost peer', peer, { hub });
     this.maybeForget(e);
     this.changed();
   }
@@ -372,6 +384,7 @@ export class Mesh {
     const link: PeerLink = this.newLink(e, initiator);
     e.link = link;
     this.opts.log?.('link start', { peer: e.peer, initiator, attempt: e.attempts, relayed: e.relayed });
+    this.evt('link start', e.peer, { attempt: e.attempts, relayed: e.relayed, initiator });
     // The initiator may be in a retry backoff; ask it to offer now.
     if (!initiator && !e.relayed) this.sendSignal(e, { kind: 'knock' });
   }
@@ -486,6 +499,7 @@ export class Mesh {
     if (!(link instanceof RelayLink)) e.lastDirectError = null;
     e.lastHeard = Date.now();
     this.opts.log?.('link open', { peer: e.peer });
+    this.evt('link open', e.peer, { relayed: link instanceof RelayLink });
     this.sendTo(e, encodeHello({ proto: PEER_PROTO, app: this.opts.appVersion }));
     const enc = encoding.createEncoder();
     syncProtocol.writeSyncStep1(enc, this.doc);
@@ -513,6 +527,7 @@ export class Mesh {
       if (e.directFails >= RELAY_AFTER_FAILS && this.hasRelayHub(e)) {
         e.relayed = true;
         this.opts.log?.('link via relays', { peer: e.peer, after: reason });
+        this.evt('link via relays', e.peer, { after: reason });
       }
     }
     e.rtt = null;
@@ -520,6 +535,7 @@ export class Mesh {
     this.dropClients(e);
     this.failBlobs(e);
     this.opts.log?.('link closed', { peer: e.peer, reason });
+    this.evt('link closed', e.peer, { reason, relayed: link instanceof RelayLink });
     this.announceNeighbors();
     if (this.destroyed) return;
     this.resync(e);
@@ -875,5 +891,23 @@ export class Mesh {
       this.changePending = false;
       if (!this.destroyed) this.opts.onChange();
     });
+  }
+
+  /** Recent link/hub lifecycle lines, oldest first (peer ids shortened). */
+  recentEvents(limit = 40): MeshEvent[] {
+    const out = this.events.slice(Math.max(0, this.events.length - Math.max(1, limit)));
+    return out.map((e) => ({ ...e, data: e.data ? { ...e.data } : undefined }));
+  }
+
+  private evt(msg: string, peer?: string, data?: Record<string, string | number | boolean | null>): void {
+    try {
+      this.events.push({
+        at: new Date().toISOString(),
+        msg,
+        ...(peer ? { peer: peer.slice(0, 8) } : {}),
+        ...(data ? { data } : {}),
+      });
+      while (this.events.length > 60) this.events.shift();
+    } catch { /* diagnostics never break sync */ }
   }
 }

@@ -1,7 +1,7 @@
 export { isSyncEnabled, boardRoomName } from './config';
 export { p2pClient, attachP2p, detachP2p, reconnectP2p } from './p2p';
 export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser, PeerConfettiBurst } from './types';
-export type { BlobBytes, BlobSource } from './p2p/mesh';
+export type { BlobBytes, BlobSource, MeshEvent } from './p2p/mesh';
 export type { MeshSnapshot, HubInfo, PeerInfo, LinkPath, LinkState, HubState, HubSource } from './p2p/types';
 export { normalizeHubUrl } from './p2p/hub';
 export { DEFAULT_ICE, findSelfHost, lanHostHub } from './p2p/hubs';

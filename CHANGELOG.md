@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.16.13
+
+### One-shot connect diagnostics
+
+- **Mesh keeps a link event ring.** Seen, link start/open/closed, relay
+  fallback and hub lost peer lines with timestamps (last 60, peer ids
+  shortened) are kept in memory and exposed via `recentEvents()`.
+- **Console `await reviewDiag()`.** Runs the NAT check, snapshots the mesh,
+  attaches the event ring and prefs (ICE passwords redacted), copies the JSON
+  to the clipboard when allowed and returns the object. One paste from each
+  side is enough to separate signaling, NAT, firewall and handshake failures.
+- **Copy diagnostics carries the same.** Origin, build hubs, sync/WebRTC flags,
+  full prefs and the event ring are included alongside the existing NAT, TURN,
+  hub and peer data.
+
 ## 0.16.12
 
 ### Long strokes stop backlogging thin links

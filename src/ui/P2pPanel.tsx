@@ -146,15 +146,41 @@ export function P2pPanel({
   const copyDiagnostics = async () => {
     const report = nat && nat !== 'checking' ? nat : await runNat();
     const mesh = p2pClient.getMeshSnapshot();
+    const prefsNow = readPrefs();
+    const redactedIce = prefsNow.p2pIce
+      ? prefsNow.p2pIce.map((line) => {
+          const parts = line.split('|').map((s) => s.trim());
+          if (parts.length >= 3) return `${parts[0]}|${parts[1]}|(set)`;
+          return line;
+        })
+      : null;
+    let viteHubs = '';
+    try {
+      viteHubs = String((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HUBS ?? '');
+    } catch { /* ignore */ }
+    let events: unknown = [];
+    try {
+      events = p2pClient.getRecentEvents();
+    } catch { /* ignore */ }
     const text = JSON.stringify(
       {
         app: APP_BUILD,
         desktop,
         ua: navigator.userAgent,
         at: new Date().toISOString(),
+        origin: typeof location !== 'undefined' ? location.origin : null,
+        viteHubs,
+        syncEnabled: prefsNow.syncEnabled !== false,
+        webrtc: mesh.webrtc,
         nat: report,
         turn: currentTurn() ? { exp: new Date(currentTurn()!.exp).toISOString() } : null,
-        turnPref: readPrefs().p2pTurn,
+        turnPref: prefsNow.p2pTurn,
+        prefs: {
+          p2pRelays: prefsNow.p2pRelays,
+          p2pTurn: prefsNow.p2pTurn,
+          p2pLanDiscovery: prefsNow.p2pLanDiscovery,
+          p2pIce: redactedIce,
+        },
         room: mesh.room,
         self: mesh.self,
         hubs: mesh.hubs.map((h) => ({ url: h.url, state: h.state, peers: h.peers, error: h.error })),
@@ -172,6 +198,7 @@ export function P2pPanel({
           hubs: p.hubs,
           app: p.app,
         })),
+        events,
       },
       null,
       1,
