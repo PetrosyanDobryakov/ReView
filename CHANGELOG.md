@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.17
+
+### Media transport overlay, shared playback, co-host rights
+
+- **Floating player.** Selecting an audio/video shape pops a transport bar
+  above it: big play/pause, scrubbable timeline, own volume, follow toggle.
+  Video now plays with sound (user gesture unmutes).
+- **Play for everyone.** Owner and granted co-hosts get start/stop-for-all and
+  a shared volume; followers seek into position automatically. State rides the
+  shape as JSON, untracked by undo; enforcement is UI-level, like kick.
+- **Co-host grants** in Connection next to each person (owner only).
+
 ## 0.16.16
 
 ### Audio files on the board
