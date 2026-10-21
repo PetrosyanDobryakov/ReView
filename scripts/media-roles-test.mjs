@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import {
   MEDIA_SYNC_SLOP_S,
+  MEDIA_WARN_GRACE_MS,
+  MEDIA_WARN_MS,
   canControlMedia,
   decodeMediaState,
   encodeMediaState,
@@ -32,6 +34,14 @@ import {
   assert.equal(decodeMediaState(JSON.stringify({ ...st, by: '' })), null);
   assert.equal(decodeMediaState(null), null);
   assert.ok(MEDIA_SYNC_SLOP_S > 0);
+  // Countdown protocol: grace below, warn window above.
+  assert.equal(MEDIA_WARN_MS, 3000);
+  assert.ok(MEDIA_WARN_GRACE_MS > 0 && MEDIA_WARN_GRACE_MS < MEDIA_WARN_MS);
+  // A future-dated start is still a valid state (followers count down to it).
+  const future = decodeMediaState(
+    encodeMediaState({ playing: true, pos: 0, at: Date.now() + MEDIA_WARN_MS, vol: 1, by: 'host' })
+  );
+  assert.ok(future && future.playing && future.at > Date.now());
 }
 
 // --- seek math ----------------------------------------------------------------

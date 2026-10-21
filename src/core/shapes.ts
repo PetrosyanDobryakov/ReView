@@ -2127,19 +2127,14 @@ export function drawShape(
       break;
     }
     case 'audio': {
-      const el = getAudio(resolveBlobPaintSrc(v));
-      drawAudioCard(
-        ctx,
-        v,
-        el
-          ? {
-              cur: el.currentTime,
-              dur: el.duration,
-              playing: !el.paused && !el.ended,
-              ready: el.readyState >= 1,
-            }
-          : null
-      );
+      // The floating player card owns the visuals; canvas keeps a flat
+      // theme-tinted body so edges stay clean at any zoom.
+      const chrome = mediaPlayerChrome();
+      ctx.fillStyle = chrome.bg;
+      ctx.fillRect(v.x, v.y, v.w, v.h);
+      ctx.strokeStyle = chrome.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(v.x, v.y, v.w, v.h);
       break;
     }
     case 'doc': {
@@ -3191,64 +3186,48 @@ export function fmtAudioTime(sec: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(r).padStart(2, '0')}`;
 }
 
-export type AudioCardState = { cur: number; dur: number; playing: boolean; ready: boolean };
+export interface PlayerChrome {
+  bg: string;
+  border: string;
+  text: string;
+  dim: string;
+  accent: string;
+}
 
-/** Canvas player card: round button, time readout and progress bar. */
-export function drawAudioCard(ctx: CanvasRenderingContext2D, v: ShapeView, st: AudioCardState | null): void {
-  ctx.save();
-  ctx.fillStyle = '#1a1a18';
-  ctx.fillRect(v.x, v.y, v.w, v.h);
-  ctx.strokeStyle = '#454540';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(v.x, v.y, v.w, v.h);
-  const pad = Math.min(v.w, v.h) * 0.18;
-  const r = Math.max(12, Math.min(44, Math.min(v.w, v.h) * 0.26));
-  const cx = v.x + pad + r;
-  const cy = v.y + v.h / 2;
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = '#000000';
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 0.95;
-  ctx.fillStyle = '#ffffff';
-  if (st?.playing) {
-    const bw = r * 0.22;
-    const bh = r * 0.8;
-    ctx.fillRect(cx - bw - r * 0.08, cy - bh / 2, bw, bh);
-    ctx.fillRect(cx + r * 0.08, cy - bh / 2, bw, bh);
-  } else {
-    const tri = r * 0.45;
-    ctx.beginPath();
-    ctx.moveTo(cx - tri * 0.35, cy - tri);
-    ctx.lineTo(cx - tri * 0.35, cy + tri);
-    ctx.lineTo(cx + tri * 0.85, cy);
-    ctx.closePath();
-    ctx.fill();
+let playerChromeCache: PlayerChrome | null = null;
+
+function cssVarValue(name: string): string {
+  try {
+    if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return '';
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return typeof v === 'string' ? v.trim() : '';
+  } catch {
+    return '';
   }
-  ctx.globalAlpha = 1;
-  const tx = cx + r + pad * 0.8;
-  const tw = Math.max(0, v.x + v.w - pad - tx);
-  if (tw > 8) {
-    const fs = Math.max(10, Math.min(20, v.h * 0.17));
-    ctx.font = `500 ${fs}px system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    const label = st && st.ready ? `${fmtAudioTime(st.cur)} / ${fmtAudioTime(st.dur)}` : '--:--';
-    ctx.fillStyle = '#eceae4';
-    ctx.fillText(label, tx, cy - fs * 0.75, tw);
-    const frac = st && st.ready && Number.isFinite(st.dur) && st.dur > 0
-      ? Math.max(0, Math.min(1, st.cur / st.dur))
-      : 0;
-    const by = cy + fs * 0.55;
-    const bh = Math.max(2, fs * 0.22);
-    ctx.fillStyle = '#454540';
-    ctx.fillRect(tx, by, tw, bh);
-    if (frac > 0) {
-      ctx.fillStyle = '#eceae4';
-      ctx.fillRect(tx, by, Math.max(bh, tw * frac), bh);
-    }
+}
+
+/**
+ * Chrome-side palette for media player surfaces, read live from CSS vars so
+ * every theme applies. Cached until refreshMediaChrome (theme switch).
+ * Node-safe: falls back to the packet dark palette.
+ */
+export function mediaPlayerChrome(): PlayerChrome {
+  if (!playerChromeCache) {
+    const pick = (name: string, fallback: string): string => cssVarValue(name) || fallback;
+    playerChromeCache = {
+      bg: pick('--chrome-panel', '#2e2e2b'),
+      border: pick('--chrome-border', '#454540'),
+      text: pick('--chrome-text', '#eceae4'),
+      dim: pick('--chrome-text-dim', '#a8a59c'),
+      accent: pick('--chrome-accent', '#d4cfc4'),
+    };
   }
-  ctx.restore();
+  return playerChromeCache;
+}
+
+/** Drop the cached palette (chrome theme switched) — next paint re-reads vars. */
+export function refreshMediaChrome(): void {
+  playerChromeCache = null;
 }
 
 function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {

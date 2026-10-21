@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Engine } from './engine/Engine';
 import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine/Engine';
@@ -9,7 +9,7 @@ import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
-import { MediaOverlay } from './ui/MediaOverlay';
+import { MediaCards } from './ui/MediaOverlay';
 import { NoticeCenter, type Notice } from './ui/Notices';
 import { GraphEditor } from './ui/GraphEditor';
 import { CalculatorPanel } from './ui/CalculatorPanel';
@@ -1083,10 +1083,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     );
   };
 
-  const mediaTarget =
-    selected.length === 1 && (selected[0]?.type === 'audio' || selected[0]?.type === 'video')
-      ? selected[0]
-      : null;
+  const mediaShapes = useMemo(() => {
+    if (!engine) return [];
+    const out: Array<{ id: string; kind: 'audio' | 'video' }> = [];
+    try {
+      for (const v of engine.views.values()) {
+        if (v.type === 'audio' || v.type === 'video') out.push({ id: v.id, kind: v.type });
+      }
+    } catch {
+      /* ignore */
+    }
+    return out;
+  }, [engine, shapeCount, pageEpoch]);
+  const mediaSelectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
 
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
@@ -1140,11 +1149,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             onDone={() => setEditCalc(null)}
           />
         )}
-        {mediaTarget && engine && !editTarget && (
-          <MediaOverlay
+        {mediaShapes.length > 0 && engine && (
+          <MediaCards
             engine={engine}
-            shapeId={mediaTarget.id}
-            kind={mediaTarget.type === 'audio' ? 'audio' : 'video'}
+            shapes={mediaShapes}
+            selectedIds={mediaSelectedIds}
             locale={locale}
           />
         )}
