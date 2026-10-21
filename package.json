@@ -1,7 +1,7 @@
 {
   "name": "review",
   "private": true,
-  "version": "0.16.14",
+  "version": "0.16.15",
   "license": "Apache-2.0",
   "description": "ReView — local-first whiteboard with self-hosted peer-to-peer sync (WebRTC mesh, Yjs). The host only introduces peers and stores nothing.",
   "type": "module",
