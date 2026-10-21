@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, clampAudioScale } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -749,11 +749,12 @@ export class SelectTool extends Tool {
   }
 
   /**
-   * Corner-drag on an audio card: uniform radial scale around the footprint
-   * center. World-space ratio, so board zoom cannot affect it; the footprint
-   * x/y/w/h are untouched (only `audioScale` is written, undoable).
+   * Audio resize: uniform scale of w/h (aspect locked) so the DOM player card
+   * — rendered at shape-width scale — never distorts. Any handle works: the
+   * radial pointer ratio drives k, the dragged sides stay pinned. Like a
+   * photo, the player keeps its board size and zooms with the board.
    */
-  private resizeAudioScale(engine: Engine, p: PointerInfo, orig: ShapeView): void {
+  private resizeAudioUniform(engine: Engine, p: PointerInfo, orig: ShapeView): void {
     const r = this.resizing;
     if (!r) return;
     const cx = orig.x + orig.w / 2;
@@ -761,11 +762,25 @@ export class SelectTool extends Tool {
     const grab = Math.hypot(this.start.x - cx, this.start.y - cy);
     if (!(grab > 1)) return;
     const now = Math.hypot(p.world.x - cx, p.world.y - cy);
-    const s = clampAudioScale((orig.audioScale ?? 1) * (now / grab));
+    const k = Math.min(5, Math.max(0.2, now / grab));
+    const w = Math.min(1600, Math.max(60, orig.w * k));
+    const h = Math.max(1, orig.h * (w / Math.max(1, orig.w)));
+    const x = r.handle.includes('w')
+      ? orig.x + orig.w - w
+      : r.handle.includes('e')
+        ? orig.x
+        : cx - w / 2;
+    const y = r.handle.includes('n')
+      ? orig.y + orig.h - h
+      : r.handle.includes('s')
+        ? orig.y
+        : cy - h / 2;
     const live = engine.views.get(r.shapeId);
-    if (live) engine.views.set(r.shapeId, { ...live, audioScale: s });
-    store.patchShapes([[r.shapeId, { audioScale: s }]]);
-    engine.setDirty();
+    if (live) {
+      engine.views.set(r.shapeId, { ...live, x, y, w, h });
+      engine.setDirty();
+    }
+    this.commitHostResize(engine, r.shapeId, orig, { x, y, w, h }, 1);
   }
 
   private resize(engine: Engine, p: PointerInfo): void {
@@ -773,10 +788,10 @@ export class SelectTool extends Tool {
     if (!r) return;
     const orig = this.originals.get(r.shapeId);
     if (!orig || orig.locked) return;
-    // Audio cards resize by corner-dragging audioScale (zoom-independent) —
-    // the footprint w/h stays fixed, only the card scale changes.
+    // Audio resizes uniformly (aspect locked) so the player card never
+    // distorts; w/h are written like any other shape (undoable, synced).
     if (orig.type === 'audio') {
-      this.resizeAudioScale(engine, p, orig);
+      this.resizeAudioUniform(engine, p, orig);
       return;
     }
     if (orig.type === 'arrow' && orig.fromId && orig.toId) {
@@ -1021,12 +1036,6 @@ export class SelectTool extends Tool {
       }
       const next = groupResizeMember(o, origBox, nextBox, MIN);
       if (!next) continue;
-      // Audio footprints stay fixed (the card scales via audioScale instead);
-      // group resize only translates them with the group.
-      if (o.type === 'audio') {
-        patches.push([id, { x: next.x, y: next.y }]);
-        continue;
-      }
       patches.push([id, bakedArrowGeom(o, next)]);
     }
     if (patches.length) store.patchShapes(patches);

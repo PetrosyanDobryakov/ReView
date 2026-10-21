@@ -90,12 +90,6 @@ export interface ShapeView {
    * followers seek to `pos + (now - at) / 1000` while playing. Absent = local only.
    */
   mediaState?: string;
-  /**
-   * Player card scale for audio (manual corner-drag resize, zoom-independent).
-   * The DOM card renders at AUDIO_CARD_PX_W * scale screen px at any zoom.
-   * Omit = 1. Synced like other scalar attrs (undoable).
-   */
-  audioScale?: number;
   pages?: string[];
   pageBlobs?: string[];
   pageThumbs?: Array<string | null>;
@@ -3188,24 +3182,16 @@ export function fmtAudioTime(sec: number): string {
 }
 
 /**
- * Fixed audio footprint (canvas units): the DOM player card owns the visuals,
- * so the invisible shape rect just hugs the card at scale 1. Selection,
- * hit-test and corner handles all derive from these plus audioScale —
- * board zoom never enters the math, so the card is constant on screen.
+ * Default audio spawn size (world units): the DOM player card renders its
+ * 280px-wide content scaled so it exactly fills the shape width — like a
+ * photo, the player zooms with the board and keeps its board size.
+ * Manual resize scales w/h uniformly (aspect locked), undoable, synced.
  */
-export const AUDIO_CARD_W = 288;
-/** Footprint height in the doc (one size for all roles so docs converge). */
+export const AUDIO_CARD_W = 280;
+/** Default audio spawn height (world units) — matches the host card aspect. */
 export const AUDIO_CARD_H = 196;
-/** Participant card/frame height (fewer rows) — view layer only, never synced. */
+/** Participant card content height (fewer rows) — overlay estimate only. */
 export const AUDIO_CARD_H_GUEST = 152;
-/** DOM card width in screen px (times audioScale). */
-export const AUDIO_CARD_PX_W = 280;
-export const AUDIO_SCALE_MIN = 0.6;
-export const AUDIO_SCALE_MAX = 2;
-export function clampAudioScale(s: number | undefined): number {
-  if (typeof s !== 'number' || !Number.isFinite(s)) return 1;
-  return Math.min(AUDIO_SCALE_MAX, Math.max(AUDIO_SCALE_MIN, s));
-}
 
 function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {
   const cx = v.x + v.w / 2;

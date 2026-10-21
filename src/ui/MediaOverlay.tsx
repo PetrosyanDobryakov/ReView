@@ -16,7 +16,6 @@ import {
   mediaUrl,
   AUDIO_CARD_H,
   AUDIO_CARD_H_GUEST,
-  clampAudioScale,
 } from '../core/shapes';
 import { clampToVisualViewport } from '../core/pointerEnv';
 import { t } from './i18n';
@@ -90,9 +89,12 @@ function VolRow({
  * Always-visible player card for one media shape, laid out like the mockup:
  * bare outline Play at the left, filename pill over a thin timeline with live
  * time, then "stop for me" plus my volume — and, when this device may drive
- * it, a second "stop for all" row plus the shared volume. Fixed pixel size:
- * zoom moves the card with its shape but never rescales it. Audio centers over
- * its (invisible, fixed-size) footprint; video docks below its frame.
+ * it, a second "stop for all" row plus the shared volume.
+ *
+ * Audio is a board object like a photo: the card fills its world rect, so it
+ * zooms with the board and keeps its board size. Manual resize (any handle)
+ * scales the shape uniformly; the card renders its 280px content at
+ * shape-screen-width scale and never distorts. Video docks below its frame.
  *
  * Play semantics: participant toggles local playback; organizer starts the
  * countdown for everyone when idle, otherwise toggles locally (all-stop is
@@ -121,7 +123,6 @@ function MediaCard({
   const seekingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [sharedPlaying, setSharedPlaying] = useState(false);
-  const [scale, setScale] = useState(1);
   const [follow, setFollow] = useState(() => followMediaEnabled());
   const [can, setCan] = useState(() => iControlMedia());
   const [selfVol, setSelfVol] = useState(() => Math.round(localMediaVolume() * 100));
@@ -134,18 +135,14 @@ function MediaCard({
       return 100;
     }
   });
-  const stateRef = useRef({ playing, sharedPlaying, scale, follow, can });
-  stateRef.current = { playing, sharedPlaying, scale, follow, can };
+  const stateRef = useRef({ playing, sharedPlaying, follow, can });
+  stateRef.current = { playing, sharedPlaying, follow, can };
 
   useEffect(() => {
     const poll = window.setInterval(() => {
       try {
         const next = iControlMedia();
-        if (next !== stateRef.current.can) {
-          setCan(next);
-          // Footprint height depends on the role (extra for-all row).
-          engine.normalizeAudioFootprints();
-        }
+        if (next !== stateRef.current.can) setCan(next);
       } catch {
         /* ignore */
       }
@@ -172,18 +169,19 @@ function MediaCard({
           return;
         }
         box.style.display = '';
-        // Fixed card size: it follows the shape on zoom/pan but never rescales
-        // with the board. Manual resize applies audioScale as a CSS scale.
-        // Audio centers over its invisible fixed footprint; video docks below.
-        const sc = kind === 'audio' ? stateRef.current.scale : 1;
+        // Audio fills its world rect like a photo: the card content (CARD_W
+        // wide) scales with the shape's screen width, so board zoom rescales
+        // the player and it keeps its board size. Video docks below its frame.
+        const screenW = Math.max(1, b.x - a.x);
+        const k = kind === 'audio' ? screenW / CARD_W : 1;
         const estH =
           kind === 'audio'
             ? stateRef.current.can
               ? AUDIO_CARD_H
               : AUDIO_CARD_H_GUEST
             : CARD_H;
-        const cardW = CARD_W * sc;
-        const cardH = estH * sc;
+        const cardW = CARD_W * k;
+        const cardH = estH * k;
         let left: number;
         let top: number;
         if (kind === 'audio') {
@@ -197,7 +195,7 @@ function MediaCard({
         box.style.left = `${Math.round(pos.left)}px`;
         box.style.top = `${Math.round(pos.top)}px`;
         box.style.width = `${CARD_W}px`;
-        const wantTransform = kind === 'audio' ? `scale(${sc})` : '';
+        const wantTransform = kind === 'audio' ? `scale(${k})` : '';
         if (box.style.transform !== wantTransform) box.style.transform = wantTransform;
         const url = mediaUrl(v);
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
@@ -205,9 +203,6 @@ function MediaCard({
         if (isPlaying !== stateRef.current.playing) setPlaying(isPlaying);
         const sp = decodeMediaState(v.mediaState)?.playing === true;
         if (sp !== stateRef.current.sharedPlaying) setSharedPlaying(sp);
-        // Manual corner-drag scale (zoom-independent) — applied as CSS scale.
-        const cardScale = kind === 'audio' ? clampAudioScale(v.audioScale) : 1;
-        if (cardScale !== stateRef.current.scale) setScale(cardScale);
         const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
         if (seekRef.current && !seekingRef.current) {
           seekRef.current.value = String(
