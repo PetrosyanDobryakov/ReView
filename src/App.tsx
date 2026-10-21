@@ -410,6 +410,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       e.insertVideoFile(file, at);
       return;
     }
+    if (file.type.startsWith('audio/') || /\.(mp3|wav|oga|opus|m4a|flac)$/i.test(file.name)) {
+      e.insertAudioFile(file, at);
+      return;
+    }
     const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
     const isTxt =
       name.endsWith('.txt') || file.type === 'text/plain' || file.type.startsWith('text/');
@@ -896,6 +900,18 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           { label: t(locale, 'ctxOriginal'), run: () => e?.scaleSelectionToOriginal() }
         );
       }
+      if (menuView.type === 'audio') {
+        typeExtras.push(
+          {
+            label: t(locale, 'ctxAudioToggle'),
+            run: () => {
+              e?.setSelection([shapeId]);
+              e?.toggleAudioSelected(shapeId);
+            },
+          },
+          { label: t(locale, 'ctxDownload'), run: () => e?.downloadSelection() }
+        );
+      }
       if (menuView.type === 'pen') {
         typeExtras.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
@@ -1331,7 +1347,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,video/*,.gif,.mp4,.webm,.mov,.pdf,application/pdf,.txt,text/plain,.review,.json,application/json"
+        accept="image/*,video/*,audio/*,.gif,.mp4,.webm,.mov,.mp3,.wav,.ogg,.oga,.opus,.m4a,.flac,.pdf,application/pdf,.txt,text/plain,.review,.json,application/json"
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];

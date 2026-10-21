@@ -9,9 +9,11 @@ import {
   drawShape,
   getImage,
   getVideo,
+  getAudio,
   hasFill,
   onImageLoad,
   onVideoLoad,
+  onAudioLoad,
   pointInShape,
   shapeLassoProbes,
   displayInk,
@@ -29,15 +31,20 @@ import {
   setPaintZoom,
   boardNeedsMediaPaint,
   toggleVideoPlayback,
+  toggleAudioPlayback,
   isVideoPlaying,
+  isAudioPlaying,
 } from '../core/shapes';
 import {
   MEDIA_MAX_BYTES,
+  AUDIO_MAX_BYTES,
   isGifMime,
   isVideoMime,
+  isAudioMime,
   resolveFileMime,
   imageDownloadExt,
   videoDownloadExt,
+  audioDownloadExt,
 } from '../core/media';
 import { ingestDataUrlAsBlob, onBlobResolved, primeBlobUrl, warmVisibleBlobMedia } from '../core/mediaBlobs';
 import { localToWorld, rotatedAabb, withShapeRotation, worldToLocal, shapeRotation, degToRad, ROTATE_HANDLE_OFFSET_PX, rotateHandleLocal, rotateHandleOnBox, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorCroppedBox } from '../core/transform';
@@ -559,6 +566,7 @@ export class Engine {
   private offImageLoad: () => void = () => {};
   private offBlobResolved: () => void = () => {};
   private offVideoLoad: () => void = () => {};
+  private offAudioLoad: () => void = () => {};
   private offFormulaLoad: () => void = () => {};
   private offPrefs: () => void = () => {};
   private erasing = new Set<string>();
@@ -670,6 +678,9 @@ export class Engine {
       this.dirty = true;
     });
     this.offVideoLoad = onVideoLoad(() => {
+      this.dirty = true;
+    });
+    this.offAudioLoad = onAudioLoad(() => {
       this.dirty = true;
     });
     this.offFormulaLoad = onFormulaLoad(() => {
@@ -1064,6 +1075,7 @@ export class Engine {
     this.offImageLoad();
     this.offBlobResolved();
     this.offVideoLoad();
+    this.offAudioLoad();
     this.offFormulaLoad();
     this.offPrefs();
     window.removeEventListener('review-chrome-theme', this.onChromeTheme);
@@ -2022,7 +2034,7 @@ export class Engine {
     if (!this.selection.size) return;
     const ids = [...this.selection];
     const v = this.views.get(ids[0]);
-    const url = v && (v.type === 'image' || v.type === 'video') ? mediaUrl(v) : '';
+    const url = v && (v.type === 'image' || v.type === 'video' || v.type === 'audio') ? mediaUrl(v) : '';
     const kind = v?.mime ? `data:${v.mime}` : url;
     // Raw src only when a lone image has no annotations; otherwise bake the canvas
     // (same path as copy-as-image) so pens/stickies/text on the photo are included.
@@ -2044,6 +2056,13 @@ export class Engine {
       const a = document.createElement('a');
       a.href = url;
       a.download = `review-video.${videoDownloadExt(kind)}`;
+      a.click();
+      return;
+    }
+    if (ids.length === 1 && v?.type === 'audio' && url && this.annotationsOn(v).length === 0) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `review-audio.${audioDownloadExt(kind)}`;
       a.click();
       return;
     }
@@ -2125,6 +2144,7 @@ export class Engine {
         arrow: 'infoArrow',
         image: 'infoImage',
         video: 'infoVideo',
+        audio: 'infoAudio',
         graph: 'infoGraph',
         calculator: 'infoCalculator',
         table: 'infoTable',
@@ -2160,6 +2180,14 @@ export class Engine {
         lines.push(`${t(locale, 'infoPixels')}: ${vid.videoWidth} × ${vid.videoHeight}`);
       }
       lines.push(isVideoPlaying(mediaUrl(v)) ? t(locale, 'videoPlaying') : t(locale, 'videoPaused'));
+    }
+    if (v.type === 'audio') {
+      const el = getAudio(mediaUrl(v));
+      if (el && Number.isFinite(el.duration)) {
+        const s = Math.floor(el.duration);
+        lines.push(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+      }
+      lines.push(isAudioPlaying(mediaUrl(v)) ? t(locale, 'audioPlaying') : t(locale, 'audioPaused'));
     }
     if (v.locked) lines.push(t(locale, 'infoLocked'));
     return { title: t(locale, typeKey as unknown as import('../ui/i18n').MessageKey), lines };
@@ -2336,6 +2364,70 @@ export class Engine {
     const url = v && v.type === 'video' ? mediaUrl(v) : '';
     if (!v || !url || v.locked) return;
     toggleVideoPlayback(url);
+    this.dirty = true;
+  }
+
+  insertAudioFile(file: File, at?: { x: number; y: number }, pageId?: string): void {
+    const locale = readLocale();
+    const mime = resolveFileMime(file);
+    if (!isAudioMime(mime)) {
+      this.events.onError?.(t(locale, 'audioFailed'));
+      return;
+    }
+    if (file.size > AUDIO_MAX_BYTES) {
+      this.events.onError?.(t(locale, 'audioTooLarge'));
+      return;
+    }
+    const pos = this.resolvePastePos(at);
+    const page = pageId ?? store.currentPageId();
+    const boardId = store.getCurrentBoardId();
+    const reader = new FileReader();
+    reader.onerror = () => this.events.onError?.(t(locale, 'audioFailed'));
+    reader.onload = () => {
+      if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+      const src = String(reader.result);
+      // Validate decodability before a shape exists: metadata or error.
+      const probe = document.createElement('audio');
+      probe.preload = 'metadata';
+      probe.onerror = () => this.events.onError?.(t(locale, 'audioFailed'));
+      probe.onloadedmetadata = async () => {
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+        const w = 320;
+        const h = 96;
+        const media = await this.mediaFields(src);
+        if (!this.alive || store.getCurrentBoardId() !== boardId) return;
+        const id = store.addShape(
+          {
+            type: 'audio',
+            x: pos.x - w / 2,
+            y: pos.y - h / 2,
+            w,
+            h,
+            fill: 'transparent',
+            stroke: 'transparent',
+            strokeWidth: 0,
+            ...media,
+          },
+          page
+        );
+        // Warm the shared cache so paint/play use the same element.
+        getAudio(src);
+        this.setSelection([id]);
+        this.dirty = true;
+      };
+      probe.src = src;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /** Double-click / context: toggle play-pause for an audio shape. */
+  toggleAudioSelected(id?: string): void {
+    const sid = id ?? (this.selection.size === 1 ? [...this.selection][0] : null);
+    if (!sid) return;
+    const v = this.views.get(sid);
+    const url = v && v.type === 'audio' ? mediaUrl(v) : '';
+    if (!v || !url || v.locked) return;
+    toggleAudioPlayback(url);
     this.dirty = true;
   }
 
@@ -2761,7 +2853,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -4219,6 +4311,11 @@ export class Engine {
       this.toggleVideoSelected(id);
       return;
     }
+    if (type === 'audio') {
+      this.setSelection([id]);
+      this.toggleAudioSelected(id);
+      return;
+    }
     if (type === 'graph') {
       this.openGraphEditor(id);
       return;
@@ -5084,7 +5181,7 @@ export class Engine {
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
       // Stage 2 read path: warm blob bytes for the LOD resolution this view needs.
-      if (v.type === 'image' || v.type === 'video' || v.type === 'doc') {
+      if (v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc') {
         const screenPx = Math.max(v.w, v.h) * this.camera.zoom;
         const pageIndex =
           v.type === 'doc' ? docPageIndex(v.page, docPageCount(v)) : undefined;

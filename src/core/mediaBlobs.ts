@@ -541,7 +541,7 @@ export function warmVisibleBlobMedia(
   store?: BlobStore
 ): void {
   try {
-    if (v.type === 'image' || v.type === 'video' || (!v.type && (v.blob || v.thumb))) {
+    if (v.type === 'image' || v.type === 'video' || v.type === 'audio' || (!v.type && (v.blob || v.thumb))) {
       if (selectBlobKind(screenPx) === 'full') {
         if (v.blob) void ensureBlobUrl(v.blob, store);
       } else if (v.thumb) {

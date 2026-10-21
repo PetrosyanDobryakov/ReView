@@ -28,6 +28,13 @@ import {
   selectPaintSrc,
   warmVisibleBlobMedia,
 } from '../src/core/mediaBlobs.ts';
+import {
+  AUDIO_MAX_BYTES,
+  audioDownloadExt,
+  isAudioMime,
+  isVideoMime,
+  mimeFromFileName,
+} from '../src/core/media.ts';
 
 const enc = new TextEncoder();
 // 1x1 transparent PNG.
@@ -47,6 +54,8 @@ const PIXEL_PNG = `data:image/png;base64,${PIXEL_PNG_B64}`;
   assert.equal(decodeDataUrl('data:image/JPEG;charset=utf-8;base64,abcd')?.mime, 'image/jpeg');
   // Video mime passes through.
   assert.equal(decodeDataUrl('data:video/mp4;base64,abcd')?.mime, 'video/mp4');
+  // Audio mime passes through.
+  assert.equal(decodeDataUrl('data:audio/mpeg;base64,abcd')?.mime, 'audio/mpeg');
   // Rejects.
   assert.equal(decodeDataUrl('not-a-data-url'), null);
   assert.equal(decodeDataUrl('data:image/png,abcdef'), null); // missing ;base64
@@ -72,6 +81,38 @@ assert.equal(await makeThumbBytes(PIXEL_PNG), null);
   assert.equal(await store.has(ref.blob), true);
   // Invalid input resolves null, never throws.
   assert.equal(await ingestDataUrlAsBlob('garbage', { store }), null);
+}
+
+// --- ingest one audio (memory store): blob-backed, never a thumb ------------
+{
+  const store = new MemoryBlobStore();
+  const src = `data:audio/mpeg;base64,${Buffer.from(enc.encode('fake-mp3-bytes')).toString('base64')}`;
+  const ref = await ingestDataUrlAsBlob(src, { store });
+  assert.ok(ref);
+  assert.equal(ref.mime, 'audio/mpeg');
+  assert.equal(ref.thumb, null);
+  assert.equal(ref.bytes, decodeDataUrl(src).bytes.length);
+  assert.equal(await store.has(ref.blob), true);
+}
+
+// --- audio mime helpers ---------------------------------------------------------
+{
+  assert.equal(isAudioMime('audio/mpeg'), true);
+  assert.equal(isAudioMime('audio/x-m4a'), true);
+  assert.equal(isAudioMime('audio/unknown-future'), true); // prefix rule, mirrors video
+  assert.equal(isAudioMime('video/mp4'), false);
+  assert.equal(isAudioMime(''), false);
+  assert.equal(isVideoMime('audio/mpeg'), false);
+  assert.equal(mimeFromFileName('lesson.MP3'), 'audio/mpeg');
+  assert.equal(mimeFromFileName('voice.wav'), 'audio/wav');
+  assert.equal(mimeFromFileName('take.m4a'), 'audio/mp4');
+  assert.equal(mimeFromFileName('take.opus'), 'audio/ogg');
+  assert.equal(mimeFromFileName('clip.webm'), 'video/webm'); // still video
+  assert.equal(audioDownloadExt('data:audio/mpeg;base64,xx'), 'mp3');
+  assert.equal(audioDownloadExt('data:audio/x-wav;base64,xx'), 'wav');
+  assert.equal(audioDownloadExt('data:audio/ogg;base64,xx'), 'ogg');
+  assert.equal(audioDownloadExt('data:audio/mp4;base64,xx'), 'm4a');
+  assert.equal(AUDIO_MAX_BYTES, 32 * 1024 * 1024);
 }
 
 // --- attachImageBlobs: patch applied, board guard respected ------------------
@@ -240,6 +281,17 @@ assert.equal(selectDocPaintSrc(undefined, null, null), '');
   // No refs -> no work, no throw.
   warmVisibleBlobMedia({ type: 'image' }, 2000, undefined, store);
   warmVisibleBlobMedia({ type: 'rect' }, 2000, undefined, store);
+
+  // Audio view warms the full blob (audio has no LOD thumb).
+  __clearBlobResolverForTests();
+  const audioBytes = enc.encode('warm-audio');
+  const audioHash = await hashBytes(audioBytes);
+  await store.put(audioHash, audioBytes, 'audio/mpeg');
+  warmVisibleBlobMedia({ type: 'audio', blob: audioHash, thumb: null }, 2000, undefined, store);
+  for (let i = 0; i < 50 && !resolvedBlobUrl(audioHash); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(resolvedBlobUrl(audioHash).startsWith('blob:'));
   __clearBlobResolverForTests();
 }
 

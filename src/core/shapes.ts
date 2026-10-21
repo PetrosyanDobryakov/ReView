@@ -12,21 +12,22 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
 
-/** Photo / video / PDF hosts that magnetize notes above them in z-order. */
-export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'doc']);
+/** Photo / video / audio / PDF hosts that magnetize notes above them in z-order. */
+export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'audio', 'doc']);
 
 /**
  * Big tray-like hosts that carry riders (tables, media, frames). A press on an
  * unselected host selects it and starts marquee — moving needs it pre-selected.
  */
-export const RIDER_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['table', 'frame', 'image', 'video', 'doc']);
+export const RIDER_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['table', 'frame', 'image', 'video', 'audio', 'doc']);
 
 /** Container-like shapes the eraser never touches (either mode) — ink on top of them still erases. */
 export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
   'image',
   'video',
+  'audio',
   'doc',
   'table',
   'graph',
@@ -889,7 +890,7 @@ export function hostRiderIds(
       }
       return;
     }
-    if (host.type !== 'image' && host.type !== 'video' && host.type !== 'doc' && host.type !== 'frame') return;
+    if (host.type !== 'image' && host.type !== 'video' && host.type !== 'audio' && host.type !== 'doc' && host.type !== 'frame') return;
     const hostZ = z.get(host.id) ?? -1;
     for (const s of shapes) {
       if (skip.has(s.id) || riding.has(s.id) || s.locked) continue;
@@ -2117,6 +2118,22 @@ export function drawShape(
       }
       break;
     }
+    case 'audio': {
+      const el = getAudio(resolveBlobPaintSrc(v));
+      drawAudioCard(
+        ctx,
+        v,
+        el
+          ? {
+              cur: el.currentTime,
+              dur: el.duration,
+              playing: !el.paused && !el.ended,
+              ready: el.readyState >= 1,
+            }
+          : null
+      );
+      break;
+    }
     case 'doc': {
       const pages = v.pages ?? [];
       const idx = docPageIndex(v.page, docPageCount(v));
@@ -3067,13 +3084,157 @@ export function isVideoPlaying(src: string | undefined): boolean {
   return Boolean(video && !video.paused && !video.ended);
 }
 
-/** True when the board needs continuous RAF paints for GIF / playing video. */
+const audioCache = new Map<string, HTMLAudioElement>();
+const audioListeners = new Set<(src: string) => void>();
+
+export function onAudioLoad(cb: (src: string) => void): () => void {
+  audioListeners.add(cb);
+  return () => {
+    audioListeners.delete(cb);
+  };
+}
+
+/** Shared per-src audio element (mirrors the video cache). One plays at a time. */
+export function getAudio(src: string): HTMLAudioElement | null {
+  if (!src.startsWith('data:audio/') && !src.startsWith('blob:')) return null;
+  const hit = audioCache.get(src);
+  if (hit) return hit;
+  const audio = document.createElement('audio');
+  audio.preload = 'metadata';
+  const notify = () => {
+    for (const l of audioListeners) l(src);
+  };
+  audio.addEventListener('loadedmetadata', notify);
+  audio.addEventListener('error', () => {
+    audioCache.delete(src);
+  });
+  audio.src = src;
+  audioCache.set(src, audio);
+  return audio;
+}
+
+export function releaseAudio(src: string): void {
+  if (!src) return;
+  const a = audioCache.get(src);
+  if (a) {
+    try {
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
+    } catch {
+      /* ignore */
+    }
+    audioCache.delete(src);
+  }
+}
+
+export function toggleAudioPlayback(src: string): boolean {
+  const audio = getAudio(src);
+  if (!audio) return false;
+  if (audio.paused) {
+    for (const [key, other] of audioCache) {
+      if (key !== src && !other.paused) {
+        try {
+          other.pause();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    void audio.play().catch(() => {
+      /* autoplay policy — user gesture should allow; ignore */
+    });
+    return true;
+  }
+  audio.pause();
+  return false;
+}
+
+export function isAudioPlaying(src: string | undefined): boolean {
+  if (!src) return false;
+  const audio = audioCache.get(src);
+  return Boolean(audio && !audio.paused && !audio.ended);
+}
+
+/** True when the board needs continuous RAF paints for GIF / playing media. */
 export function boardNeedsMediaPaint(views: Iterable<Pick<ShapeView, 'type' | 'src' | 'blob' | 'mime'>>): boolean {
   for (const v of views) {
     if (v.type === 'image' && (v.mime === 'image/gif' || (v.src && v.src.startsWith('data:image/gif')))) return true;
     if (v.type === 'video' && isVideoPlaying(v.blob ? resolvedBlobUrl(v.blob) ?? v.src : v.src)) return true;
+    if (v.type === 'audio' && isAudioPlaying(v.blob ? resolvedBlobUrl(v.blob) ?? v.src : v.src)) return true;
   }
   return false;
+}
+
+/** m:ss, or h:mm:ss past an hour. NaN/negative renders as --:--. */
+export function fmtAudioTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '--:--';
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+  return `${h > 0 ? `${h}:` : ''}${mm}:${String(r).padStart(2, '0')}`;
+}
+
+export type AudioCardState = { cur: number; dur: number; playing: boolean; ready: boolean };
+
+/** Canvas player card: round button, time readout and progress bar. */
+export function drawAudioCard(ctx: CanvasRenderingContext2D, v: ShapeView, st: AudioCardState | null): void {
+  ctx.save();
+  ctx.fillStyle = '#1a1a18';
+  ctx.fillRect(v.x, v.y, v.w, v.h);
+  ctx.strokeStyle = '#454540';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(v.x, v.y, v.w, v.h);
+  const pad = Math.min(v.w, v.h) * 0.18;
+  const r = Math.max(12, Math.min(44, Math.min(v.w, v.h) * 0.26));
+  const cx = v.x + pad + r;
+  const cy = v.y + v.h / 2;
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = '#000000';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = '#ffffff';
+  if (st?.playing) {
+    const bw = r * 0.22;
+    const bh = r * 0.8;
+    ctx.fillRect(cx - bw - r * 0.08, cy - bh / 2, bw, bh);
+    ctx.fillRect(cx + r * 0.08, cy - bh / 2, bw, bh);
+  } else {
+    const tri = r * 0.45;
+    ctx.beginPath();
+    ctx.moveTo(cx - tri * 0.35, cy - tri);
+    ctx.lineTo(cx - tri * 0.35, cy + tri);
+    ctx.lineTo(cx + tri * 0.85, cy);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  const tx = cx + r + pad * 0.8;
+  const tw = Math.max(0, v.x + v.w - pad - tx);
+  if (tw > 8) {
+    const fs = Math.max(10, Math.min(20, v.h * 0.17));
+    ctx.font = `500 ${fs}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    const label = st && st.ready ? `${fmtAudioTime(st.cur)} / ${fmtAudioTime(st.dur)}` : '--:--';
+    ctx.fillStyle = '#eceae4';
+    ctx.fillText(label, tx, cy - fs * 0.75, tw);
+    const frac = st && st.ready && Number.isFinite(st.dur) && st.dur > 0
+      ? Math.max(0, Math.min(1, st.cur / st.dur))
+      : 0;
+    const by = cy + fs * 0.55;
+    const bh = Math.max(2, fs * 0.22);
+    ctx.fillStyle = '#454540';
+    ctx.fillRect(tx, by, tw, bh);
+    if (frac > 0) {
+      ctx.fillStyle = '#eceae4';
+      ctx.fillRect(tx, by, Math.max(bh, tw * frac), bh);
+    }
+  }
+  ctx.restore();
 }
 
 function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {
