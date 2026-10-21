@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.16.16
+
+### Audio files on the board
+
+- **New `audio` shape.** Drop mp3/wav/ogg/opus/m4a/flac onto the board (file
+  dialog, paste, drag-and-drop). Files are validated before the shape exists;
+  cap is 32 MB so lesson recordings fit.
+- **Canvas player card.** Round play/pause button, `mm:ss` readout and an
+  animated progress bar, painted like video frames. Double-click or the context
+  menu toggles; one plays at a time; no autoplay.
+- **Same pipes as video.** SHA-256 blobs outside the Y.Doc, peer fetch and
+  prefetch, download from the menu, SVG placeholder on export. No new document
+  fields, no waveform yet.
+
 ## 0.16.15
 
 ### Settings polish, home join block, honest rotation magnet
