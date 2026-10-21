@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.23
+
+### Audio is a board object again
+
+- **The player zooms with the board.** The card fills its world rect like a
+  photo: zoom in/out rescales it, and it keeps its size on the board. The
+  screen-constant card experiment (`audioScale`) is removed.
+- **Manual resize scales the shape uniformly** (any handle, aspect locked,
+  undoable, synced) so the player never distorts; selection, hit-test,
+  marquee and erase work by the world rect like image/video.
+- Legacy 320x96 audio heals to the default size once, center-preserving.
+
 ## 0.16.22
 
 ### Zoom-independent player with manual resize
