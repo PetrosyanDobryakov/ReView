@@ -2535,13 +2535,13 @@ button.brand {
 .notice-center {
   position: fixed;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  top: 26px;
+  transform: translateX(-50%);
   z-index: 1200;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(420px, 90vw);
+  width: min(460px, 92vw);
   pointer-events: none;
 }
 .notice {
@@ -2551,7 +2551,7 @@ button.brand {
   border: 1px solid var(--chrome-border);
   border-radius: 14px;
   box-shadow: var(--chrome-shadow);
-  padding: 12px 12px 10px;
+  padding: 14px 14px 12px;
   overflow: hidden;
 }
 .notice-error {
@@ -2567,13 +2567,13 @@ button.brand {
   min-width: 0;
 }
 .notice-title {
-  font-size: var(--chrome-type);
+  font-size: var(--chrome-type-head);
   font-weight: 600;
   line-height: 1.3;
 }
 .notice-detail {
   margin-top: 2px;
-  font-size: var(--chrome-type-label);
+  font-size: var(--chrome-type);
   color: var(--chrome-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;

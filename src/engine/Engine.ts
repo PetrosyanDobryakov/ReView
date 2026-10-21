@@ -34,6 +34,7 @@ import {
   toggleAudioPlayback,
   isVideoPlaying,
   isAudioPlaying,
+  refreshMediaChrome,
 } from '../core/shapes';
 import {
   MEDIA_SYNC_SLOP_S,
@@ -749,6 +750,7 @@ export class Engine {
   }
 
   private onChromeTheme = (): void => {
+    refreshMediaChrome();
     this.dirty = true;
   };
 
@@ -2566,8 +2568,7 @@ export class Engine {
         return;
       }
       const el = this.mediaElement(v);
-      if (!el) return;
-      this.applyMediaElement(el, st, Date.now());
+      // The notice must reach everyone, even a peer with no bytes yet.
       if (st.at >= this.bootMs) {
         try {
           this.events.onMediaNotice?.({
@@ -2581,6 +2582,8 @@ export class Engine {
           /* ignore */
         }
       }
+      if (!el) return;
+      this.applyMediaElement(el, st, Date.now());
       this.dirty = true;
     } catch {
       /* follower never breaks paint */
@@ -4594,8 +4597,8 @@ export class Engine {
       return;
     }
     if (type === 'audio') {
+      // Tap the on-canvas player instead (dblclick would toggle twice).
       this.setSelection([id]);
-      this.toggleAudioSelected(id);
       return;
     }
     if (type === 'graph') {
