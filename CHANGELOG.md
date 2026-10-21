@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Audio is just the player card.** No canvas rectangle anymore: the body is
+  invisible, the footprint is fixed (288 wide, role-height) and snaps existing
+  shapes back to center, no resize/rotate handles on audio. Card layout follows
+  the mockup: outline Play (participant toggles locally, organizer starts the
+  countdown when idle), "stop for me" + my volume, organizer adds "stop for
+  all" + shared volume.
+
 ## 0.16.20
 
 ### Player card cleanup

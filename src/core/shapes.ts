@@ -2127,14 +2127,9 @@ export function drawShape(
       break;
     }
     case 'audio': {
-      // The floating player card owns the visuals; canvas keeps a flat
-      // theme-tinted body so edges stay clean at any zoom.
-      const chrome = mediaPlayerChrome();
-      ctx.fillStyle = chrome.bg;
-      ctx.fillRect(v.x, v.y, v.w, v.h);
-      ctx.strokeStyle = chrome.border;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(v.x, v.y, v.w, v.h);
+      // No canvas body at all: the fixed-size DOM player card owns the
+      // visuals, so no rectangle is ever visible or scaled by zoom. The
+      // footprint below only drives hit-test / move / selection outline.
       break;
     }
     case 'doc': {
@@ -3186,49 +3181,14 @@ export function fmtAudioTime(sec: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(r).padStart(2, '0')}`;
 }
 
-export interface PlayerChrome {
-  bg: string;
-  border: string;
-  text: string;
-  dim: string;
-  accent: string;
-}
-
-let playerChromeCache: PlayerChrome | null = null;
-
-function cssVarValue(name: string): string {
-  try {
-    if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return '';
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return typeof v === 'string' ? v.trim() : '';
-  } catch {
-    return '';
-  }
-}
-
 /**
- * Chrome-side palette for media player surfaces, read live from CSS vars so
- * every theme applies. Cached until refreshMediaChrome (theme switch).
- * Node-safe: falls back to the packet dark palette.
+ * Fixed audio footprint (canvas units): the DOM player card is CARD_W wide and
+ * never rescales, so the invisible shape rect hugs it. Host cards carry the
+ * extra for-all row and run taller.
  */
-export function mediaPlayerChrome(): PlayerChrome {
-  if (!playerChromeCache) {
-    const pick = (name: string, fallback: string): string => cssVarValue(name) || fallback;
-    playerChromeCache = {
-      bg: pick('--chrome-panel', '#2e2e2b'),
-      border: pick('--chrome-border', '#454540'),
-      text: pick('--chrome-text', '#eceae4'),
-      dim: pick('--chrome-text-dim', '#a8a59c'),
-      accent: pick('--chrome-accent', '#d4cfc4'),
-    };
-  }
-  return playerChromeCache;
-}
-
-/** Drop the cached palette (chrome theme switched) — next paint re-reads vars. */
-export function refreshMediaChrome(): void {
-  playerChromeCache = null;
-}
+export const AUDIO_CARD_W = 288;
+export const AUDIO_CARD_H_HOST = 196;
+export const AUDIO_CARD_H_GUEST = 160;
 
 function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {
   const cx = v.x + v.w / 2;

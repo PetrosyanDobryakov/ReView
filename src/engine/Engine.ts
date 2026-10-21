@@ -34,7 +34,9 @@ import {
   toggleAudioPlayback,
   isVideoPlaying,
   isAudioPlaying,
-  refreshMediaChrome,
+  AUDIO_CARD_W,
+  AUDIO_CARD_H_HOST,
+  AUDIO_CARD_H_GUEST,
 } from '../core/shapes';
 import {
   MEDIA_SYNC_SLOP_S,
@@ -750,7 +752,6 @@ export class Engine {
   }
 
   private onChromeTheme = (): void => {
-    refreshMediaChrome();
     this.dirty = true;
   };
 
@@ -830,11 +831,40 @@ export class Engine {
     return visualBox(v);
   }
 
+  /**
+   * Audio shapes are fixed-size player cards (DOM overlay, never rescaled), so
+   * any stored geometry (legacy 320x96, user-resized, remote) is snapped back
+   * to the card footprint, keeping the same center. View-only: the Y doc is
+   * left alone, so there is nothing to fight over.
+   */
+  private normalizeAudioView(v: ShapeView): ShapeView {
+    if (v.type !== 'audio') return v;
+    const w = AUDIO_CARD_W;
+    const h = store.iControlMedia() ? AUDIO_CARD_H_HOST : AUDIO_CARD_H_GUEST;
+    if (v.w === w && v.h === h) return v;
+    return { ...v, x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
+  }
+
+  /** Re-snap audio footprints (e.g. after the local media role changes). */
+  normalizeAudioFootprints(): void {
+    let touched = false;
+    for (const [id, v] of this.views) {
+      if (v.type !== 'audio') continue;
+      const n = this.normalizeAudioView(v);
+      if (n !== v) {
+        this.views.set(id, n);
+        this.grid.upsert(id, this.spatialBox(n));
+        touched = true;
+      }
+    }
+    if (touched) this.dirty = true;
+  }
+
   private loadActivePage(): void {
     store.ensureOrder();
     for (const [key, m] of store.board) {
       if (!store.isOnActivePage(key)) continue;
-      const v = { ...store.readShape(m), id: key };
+      const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.attachShape(key, m);
@@ -1306,7 +1336,9 @@ export class Engine {
     }
     for (const id of this.selection) {
       const v = this.views.get(id);
-      if (!v || v.locked) continue;
+      // Audio is a fixed-size player card — selectable and movable, but never
+      // resized, so its corners stay handle-free.
+      if (!v || v.locked || v.type === 'audio') continue;
       for (const handle of HANDLES) {
         const [fx, fy] = HANDLE_POS[handle];
         const world = localToWorld(v, fx * v.w, fy * v.h);
@@ -1359,7 +1391,8 @@ export class Engine {
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
     const v = this.views.get(id);
-    if (!v || v.locked) return null;
+    // Audio has no rotate knob either — the DOM card stays axis-aligned.
+    if (!v || v.locked || v.type === 'audio') return null;
     const w = this.rotateHandleWorldPos(id);
     if (!w) return null;
     const hx = w.x * z + ox;
@@ -2436,8 +2469,9 @@ export class Engine {
       probe.onerror = () => this.events.onError?.(t(locale, 'audioFailed'));
       probe.onloadedmetadata = async () => {
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
-        const w = 320;
-        const h = 96;
+        // Fixed player footprint — the DOM card owns the visuals.
+        const w = AUDIO_CARD_W;
+        const h = store.iControlMedia() ? AUDIO_CARD_H_HOST : AUDIO_CARD_H_GUEST;
         const media = await this.mediaFields(src);
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const id = store.addShape(
@@ -3928,7 +3962,7 @@ export class Engine {
       } else if (store.isOnActivePage(key)) {
         const m = store.board.get(key);
         if (m) {
-          const v = { ...store.readShape(m), id: key };
+          const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
           this.views.set(key, v);
           this.grid.upsert(key, this.spatialBox(v));
           this.attachShape(key, m);
@@ -3971,7 +4005,7 @@ export class Engine {
     if (existing && existing.m === m) return;
     this.detachShape(key);
     const cb = (ev: Y.YMapEvent<unknown>) => {
-      const v = { ...store.readShape(m), id: key };
+      const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.followMediaState(key, v);
@@ -6036,7 +6070,7 @@ export class Engine {
         ctx.lineWidth = line;
         ctx.strokeRect(x, y, w, h);
 
-        if (this.selection.size === 1 && !v.locked) {
+        if (this.selection.size === 1 && !v.locked && v.type !== 'audio') {
           for (const [fx, fy] of Object.values(HANDLE_POS)) {
             const hx = v.x + fx * v.w;
             const hy = v.y + fy * v.h;

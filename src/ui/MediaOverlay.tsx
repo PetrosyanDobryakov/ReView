@@ -9,7 +9,14 @@ import {
   setLocalMediaVolume,
 } from '../core/mediaRoles';
 import { iControlMedia } from '../core/store';
-import { fmtAudioTime, getAudio, getVideo, mediaUrl } from '../core/shapes';
+import {
+  fmtAudioTime,
+  getAudio,
+  getVideo,
+  mediaUrl,
+  AUDIO_CARD_H_HOST,
+  AUDIO_CARD_H_GUEST,
+} from '../core/shapes';
 import { clampToVisualViewport } from '../core/pointerEnv';
 import { t } from './i18n';
 
@@ -18,13 +25,19 @@ const CARD_H = 280;
 
 function PlayGlyph({ playing }: { playing: boolean }) {
   return playing ? (
-    <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="3" y="2.5" width="3.4" height="11" rx="1" fill="currentColor" />
       <rect x="9.6" y="2.5" width="3.4" height="11" rx="1" fill="currentColor" />
     </svg>
   ) : (
-    <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M4.5 2.3l8.7 5.7-8.7 5.7z" fill="currentColor" />
+    <svg width="32" height="32" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M4.2 2.2l9.2 5.8-9.2 5.8z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -46,7 +59,7 @@ function VolRow({
         title={label}
         style={{
           flex: 'none',
-          maxWidth: 110,
+          maxWidth: 96,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -73,15 +86,19 @@ function VolRow({
 }
 
 /**
- * Always-visible player card for one media shape (mockup layout): big play
- * toggle for me, file pill, thin timeline, sync-with-host switch, my volume —
- * and, when this device may drive it, one contextual start/stop-for-all button
- * plus the shared volume. Fixed pixel size: zoom moves the card with its shape
- * but never rescales it. Audio centers over its body, video docks below its
- * frame.
+ * Always-visible player card for one media shape, laid out like the mockup:
+ * bare outline Play at the left, filename pill over a thin timeline with live
+ * time, then "stop for me" plus my volume — and, when this device may drive
+ * it, a second "stop for all" row plus the shared volume. Fixed pixel size:
+ * zoom moves the card with its shape but never rescales it. Audio centers over
+ * its (invisible, fixed-size) footprint; video docks below its frame.
  *
- * The container is pointer-transparent so canvas gestures (select / move /
- * resize) keep working everywhere except the controls themselves.
+ * Play semantics: participant toggles local playback; organizer starts the
+ * countdown for everyone when idle, otherwise toggles locally (all-stop is
+ * the button below).
+ *
+ * The container is pointer-transparent so canvas gestures (select / move)
+ * keep working everywhere except the controls themselves.
  */
 function MediaCard({
   engine,
@@ -122,13 +139,17 @@ function MediaCard({
     const poll = window.setInterval(() => {
       try {
         const next = iControlMedia();
-        if (next !== stateRef.current.can) setCan(next);
+        if (next !== stateRef.current.can) {
+          setCan(next);
+          // Footprint height depends on the role (extra for-all row).
+          engine.normalizeAudioFootprints();
+        }
       } catch {
         /* ignore */
       }
     }, 2000);
     return () => window.clearInterval(poll);
-  }, []);
+  }, [engine]);
 
   useEffect(() => {
     let raf = 0;
@@ -150,12 +171,18 @@ function MediaCard({
         }
         box.style.display = '';
         // Fixed card size: it follows the shape on zoom/pan but never rescales.
-        // Audio centers over its body; video docks below its frame.
+        // Audio centers over its invisible fixed footprint; video docks below.
+        const estH =
+          kind === 'audio'
+            ? stateRef.current.can
+              ? AUDIO_CARD_H_HOST
+              : AUDIO_CARD_H_GUEST
+            : CARD_H;
         let left: number;
         let top: number;
         if (kind === 'audio') {
           left = (a.x + b.x) / 2 - CARD_W / 2;
-          top = (a.y + b.y) / 2 - CARD_H / 2;
+          top = (a.y + b.y) / 2 - estH / 2;
         } else {
           left = a.x;
           top = b.y + 8;
@@ -251,6 +278,17 @@ function MediaCard({
     else playSelf();
   };
 
+  // Mockup semantics. Participant: local toggle. Organizer: idle → countdown
+  // start for everyone; while shared playing → local toggle (all-stop lives
+  // in the row below).
+  const pressPlay = () => {
+    if (stateRef.current.can && !stateRef.current.sharedPlaying) {
+      void engine.setMediaSharedState(shapeId, { playing: true });
+      return;
+    }
+    toggleSelf();
+  };
+
   const seekSelf = (frac: number) => {
     engine.cancelPendingMedia(shapeId);
     withElement((el) => {
@@ -311,11 +349,23 @@ function MediaCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
         <button
           type="button"
-          className="style-btn active"
-          style={{ width: 52, height: 52, borderRadius: '50%', padding: 0, flex: 'none', pointerEvents: 'auto' }}
+          style={{
+            width: 56,
+            height: 56,
+            flex: 'none',
+            pointerEvents: 'auto',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            color: 'var(--chrome-text)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
           title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
           aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-          onClick={toggleSelf}
+          onClick={pressPlay}
         >
           <PlayGlyph playing={playing} />
         </button>
@@ -350,27 +400,35 @@ function MediaCard({
           </div>
         </div>
       </div>
-      <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
-        <VolRow
-          label={t(locale, 'mediaVolSelf')}
-          value={selfVol}
-          onInput={volSelf}
-        />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, pointerEvents: 'none' }}>
+        <button
+          type="button"
+          className="style-btn"
+          style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
+          onClick={stopSelf}
+        >
+          {t(locale, 'mediaStopSelf')}
+        </button>
+        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
+          <VolRow
+            label={t(locale, 'mediaVolSelf')}
+            value={selfVol}
+            onInput={volSelf}
+          />
+        </div>
       </div>
       {can ? (
-        <>
-          <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
-            <button
-              type="button"
-              className="style-btn"
-              style={{ width: '100%', pointerEvents: 'auto' }}
-              title={t(locale, sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint')}
-              onClick={() => void engine.setMediaSharedState(shapeId, { playing: !sharedPlaying })}
-            >
-              {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
-            </button>
-          </div>
-          <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, pointerEvents: 'none' }}>
+          <button
+            type="button"
+            className="style-btn"
+            style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
+            title={t(locale, 'mediaStopAllHint')}
+            onClick={() => void engine.setMediaSharedState(shapeId, { playing: false })}
+          >
+            {t(locale, 'mediaStopAll')}
+          </button>
+          <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
             <VolRow
               label={t(locale, 'mediaVolAll')}
               value={allVol}
@@ -378,7 +436,7 @@ function MediaCard({
               onCommit={volAllCommit}
             />
           </div>
-        </>
+        </div>
       ) : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6, pointerEvents: 'none' }}>
         <button
