@@ -422,31 +422,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       <main className="home-shell">
         <div className="home-hero">
           <h1 className="home-h1">{t(locale, 'boardsTitle')}</h1>
-          <div className="home-hero-actions">
-            <input
-              ref={importRef}
-              type="file"
-              accept=".json,.review,application/json"
-              className="visually-hidden"
-              aria-label={t(locale, 'importBoardAction')}
-              onChange={handleImportPick}
-            />
-            <button
-              type="button"
-              className="home-btn"
-              title={t(locale, 'importBoardHint')}
-              onClick={() => importRef.current?.click()}
-            >
-              <Icon name="upload" size={16} />
-              <span className="home-btn-label">{t(locale, 'importBoard')}</span>
-            </button>
-            <button type="button" className="home-btn home-btn-primary" onClick={handleCreateBoard}>
-              <Icon name="plus" size={16} />
-              {t(locale, 'newBoard')}
-            </button>
-          </div>
         </div>
 
+        <p className="home-join-title">{t(locale, 'joinTitle')}</p>
         <form
           className="home-join"
           onSubmit={(e) => {
@@ -673,6 +651,30 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             )}
           </div>
         )}
+
+        <div className="home-bottom-actions">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".json,.review,application/json"
+            className="visually-hidden"
+            aria-label={t(locale, 'importBoardAction')}
+            onChange={handleImportPick}
+          />
+          <button
+            type="button"
+            className="home-btn"
+            title={t(locale, 'importBoardHint')}
+            onClick={() => importRef.current?.click()}
+          >
+            <Icon name="upload" size={16} />
+            <span className="home-btn-label">{t(locale, 'importBoard')}</span>
+          </button>
+          <button type="button" className="home-btn home-btn-primary" onClick={handleCreateBoard}>
+            <Icon name="plus" size={16} />
+            {t(locale, 'newBoard')}
+          </button>
+        </div>
 
         <footer className="home-foot">
           <p className="home-foot-note">

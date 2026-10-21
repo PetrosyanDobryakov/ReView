@@ -2489,6 +2489,48 @@ button.brand {
   background: transparent;
 }
 
+/* Four settings tabs must fit without clipping long ru/en labels. */
+.sheet-tabs > .style-btn {
+  padding: 0 4px;
+  font-size: var(--chrome-type-label);
+}
+.sheet-tabs > .style-btn .swap-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Developer hold-to-open: the fill tracks the press duration. */
+.dev-hold {
+  position: relative;
+  overflow: hidden;
+}
+.dev-hold-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--chrome-active-bg);
+  box-shadow: inset 0 0 0 1px var(--chrome-active-ring);
+  pointer-events: none;
+}
+.dev-hold.is-holding .dev-hold-fill {
+  width: 100%;
+  transition: width 1.5s linear;
+}
+.dev-hold-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* Full-width mono line (paths, long ids). */
+.sheet-mono-wide {
+  max-width: 100%;
+  margin: 0 0 8px;
+}
+
 /* Bottom fade stays pinned to the sheet frame (does not scroll away). */
 .sheet-fade {
   position: absolute;
@@ -4794,6 +4836,18 @@ h3 .swap-text,
 }
 
 /* Join: one quiet field, the button wakes up once there is something to join. */
+.home-join-title {
+  margin: 10px 2px 6px;
+  font-size: var(--chrome-type-label);
+  font-weight: 600;
+  color: var(--chrome-text);
+}
+.home-bottom-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 2px 4px;
+}
 .home-join {
   display: flex;
   align-items: center;
@@ -5114,6 +5168,10 @@ h3 .swap-text,
   .board-row:focus-within .board-row-menu-trigger,
   .board-row-menu-trigger.is-open,
   .home-tabs .board-row-menu-trigger {
+    opacity: 1;
+  }
+  /* Board row menus stay discoverable: dots are always visible. */
+  .board-row .board-row-menu-trigger {
     opacity: 1;
   }
 }

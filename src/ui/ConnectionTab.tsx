@@ -363,8 +363,8 @@ export function ConnectionTab({
         </li>
       </ul>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'membersInvite')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'membersInvite')}</h3>
         {!boardSession ? (
           <p className="sheet-hint">{t(locale, 'syncBoardOnly')}</p>
         ) : (
@@ -392,10 +392,10 @@ export function ConnectionTab({
             </button>
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'membersYou')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'membersYou')}</h3>
         <label className="nick-row">
           <span>{t(locale, 'nickname')}</span>
           <input
@@ -435,10 +435,10 @@ export function ConnectionTab({
             }}
           />
         </div>
-      </div>
+      </section>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'connMode')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'connMode')}</h3>
         <SlideTrack className="locale-row" active={mode}>
           {MODES.map((m) => (
             <button
@@ -457,10 +457,10 @@ export function ConnectionTab({
           ))}
         </SlideTrack>
         <p className="sheet-hint">{t(locale, MODE_HINT[mode])}</p>
-      </div>
+      </section>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'connPeople')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'connPeople')}</h3>
         {!boardSession ? (
           <p className="sheet-hint">{t(locale, 'syncBoardOnly')}</p>
         ) : snap.peers.length === 0 && kickedIds.length === 0 ? (
@@ -537,10 +537,10 @@ export function ConnectionTab({
             {t(locale, 'connKicked')}: <span className="sheet-mono">{kickedIds.join(', ')}</span>
           </p>
         ) : null}
-      </div>
+      </section>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'p2pNetCheck')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'p2pNetCheck')}</h3>
         {nat === 'checking' ? (
           <p className="sheet-hint">{t(locale, 'p2pNatChecking')}</p>
         ) : nat ? (
@@ -559,17 +559,17 @@ export function ConnectionTab({
             {diagCopied ? t(locale, 'syncLanCopied') : t(locale, 'p2pDiagCopy')}
           </button>
         </div>
-      </div>
+      </section>
 
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'p2pHubs')}</h4>
+      <section className="sheet-section">
+        <h3>{t(locale, 'p2pHubs')}</h3>
         <p className="sheet-hint">{hubsSummary}</p>
         <div className="sheet-actions">
           <button type="button" className="style-btn" disabled={!boardSession} onClick={() => refreshHubs()}>
             {t(locale, 'p2pRefresh')}
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

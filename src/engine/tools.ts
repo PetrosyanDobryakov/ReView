@@ -1232,6 +1232,9 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
   const dy = y1 - y0;
   const len = Math.hypot(dx, dy);
   if (len < 0.001) return { x: x1, y: y1 };
+  // The rotation magnet governs every angle snap, including shift-drawn
+  // lines: off means free everywhere, as the setting hint promises.
+  if (!readPrefs().rotateSnap) return { x: x1, y: y1 };
   const ang = Math.atan2(dy, dx);
   const rounded = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
   if (Math.abs(ang - rounded) < 0.07) {

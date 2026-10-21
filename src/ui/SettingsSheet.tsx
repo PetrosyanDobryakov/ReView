@@ -193,6 +193,7 @@ export function SettingsSheet({
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
   const [netLogOn, setNetLogOn] = useState(() => isNetLogEnabled());
   const [devOpen, setDevOpen] = useState(false);
+  const [holding, setHolding] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dataDir, setDataDir] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -314,12 +315,15 @@ export function SettingsSheet({
       clearTimeout(holdTimer.current);
       holdTimer.current = null;
     }
+    setHolding(false);
   };
 
   const startDevHold = () => {
     cancelDevHold();
+    setHolding(true);
     holdTimer.current = setTimeout(() => {
       holdTimer.current = null;
+      setHolding(false);
       setDevOpen(true);
     }, DEV_HOLD_MS);
   };
@@ -414,20 +418,25 @@ export function SettingsSheet({
 
               {desktop ? (
                 <section className="sheet-section">
+                  <h3>
+                    <SwapText text={t(locale, 'p2pBoardsFolder')} />
+                  </h3>
+                  <p className="sheet-hint">
+                    <SwapText text={t(locale, 'p2pDataFolder')} />
+                  </p>
+                  {dataDir ? (
+                    <p className="sheet-mono sheet-mono-wide" title={dataDir}>
+                      {dataDir}
+                    </p>
+                  ) : null}
                   <div className="sheet-actions">
                     <button type="button" className="style-btn" onClick={() => void openBoardsFolder()}>
                       {t(locale, 'p2pBoardsFolder')}
                     </button>
-                  </div>
-                  {dataDir ? (
-                    <div className="p2p-row">
-                      <span className="sheet-hint">{t(locale, 'p2pDataFolder')}</span>
-                      <span className="sheet-mono p2p-url" title={dataDir}>
-                        {dataDir}
-                      </span>
+                    {dataDir ? (
                       <button
                         type="button"
-                        className="style-btn p2p-mini"
+                        className="style-btn"
                         disabled={moving}
                         onClick={async () => {
                           setMoving(true);
@@ -440,8 +449,8 @@ export function SettingsSheet({
                       >
                         {moving ? t(locale, 'p2pDataMoving') : t(locale, 'p2pDataChange')}
                       </button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </section>
               ) : null}
 
@@ -457,7 +466,7 @@ export function SettingsSheet({
                     <div className="sheet-actions">
                       <button
                         type="button"
-                        className="style-btn"
+                        className={`style-btn dev-hold${holding ? ' is-holding' : ''}`}
                         onPointerDown={startDevHold}
                         onPointerUp={cancelDevHold}
                         onPointerLeave={cancelDevHold}
@@ -465,7 +474,8 @@ export function SettingsSheet({
                           if (e.key === 'Enter') setDevOpen(true);
                         }}
                       >
-                        {t(locale, 'devHold')}
+                        <span className="dev-hold-fill" aria-hidden="true" />
+                        <span className="dev-hold-label">{t(locale, 'devHold')}</span>
                       </button>
                     </div>
                   </>
@@ -709,89 +719,6 @@ export function SettingsSheet({
                 </CustomSwatchRollout>
               </section>
 
-              <section className="sheet-section">
-                <h3>
-                  <SwapText text={t(locale, 'advanced')} />
-                </h3>
-                <label className="sheet-range">
-                  <span>{t(locale, 'uiScale')}</span>
-                  <input
-                    type="range"
-                    min={UI_SCALE_MIN}
-                    max={UI_SCALE_MAX}
-                    step={0.05}
-                    value={uiScaleDraft ?? prefs.uiScale}
-                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (uiScaleDraft != null) {
-                        patchPrefs({ uiScale: uiScaleDraft });
-                        setUiScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
-                </label>
-                <label className="sheet-range">
-                  <span>{t(locale, 'toolCursorSize')}</span>
-                  <input
-                    type="range"
-                    min={CURSOR_SCALE_MIN}
-                    max={CURSOR_SCALE_MAX}
-                    step={0.05}
-                    value={cursorScaleDraft ?? prefs.toolCursorScale}
-                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
-                    onPointerUp={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (cursorScaleDraft != null) {
-                        patchPrefs({ toolCursorScale: cursorScaleDraft });
-                        setCursorScaleDraft(null);
-                      }
-                    }}
-                  />
-                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
-                </label>
-                <button
-                  type="button"
-                  className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={prefs.toolHoverAnim}
-                  onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
-                >
-                  <span>{t(locale, 'toolHoverAnim')}</span>
-                  <span className="switch" aria-hidden="true">
-                    <span className="switch-thumb" />
-                  </span>
-                </button>
-                <p className="sheet-hint">
-                  <SwapText text={t(locale, 'toolHoverAnimHint')} />
-                </p>
-              </section>
-
               {!hideBoardSection && (
                 <section className="sheet-section">
                   <h3>
@@ -952,6 +879,89 @@ export function SettingsSheet({
                   </p>
                 </section>
               )}
+
+              <section className="sheet-section">
+                <h3>
+                  <SwapText text={t(locale, 'advanced')} />
+                </h3>
+                <label className="sheet-range">
+                  <span>{t(locale, 'uiScale')}</span>
+                  <input
+                    type="range"
+                    min={UI_SCALE_MIN}
+                    max={UI_SCALE_MAX}
+                    step={0.05}
+                    value={uiScaleDraft ?? prefs.uiScale}
+                    onInput={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setUiScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (uiScaleDraft != null) {
+                        patchPrefs({ uiScale: uiScaleDraft });
+                        setUiScaleDraft(null);
+                      }
+                    }}
+                  />
+                  <span className="sheet-range-value">{Math.round((uiScaleDraft ?? prefs.uiScale) * 100)}%</span>
+                </label>
+                <label className="sheet-range">
+                  <span>{t(locale, 'toolCursorSize')}</span>
+                  <input
+                    type="range"
+                    min={CURSOR_SCALE_MIN}
+                    max={CURSOR_SCALE_MAX}
+                    step={0.05}
+                    value={cursorScaleDraft ?? prefs.toolCursorScale}
+                    onInput={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onChange={(e) => setCursorScaleDraft(Number((e.target as HTMLInputElement).value))}
+                    onPointerUp={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (cursorScaleDraft != null) {
+                        patchPrefs({ toolCursorScale: cursorScaleDraft });
+                        setCursorScaleDraft(null);
+                      }
+                    }}
+                  />
+                  <span className="sheet-range-value">{Math.round((cursorScaleDraft ?? prefs.toolCursorScale) * 100)}%</span>
+                </label>
+                <button
+                  type="button"
+                  className={`sheet-switch${prefs.toolHoverAnim ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={prefs.toolHoverAnim}
+                  onClick={() => patchPrefs({ toolHoverAnim: !prefs.toolHoverAnim })}
+                >
+                  <span>{t(locale, 'toolHoverAnim')}</span>
+                  <span className="switch" aria-hidden="true">
+                    <span className="switch-thumb" />
+                  </span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'toolHoverAnimHint')} />
+                </p>
+              </section>
             </div>
           )}
         </div>
