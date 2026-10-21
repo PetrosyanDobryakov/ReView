@@ -34,6 +34,10 @@ export interface MediaState {
 
 /** Re-seek only when further than this from the shared position (seconds). */
 export const MEDIA_SYNC_SLOP_S = 1.5;
+/** Countdown before a shared start: followers warn, then everyone starts at `at`. */
+export const MEDIA_WARN_MS = 3000;
+/** Below this the start is effectively now: apply immediately, no countdown. */
+export const MEDIA_WARN_GRACE_MS = 400;
 
 export function encodeMediaState(s: MediaState): string {
   return JSON.stringify({

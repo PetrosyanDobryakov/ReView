@@ -14,7 +14,7 @@ import { clampToVisualViewport } from '../core/pointerEnv';
 import { t } from './i18n';
 
 const OVERLAY_W = 264;
-const OVERLAY_H = 196;
+const OVERLAY_H = 210;
 
 function PlayGlyph({ playing }: { playing: boolean }) {
   return playing ? (
@@ -45,10 +45,11 @@ function SpeakerGlyph() {
 }
 
 /**
- * Floating transport for a selected audio/video shape: big play toggle,
- * scrubbable timeline, own volume — plus shared ("for everyone") transport
- * and shared volume when this device may drive it (board owner / editor).
- * Positioned above the shape every frame; unmounts with selection change.
+ * Floating transport for a selected audio/video shape: file pill, big play
+ * toggle, scrubbable timeline, "stop for me" plus own volume — and, when this
+ * device may drive it (board owner / editor), start/stop for everyone plus
+ * the shared volume. Positioned above the shape every frame; unmounts with
+ * selection change.
  */
 export function MediaOverlay({
   engine,
@@ -129,6 +130,17 @@ export function MediaOverlay({
     return () => cancelAnimationFrame(raf);
   }, [engine, shapeId, kind]);
 
+  const fileName = (() => {
+    try {
+      const v = engine.views.get(shapeId);
+      const name = (v?.mediaName ?? '').trim();
+      if (name) return name;
+    } catch {
+      /* ignore */
+    }
+    return t(locale, kind === 'audio' ? 'infoAudio' : 'infoVideo');
+  })();
+
   const withElement = (fn: (el: HTMLMediaElement, vol: number) => void): boolean => {
     try {
       const v = engine.views.get(shapeId);
@@ -144,7 +156,19 @@ export function MediaOverlay({
     }
   };
 
+  const stopSelf = () => {
+    engine.cancelPendingMedia(shapeId);
+    withElement((el) => {
+      try {
+        el.pause();
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+
   const playSelf = () => {
+    engine.cancelPendingMedia(shapeId);
     const local = Math.max(0, Math.min(1, selfVol / 100));
     setLocalMediaVolume(local);
     withElement((el, global) => {
@@ -159,6 +183,7 @@ export function MediaOverlay({
   };
 
   const seekSelf = (frac: number) => {
+    engine.cancelPendingMedia(shapeId);
     withElement((el) => {
       const dur = el.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
@@ -205,55 +230,57 @@ export function MediaOverlay({
       ref={boxRef}
       className="board-row-menu"
       role="group"
-      aria-label={kind === 'audio' ? 'audio' : 'video'}
+      aria-label={fileName}
       style={{ position: 'fixed', width: OVERLAY_W, zIndex: 60 }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 2px 6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           type="button"
           className="style-btn active"
-          style={{ width: 46, height: 46, borderRadius: '50%', padding: 0, flex: 'none' }}
+          style={{ width: 48, height: 48, borderRadius: '50%', padding: 0, flex: 'none' }}
           title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
           aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
           onClick={playSelf}
         >
           <PlayGlyph playing={playing} />
         </button>
-        <span ref={timeRef} className="sheet-mono" style={{ maxWidth: '100%' }}>
-          --:--
-        </span>
-        <button
-          type="button"
-          aria-pressed={follow}
-          title={t(locale, 'mediaFollowHint')}
-          className={`style-btn p2p-mini${follow ? ' active' : ''}`}
-          style={{ marginLeft: 'auto' }}
-          onClick={() => {
-            const next = !follow;
-            setFollow(next);
-            setFollowMediaEnabled(next);
-          }}
-        >
-          {t(locale, 'mediaFollow')}
-        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
+            <span
+              className="p2p-tag"
+              title={fileName}
+              style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {fileName}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              ref={seekRef}
+              type="range"
+              min={0}
+              max={1000}
+              defaultValue={0}
+              aria-label={t(locale, 'mediaSeek')}
+              style={{ flex: 1, minWidth: 0, accentColor: 'var(--chrome-accent)' }}
+              onPointerDown={() => {
+                seekingRef.current = true;
+              }}
+              onPointerUp={() => {
+                seekingRef.current = false;
+              }}
+              onChange={(e) => seekSelf(Number(e.target.value) / 1000)}
+            />
+            <span ref={timeRef} className="sheet-mono" style={{ flex: 'none' }}>
+              --:--
+            </span>
+          </div>
+        </div>
       </div>
-      <input
-        ref={seekRef}
-        type="range"
-        min={0}
-        max={1000}
-        defaultValue={0}
-        aria-label={t(locale, 'mediaSeek')}
-        style={{ width: '100%', accentColor: 'var(--chrome-accent)' }}
-        onPointerDown={() => {
-          seekingRef.current = true;
-        }}
-        onPointerUp={() => {
-          seekingRef.current = false;
-        }}
-        onChange={(e) => seekSelf(Number(e.target.value) / 1000)}
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8 }}>
+        <button type="button" className="style-btn" style={{ flex: 'none' }} onClick={stopSelf}>
+          {t(locale, 'mediaStopSelf')}
+        </button>
         <span style={{ display: 'inline-flex', color: 'var(--chrome-text-dim)' }}>
           <SpeakerGlyph />
         </span>
@@ -264,11 +291,12 @@ export function MediaOverlay({
           value={selfVol}
           aria-label={t(locale, 'mediaVolSelf')}
           title={t(locale, 'mediaVolSelf')}
-          style={{ flex: 1, accentColor: 'var(--chrome-accent)' }}
+          style={{ flex: 1, minWidth: 0, accentColor: 'var(--chrome-accent)' }}
           onChange={(e) => volSelf(Number(e.target.value))}
         />
       </div>
-      {can ? (        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8 }}>
+      {can ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8 }}>
           <button
             type="button"
             className="style-btn p2p-mini"
@@ -292,13 +320,29 @@ export function MediaOverlay({
             value={allVol}
             aria-label={t(locale, 'mediaVolAll')}
             title={t(locale, 'mediaVolAll')}
-            style={{ flex: 1, accentColor: 'var(--chrome-accent)' }}
+            style={{ flex: 1, minWidth: 0, accentColor: 'var(--chrome-accent)' }}
             onChange={(e) => volAllPreview(Number(e.target.value))}
             onPointerUp={(e) => volAllCommit(Number((e.target as HTMLInputElement).value))}
             onBlur={(e) => volAllCommit(Number((e.target as HTMLInputElement).value))}
           />
         </div>
       ) : null}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+        <button
+          type="button"
+          aria-pressed={follow}
+          title={t(locale, 'mediaFollowHint')}
+          className={`style-btn p2p-mini${follow ? ' active' : ''}`}
+          onClick={() => {
+            const next = !follow;
+            setFollow(next);
+            setFollowMediaEnabled(next);
+            if (next) engine.refollowMedia(shapeId);
+          }}
+        >
+          {t(locale, 'mediaFollow')}
+        </button>
+      </div>
     </div>
   );
 }
