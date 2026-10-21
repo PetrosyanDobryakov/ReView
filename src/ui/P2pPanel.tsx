@@ -2,29 +2,14 @@ import { useEffect, useState } from 'react';
 import type { LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import { parseIceLines, readPrefs, writePrefs, type AppPrefs } from '../core/prefs';
-import { APP_BUILD } from '../core/version';
 import {
-  checkNat,
-  currentTurn,
-  type NatReport,
   DEFAULT_ICE,
-  fetchLanAddresses,
-  getBoardRoomName,
-  inviteHostname,
-  isDesktop,
-  lanAppUrl,
   normalizeHubUrl,
   onMesh,
-  changeDataFolder,
-  desktopHostInfo,
-  openBoardsFolder,
   p2pClient,
   reconnectSync,
-  refreshHubs,
   type HubInfo,
   type MeshSnapshot,
-  type PeerInfo,
-  type SyncStatus,
 } from '../net';
 import { t, type MessageKey } from './i18n';
 import { SwapText } from './SwapText';
@@ -45,209 +30,22 @@ const HUB_SOURCE_KEY: Record<HubInfo['source'], MessageKey> = {
   invite: 'p2pHubInvite',
 };
 
-const LINK_STATE_KEY: Record<PeerInfo['state'], MessageKey> = {
-  open: 'p2pStateOpen',
-  connecting: 'p2pStateConnecting',
-  failed: 'p2pStateFailed',
-  closed: 'p2pStateClosed',
-};
-
-const PATH_KEY: Record<PeerInfo['path'], MessageKey | null> = {
-  lan: 'p2pPathLan',
-  direct: 'p2pPathDirect',
-  relay: 'p2pPathRelay',
-  hub: 'p2pPathHub',
-  unknown: null,
-};
-
-function bytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-async function copy(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Last-resort copy when the async clipboard API is denied. A hidden textarea
- * plus execCommand works in Chromium/Electron renderers; a bare `prompt()`
- * call must never run unchecked — it does not exist in the sandboxed app
- * shell and throws, red-screening the window. Returns true when the text is
- * on the clipboard or shown for manual copy.
+ * Developer wires for P2P: raw hub list with manual add/remove, the three
+ * low-level switches the link-mode radio abstracts, and the ICE textarea.
+ * Rendered only behind the developer gate in System. Everyday controls
+ * (status, invite, mode, people, network check) live in ConnectionTab.
  */
-async function copyFallback(text: string, manualTitle: string): Promise<boolean> {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    if (ok) return true;
-  } catch {
-    /* fall through */
-  }
-  try {
-    if (typeof window.prompt === 'function') {
-      window.prompt(manualTitle, text);
-      return true;
-    }
-  } catch {
-    /* ignore */
-  }
-  return false;
-}
-
-/**
- * The P2P control surface: on/off, this device's host and invite address,
- * live peer links (path, latency, traffic), hubs, and ICE settings.
- */
-export function P2pPanel({
-  locale,
-  sync,
-  saved,
-  ephemeral,
-}: {
-  locale: LocaleId;
-  sync: SyncStatus;
-  saved: boolean;
-  ephemeral: boolean;
-}) {
+export function P2pPanel({ locale }: { locale: LocaleId }) {
   const [prefs, setPrefs] = useState<AppPrefs>(() => readPrefs());
   const [snap, setSnap] = useState<MeshSnapshot>(() => p2pClient.getMeshSnapshot());
-  const [names, setNames] = useState(() => p2pClient.clientNames());
-  const [lan, setLan] = useState<{ addresses: string[]; port: number } | null>(null);
-  const [lanState, setLanState] = useState<'loading' | 'ok' | 'none'>('loading');
-  const [copied, setCopied] = useState(false);
   const [hubDraft, setHubDraft] = useState('');
   const [hubError, setHubError] = useState(false);
   const [iceDraft, setIceDraft] = useState(() => (readPrefs().p2pIce ?? [...DEFAULT_ICE]).join('\n'));
   const [iceError, setIceError] = useState(false);
   const boardSession = Boolean(getCurrentBoardId());
-  const desktop = isDesktop();
-  const [nat, setNat] = useState<NatReport | 'checking' | null>(null);
-  const [diagCopied, setDiagCopied] = useState(false);
-  const runNat = async (): Promise<NatReport> => {
-    setNat('checking');
-    const r = await checkNat().catch((): NatReport => ({ kind: 'unknown', publicIp: null, mapped: [], stunServers: 0 }));
-    setNat(r);
-    return r;
-  };
-  const copyDiagnostics = async () => {
-    const report = nat && nat !== 'checking' ? nat : await runNat();
-    const mesh = p2pClient.getMeshSnapshot();
-    const prefsNow = readPrefs();
-    const redactedIce = prefsNow.p2pIce
-      ? prefsNow.p2pIce.map((line) => {
-          const parts = line.split('|').map((s) => s.trim());
-          if (parts.length >= 3) return `${parts[0]}|${parts[1]}|(set)`;
-          return line;
-        })
-      : null;
-    let viteHubs = '';
-    try {
-      viteHubs = String((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HUBS ?? '');
-    } catch { /* ignore */ }
-    let events: unknown = [];
-    try {
-      events = p2pClient.getRecentEvents();
-    } catch { /* ignore */ }
-    const text = JSON.stringify(
-      {
-        app: APP_BUILD,
-        desktop,
-        ua: navigator.userAgent,
-        at: new Date().toISOString(),
-        origin: typeof location !== 'undefined' ? location.origin : null,
-        viteHubs,
-        syncEnabled: prefsNow.syncEnabled !== false,
-        webrtc: mesh.webrtc,
-        nat: report,
-        turn: currentTurn() ? { exp: new Date(currentTurn()!.exp).toISOString() } : null,
-        turnPref: prefsNow.p2pTurn,
-        prefs: {
-          p2pRelays: prefsNow.p2pRelays,
-          p2pTurn: prefsNow.p2pTurn,
-          p2pLanDiscovery: prefsNow.p2pLanDiscovery,
-          p2pIce: redactedIce,
-        },
-        room: mesh.room,
-        self: mesh.self,
-        hubs: mesh.hubs.map((h) => ({ url: h.url, state: h.state, peers: h.peers, error: h.error })),
-        peers: mesh.peers.map((p) => ({
-          peer: p.peer.slice(0, 8),
-          state: p.state,
-          path: p.path,
-          attempts: p.attempts,
-          lastError: p.lastError,
-          lastDirectError: p.lastDirectError,
-          awareAgeMs: p.awareAgeMs,
-          queued: p.queued,
-          relay: p.relay,
-          ice: p.ice,
-          hubs: p.hubs,
-          app: p.app,
-        })),
-        events,
-      },
-      null,
-      1,
-    );
-    if (await copy(text)) {
-      setDiagCopied(true);
-      window.setTimeout(() => setDiagCopied(false), 2000);
-    } else if (await copyFallback(text, t(locale, 'p2pDiagCopy'))) {
-      setDiagCopied(true);
-      window.setTimeout(() => setDiagCopied(false), 2000);
-    } else {
-      try {
-        console.warn('[review] copy diagnostics failed');
-      } catch {
-        /* ignore */
-      }
-    }
-  };
-  const [dataDir, setDataDir] = useState<string | null>(null);
-  const [moving, setMoving] = useState(false);
-  useEffect(() => {
-    if (desktop) void desktopHostInfo().then((i) => setDataDir(i?.dataDir ?? i?.boardsDir ?? null));
-  }, [desktop]);
 
-  useEffect(
-    () =>
-      onMesh((s) => {
-        setSnap(s);
-        setNames(p2pClient.clientNames());
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    let live = true;
-    setLanState('loading');
-    fetchLanAddresses()
-      .then((info) => {
-        if (!live) return;
-        setLan({ addresses: info.addresses, port: info.port });
-        setLanState(info.addresses.length ? 'ok' : 'none');
-      })
-      .catch(() => {
-        if (live) setLanState('none');
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
+  useEffect(() => onMesh((s) => setSnap(s)), []);
 
   const apply = (patch: Partial<AppPrefs>) => {
     setPrefs(writePrefs(patch));
@@ -265,205 +63,8 @@ export function P2pPanel({
     if (!prefs.p2pHubs.includes(url)) apply({ p2pHubs: [...prefs.p2pHubs, url] });
   };
 
-  const inviteHost = lan ? inviteHostname(lan.addresses) : null;
-  const peerLabel = (p: PeerInfo) => {
-    for (const c of p.clients) {
-      const n = names.get(c);
-      if (n) return n;
-    }
-    return null;
-  };
-  const open = snap.peers.filter((p) => p.state === 'open').length;
-
   return (
     <div className="p2p-panel">
-      <button
-        type="button"
-        role="switch"
-        className={`sheet-switch${prefs.syncEnabled ? ' on' : ''}`}
-        aria-checked={prefs.syncEnabled}
-        onClick={() => apply({ syncEnabled: !prefs.syncEnabled })}
-      >
-        <span>{t(locale, 'p2pSwitch')}</span>
-        <span className="switch" aria-hidden="true">
-          <span className="switch-thumb" />
-        </span>
-      </button>
-      <p className="sheet-hint">
-        <SwapText text={t(locale, 'p2pIntro')} />
-      </p>
-      {!snap.webrtc ? (
-        <p className="sheet-hint p2p-warn">{t(locale, 'p2pNoWebrtc')}</p>
-      ) : null}
-
-      <ul className="sheet-keys">
-        <li>
-          <span className={`status-line${sync.online ? ' on' : ''}`}>
-            {!prefs.syncEnabled ? t(locale, 'syncDisconnect') : sync.online ? t(locale, 'online') : t(locale, 'offline')}
-          </span>
-          <span>
-            {t(locale, 'p2pPeers')}: {open}
-          </span>
-        </li>
-        <li>
-          <span className={`status-line${ephemeral ? ' wait' : saved ? ' on' : ' wait'}`}>{t(locale, 'persist')}</span>
-          <span>{ephemeral ? t(locale, 'persistSession') : saved ? t(locale, 'persistSaved') : t(locale, 'loading')}</span>
-        </li>
-        <li>
-          <span>{t(locale, 'syncRoom')}</span>
-          <span className="sheet-mono">{boardSession ? getBoardRoomName(getCurrentBoardId()) : '—'}</span>
-        </li>
-        <li>
-          <span>{t(locale, 'p2pPeerId')}</span>
-          <span className="sheet-mono">{snap.self}</span>
-        </li>
-      </ul>
-
-      <div className="lan-block">
-        <h4 className="lan-block-title">
-          <SwapText text={t(locale, 'syncLanSection')} />
-        </h4>
-        {lanState === 'loading' ? (
-          <p className="sheet-hint">{t(locale, 'syncLanLoading')}</p>
-        ) : lanState === 'none' || !inviteHost ? (
-          <p className="sheet-hint">
-            <SwapText text={t(locale, 'syncLanEmpty')} />
-          </p>
-        ) : (
-          <ul className="lan-ip-list">
-            {lan!.addresses.map((ip) => (
-              <li key={ip} className="sheet-mono">
-                {lanAppUrl(ip, lan!.port)}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="sheet-actions">
-          <button
-            type="button"
-            className="style-btn active"
-            disabled={!inviteHost || !lan}
-            onClick={async () => {
-              if (!inviteHost || !lan) return;
-              const url = lanAppUrl(inviteHost, lan.port);
-              if (await copy(url)) {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 2000);
-              } else if (await copyFallback(url, t(locale, 'syncLanCopyApp'))) {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 2000);
-              } else {
-                try {
-                  console.warn('[review] copy invite link failed');
-                } catch {
-                  /* ignore */
-                }
-              }
-            }}
-          >
-            {copied ? t(locale, 'syncLanCopied') : t(locale, 'syncLanCopyApp')}
-          </button>
-          {desktop ? (
-            <button type="button" className="style-btn" onClick={() => void openBoardsFolder()}>
-              {t(locale, 'p2pBoardsFolder')}
-            </button>
-          ) : null}
-        </div>
-        {desktop && dataDir ? (
-          <div className="p2p-row">
-            <span className="sheet-hint">{t(locale, 'p2pDataFolder')}</span>
-            <span className="sheet-mono p2p-url" title={dataDir}>
-              {dataDir}
-            </span>
-            <button
-              type="button"
-              className="style-btn p2p-mini"
-              disabled={moving}
-              onClick={async () => {
-                setMoving(true);
-                try {
-                  if (!(await changeDataFolder())) setMoving(false);
-                } catch {
-                  setMoving(false);
-                }
-              }}
-            >
-              {moving ? t(locale, 'p2pDataMoving') : t(locale, 'p2pDataChange')}
-            </button>
-          </div>
-        ) : null}
-        <p className="sheet-hint">
-          <SwapText text={t(locale, 'syncLanFirewall')} />
-        </p>
-      </div>
-
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'p2pPeers')}</h4>
-        {!boardSession ? (
-          <p className="sheet-hint">{t(locale, 'syncBoardOnly')}</p>
-        ) : snap.peers.length === 0 ? (
-          <p className="sheet-hint">{t(locale, 'p2pNoPeers')}</p>
-        ) : (
-          <ul className="p2p-list">
-            {snap.peers.map((p) => {
-              const who = peerLabel(p);
-              const path = PATH_KEY[p.path];
-              return (
-                <li key={p.peer} className="p2p-row">
-                  <span className="p2p-row-head">
-                    <span
-                      className={`status-line${p.state === 'open' ? ' on' : p.state === 'connecting' ? ' wait' : ''}`}
-                    >
-                      {who ? (
-                        <span className="p2p-name" style={{ color: who.color }}>
-                          {who.name}
-                        </span>
-                      ) : (
-                        <span className="sheet-mono">{p.peer.slice(0, 8)}</span>
-                      )}
-                    </span>
-                    <span className="p2p-tag">{t(locale, LINK_STATE_KEY[p.state])}</span>
-                  </span>
-                  <span className="p2p-meta">
-                    {path ? <span>{t(locale, path)}</span> : null}
-                    {p.rtt !== null ? <span>{p.rtt} ms</span> : null}
-                    {p.state === 'open' ? (
-                      <span>
-                        {bytes(p.bytesIn)} / {bytes(p.bytesOut)}
-                      </span>
-                    ) : null}
-                    {p.attempts > 1 && p.state !== 'open' ? <span>#{p.attempts}</span> : null}
-                    {p.state !== 'open' && p.lastError ? <span className="p2p-warn">{p.lastError}</span> : null}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-
-      <div className="lan-block">
-        <h4 className="lan-block-title">{t(locale, 'p2pNetCheck')}</h4>
-        {nat === 'checking' ? (
-          <p className="sheet-hint">{t(locale, 'p2pNatChecking')}</p>
-        ) : nat ? (
-          <p className={`sheet-hint${nat.kind === 'ok' ? '' : ' p2p-warn'}`}>
-            {t(locale, nat.kind === 'ok' ? 'p2pNatOk' : nat.kind === 'symmetric' ? 'p2pNatSymmetric' : nat.kind === 'blocked' ? 'p2pNatBlocked' : 'p2pNatUnknown')}
-            {nat.publicIp ? ` (${nat.mapped.join(', ')})` : ''}
-          </p>
-        ) : (
-          <p className="sheet-hint">{t(locale, 'p2pNetCheckHint')}</p>
-        )}
-        <div className="sheet-actions">
-          <button type="button" className="style-btn" disabled={nat === 'checking'} onClick={() => void runNat()}>
-            {t(locale, 'p2pNatRun')}
-          </button>
-          <button type="button" className="style-btn" disabled={nat === 'checking'} onClick={() => void copyDiagnostics()}>
-            {diagCopied ? t(locale, 'syncLanCopied') : t(locale, 'p2pDiagCopy')}
-          </button>
-        </div>
-      </div>
-
       <div className="lan-block">
         <h4 className="lan-block-title">{t(locale, 'p2pHubs')}</h4>
         <p className="sheet-hint">
@@ -493,6 +94,7 @@ export function P2pPanel({
                     {h.peers} {t(locale, 'p2pHubPeers')}
                   </span>
                 ) : null}
+                {h.error ? <span className="p2p-warn">{h.error}</span> : null}
                 {h.source === 'custom' ? (
                   <button
                     type="button"
@@ -505,7 +107,6 @@ export function P2pPanel({
               </span>
             </li>
           ))}
-          {/* Custom hubs stay listed even with no board open, so they can be removed. */}
           {!boardSession
             ? prefs.p2pHubs.map((u) => (
                 <li key={u} className="p2p-row">
@@ -550,9 +151,6 @@ export function P2pPanel({
         <div className="sheet-actions">
           <button type="button" className="style-btn active" disabled={!hubDraft.trim()} onClick={addHub}>
             {t(locale, 'p2pAdd')}
-          </button>
-          <button type="button" className="style-btn" disabled={!boardSession} onClick={() => refreshHubs()}>
-            {t(locale, 'p2pRefresh')}
           </button>
         </div>
         <button

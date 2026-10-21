@@ -177,6 +177,12 @@ export class Mesh {
   private destroyed = false;
   /** Ring of recent link/hub lifecycle lines for one-shot diagnostics. */
   private readonly events: MeshEvent[] = [];
+  /**
+   * Peers kicked for this session (honest P2P kick: their links are dropped and
+   * their handshakes ignored while this mesh lives; a determined peer with a
+   * fresh id can still come back — there is no server to enforce a ban).
+   */
+  private readonly blocked = new Set<string>();
 
   constructor(
     readonly doc: Y.Doc,
@@ -222,6 +228,30 @@ export class Mesh {
 
   retryHubs(): void {
     for (const h of this.hubs.values()) h.retryNow();
+  }
+
+  /**
+   * Kick a peer for this session: drop any link, forget the entry and ignore
+   * future handshakes from them while this mesh lives. Returns false when the
+   * peer is unknown (or is us).
+   */
+  blockPeer(peer: string): boolean {
+    if (this.destroyed || peer === this.self || this.blocked.has(peer)) return this.blocked.has(peer);
+    this.blocked.add(peer);
+    const e = this.entries.get(peer);
+    if (!e) {
+      this.changed();
+      return true;
+    }
+    this.evt('peer blocked', peer, {});
+    this.drop(e);
+    this.changed();
+    return true;
+  }
+
+  /** Peers blocked via blockPeer (short ids, oldest first). */
+  blockedPeers(): string[] {
+    return [...this.blocked].map((p) => p.slice(0, 8));
   }
 
   openLinks(): number {
@@ -332,7 +362,7 @@ export class Mesh {
   }
 
   private notePeer(hub: string, peer: string): void {
-    if (this.destroyed || peer === this.self) return;
+    if (this.destroyed || peer === this.self || this.blocked.has(peer)) return;
     const fresh = !this.entries.has(peer);
     const e = this.entry(peer);
     e.hubs.add(hub);
@@ -390,7 +420,7 @@ export class Mesh {
   }
 
   private onSignal(hub: string, from: string, data: unknown): void {
-    if (this.destroyed || from === this.self) return;
+    if (this.destroyed || from === this.self || this.blocked.has(from)) return;
     const e = this.entry(from);
     e.hubs.add(hub);
     const kind = data && typeof data === 'object' ? (data as { kind?: unknown }).kind : null;
