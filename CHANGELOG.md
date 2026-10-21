@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Player card cleanup.** Fixed-size card follows its shape but never rescales
+  on zoom; audio centers over its body. Big button toggles local play/pause,
+  one contextual start/stop-for-all button for the host, labeled volume rows,
+  sync switch renamed to "Sync with host".
+
 ## 0.16.19
 
 ### Mockup player cards, countdown starts, top notices
