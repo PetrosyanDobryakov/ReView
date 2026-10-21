@@ -14,8 +14,7 @@ import { clampToVisualViewport } from '../core/pointerEnv';
 import { t } from './i18n';
 
 const CARD_W = 280;
-const CARD_H = 220;
-const MIN_W = 240;
+const CARD_H = 280;
 
 function PlayGlyph({ playing }: { playing: boolean }) {
   return playing ? (
@@ -26,21 +25,6 @@ function PlayGlyph({ playing }: { playing: boolean }) {
   ) : (
     <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4.5 2.3l8.7 5.7-8.7 5.7z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SpeakerGlyph() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M2 6h3l4-3.2v10.4L5 10H2z" fill="currentColor" />
-      <path
-        d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.7a6 6 0 0 1 0 8.6"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        fill="none"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }
@@ -58,8 +42,19 @@ function VolRow({
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-      <span style={{ display: 'inline-flex', color: 'var(--chrome-text-dim)', flex: 'none' }}>
-        <SpeakerGlyph />
+      <span
+        title={label}
+        style={{
+          flex: 'none',
+          maxWidth: 110,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 12,
+          color: 'var(--chrome-text-dim)',
+        }}
+      >
+        {label}
       </span>
       <input
         type="range"
@@ -78,10 +73,12 @@ function VolRow({
 }
 
 /**
- * Always-visible player card for one media shape (mockup layout): file pill,
- * big play toggle, scrubbable timeline, stop-for-me plus own volume — and,
- * when this device may drive it, start/stop-for-all plus the shared volume.
- * Video docks the same card below its frame; audio covers its body.
+ * Always-visible player card for one media shape (mockup layout): big play
+ * toggle for me, file pill, thin timeline, sync-with-host switch, my volume —
+ * and, when this device may drive it, one contextual start/stop-for-all button
+ * plus the shared volume. Fixed pixel size: zoom moves the card with its shape
+ * but never rescales it. Audio centers over its body, video docks below its
+ * frame.
  *
  * The container is pointer-transparent so canvas gestures (select / move /
  * resize) keep working everywhere except the controls themselves.
@@ -105,6 +102,7 @@ function MediaCard({
   const nameRef = useRef<HTMLSpanElement>(null);
   const seekingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
+  const [sharedPlaying, setSharedPlaying] = useState(false);
   const [follow, setFollow] = useState(() => followMediaEnabled());
   const [can, setCan] = useState(() => iControlMedia());
   const [selfVol, setSelfVol] = useState(() => Math.round(localMediaVolume() * 100));
@@ -117,8 +115,8 @@ function MediaCard({
       return 100;
     }
   });
-  const stateRef = useRef({ playing, follow, can });
-  stateRef.current = { playing, follow, can };
+  const stateRef = useRef({ playing, sharedPlaying, follow, can });
+  stateRef.current = { playing, sharedPlaying, follow, can };
 
   useEffect(() => {
     const poll = window.setInterval(() => {
@@ -145,24 +143,33 @@ function MediaCard({
         }
         const a = engine.worldToScreen(v.x, v.y);
         const b = engine.worldToScreen(v.x + v.w, v.y + v.h);
-        const sw = Math.max(0, b.x - a.x);
         const vv = typeof window !== 'undefined' ? { w: window.innerWidth, h: window.innerHeight } : { w: 0, h: 0 };
         if (a.x > vv.w || a.y > vv.h || b.x < 0 || b.y < 0) {
           box.style.display = 'none';
           return;
         }
         box.style.display = '';
-        const w = Math.max(MIN_W, sw);
-        let left = kind === 'audio' ? a.x : a.x;
-        let top = kind === 'audio' ? a.y : b.y + 8;
-        const pos = clampToVisualViewport(left, top, w, CARD_H);
+        // Fixed card size: it follows the shape on zoom/pan but never rescales.
+        // Audio centers over its body; video docks below its frame.
+        let left: number;
+        let top: number;
+        if (kind === 'audio') {
+          left = (a.x + b.x) / 2 - CARD_W / 2;
+          top = (a.y + b.y) / 2 - CARD_H / 2;
+        } else {
+          left = a.x;
+          top = b.y + 8;
+        }
+        const pos = clampToVisualViewport(left, top, CARD_W, CARD_H);
         box.style.left = `${Math.round(pos.left)}px`;
         box.style.top = `${Math.round(pos.top)}px`;
-        box.style.width = `${Math.round(w)}px`;
+        box.style.width = `${CARD_W}px`;
         const url = mediaUrl(v);
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
         const isPlaying = Boolean(el && !el.paused && !el.ended);
         if (isPlaying !== stateRef.current.playing) setPlaying(isPlaying);
+        const sp = decodeMediaState(v.mediaState)?.playing === true;
+        if (sp !== stateRef.current.sharedPlaying) setSharedPlaying(sp);
         const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
         if (seekRef.current && !seekingRef.current) {
           seekRef.current.value = String(
@@ -237,6 +244,13 @@ function MediaCard({
     else engine.toggleVideoSelected(shapeId);
   };
 
+  // Big round button: local play/pause for me only, never touches the
+  // shared state. Stopping for everyone is the host's button below.
+  const toggleSelf = () => {
+    if (stateRef.current.playing) stopSelf();
+    else playSelf();
+  };
+
   const seekSelf = (frac: number) => {
     engine.cancelPendingMedia(shapeId);
     withElement((el) => {
@@ -301,7 +315,7 @@ function MediaCard({
           style={{ width: 52, height: 52, borderRadius: '50%', padding: 0, flex: 'none', pointerEvents: 'auto' }}
           title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
           aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-          onClick={playSelf}
+          onClick={toggleSelf}
         >
           <PlayGlyph playing={playing} />
         </button>
@@ -336,44 +350,27 @@ function MediaCard({
           </div>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, pointerEvents: 'none' }}>
-        <button
-          type="button"
-          className="style-btn"
-          style={{ flex: 'none', pointerEvents: 'auto' }}
-          onClick={stopSelf}
-        >
-          {t(locale, 'mediaStopSelf')}
-        </button>
-        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
-          <VolRow
-            label={t(locale, 'mediaVolSelf')}
-            value={selfVol}
-            onInput={volSelf}
-          />
-        </div>
+      <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
+        <VolRow
+          label={t(locale, 'mediaVolSelf')}
+          value={selfVol}
+          onInput={volSelf}
+        />
       </div>
       {can ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, pointerEvents: 'none' }}>
-          <button
-            type="button"
-            className="style-btn p2p-mini"
-            style={{ flex: 'none', pointerEvents: 'auto' }}
-            title={t(locale, 'mediaPlayAllHint')}
-            onClick={() => void engine.setMediaSharedState(shapeId, { playing: true })}
-          >
-            {t(locale, 'mediaPlayAll')}
-          </button>
-          <button
-            type="button"
-            className="style-btn p2p-mini"
-            style={{ flex: 'none', pointerEvents: 'auto' }}
-            title={t(locale, 'mediaStopAllHint')}
-            onClick={() => void engine.setMediaSharedState(shapeId, { playing: false })}
-          >
-            {t(locale, 'mediaStopAll')}
-          </button>
-          <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
+        <>
+          <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
+            <button
+              type="button"
+              className="style-btn"
+              style={{ width: '100%', pointerEvents: 'auto' }}
+              title={t(locale, sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint')}
+              onClick={() => void engine.setMediaSharedState(shapeId, { playing: !sharedPlaying })}
+            >
+              {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
+            </button>
+          </div>
+          <div style={{ paddingTop: 8, pointerEvents: 'none' }}>
             <VolRow
               label={t(locale, 'mediaVolAll')}
               value={allVol}
@@ -381,7 +378,7 @@ function MediaCard({
               onCommit={volAllCommit}
             />
           </div>
-        </div>
+        </>
       ) : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6, pointerEvents: 'none' }}>
         <button
