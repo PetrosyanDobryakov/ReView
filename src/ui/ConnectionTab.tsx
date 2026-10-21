@@ -3,6 +3,12 @@ import type { LocaleId } from '../core/locale';
 import { getCurrentBoardId } from '../core/store';
 import { onPrefsChange, readPrefs, writePrefs, type AppPrefs } from '../core/prefs';
 import { loadUser, onUserChange, saveUserColor, USER_COLOR_PALETTE } from '../core/user';
+import {
+  boardRoles,
+  grantMediaRole,
+  iOwnBoard,
+  type MediaRole,
+} from '../core/store';
 import { APP_BUILD } from '../core/version';
 import {
   appInviteUrl,
@@ -14,12 +20,14 @@ import {
   fetchLanAddresses,
   inviteHostname,
   onMesh,
+  onPeers,
   p2pClient,
   reconnectSync,
   refreshHubs,
   resolveInviteBoardUrl,
   type MeshSnapshot,
   type NatReport,
+  type PeerCursor,
   type PeerInfo,
   type SyncStatus,
 } from '../net';
@@ -152,15 +160,23 @@ export function ConnectionTab({
   const [inviteFlash, setInviteFlash] = useState<'ok' | 'fail' | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [kickedIds, setKickedIds] = useState<string[]>(() => p2pClient.blockedPeers());
+  const [roster, setRoster] = useState<PeerCursor[]>(() => p2pClient.collectPeers());
+  const [roles, setRoles] = useState<Record<string, MediaRole>>(() => boardRoles());
   const boardSession = Boolean(getCurrentBoardId());
   const desktop = isDesktop();
   const mode = readMode(prefs);
+  const owner = iOwnBoard();
+  const myId = loadUser().id;
 
   useEffect(() => onMesh((s) => {
     setSnap(s);
     setNames(p2pClient.clientNames());
     setKickedIds(p2pClient.blockedPeers());
+    setRoster(p2pClient.collectPeers());
+    setRoles(boardRoles());
   }), []);
+
+  useEffect(() => onPeers((list) => setRoster(list)), []);
 
   useEffect(() => onPrefsChange((p) => setPrefs(p)), []);
 
@@ -307,6 +323,16 @@ export function ConnectionTab({
     for (const c of p.clients) {
       const n = names.get(c);
       if (n) return n;
+    }
+    return null;
+  };
+
+  const clientUser = new Map<number, string>();
+  for (const c of roster) clientUser.set(c.id, c.userId);
+  const userIdForPeer = (p: PeerInfo): string | null => {
+    for (const c of p.clients) {
+      const u = clientUser.get(c);
+      if (u) return u;
     }
     return null;
   };
@@ -471,6 +497,9 @@ export function ConnectionTab({
               const who = peerLabel(p);
               const path = PATH_KEY[p.path];
               const isOpen = expanded.has(p.peer);
+              const userId = userIdForPeer(p);
+              const isEditor = userId ? roles[userId] === 'editor' : false;
+              const grantable = owner && userId && userId !== myId;
               return (
                 <li key={p.peer} className="p2p-row">
                   <span className="p2p-row-head">
@@ -509,6 +538,21 @@ export function ConnectionTab({
                     >
                       {t(locale, 'connKick')}
                     </button>
+                    {isEditor ? <span className="p2p-tag">{t(locale, 'connRoleEditor')}</span> : null}
+                    {grantable ? (
+                      <button
+                        type="button"
+                        className="style-btn p2p-mini"
+                        title={t(locale, 'rolesHint')}
+                        onClick={() => {
+                          if (userId && grantMediaRole(userId, isEditor ? null : 'editor')) {
+                            setRoles(boardRoles());
+                          }
+                        }}
+                      >
+                        {isEditor ? t(locale, 'connRoleRevoke') : t(locale, 'connRoleGrant')}
+                      </button>
+                    ) : null}
                   </span>
                   {isOpen ? (
                     <span className="p2p-meta">
@@ -536,6 +580,9 @@ export function ConnectionTab({
           <p className="sheet-hint">
             {t(locale, 'connKicked')}: <span className="sheet-mono">{kickedIds.join(', ')}</span>
           </p>
+        ) : null}
+        {owner ? (
+          <p className="sheet-hint">{t(locale, 'rolesHint')}</p>
         ) : null}
       </section>
 

@@ -9,6 +9,7 @@ import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
+import { MediaOverlay } from './ui/MediaOverlay';
 import { GraphEditor } from './ui/GraphEditor';
 import { CalculatorPanel } from './ui/CalculatorPanel';
 import { PageBar } from './ui/PageBar';
@@ -1022,6 +1023,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     );
   };
 
+  const mediaTarget =
+    selected.length === 1 && (selected[0]?.type === 'audio' || selected[0]?.type === 'video')
+      ? selected[0]
+      : null;
+
   return (
     <div className={`app${settingsOpen ? ' settings-open' : ''}${uiHidden ? ' ui-hidden' : ''}`}>
       <div className="canvas-wrap">
@@ -1072,6 +1078,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             target={editCalc}
             engine={engine}
             onDone={() => setEditCalc(null)}
+          />
+        )}
+        {mediaTarget && engine && !editTarget && (
+          <MediaOverlay
+            engine={engine}
+            shapeId={mediaTarget.id}
+            kind={mediaTarget.type === 'audio' ? 'audio' : 'video'}
+            locale={locale}
           />
         )}
         {exportState && engine && (

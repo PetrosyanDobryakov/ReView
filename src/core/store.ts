@@ -9,6 +9,8 @@ import { attachSync, detachSync, fetchBlobFromPeers, hasDistinctRemoteCollaborat
 import { attachDesktopMirror } from './desktopBoards';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 import { attachDocBlobs, attachImageBlobs, clearBlobMisses, collectBlobHashes, collectLegacyMedia, mediaBlobStore, prefetchBlobs, setRemoteBlobFetcher } from './mediaBlobs';
+import { canControlMedia, parseRoles, type MediaRole } from './mediaRoles';
+export type { MediaRole } from './mediaRoles';
 import {
   boardHadRemoteCollaborators,
   compactSavesEnough,
@@ -573,6 +575,68 @@ const PAPER_MIGRATE: Record<string, string> = {
 
 export const META_TITLE = 'title';
 export const META_OWNER_ID = 'ownerId';
+/** JSON `{ userId: 'editor' }` — owner grants; single writer (the owner). */
+export const META_ROLES = 'roles';
+
+export function metaRolesRaw(): string | null {
+  const raw = meta.get(META_ROLES);
+  return typeof raw === 'string' ? raw : null;
+}
+
+export function boardRoles(): Record<string, MediaRole> {
+  try {
+    return parseRoles(metaRolesRaw());
+  } catch {
+    return {};
+  }
+}
+
+function myUserId(): string {
+  try {
+    return loadUser().id;
+  } catch {
+    return '';
+  }
+}
+
+/** True when this device's user may drive shared media playback. */
+export function iControlMedia(): boolean {
+  try {
+    return canControlMedia(metaOwnerId(), boardRoles(), myUserId());
+  } catch {
+    return false;
+  }
+}
+
+export function iOwnBoard(): boolean {
+  try {
+    const owner = metaOwnerId();
+    const me = myUserId();
+    return Boolean(owner && me && owner === me);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Grant/revoke the co-host editor role (owner only, local guard — the doc
+ * itself takes whatever lands; single writer in practice).
+ * Returns false when not allowed.
+ */
+export function grantMediaRole(userId: string, role: MediaRole | null): boolean {
+  try {
+    if (!iOwnBoard()) return false;
+    const id = userId.trim();
+    if (!id || id === myUserId()) return false;
+    const roles = boardRoles();
+    if (role) roles[id] = role;
+    else delete roles[id];
+    setMeta({ [META_ROLES]: JSON.stringify(roles) });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function metaTitle(): string | null {
   const raw = meta.get(META_TITLE);
@@ -863,6 +927,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     thumb: typeof m.get('thumb') === 'string' ? (m.get('thumb') as string) : undefined,
     mime: typeof m.get('mime') === 'string' ? (m.get('mime') as string) : undefined,
     bytes: typeof m.get('bytes') === 'number' ? (m.get('bytes') as number) : undefined,
+    mediaState: typeof m.get('mediaState') === 'string' ? (m.get('mediaState') as string) : undefined,
     pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
     pageBlobs: (() => {
       const p = m.get('pageBlobs');
