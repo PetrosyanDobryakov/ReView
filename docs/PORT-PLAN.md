@@ -220,3 +220,6 @@ needs a card, owner has none), so `turn: null` on both sides.
 - 2026-10-20: 0.16.13 shipped (`p2p-desktop-v0.16.13`): mesh event ring,
   `reviewDiag()`, extended copy diagnostics. Cross-ISP direct and same-pool
   relay failure both confirmed by pasted JSON; see Long-term ideas above.
+- 2026-10-21: 0.16.13 fixed as the known-good baseline (tag
+  `backup/dev-petrosyan-p2p-stable-2026-10-21`): direct cross-ISP, relay
+  same-pool, one-shot diagnostics green. Board feature work continues from here.
