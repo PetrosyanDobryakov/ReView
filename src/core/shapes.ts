@@ -82,6 +82,8 @@ export interface ShapeView {
   thumb?: string | null;
   mime?: string;
   bytes?: number;
+  /** Original file name for media shapes (player pill), sliced at write. */
+  mediaName?: string;
   /**
    * Shared playback state for audio/video as opaque JSON (mirrors calcState):
    * `{ playing, pos, at, vol, by }`. Written untracked (never an undo item);

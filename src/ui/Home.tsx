@@ -34,6 +34,7 @@ import { BoardStorageBadge } from './BoardStorageBadge';
 import { BoardGlyph } from './BoardGlyph';
 import { readLocale } from '../core/locale';
 import { SettingsSheet } from './SettingsSheet';
+import { NoticeCenter, type Notice } from './Notices';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
@@ -180,10 +181,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     setActiveTeam(created.id);
   };
 
-  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const noticeId = useRef(0);
   const showCopyToast = useCallback((msg: string) => {
-    setCopyToast(msg);
-    window.setTimeout(() => setCopyToast(null), 2000);
+    noticeId.current += 1;
+    const id = noticeId.current;
+    setNotices((list) => [...list.slice(-2), { id, kind: 'info', title: msg, mode: 'toast', ms: 2000, lingerMs: 0 }]);
+  }, []);
+  const dismissNotice = useCallback((n: Notice) => {
+    setNotices((list) => list.filter((x) => x.id !== n.id));
   }, []);
   const copyTextFallback = async (text: string): Promise<boolean> => {
     try {
@@ -737,31 +743,12 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         onGrid={() => {}}
         onClose={() => setSettingsOpen(false)}
       />
-      {copyToast ? (
-        <div
-          style={{
-            position: 'fixed',
-            left: '50%',
-            bottom: 72,
-            transform: 'translateX(-50%)',
-            background: 'var(--chrome-panel)',
-            color: 'var(--chrome-text)',
-            border: '1px solid var(--chrome-border)',
-            borderRadius: 10,
-            padding: '10px 16px',
-            boxShadow: 'var(--chrome-shadow)',
-            zIndex: 9999,
-            fontSize: 13,
-            maxWidth: 'min(420px, 90vw)',
-            whiteSpace: 'normal',
-            textAlign: 'center',
-            wordBreak: 'break-word',
-            lineHeight: 1.4,
-          }}
-        >
-          {copyToast}
-        </div>
-      ) : null}
+      <NoticeCenter
+        notices={notices}
+        locale={locale}
+        onDone={() => {}}
+        onDismiss={(n) => dismissNotice(n)}
+      />
     </div>
   );
 }

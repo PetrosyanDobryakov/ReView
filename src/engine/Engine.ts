@@ -37,6 +37,8 @@ import {
 } from '../core/shapes';
 import {
   MEDIA_SYNC_SLOP_S,
+  MEDIA_WARN_GRACE_MS,
+  MEDIA_WARN_MS,
   decodeMediaState,
   encodeMediaState,
   followMediaEnabled,
@@ -376,6 +378,13 @@ export interface EngineEvents {
   onContextMenu?: (menu: { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean }) => void;
   onInfo?: (info: { title: string; lines: string[] } | null) => void;
   onExportRegion?: (rect: ShapeBox | null) => void;
+  /**
+   * Shared media countdown/info for the notice center. Fired when a fresh
+   * play state (ours or a followed peer's) schedules a start: `mode`
+   * countdown fills over `ms`, info drains. × in UI cancels the pending
+   * start via cancelPendingMedia; fill end re-applies (idempotent).
+   */
+  onMediaNotice?: (n: { shapeId: string; kind: 'audio' | 'video'; name: string; mode: 'countdown' | 'info'; ms: number }) => void;
 }
 
 const TOOL_KEYS_FALLBACK: Record<string, ToolId> = {
@@ -579,6 +588,9 @@ export class Engine {
   private offAudioLoad: () => void = () => {};
   /** Last shared media state applied per shape (echo + reorder guard). */
   private lastMedia = new Map<string, { at: number; raw: string }>();
+  /** Scheduled shared starts waiting out their countdown. */
+  private pendingMedia = new Map<string, { timer: ReturnType<typeof setTimeout>; state: MediaState; raw: string }>();
+  private readonly bootMs = Date.now();
 
   private myMediaId(): string {
     try {
@@ -1044,6 +1056,14 @@ export class Engine {
 
   destroy(): void {
     this.alive = false;
+    for (const [, pend] of this.pendingMedia) {
+      try {
+        clearTimeout(pend.timer);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.pendingMedia.clear();
     this.cancelTransientUi();
     this.syncOrbitCovered(false);
     this.syncOrbitBoard(false);
@@ -2362,6 +2382,7 @@ export class Engine {
             fill: 'transparent',
             stroke: 'transparent',
             strokeWidth: 0,
+            mediaName: file.name.slice(0, 80) || undefined,
             ...media,
           },
           page
@@ -2383,6 +2404,7 @@ export class Engine {
     const v = this.views.get(sid);
     const url = v && v.type === 'video' ? mediaUrl(v) : '';
     if (!v || !url || v.locked) return;
+    this.cancelPendingMedia(sid);
     toggleVideoPlayback(url);
     this.dirty = true;
   }
@@ -2426,6 +2448,7 @@ export class Engine {
             fill: 'transparent',
             stroke: 'transparent',
             strokeWidth: 0,
+            mediaName: file.name.slice(0, 80) || undefined,
             ...media,
           },
           page
@@ -2447,6 +2470,7 @@ export class Engine {
     const v = this.views.get(sid);
     const url = v && v.type === 'audio' ? mediaUrl(v) : '';
     if (!v || !url || v.locked) return;
+    this.cancelPendingMedia(sid);
     toggleAudioPlayback(url);
     this.dirty = true;
   }
@@ -2504,6 +2528,9 @@ export class Engine {
    * Follow shared playback state ("play for everyone"). Runs on every shape
    * observation; cheap-skip unless the state string is new, then echo, order
    * and follow-toggle guards. Local-only transport never writes state.
+   *
+   * A fresh start counts down (notice + synchronized start at `at`); stops
+   * and stale states apply immediately and quietly.
    */
   private followMediaState(id: string, v: ShapeView): void {
     try {
@@ -2517,12 +2544,132 @@ export class Engine {
       this.lastMedia.set(id, { at: st.at, raw });
       if (!followMediaEnabled() || st.by === this.myMediaId()) return;
       if (prev && st.at <= prev.at) return;
+      if (!st.playing) {
+        this.cancelPendingMedia(id);
+        const el = this.mediaElement(v);
+        if (!el) return;
+        this.applyMediaElement(el, st, Date.now());
+        this.dirty = true;
+        return;
+      }
+      const delay = st.at - Date.now();
+      if (delay > MEDIA_WARN_GRACE_MS) {
+        if (st.at >= this.bootMs) {
+          this.scheduleMediaApply(id, st, raw, delay, 'countdown');
+        } else {
+          // Late join of an old start: apply quietly, no notice storm.
+          const el = this.mediaElement(v);
+          if (!el) return;
+          this.applyMediaElement(el, st, Date.now());
+          this.dirty = true;
+        }
+        return;
+      }
+      const el = this.mediaElement(v);
+      if (!el) return;
+      this.applyMediaElement(el, st, Date.now());
+      if (st.at >= this.bootMs) {
+        try {
+          this.events.onMediaNotice?.({
+            shapeId: id,
+            kind: v.type === 'video' ? 'video' : 'audio',
+            name: this.mediaNoticeName(v),
+            mode: 'info',
+            ms: 3000,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      this.dirty = true;
+    } catch {
+      /* follower never breaks paint */
+    }
+  }
+
+  private mediaNoticeName(v: ShapeView): string {
+    try {
+      const name = (v.mediaName ?? '').trim();
+      if (name) return name;
+    } catch {
+      /* ignore */
+    }
+    try {
+      return t(readLocale(), v.type === 'audio' ? 'infoAudio' : 'infoVideo');
+    } catch {
+      return v.type;
+    }
+  }
+
+  private scheduleMediaApply(
+    id: string,
+    st: MediaState,
+    raw: string,
+    ms: number,
+    notice: 'countdown' | 'info',
+  ): void {
+    this.cancelPendingMedia(id);
+    const v = this.views.get(id);
+    const kind = v?.type === 'video' ? 'video' : 'audio';
+    const name = v ? this.mediaNoticeName(v) : id.slice(0, 8);
+    try {
+      this.events.onMediaNotice?.({ shapeId: id, kind, name, mode: notice, ms });
+    } catch {
+      /* ignore */
+    }
+    const timer = setTimeout(() => {
+      this.pendingMedia.delete(id);
+      this.applyPendingMedia(id);
+    }, Math.max(0, ms));
+    this.pendingMedia.set(id, { timer, state: st, raw });
+  }
+
+  /** Apply a scheduled shared start (idempotent; countdown end calls it too). */
+  applyPendingMedia(id: string): void {
+    try {
+      const pend = this.pendingMedia.get(id);
+      if (pend) {
+        clearTimeout(pend.timer);
+        this.pendingMedia.delete(id);
+      }
+      const v = this.views.get(id);
+      if (!v || (v.type !== 'audio' && v.type !== 'video')) return;
+      const st = pend?.state ?? decodeMediaState(v.mediaState);
+      if (!st || !st.playing) return;
       const el = this.mediaElement(v);
       if (!el) return;
       this.applyMediaElement(el, st, Date.now());
       this.dirty = true;
     } catch {
-      /* follower never breaks paint */
+      /* ignore */
+    }
+  }
+
+  /**
+   * Opt out of a scheduled shared start (× on the notice, or local takeover).
+   * Marks the state applied so it never fires late.
+   */
+  cancelPendingMedia(id: string): boolean {
+    try {
+      const pend = this.pendingMedia.get(id);
+      if (!pend) return false;
+      clearTimeout(pend.timer);
+      this.pendingMedia.delete(id);
+      this.lastMedia.set(id, { at: pend.state.at, raw: pend.raw });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Re-run follow for one shape (follow toggle switched back on). */
+  refollowMedia(id: string): void {
+    try {
+      this.lastMedia.delete(id);
+      const v = this.views.get(id);
+      if (v) this.followMediaState(id, v);
+    } catch {
+      /* ignore */
     }
   }
 
@@ -2530,6 +2677,9 @@ export class Engine {
    * Shared transport for audio/video ("for everyone"). Owner/editors only;
    * written untracked so transport never pollutes undo. Returns false when
    * not permitted. Omitted fields keep playing/pos/vol.
+   *
+   * A fresh start counts down MEDIA_WARN_MS so everyone (including us) starts
+   * together; stops and volume apply immediately.
    */
   setMediaSharedState(id: string, patch: { playing?: boolean; pos?: number; vol?: number }): boolean {
     try {
@@ -2542,14 +2692,19 @@ export class Engine {
       const st: MediaState = {
         playing: patch.playing ?? cur?.playing ?? false,
         pos,
-        at: Date.now(),
+        at: patch.playing === true ? Date.now() + MEDIA_WARN_MS : Date.now(),
         vol: patch.vol ?? cur?.vol ?? 1,
         by: this.myMediaId(),
       };
       const raw = encodeMediaState(st);
       store.patchShapesUntracked([[id, { mediaState: raw }]]);
       this.lastMedia.set(id, { at: st.at, raw });
-      if (el) this.applyMediaElement(el, st, Date.now());
+      if (st.playing && patch.playing === true) {
+        this.scheduleMediaApply(id, st, raw, MEDIA_WARN_MS, 'countdown');
+      } else {
+        this.cancelPendingMedia(id);
+        if (el) this.applyMediaElement(el, st, Date.now());
+      }
       this.dirty = true;
       return true;
     } catch {

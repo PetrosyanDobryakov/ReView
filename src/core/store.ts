@@ -927,6 +927,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     thumb: typeof m.get('thumb') === 'string' ? (m.get('thumb') as string) : undefined,
     mime: typeof m.get('mime') === 'string' ? (m.get('mime') as string) : undefined,
     bytes: typeof m.get('bytes') === 'number' ? (m.get('bytes') as number) : undefined,
+    mediaName: typeof m.get('mediaName') === 'string' ? (m.get('mediaName') as string).slice(0, 80) || undefined : undefined,
     mediaState: typeof m.get('mediaState') === 'string' ? (m.get('mediaState') as string) : undefined,
     pages: pagesArr instanceof Y.Array ? pagesArr.toArray() : undefined,
     pageBlobs: (() => {
@@ -1039,6 +1040,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   if (v.thumb !== undefined && v.thumb !== null) m.set('thumb', v.thumb);
   if (v.mime) m.set('mime', v.mime);
   if (v.bytes !== undefined) m.set('bytes', v.bytes);
+  if (v.mediaName) m.set('mediaName', v.mediaName.slice(0, 80));
   if (v.pageBlobs) {
     const arr = new Y.Array<string>();
     arr.insert(0, v.pageBlobs);

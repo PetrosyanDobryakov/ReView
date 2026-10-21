@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Engine } from './engine/Engine';
 import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine/Engine';
@@ -10,6 +10,7 @@ import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { MediaOverlay } from './ui/MediaOverlay';
+import { NoticeCenter, type Notice } from './ui/Notices';
 import { GraphEditor } from './ui/GraphEditor';
 import { CalculatorPanel } from './ui/CalculatorPanel';
 import { PageBar } from './ui/PageBar';
@@ -174,8 +175,47 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [editCalc, setEditCalc] = useState<CalculatorEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
   const [pageEpoch, setPageEpoch] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const noticeId = useRef(0);
+  const pushNotice = useCallback((n: Omit<Notice, 'id'>) => {
+    noticeId.current += 1;
+    const id = noticeId.current;
+    setNotices((list) => [...list.slice(-2), { ...n, id }]);
+    return id;
+  }, []);
+  const removeNotice = useCallback((id: number) => {
+    setNotices((list) => list.filter((n) => n.id !== id));
+  }, []);
+  const handleNoticeDone = useCallback((nt: Notice) => {
+    try {
+      nt.onDone?.();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const handleNoticeDismiss = useCallback(
+    (nt: Notice, auto: boolean) => {
+      try {
+        nt.onDismiss?.(auto);
+      } catch {
+        /* ignore */
+      }
+      removeNotice(nt.id);
+    },
+    [removeNotice]
+  );
+  const pushError = useCallback(
+    (detail: string) => {
+      pushNotice({ kind: 'error', title: t(readLocale(), 'error'), detail, mode: 'toast', ms: 6000, lingerMs: 0 });
+    },
+    [pushNotice]
+  );
+  const pushToast = useCallback(
+    (title: string) => {
+      pushNotice({ kind: 'info', title, mode: 'toast', ms: 2200, lingerMs: 0 });
+    },
+    [pushNotice]
+  );
   const [pen, setPen] = useState({ ...settings.pen });
   const [shape, setShape] = useState({ ...settings.shape });
   const [text, setText] = useState({ ...settings.text });
@@ -272,7 +312,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [boardTitle, hostOffline, ephemeral, error, zoom]);
+  }, [boardTitle, hostOffline, ephemeral, zoom]);
 
   useEffect(() => {
     if (!zoomMenuOpen) return;
@@ -348,14 +388,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     void cloneBoard(boardId)
       .then((copy) => {
         if (!copy) {
-          setError(t(readLocale(), 'error'));
+          pushError(t(readLocale(), 'error'));
           return;
         }
         dismissJoinPrompt();
         navigateThemed(navigate, boardUrl(copy.id));
       })
       .catch(() => {
-        setError(t(readLocale(), 'error'));
+        pushError(t(readLocale(), 'error'));
       });
   };
 
@@ -383,7 +423,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const fileRef = useRef<HTMLInputElement>(null);
   const menuHold = useRef<BoardMenu | null>(null);
   const infoHold = useRef<{ title: string; lines: string[] } | null>(null);
-  const errorHold = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = (file: File, at?: { x: number; y: number }) => {
@@ -392,11 +431,10 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       const locale = readLocale();
       void importBoardFile(file).then((res) => {
         if (res.ok) {
-          setToast(t(locale, 'importSuccess'));
-          window.setTimeout(() => setToast((cur) => (cur === t(locale, 'importSuccess') ? null : cur)), 2000);
+          pushToast(t(locale, 'importSuccess'));
           navigateThemed(navigate, boardUrl(res.board.id));
         } else {
-          setError(t(locale, importErrorI18nKey(res.error)));
+          pushError(t(locale, importErrorI18nKey(res.error)));
         }
       });
       return;
@@ -419,7 +457,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     const isTxt =
       name.endsWith('.txt') || file.type === 'text/plain' || file.type.startsWith('text/');
     if (!isPdf && !isTxt) {
-      setError(t(readLocale(), 'docFailed'));
+      pushError(t(readLocale(), 'docFailed'));
       return;
     }
     const locale = readLocale();
@@ -432,15 +470,15 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         const live = engineRef.current;
         if (!live?.alive) return;
         if (!pages.length) {
-          setError(t(locale, 'docFailed'));
+          pushError(t(locale, 'docFailed'));
           return;
         }
         void live.addDocument(pages, ratio, pos, pageId);
-        if (truncated) setError(t(locale, 'docTruncated'));
+        if (truncated) pushError(t(locale, 'docTruncated'));
       })
       .catch(() => {
         if (getCurrentBoardId() !== boardId) return;
-        setError(t(locale, 'docFailed'));
+        pushError(t(locale, 'docFailed'));
       });
   };
   const handleFileRef = useRef(handleFile);
@@ -487,7 +525,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
 
   if (menu) menuHold.current = menu;
   if (info) infoHold.current = info;
-  if (error) errorHold.current = error;
 
   const refreshSelected = () => setSelected(engineRef.current?.selectedViews() ?? []);
 
@@ -594,10 +631,35 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       if (!rect) return;
       setExportState({ source: 'region', rect });
     };
-    engine.events.onError = (message) => setError(message);
-    engine.events.onToast = (message) => {
-      setToast(message);
-      window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2000);
+    engine.events.onError = (message) => pushError(message);
+    engine.events.onToast = (message) => pushToast(message);
+    engine.events.onMediaNotice = (n) => {
+      const e = engineRef.current;
+      if (!e) return;
+      const title = t(readLocale(), n.mode === 'countdown' ? 'mediaStartsTitle' : 'mediaNowPlaying');
+      if (n.mode === 'countdown') {
+        pushNotice({
+          kind: 'info',
+          title,
+          detail: n.name,
+          mode: 'countdown',
+          ms: n.ms,
+          lingerMs: 2500,
+          onDone: () => e.applyPendingMedia(n.shapeId),
+          onDismiss: (auto) => {
+            if (!auto) e.cancelPendingMedia(n.shapeId);
+          },
+        });
+      } else {
+        pushNotice({
+          kind: 'info',
+          title,
+          detail: n.name,
+          mode: 'toast',
+          ms: 3000,
+          lingerMs: 0,
+        });
+      }
     };
     engine.events.onToggleUi = () => setUiHidden((v) => !v);
     // ponytail: remember viewport per board+page (localStorage), restore on enter
@@ -838,10 +900,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   }, [menu, info, settingsOpen]);
   const menuShown = useExitPresence(Boolean(menu), MOTION.overlay);
   const infoShown = useExitPresence(Boolean(info), MOTION.overlay);
-  const errorShown = useExitPresence(Boolean(error), MOTION.enter);
   const menuView = menu ?? (menuShown ? menuHold.current : null);
   const infoView = info ?? (infoShown ? infoHold.current : null);
-  const errorView = error ?? (errorShown ? errorHold.current : null);
   const menuPad = 8;
   const menuX = menuView
     ? Math.min(Math.max(menuPad, menuView.x), Math.max(menuPad, window.innerWidth - 240))
@@ -1267,7 +1327,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             aria-label={t(locale, 'exportBoard')}
             onClick={() => {
               commitOpenEditors();
-              void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); setToast(msg); setTimeout(() => setToast(null), 1800); }).catch(() => { setToast(t(readLocale(), 'error')); setTimeout(() => setToast(null), 1800); });
+              void exportBoardFile(boardId).then(res => { const msg = res === 'ok' ? t(readLocale(), 'shareCopied') : res === 'too_large' ? t(readLocale(), 'exportTooLarge') : t(readLocale(), 'error'); pushToast(msg); }).catch(() => { pushToast(t(readLocale(), 'error')); });
             }}
           >
             <Icon name="download" />
@@ -1297,17 +1357,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             >
               <span>{t(locale, 'hostOfflineBanner')}</span>
               <span className="host-offline-cta">{t(locale, 'keepOnDevice')}</span>
-            </button>
-          )}
-          {errorShown && errorView && (
-            <button
-              type="button"
-              className={`error-banner${error ? '' : ' is-leaving'}`}
-              onClick={() => setError(null)}
-              title={t(locale, 'errorHint')}
-              aria-label={t(locale, 'errorHint')}
-            >
-              {t(locale, 'error')}: {errorView}
             </button>
           )}
           <MembersMenu
@@ -1523,31 +1572,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           ))}
         </div>
       )}
-      {toast ? (
-        <div
-          style={{
-            position: 'fixed',
-            left: '50%',
-            bottom: 72,
-            transform: 'translateX(-50%)',
-            background: 'var(--chrome-panel)',
-            color: 'var(--chrome-text)',
-            border: '1px solid var(--chrome-border)',
-            borderRadius: 10,
-            padding: '10px 16px',
-            boxShadow: 'var(--chrome-shadow)',
-            zIndex: 9999,
-            fontSize: 13,
-            maxWidth: 'min(420px, 90vw)',
-            whiteSpace: 'normal',
-            textAlign: 'center',
-            wordBreak: 'break-word',
-            lineHeight: 1.4,
-          }}
-        >
-          {toast}
-        </div>
-      ) : null}
+      <NoticeCenter
+        notices={notices}
+        locale={locale}
+        onDone={handleNoticeDone}
+        onDismiss={handleNoticeDismiss}
+      />
     </div>
   );
 }

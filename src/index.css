@@ -2531,6 +2531,71 @@ button.brand {
   margin: 0 0 8px;
 }
 
+/* Center-screen notices: title, optional detail, ×, progress bar below. */
+.notice-center {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 90vw);
+  pointer-events: none;
+}
+.notice {
+  pointer-events: auto;
+  background: var(--chrome-panel);
+  color: var(--chrome-text);
+  border: 1px solid var(--chrome-border);
+  border-radius: 14px;
+  box-shadow: var(--chrome-shadow);
+  padding: 12px 12px 10px;
+  overflow: hidden;
+}
+.notice-error {
+  border-color: var(--chrome-danger-border);
+}
+.notice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.notice-title {
+  font-size: var(--chrome-type);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.notice-detail {
+  margin-top: 2px;
+  font-size: var(--chrome-type-label);
+  color: var(--chrome-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notice-bar {
+  margin-top: 10px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--chrome-border-soft);
+  overflow: hidden;
+}
+.notice-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--chrome-accent);
+}
+.notice-error .notice-fill {
+  background: var(--chrome-danger);
+}
+
 /* Bottom fade stays pinned to the sheet frame (does not scroll away). */
 .sheet-fade {
   position: absolute;
