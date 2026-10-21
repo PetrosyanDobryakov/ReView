@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.16.19
+
+### Mockup player cards, countdown starts, top notices
+
+- **Player like the mockup, always visible.** File pill, big toggle, timeline
+  with time, stop-for-me plus own volume; owners and co-hosts get
+  start/stop-for-all plus the shared volume. Theme-adaptive in every theme.
+  Canvas keeps a flat themed body underneath.
+- **Synchronized countdown starts.** Play-for-all warns everyone for 3 seconds
+  ("starting soon" + file name), then starts together; × opts out locally.
+- **Notices top-center and larger.** Errors red, info drains away.
+- **"Follow" renamed** to "listen to host" with a plain-language hint.
+
 ## 0.16.18
 
 ### Media player mockup, countdown notices, notice center
