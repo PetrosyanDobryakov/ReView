@@ -82,6 +82,12 @@ export interface ShapeView {
   thumb?: string | null;
   mime?: string;
   bytes?: number;
+  /**
+   * Shared playback state for audio/video as opaque JSON (mirrors calcState):
+   * `{ playing, pos, at, vol, by }`. Written untracked (never an undo item);
+   * followers seek to `pos + (now - at) / 1000` while playing. Absent = local only.
+   */
+  mediaState?: string;
   pages?: string[];
   pageBlobs?: string[];
   pageThumbs?: Array<string | null>;
@@ -3069,6 +3075,12 @@ export function toggleVideoPlayback(src: string): boolean {
   const video = getVideo(src);
   if (!video) return false;
   if (video.paused) {
+    // All callers are user gestures (dblclick, menu, overlay) — take sound.
+    try {
+      video.muted = false;
+    } catch {
+      /* ignore */
+    }
     void video.play().catch(() => {
       /* autoplay policy — user gesture should allow; ignore */
     });

@@ -36,6 +36,16 @@ import {
   isAudioPlaying,
 } from '../core/shapes';
 import {
+  MEDIA_SYNC_SLOP_S,
+  decodeMediaState,
+  encodeMediaState,
+  followMediaEnabled,
+  localMediaVolume,
+  seekTargetAt,
+  type MediaState,
+} from '../core/mediaRoles';
+import { loadUser } from '../core/user';
+import {
   MEDIA_MAX_BYTES,
   AUDIO_MAX_BYTES,
   isGifMime,
@@ -567,6 +577,16 @@ export class Engine {
   private offBlobResolved: () => void = () => {};
   private offVideoLoad: () => void = () => {};
   private offAudioLoad: () => void = () => {};
+  /** Last shared media state applied per shape (echo + reorder guard). */
+  private lastMedia = new Map<string, { at: number; raw: string }>();
+
+  private myMediaId(): string {
+    try {
+      return loadUser().id;
+    } catch {
+      return '';
+    }
+  }
   private offFormulaLoad: () => void = () => {};
   private offPrefs: () => void = () => {};
   private erasing = new Set<string>();
@@ -2431,6 +2451,112 @@ export class Engine {
     this.dirty = true;
   }
 
+  private mediaElement(v: ShapeView): HTMLMediaElement | null {
+    try {
+      const url = mediaUrl(v);
+      if (!url) return null;
+      return v.type === 'audio' ? getAudio(url) : v.type === 'video' ? getVideo(url) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private applyMediaElement(el: HTMLMediaElement, st: MediaState, at: number): void {
+    try {
+      el.volume = Math.max(0, Math.min(1, st.vol)) * localMediaVolume();
+    } catch {
+      /* ignore */
+    }
+    if (st.playing) {
+      const target = seekTargetAt(st, at);
+      if (target !== null) {
+        try {
+          if (Math.abs(el.currentTime - target) > MEDIA_SYNC_SLOP_S) el.currentTime = target;
+        } catch {
+          /* seek may throw before metadata */
+        }
+      }
+      try {
+        if (el instanceof HTMLVideoElement) el.muted = false;
+      } catch {
+        /* ignore */
+      }
+      void el.play().catch(() => {
+        /* blocked without a gesture (follower without engagement); user taps play */
+      });
+    } else {
+      try {
+        el.pause();
+      } catch {
+        /* ignore */
+      }
+      if (Number.isFinite(st.pos)) {
+        try {
+          if (Math.abs(el.currentTime - st.pos) > 0.5) el.currentTime = st.pos;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  /**
+   * Follow shared playback state ("play for everyone"). Runs on every shape
+   * observation; cheap-skip unless the state string is new, then echo, order
+   * and follow-toggle guards. Local-only transport never writes state.
+   */
+  private followMediaState(id: string, v: ShapeView): void {
+    try {
+      if (v.type !== 'audio' && v.type !== 'video') return;
+      const raw = v.mediaState;
+      if (typeof raw !== 'string' || !raw) return;
+      const prev = this.lastMedia.get(id);
+      if (prev && prev.raw === raw) return;
+      const st = decodeMediaState(raw);
+      if (!st) return;
+      this.lastMedia.set(id, { at: st.at, raw });
+      if (!followMediaEnabled() || st.by === this.myMediaId()) return;
+      if (prev && st.at <= prev.at) return;
+      const el = this.mediaElement(v);
+      if (!el) return;
+      this.applyMediaElement(el, st, Date.now());
+      this.dirty = true;
+    } catch {
+      /* follower never breaks paint */
+    }
+  }
+
+  /**
+   * Shared transport for audio/video ("for everyone"). Owner/editors only;
+   * written untracked so transport never pollutes undo. Returns false when
+   * not permitted. Omitted fields keep playing/pos/vol.
+   */
+  setMediaSharedState(id: string, patch: { playing?: boolean; pos?: number; vol?: number }): boolean {
+    try {
+      const v = this.views.get(id);
+      if (!v || (v.type !== 'audio' && v.type !== 'video')) return false;
+      if (!store.iControlMedia()) return false;
+      const el = this.mediaElement(v);
+      const cur = decodeMediaState(v.mediaState);
+      const pos = patch.pos ?? (el && Number.isFinite(el.currentTime) ? el.currentTime : cur?.pos ?? 0);
+      const st: MediaState = {
+        playing: patch.playing ?? cur?.playing ?? false,
+        pos,
+        at: Date.now(),
+        vol: patch.vol ?? cur?.vol ?? 1,
+        by: this.myMediaId(),
+      };
+      const raw = encodeMediaState(st);
+      store.patchShapesUntracked([[id, { mediaState: raw }]]);
+      this.lastMedia.set(id, { at: st.at, raw });
+      if (el) this.applyMediaElement(el, st, Date.now());
+      this.dirty = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   hasImageSelection(): boolean {
     if (this.selection.size !== 1) return false;
     const v = this.views.get([...this.selection][0]);
@@ -3690,6 +3816,7 @@ export class Engine {
       const v = { ...store.readShape(m), id: key };
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
+      this.followMediaState(key, v);
       this.dirty = true;
       if (!this.selection.has(key)) return;
       let styleish = false;
