@@ -35,8 +35,10 @@ import {
   isVideoPlaying,
   isAudioPlaying,
   AUDIO_CARD_W,
-  AUDIO_CARD_H_HOST,
+  AUDIO_CARD_H,
   AUDIO_CARD_H_GUEST,
+  AUDIO_CARD_PX_W,
+  clampAudioScale,
 } from '../core/shapes';
 import {
   MEDIA_SYNC_SLOP_S,
@@ -832,17 +834,34 @@ export class Engine {
   }
 
   /**
-   * Audio shapes are fixed-size player cards (DOM overlay, never rescaled), so
-   * any stored geometry (legacy 320x96, user-resized, remote) is snapped back
-   * to the card footprint, keeping the same center. View-only: the Y doc is
-   * left alone, so there is nothing to fight over.
+   * Audio shapes are fixed-size player cards (DOM overlay, constant on screen),
+   * so any stored geometry (legacy 320x96, user-resized, remote) is snapped
+   * back to the card footprint, keeping the same center. The card scale lives
+   * in `audioScale` and never touches w/h.
    */
   private normalizeAudioView(v: ShapeView): ShapeView {
     if (v.type !== 'audio') return v;
     const w = AUDIO_CARD_W;
-    const h = store.iControlMedia() ? AUDIO_CARD_H_HOST : AUDIO_CARD_H_GUEST;
+    const h = AUDIO_CARD_H;
     if (v.w === w && v.h === h) return v;
     return { ...v, x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
+  }
+
+  /**
+   * normalizeAudioView plus an untracked write-back so the doc converges:
+   * legacy / group-resized footprints heal on every client without fighting
+   * (one fixed size for all roles, center-preserving, idempotent).
+   */
+  private snapAudioView(key: string, v: ShapeView): ShapeView {
+    const n = this.normalizeAudioView(v);
+    if (n !== v) {
+      try {
+        store.patchShapesUntracked([[key, { x: n.x, y: n.y, w: n.w, h: n.h }]]);
+      } catch {
+        /* store not bound yet */
+      }
+    }
+    return n;
   }
 
   /** Re-snap audio footprints (e.g. after the local media role changes). */
@@ -864,7 +883,7 @@ export class Engine {
     store.ensureOrder();
     for (const [key, m] of store.board) {
       if (!store.isOnActivePage(key)) continue;
-      const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
+      const v = this.snapAudioView(key, { ...store.readShape(m), id: key });
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.attachShape(key, m);
@@ -1268,16 +1287,82 @@ export class Engine {
   hitTest(x: number, y: number): string | null {
     const box = { x: x - 1, y: y - 1, w: 2, h: 2 };
     const candidates = this.grid.query(box);
-    if (!candidates.size) return null;
     this.ensureOrderIndex();
-    // Top-most first. Sort only the spatial candidates — not the full board order.
-    const ranked = [...candidates].sort(
-      (a, b) => (this.orderIndex.get(b) ?? -1) - (this.orderIndex.get(a) ?? -1)
-    );
-    for (const id of ranked) {
-      if (!store.isOnActivePage(id)) continue;
-      const v = this.views.get(id);
-      if (v && pointInShape(v, x, y)) return id;
+    let best: string | null = null;
+    let bestOrd = -1;
+    if (candidates.size) {
+      // Top-most first. Sort only the spatial candidates — not the full board order.
+      const ranked = [...candidates].sort(
+        (a, b) => (this.orderIndex.get(b) ?? -1) - (this.orderIndex.get(a) ?? -1)
+      );
+      for (const id of ranked) {
+        if (!store.isOnActivePage(id)) continue;
+        const v = this.views.get(id);
+        // Audio never hit-tests by footprint (it is invisible) — see card pass below.
+        if (!v || v.type === 'audio') continue;
+        if (v && pointInShape(v, x, y)) {
+          best = id;
+          bestOrd = this.orderIndex.get(id) ?? -1;
+          break;
+        }
+      }
+    }
+    // Audio cards are screen-constant (zoom never rescales them): hit-test the
+    // visible card rect, resolved against z-order with the footprint hit above.
+    for (const [id, v] of this.views) {
+      if (v.type !== 'audio' || !store.isOnActivePage(id)) continue;
+      if (!this.pointInAudioCard(v, x, y)) continue;
+      const o = this.orderIndex.get(id) ?? -1;
+      if (o >= bestOrd) {
+        best = id;
+        bestOrd = o;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Visible player card rect in screen px: centered on the footprint center,
+   * AUDIO_CARD_PX_W * scale wide — no zoom term, so it never grows with the board.
+   */
+  private audioCardScreenRect(v: ShapeView): { cx: number; cy: number; hw: number; hh: number } {
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    const s = clampAudioScale(v.audioScale);
+    // Role-local height (fewer rows for participants) — view layer only.
+    const ch = store.iControlMedia() ? AUDIO_CARD_H : AUDIO_CARD_H_GUEST;
+    return {
+      cx: (v.x + v.w / 2) * z + ox,
+      cy: (v.y + v.h / 2) * z + oy,
+      hw: (AUDIO_CARD_PX_W / 2) * s,
+      hh: (ch / 2) * s,
+    };
+  }
+
+  private pointInAudioCard(v: ShapeView, x: number, y: number): boolean {
+    const z = this.camera.zoom;
+    const r = this.audioCardScreenRect(v);
+    const sx = x * z + (this.w / 2 - this.camera.x * z);
+    const sy = y * z + (this.h / 2 - this.camera.y * z);
+    return Math.abs(sx - r.cx) <= r.hw && Math.abs(sy - r.cy) <= r.hh;
+  }
+
+  /** Corner handle id (or null) for a single-selected audio card. Corners only. */
+  private hitAudioCardCorner(sx: number, sy: number, v: ShapeView): HandleId | null {
+    const r = this.audioCardScreenRect(v);
+    const dx = sx - r.cx;
+    const dy = sy - r.cy;
+    if (Math.abs(dx) > r.hw || Math.abs(dy) > r.hh) return null;
+    const rad = handleHitRadius();
+    const corners: Array<[HandleId, number, number]> = [
+      ['nw', r.cx - r.hw, r.cy - r.hh],
+      ['ne', r.cx + r.hw, r.cy - r.hh],
+      ['sw', r.cx - r.hw, r.cy + r.hh],
+      ['se', r.cx + r.hw, r.cy + r.hh],
+    ];
+    for (const [id, hx, hy] of corners) {
+      if (Math.hypot(hx - sx, hy - sy) <= rad) return id;
     }
     return null;
   }
@@ -1336,9 +1421,16 @@ export class Engine {
     }
     for (const id of this.selection) {
       const v = this.views.get(id);
-      // Audio is a fixed-size player card — selectable and movable, but never
-      // resized, so its corners stay handle-free.
-      if (!v || v.locked || v.type === 'audio') continue;
+      if (!v || v.locked) continue;
+      if (v.type === 'audio') {
+        // Fixed player card: corner handles scale audioScale (zoom-independent),
+        // edges stay handle-free; the invisible footprint is never resized.
+        if (this.selection.size === 1) {
+          const corner = this.hitAudioCardCorner(sx, sy, v);
+          if (corner) return { shapeId: id, handle: corner };
+        }
+        continue;
+      }
       for (const handle of HANDLES) {
         const [fx, fy] = HANDLE_POS[handle];
         const world = localToWorld(v, fx * v.w, fy * v.h);
@@ -2471,7 +2563,7 @@ export class Engine {
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         // Fixed player footprint — the DOM card owns the visuals.
         const w = AUDIO_CARD_W;
-        const h = store.iControlMedia() ? AUDIO_CARD_H_HOST : AUDIO_CARD_H_GUEST;
+        const h = AUDIO_CARD_H;
         const media = await this.mediaFields(src);
         if (!this.alive || store.getCurrentBoardId() !== boardId) return;
         const id = store.addShape(
@@ -3962,7 +4054,7 @@ export class Engine {
       } else if (store.isOnActivePage(key)) {
         const m = store.board.get(key);
         if (m) {
-          const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
+          const v = this.snapAudioView(key, { ...store.readShape(m), id: key });
           this.views.set(key, v);
           this.grid.upsert(key, this.spatialBox(v));
           this.attachShape(key, m);
@@ -4005,7 +4097,7 @@ export class Engine {
     if (existing && existing.m === m) return;
     this.detachShape(key);
     const cb = (ev: Y.YMapEvent<unknown>) => {
-      const v = this.normalizeAudioView({ ...store.readShape(m), id: key });
+      const v = this.snapAudioView(key, { ...store.readShape(m), id: key });
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.followMediaState(key, v);
@@ -6058,6 +6150,36 @@ export class Engine {
     for (const id of this.selection) {
       const v = this.views.get(id);
       if (!v) continue;
+      if (v.type === 'audio') {
+        // Screen-constant frame hugging the card: corners scale audioScale,
+        // board zoom never enters the geometry. No rotate knob — the card
+        // stays axis-aligned.
+        const z = this.camera.zoom;
+        const sc = clampAudioScale(v.audioScale);
+        const hw = ((AUDIO_CARD_PX_W / 2) * sc) / z;
+        const ch = store.iControlMedia() ? AUDIO_CARD_H : AUDIO_CARD_H_GUEST;
+        const hh = ((ch / 2) * sc) / z;
+        const cx = v.x + v.w / 2;
+        const cy = v.y + v.h / 2;
+        ctx.strokeStyle = orbit ? ORBIT_DRAW.selectionUnder : 'rgba(28, 28, 26, 0.5)';
+        ctx.lineWidth = line + 1.25 * s;
+        ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = line;
+        ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+        if (!v.locked) {
+          for (const [fx, fy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            ctx.beginPath();
+            ctx.arc(cx + fx * hw, cy + fy * hh, hr, 0, Math.PI * 2);
+            ctx.fillStyle = handleFill;
+            ctx.fill();
+            ctx.strokeStyle = COLORS.selection;
+            ctx.lineWidth = 1.5 * s;
+            ctx.stroke();
+          }
+        }
+        continue;
+      }
       withShapeRotation(ctx, v, () => {
         const x = v.x - pad;
         const y = v.y - pad;
