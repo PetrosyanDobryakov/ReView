@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, clampAudioScale } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -748,11 +748,37 @@ export class SelectTool extends Tool {
     ctx.restore();
   }
 
+  /**
+   * Corner-drag on an audio card: uniform radial scale around the footprint
+   * center. World-space ratio, so board zoom cannot affect it; the footprint
+   * x/y/w/h are untouched (only `audioScale` is written, undoable).
+   */
+  private resizeAudioScale(engine: Engine, p: PointerInfo, orig: ShapeView): void {
+    const r = this.resizing;
+    if (!r) return;
+    const cx = orig.x + orig.w / 2;
+    const cy = orig.y + orig.h / 2;
+    const grab = Math.hypot(this.start.x - cx, this.start.y - cy);
+    if (!(grab > 1)) return;
+    const now = Math.hypot(p.world.x - cx, p.world.y - cy);
+    const s = clampAudioScale((orig.audioScale ?? 1) * (now / grab));
+    const live = engine.views.get(r.shapeId);
+    if (live) engine.views.set(r.shapeId, { ...live, audioScale: s });
+    store.patchShapes([[r.shapeId, { audioScale: s }]]);
+    engine.setDirty();
+  }
+
   private resize(engine: Engine, p: PointerInfo): void {
     const r = this.resizing;
     if (!r) return;
     const orig = this.originals.get(r.shapeId);
     if (!orig || orig.locked) return;
+    // Audio cards resize by corner-dragging audioScale (zoom-independent) —
+    // the footprint w/h stays fixed, only the card scale changes.
+    if (orig.type === 'audio') {
+      this.resizeAudioScale(engine, p, orig);
+      return;
+    }
     if (orig.type === 'arrow' && orig.fromId && orig.toId) {
       store.clearShapeKeys(r.shapeId, ['fromId', 'fromPort', 'toId', 'toPort']);
     }
@@ -995,6 +1021,12 @@ export class SelectTool extends Tool {
       }
       const next = groupResizeMember(o, origBox, nextBox, MIN);
       if (!next) continue;
+      // Audio footprints stay fixed (the card scales via audioScale instead);
+      // group resize only translates them with the group.
+      if (o.type === 'audio') {
+        patches.push([id, { x: next.x, y: next.y }]);
+        continue;
+      }
       patches.push([id, bakedArrowGeom(o, next)]);
     }
     if (patches.length) store.patchShapes(patches);

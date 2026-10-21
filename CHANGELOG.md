@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.22
+
+### Zoom-independent player with manual resize
+
+- **Card ignores board zoom.** Constant screen size at any zoom; selection
+  frame, hit-test and corners all derive from the card rect, never from zoom.
+- **Resize by corners.** Dragging a card corner scales the player (0.6–2,
+  synced, undoable); edges/rotate stay off, footprint snaps back and heals in
+  the doc.
+- Participant frame hugs the shorter card.
+
 ## 0.16.21
 
 ### Audio is just the player card
