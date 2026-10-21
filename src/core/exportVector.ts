@@ -410,6 +410,13 @@ export function shapesToSvg(
       );
       continue;
     }
+    if (v.type === 'audio') {
+      // SVG has no portable audio; export a placeholder card matching board geometry.
+      parts.push(
+        `<g${opacity}${xf}><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" fill="#1a1a18" stroke="#454540" stroke-width="1"/><text x="${x + v.w / 2}" y="${y + v.h / 2}" fill="#eceae4" font-size="${Math.max(12, Math.min(v.w, v.h) * 0.08)}" text-anchor="middle" dominant-baseline="middle">audio</text></g>`
+      );
+      continue;
+    }
     if (v.type === 'doc' && docPageCount(v)) {
       const idx = docPageIndex(v.page, docPageCount(v));
       const src = v.pages?.[idx] || inlineImageUrl(docPageUrl(v, idx));
