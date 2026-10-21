@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.16.14
+
+### Settings reorganized around Connection
+
+- **New Connection tab.** Status, invite links, profile (nick + color), a plain
+  link-mode radio (Auto / Direct only / LAN only) instead of three low-level
+  switches, people on the board with link badges (LAN / direct / TURN /
+  relays), RTT and app versions, per-peer details and session kick, network
+  check with human-language results, one-shot diagnostics copy, and a hub
+  summary. Custom TURN lines survive mode switches.
+- **Developer gate in System.** Raw hub editing, ICE lines, net log and a
+  two-click settings reset sit behind a press-and-hold button; everyday users
+  never see them.
+- **Moves.** Interface scale and tool cursor size moved to Customize; gestures
+  reference moved to Binds; desktop data-folder controls moved to System.
+
 ## 0.16.13
 
 ### One-shot connect diagnostics
