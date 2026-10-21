@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.18
+
+### Media player mockup, countdown notices, notice center
+
+- **Player like the mockup.** File-name pill, big toggle, timeline with time,
+  stop-for-me plus own volume; owners and co-hosts get start/stop-for-all
+  plus the shared volume. File names stored on the shapes.
+- **Warning before shared start.** Everyone sees "starting soon" with a
+  filling bar for 3 seconds, then a synchronized start; × opts out locally.
+- **Notice center.** All toasts and errors moved to center-screen cards with
+  a progress bar (fill, then drain back), × to close, red for errors.
+
 ## 0.16.17
 
 ### Media transport overlay, shared playback, co-host rights
