@@ -179,7 +179,44 @@ Our line backup: tag `backup/dev-petrosyan-desktop-2026-10-19` (+ branch
   `test:e2e`/`test:cf`/`test:desktop`, and any Rust edit are unverifiable here.
   JS-only changes remain fully checkable (`tsc`, `npm run build`, Node tests).
 
+## Long-term ideas (2026-10-20, deferred — Nostr relay stays the fallback)
+
+Context: one-shot diagnostics (0.16.13, `reviewDiag()` + mesh event ring) proved
+the failure mode. Cross-ISP pair (109.110.91.204 vs 46.35.249.48): direct open on
+attempt 1 in ~2.5 s, no errors. Same-ISP same-pool pair (109.110.91.204 vs .157,
+one city, one provider): direct dies twice (`ice failed` in ~15 s, then
+`timeout`), relay takes over and carries. Handshake and signaling are clean
+(peers meet even with CF hub at `peers: 0`, via Nostr); the break is same-CGNAT
+hairpinning. `/turn` on our hub answers 404: no TURN key (Cloudflare Realtime
+needs a card, owner has none), so `turn: null` on both sides.
+
+- **P1 — own coturn on a cheap RU VPS (primary fix, no code).** Mir/SBP billing,
+  no Visa needed. One static `turn:<ip>:3478|user|pass` line in Settings →
+  Connection → Advanced on both sides (STUN lines stay; `p2pIce` replaces
+  defaults, max 8 lines). TURN forwards encrypted WebRTC at network level, so
+  the product rule (no server carries board data) holds. Same VPS can also host
+  a review-host binary as an RU signaling hub (robustness only, does not affect
+  ICE). Needs no app update.
+- **P2 — Cloudflare frame relay through our Worker (backup plan, NOT decided).**
+  Retarget `RelayLink` pump from Nostr events to a WS endpoint on `SignalRoom`
+  (~20-60 ms vs Nostr's 117-355 ms, no flapping/base64). Blockers: it is a
+  server carrying board frames, which contradicts the product rule (owner call
+  required); free-tier quotas (100k req/day, DO calls) need measuring against
+  real relay counters before committing to 100 people/day; days of build.
+  Nostr already fills the last-resort slot for free, so this stays parked.
+- **P3 — home coturn via `cloudflared` tunnel (temporary zero-cost).** Publishes
+  TCP 3478 from an always-on home machine, no VPS. UDP through the tunnel is
+  unverified; TCP TURN is enough for whiteboard traffic. Fiddly, interim only.
+- **P4 — OpenRelay public TURN (`openrelay.metered.ca:80/443`, open creds) as a
+  5-minute validation** that TURN fixes a given pair before spending on a VPS.
+  Shared quota, test-only, skipped so far.
+- Standing decision: keep hardening the current path (Nostr relay QoS +
+  diagnostics) instead of chasing the above until P1 is done.
+
 ## Journal
 
 - 2026-10-19: branch `dev-petrosyan-p2p` created from `claude/full-p2p-desktop`;
   backup tag pushed; this plan written. No code changes yet.
+- 2026-10-20: 0.16.13 shipped (`p2p-desktop-v0.16.13`): mesh event ring,
+  `reviewDiag()`, extended copy diagnostics. Cross-ISP direct and same-pool
+  relay failure both confirmed by pasted JSON; see Long-term ideas above.
