@@ -2,10 +2,17 @@
 
 ## Unreleased
 
-- **Player card cleanup.** Fixed-size card follows its shape but never rescales
-  on zoom; audio centers over its body. Big button toggles local play/pause,
-  one contextual start/stop-for-all button for the host, labeled volume rows,
-  sync switch renamed to "Sync with host".
+## 0.16.20
+
+### Player card cleanup
+
+- **Fixed-size card.** Follows its shape on zoom/pan but never rescales; audio
+  centers over its body, video docks below its frame.
+- **No duplicate buttons.** Big round button toggles local play/pause for me
+  only; the host gets one contextual start/stop-for-all button (countdown
+  start when idle, stop when playing).
+- **Labeled volumes.** "My volume" / "Shared volume" text labels next to the
+  sliders; sync switch renamed to "Sync with host".
 
 ## 0.16.19
 
