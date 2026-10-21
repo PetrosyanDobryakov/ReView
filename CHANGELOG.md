@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.16.15
+
+### Settings polish, home join block, honest rotation magnet
+
+- **Connection in tiles.** The Connection tab uses the same dark tiles as
+  Customize; tabs fit without clipping in all locales.
+- **Developer hold fills.** The hold-to-open button shows fill progress and a
+  shorter label; the data-folder block is redesigned.
+- **Home.** Explicit "Join someone's board" block on top; import and new board
+  moved under the list; board row menus always visible.
+- **Rotation magnet is honest.** Shift-drawn lines and arrows no longer snap
+  when the magnet is off; on, they snap as before. Network-check copy is
+  neutral.
+
 ## 0.16.14
 
 ### Settings reorganized around Connection
