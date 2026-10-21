@@ -201,6 +201,28 @@ class P2pClient {
     }
   }
 
+  /**
+   * Kick a peer for this session (drop + ignore while the board is open).
+   * Honest scope: a determined peer with a fresh id can rejoin — P2P has no
+   * server to enforce a ban.
+   */
+  blockPeer(peer: string): boolean {
+    try {
+      return this.mesh?.blockPeer(peer) ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Short ids blocked via blockPeer. */
+  blockedPeers(): string[] {
+    try {
+      return this.mesh?.blockedPeers() ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   /** Called whenever a data channel to a peer opens. */
   onLinkOpen(cb: (peer: string) => void): () => void {
     this.linkOpenListeners.add(cb);
