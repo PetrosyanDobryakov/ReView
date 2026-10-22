@@ -4,6 +4,7 @@ import type { Engine } from '../engine/Engine';
 import {
   decodeMediaState,
   followMediaEnabled,
+  isMediaInSync,
   localMediaVolume,
   setFollowMediaEnabled,
   setLocalMediaVolume,
@@ -25,25 +26,6 @@ const VIDEO_W = 480;
 const BTN_W = 104;
 /** Volume label column shares one fixed width for the same reason. */
 const VOL_LABEL_W = 96;
-
-function PlayGlyph({ playing }: { playing: boolean }) {
-  return playing ? (
-    <svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="3" y="2.5" width="3.4" height="11" rx="1" fill="currentColor" />
-      <rect x="9.6" y="2.5" width="3.4" height="11" rx="1" fill="currentColor" />
-    </svg>
-  ) : (
-    <svg width="32" height="32" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M4.2 2.2l9.2 5.8-9.2 5.8z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function VolRow({
   label,
@@ -92,10 +74,10 @@ function VolRow({
 }
 
 /**
- * Always-visible player card for one media shape, laid out like the mockup:
- * bare outline Play at the left, filename pill over a thin timeline with live
- * time, then "for me" plus my volume — and a second "for all" row plus the
- * shared volume (locked without driving rights).
+ * Always-visible player card for one media shape: filename pill over a thin
+ * timeline with live time, then "for me" plus my volume — and a second
+ * "for all" row plus the shared volume (locked without driving rights).
+ * Transport buttons carry tinted substrates so they read as buttons.
  *
  * Audio is a board object like a photo: the themed backdrop fills its world
  * rect exactly (so the selection frame always hugs it). The controls
@@ -141,6 +123,10 @@ function MediaCard({
   const [playing, setPlaying] = useState(false);
   const [sharedPlaying, setSharedPlaying] = useState(false);
   const [follow, setFollow] = useState(() => followMediaEnabled());
+  // Diverged from the shared session (local pause/scrub/resume while it
+  // runs): the follow button goes unlit until I catch up. Derived in the
+  // tick from element vs shared state — no manual juggling.
+  const [desync, setDesync] = useState(false);
   // May I drive the shared transport? Owner/editors only; viewers stay
   // local with a locked row. Losing it mid-countdown cancels my pending start.
   const [can, setCan] = useState(() => iControlMedia());
@@ -154,8 +140,8 @@ function MediaCard({
       return 100;
     }
   });
-  const stateRef = useRef({ playing, sharedPlaying, follow, can });
-  stateRef.current = { playing, sharedPlaying, follow, can };
+  const stateRef = useRef({ playing, sharedPlaying, follow, can, desync });
+  stateRef.current = { playing, sharedPlaying, follow, can, desync };
   allVolRef.current = allVol;
 
   useEffect(() => {
@@ -253,15 +239,28 @@ function MediaCard({
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
         const isPlaying = Boolean(el && !el.paused && !el.ended);
         if (isPlaying !== stateRef.current.playing) setPlaying(isPlaying);
-        const sp = decodeMediaState(v.mediaState)?.playing === true;
+        const mst = decodeMediaState(v.mediaState);
+        const sp = mst?.playing === true;
         if (sp !== stateRef.current.sharedPlaying) setSharedPlaying(sp);
         // Shared volume rides in: the follower's slider follows the driver's
         // hand, unless I'm dragging it myself right now (commit wins).
-        const gv = decodeMediaState(v.mediaState)?.vol;
+        const gv = mst?.vol;
         if (typeof gv === 'number' && !volAllLive.current) {
           const pct = Math.round(gv * 100);
           if (pct !== allVolRef.current) setAllVol(pct);
         }
+        // Follow-button truth: converged with the shared session or diverged
+        // (local pause/scrub/resume while it runs). A pending countdown for
+        // me converges at fire.
+        const sync = isMediaInSync(
+          el
+            ? { paused: el.paused, ended: el.ended, currentTime: el.currentTime, duration: el.duration }
+            : null,
+          mst,
+          stateRef.current.follow,
+          engine.mediaStartPending(shapeId)
+        );
+        if (sync === stateRef.current.desync) setDesync(!sync);
         const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
         if (seekRef.current && !seekingRef.current) {
           seekRef.current.value = String(
@@ -336,36 +335,34 @@ function MediaCard({
     else engine.toggleVideoSelected(shapeId);
   };
 
-  // Local-only preview for me (never writes shared state). The big button
-  // and the "for all" row drive everyone.
+  // Local-only preview for me (never writes shared state). Shared driving
+  // lives in the "for all" row.
   const toggleSelf = () => {
     if (stateRef.current.playing) stopSelf();
     else playSelf();
   };
 
-  // One primary transport for everyone (when I may drive it): idle →
-  // shared start (countdown, or instant when alone); shared playing →
-  // shared stop; a shared session stuck at the end restarts for everyone
-  // from 0. Without driving rights the big button is local-only.
-  const pressPlay = () => {
-    if (!stateRef.current.can) {
-      toggleSelf();
-      return;
-    }
-    try {
-      const v = engine.views.get(shapeId);
-      const el = v ? (kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v))) : null;
-      const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
-      const ended =
-        Boolean(el?.ended) ||
-        Boolean(el && Number.isFinite(dur) && el.currentTime >= dur - 0.5);
-      if (stateRef.current.sharedPlaying) {
-        if (ended) void engine.setMediaSharedState(shapeId, { playing: true, pos: 0 });
-        else void engine.setMediaSharedState(shapeId, { playing: false });
-        return;
+  // Shared "for all" press: idle → shared start (countdown, or instant when
+  // alone); shared playing → shared stop; a session stuck at the end
+  // restarts for everyone from 0 instead of resuming into silence.
+  const pressAll = () => {
+    if (stateRef.current.sharedPlaying) {
+      try {
+        const v = engine.views.get(shapeId);
+        const el = v ? (kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v))) : null;
+        const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
+        const ended =
+          Boolean(el?.ended) ||
+          Boolean(el && Number.isFinite(dur) && el.currentTime >= dur - 0.5);
+        if (ended) {
+          void engine.setMediaSharedState(shapeId, { playing: true, pos: 0 });
+          return;
+        }
+      } catch {
+        /* fall through to shared stop */
       }
-    } catch {
-      /* fall through to shared start */
+      void engine.setMediaSharedState(shapeId, { playing: false });
+      return;
     }
     void engine.setMediaSharedState(shapeId, { playing: true });
   };
@@ -441,28 +438,6 @@ function MediaCard({
   // volume labels one fixed column, so sliders always align in both cards.
   const topRow = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
-      <button
-        type="button"
-        style={{
-          width: 56,
-          height: 56,
-          flex: 'none',
-          pointerEvents: 'auto',
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          color: 'var(--chrome-text)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-        aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-        onClick={pressPlay}
-      >
-        <PlayGlyph playing={can ? sharedPlaying : playing} />
-      </button>
       <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 5 }}>
           <span
@@ -498,11 +473,19 @@ function MediaCard({
       </div>
     </div>
   );
+  // Transport buttons read as buttons: tinted substrate + semibold label,
+  // stronger for the shared (primary) one.
   const meButton = (
     <button
       type="button"
       className="style-btn"
-      style={{ flex: 'none', width: BTN_W, pointerEvents: 'auto' }}
+      style={{
+        flex: 'none',
+        width: BTN_W,
+        pointerEvents: 'auto',
+        fontWeight: 600,
+        background: 'color-mix(in srgb, var(--chrome-accent) 16%, transparent)',
+      }}
       onClick={toggleSelf}
     >
       {t(locale, playing ? 'mediaStopSelf' : 'mediaPlaySelf')}
@@ -512,16 +495,18 @@ function MediaCard({
     <button
       type="button"
       className="style-btn"
-      style={{ flex: 'none', width: BTN_W, pointerEvents: 'auto', opacity: can ? undefined : 0.45 }}
+      style={{
+        flex: 'none',
+        width: BTN_W,
+        pointerEvents: 'auto',
+        fontWeight: 700,
+        background: 'color-mix(in srgb, var(--chrome-accent) 30%, transparent)',
+        borderColor: 'color-mix(in srgb, var(--chrome-accent) 60%, transparent)',
+        opacity: can ? undefined : 0.45,
+      }}
       disabled={!can}
       title={t(locale, can ? (sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint') : 'mediaLockedHint')}
-      onClick={() => {
-        if (stateRef.current.sharedPlaying) {
-          void engine.setMediaSharedState(shapeId, { playing: false });
-        } else {
-          void engine.setMediaSharedState(shapeId, { playing: true });
-        }
-      }}
+      onClick={pressAll}
     >
       {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
     </button>
@@ -542,19 +527,29 @@ function MediaCard({
       disabled={!can}
     />
   );
+  // Follow button, three outcomes: opted out → opt in and catch up;
+  // diverged (unlit after a local pause/scrub/resume) → catch up now, the
+  // seek jump is the lag; in step → opt out into local-only.
+  const pressFollow = () => {
+    if (!follow) {
+      setFollow(true);
+      setFollowMediaEnabled(true);
+      engine.refollowMedia(shapeId);
+    } else if (desync) {
+      engine.resyncMedia(shapeId);
+    } else {
+      setFollow(false);
+      setFollowMediaEnabled(false);
+    }
+  };
   const followButton = (
     <button
       type="button"
-      aria-pressed={follow}
+      aria-pressed={follow && !desync}
       title={t(locale, 'mediaFollowHint')}
-      className={`style-btn p2p-mini${follow ? ' active' : ''}`}
+      className={`style-btn p2p-mini${follow && !desync ? ' active' : ''}`}
       style={{ pointerEvents: 'auto' }}
-      onClick={() => {
-        const next = !follow;
-        setFollow(next);
-        setFollowMediaEnabled(next);
-        if (next) engine.refollowMedia(shapeId);
-      }}
+      onClick={pressFollow}
     >
       {t(locale, 'mediaFollow')}
     </button>

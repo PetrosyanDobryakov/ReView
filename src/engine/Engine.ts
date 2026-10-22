@@ -2773,6 +2773,33 @@ export class Engine {
     }
   }
 
+  /** A shared start is counting down for this shape (converges at fire). */
+  mediaStartPending(id: string): boolean {
+    return this.pendingMedia.has(id);
+  }
+
+  /**
+   * Catch up to the shared session now (follow button while diverged):
+   * drop any pending start and apply the shared state — seek lands on
+   * target, playback matches. The seek jump is the catch-up lag.
+   */
+  resyncMedia(id: string): boolean {
+    try {
+      const v = this.views.get(id);
+      if (!v || (v.type !== 'audio' && v.type !== 'video')) return false;
+      const st = decodeMediaState(v.mediaState);
+      if (!st) return false;
+      const el = this.mediaElement(v);
+      if (!el) return false;
+      this.cancelPendingMedia(id);
+      this.applyMediaElement(el, st, Date.now());
+      this.dirty = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Shared transport for audio/video ("for everyone"). Driving is
    * owner/editors only (the owner grants editors in Connection); viewers
