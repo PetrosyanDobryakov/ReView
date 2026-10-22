@@ -8,14 +8,12 @@ import {
   setFollowMediaEnabled,
   setLocalMediaVolume,
 } from '../core/mediaRoles';
-import { iControlMedia } from '../core/store';
 import {
   fmtAudioTime,
   getAudio,
   getVideo,
   mediaUrl,
   AUDIO_CARD_H,
-  AUDIO_CARD_H_GUEST,
 } from '../core/shapes';
 import { t } from './i18n';
 
@@ -127,7 +125,6 @@ function MediaCard({
   const [playing, setPlaying] = useState(false);
   const [sharedPlaying, setSharedPlaying] = useState(false);
   const [follow, setFollow] = useState(() => followMediaEnabled());
-  const [can, setCan] = useState(() => iControlMedia());
   const [selfVol, setSelfVol] = useState(() => Math.round(localMediaVolume() * 100));
   const [allVol, setAllVol] = useState(() => {
     try {
@@ -138,20 +135,8 @@ function MediaCard({
       return 100;
     }
   });
-  const stateRef = useRef({ playing, sharedPlaying, follow, can });
-  stateRef.current = { playing, sharedPlaying, follow, can };
-
-  useEffect(() => {
-    const poll = window.setInterval(() => {
-      try {
-        const next = iControlMedia();
-        if (next !== stateRef.current.can) setCan(next);
-      } catch {
-        /* ignore */
-      }
-    }, 2000);
-    return () => window.clearInterval(poll);
-  }, [engine]);
+  const stateRef = useRef({ playing, sharedPlaying, follow });
+  stateRef.current = { playing, sharedPlaying, follow };
 
   // Wheel over buttons/sliders zooms the board like anywhere else: the
   // canvas never sees events over this sibling, so forward them. Native
@@ -208,7 +193,7 @@ function MediaCard({
           if (box.style.transform) box.style.transform = '';
           const inner = innerRef.current;
           if (inner) {
-            const estH = stateRef.current.can ? AUDIO_CARD_H : AUDIO_CARD_H_GUEST;
+            const estH = AUDIO_CARD_H;
             // Contain-fit scale, but the content width stretches to fill:
             // extra horizontal space grows the sliders (timeline first), so
             // a wide window means finer scrubbing instead of empty margins.
@@ -310,17 +295,17 @@ function MediaCard({
     else engine.toggleVideoSelected(shapeId);
   };
 
-  // Big round button: local play/pause for me only, never touches the
-  // shared state. Stopping for everyone is the host's button below.
+  // Local-only preview for me (never writes shared state). The big button
+  // and the "for all" row drive everyone.
   const toggleSelf = () => {
     if (stateRef.current.playing) stopSelf();
     else playSelf();
   };
 
-  // Mockup semantics. Participant: local toggle. Organizer: idle → countdown
-  // start for everyone; while shared playing → local toggle (all-stop lives
-  // in the row below). A shared session stuck at the end restarts for
-  // everyone from 0 instead of resuming into silence.
+  // One primary transport for everyone: idle → shared start (countdown, or
+  // instant when alone); shared playing → shared stop; a shared session
+  // stuck at the end restarts for everyone from 0. Open transport — any
+  // peer's press plays for all followers (rights UI stays for later).
   const pressPlay = () => {
     try {
       const v = engine.views.get(shapeId);
@@ -329,18 +314,15 @@ function MediaCard({
       const ended =
         Boolean(el?.ended) ||
         Boolean(el && Number.isFinite(dur) && el.currentTime >= dur - 0.5);
-      if (stateRef.current.can && stateRef.current.sharedPlaying && ended) {
-        void engine.setMediaSharedState(shapeId, { playing: true, pos: 0 });
+      if (stateRef.current.sharedPlaying) {
+        if (ended) void engine.setMediaSharedState(shapeId, { playing: true, pos: 0 });
+        else void engine.setMediaSharedState(shapeId, { playing: false });
         return;
       }
     } catch {
-      /* fall through to normal semantics */
+      /* fall through to shared start */
     }
-    if (stateRef.current.can && !stateRef.current.sharedPlaying) {
-      void engine.setMediaSharedState(shapeId, { playing: true });
-      return;
-    }
-    toggleSelf();
+    void engine.setMediaSharedState(shapeId, { playing: true });
   };
 
   const seekSelf = (frac: number) => {
@@ -357,14 +339,14 @@ function MediaCard({
     });
   };
 
-  // Driver scrubbing during an active shared session moves everyone: the
+  // Anyone scrubbing during an active shared session moves everyone: the
   // final position commits to shared state (followers apply immediately,
-  // no new countdown). Local preview while dragging; participants stay local.
+  // no new countdown). Idle sessions stay local.
   const seekCommit = () => {
     if (!seekingRef.current) return;
     seekingRef.current = false;
     try {
-      if (!stateRef.current.can || !stateRef.current.sharedPlaying) return;
+      if (!stateRef.current.sharedPlaying) return;
       const v = engine.views.get(shapeId);
       if (!v) return;
       const el = kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v));
@@ -431,7 +413,7 @@ function MediaCard({
           aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
           onClick={pressPlay}
         >
-          <PlayGlyph playing={playing} />
+          <PlayGlyph playing={sharedPlaying} />
         </button>
         <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 5 }}>
@@ -472,9 +454,9 @@ function MediaCard({
           type="button"
           className="style-btn"
           style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
-          onClick={stopSelf}
+          onClick={toggleSelf}
         >
-          {t(locale, 'mediaStopSelf')}
+          {t(locale, playing ? 'mediaStopSelf' : 'mediaPlaySelf')}
         </button>
         <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
           <VolRow
@@ -484,27 +466,31 @@ function MediaCard({
           />
         </div>
       </div>
-      {can ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, pointerEvents: 'none' }}>
-          <button
-            type="button"
-            className="style-btn"
-            style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
-            title={t(locale, 'mediaStopAllHint')}
-            onClick={() => void engine.setMediaSharedState(shapeId, { playing: false })}
-          >
-            {t(locale, 'mediaStopAll')}
-          </button>
-          <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
-            <VolRow
-              label={t(locale, 'mediaVolAll')}
-              value={allVol}
-              onInput={volAllPreview}
-              onCommit={volAllCommit}
-            />
-          </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, pointerEvents: 'none' }}>
+        <button
+          type="button"
+          className="style-btn"
+          style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
+          title={t(locale, sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint')}
+          onClick={() => {
+            if (stateRef.current.sharedPlaying) {
+              void engine.setMediaSharedState(shapeId, { playing: false });
+            } else {
+              void engine.setMediaSharedState(shapeId, { playing: true });
+            }
+          }}
+        >
+          {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
+        </button>
+        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
+          <VolRow
+            label={t(locale, 'mediaVolAll')}
+            value={allVol}
+            onInput={volAllPreview}
+            onCommit={volAllCommit}
+          />
         </div>
-      ) : null}
+      </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6, pointerEvents: 'none' }}>
         <button
           type="button"
