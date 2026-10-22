@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.16.27
+
+### Transport states and open driving
+
+- **Buttons follow playback.** "For me" toggles Играть/Стоп у меня by local
+  state; "for all" toggles Всем: старт/стоп by shared state — no more
+  permanent Стоп labels.
+- **One primary transport for everyone.** The big button always drives the
+  shared session: start (countdown, instant when alone), stop, or restart
+  from 0 when stuck at the end. Local preview lives in the "for me" row.
+- **Open transport.** Any peer's press/seek/volume drives all followers —
+  no more silent friend presses (owner/editor grants stay for later
+  refinement; kick still guards trolls). Solo starts skip the countdown.
+
 ## 0.16.26
 
 ### Media stops when it should, video dock on demand

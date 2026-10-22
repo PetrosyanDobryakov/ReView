@@ -2715,18 +2715,19 @@ export class Engine {
   }
 
   /**
-   * Shared transport for audio/video ("for everyone"). Owner/editors only;
-   * written untracked so transport never pollutes undo. Returns false when
-   * not permitted. Omitted fields keep playing/pos/vol.
+   * Shared transport for audio/video ("for everyone"). Open transport: any
+   * peer may drive it — a friend's press plays for all followers (the
+   * owner/editor rights UI stays for later refinement; kick guards trolls).
+   * Written untracked so transport never pollutes undo. Returns false for
+   * non-media shapes. Omitted fields keep playing/pos/vol.
    *
-   * A fresh start counts down MEDIA_WARN_MS so everyone (including us) starts
-   * together; stops and volume apply immediately.
+   * A fresh start counts down MEDIA_WARN_MS so everyone starts together
+   * (instant when alone); stops and volume apply immediately.
    */
   setMediaSharedState(id: string, patch: { playing?: boolean; pos?: number; vol?: number }): boolean {
     try {
       const v = this.views.get(id);
       if (!v || (v.type !== 'audio' && v.type !== 'video')) return false;
-      if (!store.iControlMedia()) return false;
       const el = this.mediaElement(v);
       const cur = decodeMediaState(v.mediaState);
       const now = Date.now();
@@ -2749,10 +2750,12 @@ export class Engine {
           pos = el && Number.isFinite(el.currentTime) ? (el.currentTime as number) : cur?.pos ?? 0;
         }
       }
+      // Nobody to sync with: start now, no countdown (still announced).
+      const solo = patch.playing === true && this.remotePeers.length === 0;
       const st: MediaState = {
         playing: patch.playing ?? cur?.playing ?? false,
         pos,
-        at: patch.playing === true ? now + MEDIA_WARN_MS : now,
+        at: patch.playing === true ? (solo ? now : now + MEDIA_WARN_MS) : now,
         vol: patch.vol ?? cur?.vol ?? 1,
         by: this.myMediaId(),
       };
@@ -2760,7 +2763,7 @@ export class Engine {
       store.patchShapesUntracked([[id, { mediaState: raw }]]);
       this.lastMedia.set(id, { at: st.at, raw });
       if (st.playing && patch.playing === true) {
-        this.scheduleMediaApply(id, st, raw, MEDIA_WARN_MS, 'countdown');
+        this.scheduleMediaApply(id, st, raw, solo ? 0 : MEDIA_WARN_MS, solo ? 'info' : 'countdown');
       } else {
         this.cancelPendingMedia(id);
         if (el) this.applyMediaElement(el, st, Date.now());
