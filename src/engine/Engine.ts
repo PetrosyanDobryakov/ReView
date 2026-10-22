@@ -2574,7 +2574,9 @@ export class Engine {
       if (!st) return;
       this.lastMedia.set(id, { at: st.at, raw });
       if (!followMediaEnabled() || st.by === this.myMediaId()) return;
-      if (prev && st.at <= prev.at) return;
+      // Order guard is strictly older-only: vol+stop written in the same ms
+      // must both apply (single Y key, so same-ms states are still ordered).
+      if (prev && st.at < prev.at) return;
       if (!st.playing) {
         this.cancelPendingMedia(id);
         const el = this.mediaElement(v);
@@ -2720,11 +2722,30 @@ export class Engine {
       if (!store.iControlMedia()) return false;
       const el = this.mediaElement(v);
       const cur = decodeMediaState(v.mediaState);
-      const pos = patch.pos ?? (el && Number.isFinite(el.currentTime) ? el.currentTime : cur?.pos ?? 0);
+      const now = Date.now();
+      let pos = patch.pos;
+      if (pos === undefined) {
+        if (patch.playing === true) {
+          // Fresh start: never resume from the end. A locally previewed
+          // element (or an ended shared one) must restart from 0.
+          const dur = el && Number.isFinite(el.duration) ? (el.duration as number) : NaN;
+          const localPos = el && Number.isFinite(el.currentTime) ? (el.currentTime as number) : NaN;
+          const atEnd =
+            Boolean(el?.ended) ||
+            (Number.isFinite(dur) && Number.isFinite(localPos) && localPos >= dur - 0.25);
+          pos = atEnd ? 0 : Number.isFinite(localPos) ? localPos : cur?.pos ?? 0;
+        } else if (cur?.playing) {
+          // Stop / volume during a shared session: track the shared clock,
+          // not a possibly stale local element (local preview/scrub).
+          pos = seekTargetAt(cur, now) ?? cur.pos;
+        } else {
+          pos = el && Number.isFinite(el.currentTime) ? (el.currentTime as number) : cur?.pos ?? 0;
+        }
+      }
       const st: MediaState = {
         playing: patch.playing ?? cur?.playing ?? false,
         pos,
-        at: patch.playing === true ? Date.now() + MEDIA_WARN_MS : Date.now(),
+        at: patch.playing === true ? now + MEDIA_WARN_MS : now,
         vol: patch.vol ?? cur?.vol ?? 1,
         by: this.myMediaId(),
       };

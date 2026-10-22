@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.16.24
+
+### Audio alignment, backdrop window and sync repairs
+
+- **Alignment.** Audio joins the snap/align targets (photos, video, PDFs,
+  tables, frames): dragging snaps to it and it snaps to others, single and
+  multi-align include it.
+- **Window.** The themed rounded backdrop fills the whole world rect, so the
+  selection frame always hugs the object. Resize stretches freely
+  (vertical/horizontal) with readable minimums (240x150); the controls
+  contain-fit inside and never distort.
+- **Sync.** Fresh starts never resume from the end (restart from 0, shared
+  and local); the driver's seek commits to everyone without a new countdown;
+  stop/volume track the shared clock instead of a stale local element;
+  volume+stop written in the same millisecond both apply.
+
 ## 0.16.23
 
 ### Audio is a board object again

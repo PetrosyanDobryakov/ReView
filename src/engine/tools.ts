@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -749,32 +749,36 @@ export class SelectTool extends Tool {
   }
 
   /**
-   * Audio resize: uniform scale of w/h (aspect locked) so the DOM player card
-   * — rendered at shape-width scale — never distorts. Any handle works: the
-   * radial pointer ratio drives k, the dragged sides stay pinned. Like a
-   * photo, the player keeps its board size and zooms with the board.
+   * Audio resize: free edge-based stretch like other board objects (the card
+   * contain-fits, so it never distorts). Readable minimums keep the window
+   * wide enough for its buttons. Undoable, synced.
    */
-  private resizeAudioUniform(engine: Engine, p: PointerInfo, orig: ShapeView): void {
+  private resizeAudioFree(engine: Engine, p: PointerInfo, orig: ShapeView): void {
     const r = this.resizing;
     if (!r) return;
-    const cx = orig.x + orig.w / 2;
-    const cy = orig.y + orig.h / 2;
-    const grab = Math.hypot(this.start.x - cx, this.start.y - cy);
-    if (!(grab > 1)) return;
-    const now = Math.hypot(p.world.x - cx, p.world.y - cy);
-    const k = Math.min(5, Math.max(0.2, now / grab));
-    const w = Math.min(1600, Math.max(60, orig.w * k));
-    const h = Math.max(1, orig.h * (w / Math.max(1, orig.w)));
-    const x = r.handle.includes('w')
-      ? orig.x + orig.w - w
-      : r.handle.includes('e')
-        ? orig.x
-        : cx - w / 2;
-    const y = r.handle.includes('n')
-      ? orig.y + orig.h - h
-      : r.handle.includes('s')
-        ? orig.y
-        : cy - h / 2;
+    // Audio never rotates (no knob), so deltas apply directly.
+    const dx = p.world.x - this.start.x;
+    const dy = p.world.y - this.start.y;
+    let left = orig.x;
+    let right = orig.x + orig.w;
+    let top = orig.y;
+    let bottom = orig.y + orig.h;
+    if (r.handle.includes('e')) right = orig.x + orig.w + dx;
+    if (r.handle.includes('w')) left = orig.x + dx;
+    if (r.handle.includes('s')) bottom = orig.y + orig.h + dy;
+    if (r.handle.includes('n')) top = orig.y + dy;
+    let x = Math.min(left, right);
+    let y = Math.min(top, bottom);
+    let w = Math.abs(right - left);
+    let h = Math.abs(bottom - top);
+    if (w < AUDIO_MIN_W) {
+      w = AUDIO_MIN_W;
+      x = (left + right) / 2 - w / 2;
+    }
+    if (h < AUDIO_MIN_H) {
+      h = AUDIO_MIN_H;
+      y = (top + bottom) / 2 - h / 2;
+    }
     const live = engine.views.get(r.shapeId);
     if (live) {
       engine.views.set(r.shapeId, { ...live, x, y, w, h });
@@ -788,10 +792,10 @@ export class SelectTool extends Tool {
     if (!r) return;
     const orig = this.originals.get(r.shapeId);
     if (!orig || orig.locked) return;
-    // Audio resizes uniformly (aspect locked) so the player card never
-    // distorts; w/h are written like any other shape (undoable, synced).
+    // Audio resizes freely (readable minimums guard the buttons); the card
+    // contain-fits so it never distorts. w/h are written like any shape.
     if (orig.type === 'audio') {
-      this.resizeAudioUniform(engine, p, orig);
+      this.resizeAudioFree(engine, p, orig);
       return;
     }
     if (orig.type === 'arrow' && orig.fromId && orig.toId) {

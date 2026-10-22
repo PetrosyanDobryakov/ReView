@@ -91,10 +91,11 @@ function VolRow({
  * time, then "stop for me" plus my volume — and, when this device may drive
  * it, a second "stop for all" row plus the shared volume.
  *
- * Audio is a board object like a photo: the card fills its world rect, so it
- * zooms with the board and keeps its board size. Manual resize (any handle)
- * scales the shape uniformly; the card renders its 280px content at
- * shape-screen-width scale and never distorts. Video docks below its frame.
+ * Audio is a board object like a photo: the themed backdrop fills its world
+ * rect exactly (so the selection frame always hugs it), and the controls
+ * contain-fit inside without distorting. Manual resize stretches w/h freely
+ * with readable minimums; the player zooms with the board. Video docks below
+ * its frame.
  *
  * Play semantics: participant toggles local playback; organizer starts the
  * countdown for everyone when idle, otherwise toggles locally (all-stop is
@@ -117,6 +118,7 @@ function MediaCard({
   selected: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const seekRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
@@ -169,34 +171,34 @@ function MediaCard({
           return;
         }
         box.style.display = '';
-        // Audio fills its world rect like a photo: the card content (CARD_W
-        // wide) scales with the shape's screen width, so board zoom rescales
-        // the player and it keeps its board size. Video docks below its frame.
+        // Audio is a board object: the themed backdrop (this box) fills the
+        // world rect exactly, so the selection frame always hugs it. The
+        // controls contain-fit inside and never distort. Video docks below.
         const screenW = Math.max(1, b.x - a.x);
-        const k = kind === 'audio' ? screenW / CARD_W : 1;
-        const estH =
-          kind === 'audio'
-            ? stateRef.current.can
-              ? AUDIO_CARD_H
-              : AUDIO_CARD_H_GUEST
-            : CARD_H;
-        const cardW = CARD_W * k;
-        const cardH = estH * k;
-        let left: number;
-        let top: number;
+        const screenH = Math.max(1, b.y - a.y);
         if (kind === 'audio') {
-          left = (a.x + b.x) / 2 - cardW / 2;
-          top = (a.y + b.y) / 2 - cardH / 2;
+          const pos = clampToVisualViewport(a.x, a.y, screenW, screenH);
+          box.style.left = `${Math.round(pos.left)}px`;
+          box.style.top = `${Math.round(pos.top)}px`;
+          box.style.width = `${Math.round(screenW)}px`;
+          box.style.height = `${Math.round(screenH)}px`;
+          box.style.borderRadius = `${Math.max(4, Math.round((12 * screenW) / CARD_W))}px`;
+          if (box.style.transform) box.style.transform = '';
+          const inner = innerRef.current;
+          if (inner) {
+            const estH = stateRef.current.can ? AUDIO_CARD_H : AUDIO_CARD_H_GUEST;
+            const kc = Math.max(0.01, Math.min(screenW / CARD_W, screenH / estH));
+            inner.style.left = `${((screenW - CARD_W * kc) / 2).toFixed(1)}px`;
+            inner.style.top = `${((screenH - estH * kc) / 2).toFixed(1)}px`;
+            const t = `scale(${kc.toFixed(4)})`;
+            if (inner.style.transform !== t) inner.style.transform = t;
+          }
         } else {
-          left = a.x;
-          top = b.y + 8;
+          const pos = clampToVisualViewport(a.x, b.y + 8, CARD_W, CARD_H);
+          box.style.left = `${Math.round(pos.left)}px`;
+          box.style.top = `${Math.round(pos.top)}px`;
+          box.style.width = `${CARD_W}px`;
         }
-        const pos = clampToVisualViewport(left, top, cardW, cardH);
-        box.style.left = `${Math.round(pos.left)}px`;
-        box.style.top = `${Math.round(pos.top)}px`;
-        box.style.width = `${CARD_W}px`;
-        const wantTransform = kind === 'audio' ? `scale(${k})` : '';
-        if (box.style.transform !== wantTransform) box.style.transform = wantTransform;
         const url = mediaUrl(v);
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
         const isPlaying = Boolean(el && !el.paused && !el.ended);
@@ -286,8 +288,23 @@ function MediaCard({
 
   // Mockup semantics. Participant: local toggle. Organizer: idle → countdown
   // start for everyone; while shared playing → local toggle (all-stop lives
-  // in the row below).
+  // in the row below). A shared session stuck at the end restarts for
+  // everyone from 0 instead of resuming into silence.
   const pressPlay = () => {
+    try {
+      const v = engine.views.get(shapeId);
+      const el = v ? (kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v))) : null;
+      const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
+      const ended =
+        Boolean(el?.ended) ||
+        Boolean(el && Number.isFinite(dur) && el.currentTime >= dur - 0.5);
+      if (stateRef.current.can && stateRef.current.sharedPlaying && ended) {
+        void engine.setMediaSharedState(shapeId, { playing: true, pos: 0 });
+        return;
+      }
+    } catch {
+      /* fall through to normal semantics */
+    }
     if (stateRef.current.can && !stateRef.current.sharedPlaying) {
       void engine.setMediaSharedState(shapeId, { playing: true });
       return;
@@ -297,6 +314,7 @@ function MediaCard({
 
   const seekSelf = (frac: number) => {
     engine.cancelPendingMedia(shapeId);
+    seekingRef.current = true;
     withElement((el) => {
       const dur = el.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
@@ -306,6 +324,25 @@ function MediaCard({
         /* before metadata */
       }
     });
+  };
+
+  // Driver scrubbing during an active shared session moves everyone: the
+  // final position commits to shared state (followers apply immediately,
+  // no new countdown). Local preview while dragging; participants stay local.
+  const seekCommit = () => {
+    if (!seekingRef.current) return;
+    seekingRef.current = false;
+    try {
+      if (!stateRef.current.can || !stateRef.current.sharedPlaying) return;
+      const v = engine.views.get(shapeId);
+      if (!v) return;
+      const el = kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v));
+      if (el && Number.isFinite(el.currentTime)) {
+        void engine.setMediaSharedState(shapeId, { pos: el.currentTime });
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const volSelf = (pct: number) => {
@@ -338,21 +375,10 @@ function MediaCard({
     engine.setMediaSharedState(shapeId, { vol: Math.max(0, Math.min(1, pct / 100)) });
   };
 
-  return (
-    <div
-      ref={boxRef}
-      className="board-row-menu"
-      role="group"
-      aria-label={t(locale, kind === 'audio' ? 'infoAudio' : 'infoVideo')}
-      style={{
-        position: 'fixed',
-        width: CARD_W,
-        zIndex: 60,
-        pointerEvents: 'none',
-        transformOrigin: 'top left',
-        borderColor: selected ? 'var(--chrome-accent)' : undefined,
-      }}
-    >
+  // Controls fragment: for audio it lives in the scaled inner wrapper that
+  // contain-fits the world rect; for video it flows directly in the box.
+  const controls = (
+    <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
         <button
           type="button"
@@ -397,7 +423,10 @@ function MediaCard({
                 seekingRef.current = true;
               }}
               onPointerUp={() => {
-                seekingRef.current = false;
+                seekCommit();
+              }}
+              onBlur={() => {
+                seekCommit();
               }}
               onChange={(e) => seekSelf(Number(e.target.value) / 1000)}
             />
@@ -462,6 +491,40 @@ function MediaCard({
           {t(locale, 'mediaFollow')}
         </button>
       </div>
+    </>
+  );
+
+  return (
+    <div
+      ref={boxRef}
+      className="board-row-menu"
+      role="group"
+      aria-label={t(locale, kind === 'audio' ? 'infoAudio' : 'infoVideo')}
+      style={{
+        position: 'fixed',
+        zIndex: 60,
+        minWidth: 0,
+        pointerEvents: 'none',
+        borderColor: selected ? 'var(--chrome-accent)' : undefined,
+      }}
+    >
+      {kind === 'audio' ? (
+        <div
+          ref={innerRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: CARD_W,
+            pointerEvents: 'none',
+            transformOrigin: 'top left',
+          }}
+        >
+          {controls}
+        </div>
+      ) : (
+        controls
+      )}
     </div>
   );
 }
