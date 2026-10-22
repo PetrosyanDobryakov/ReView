@@ -575,16 +575,21 @@ export function MediaCards({
   if (!shapes.length) return null;
   return (
     <>
-      {shapes.map((s) => (
-        <MediaCard
-          key={s.id}
-          engine={engine}
-          shapeId={s.id}
-          kind={s.kind}
-          locale={locale}
-          selected={selectedIds.has(s.id)}
-        />
-      ))}
+      {shapes.map((s) => {
+        // Audio owns a permanent board window; the video dock only appears
+        // for the selected video (canvas dblclick still toggles playback).
+        if (s.kind === 'video' && !selectedIds.has(s.id)) return null;
+        return (
+          <MediaCard
+            key={s.id}
+            engine={engine}
+            shapeId={s.id}
+            kind={s.kind}
+            locale={locale}
+            selected={selectedIds.has(s.id)}
+          />
+        );
+      })}
     </>
   );
 }

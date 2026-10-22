@@ -3132,6 +3132,28 @@ export function releaseAudio(src: string): void {
   }
 }
 
+/**
+ * Pause every cached audio/video element without releasing: leaving the
+ * board (or deleting a shape) must silence playback; elements stay cached
+ * so another shape with the same file can resume on demand.
+ */
+export function pauseAllMedia(): void {
+  for (const [, el] of audioCache) {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const [, el] of videoCache) {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function toggleAudioPlayback(src: string): boolean {
   const audio = getAudio(src);
   if (!audio) return false;
