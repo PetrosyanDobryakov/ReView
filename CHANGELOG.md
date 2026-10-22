@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.16.26
+
+### Media stops when it should, video dock on demand
+
+- **Leaving the board silences everything.** Engine teardown pauses all
+  cached audio/video elements (they outlive the board); scheduled shared
+  starts already died with it.
+- **Deleting a player shape stops it.** The delete path pauses its element
+  and cancels its pending countdown — on every peer, since the deletion
+  itself syncs.
+- **Video dock only when selected.** Audio keeps its permanent window; the
+  video control tab appears on click/selection and hides on deselect
+  (canvas double-click still toggles playback).
+
 ## 0.16.25
 
 ### Player cards behave like board objects

@@ -34,6 +34,7 @@ import {
   toggleAudioPlayback,
   isVideoPlaying,
   isAudioPlaying,
+  pauseAllMedia,
   AUDIO_CARD_W,
   AUDIO_CARD_H,
 } from '../core/shapes';
@@ -1077,6 +1078,12 @@ export class Engine {
 
   destroy(): void {
     this.alive = false;
+    // Leaving the board silences everything (cached elements outlive us).
+    try {
+      pauseAllMedia();
+    } catch {
+      /* ignore */
+    }
     for (const [, pend] of this.pendingMedia) {
       try {
         clearTimeout(pend.timer);
@@ -3968,8 +3975,18 @@ export class Engine {
     let sparks = 0;
     ev.changes.keys.forEach((change, key) => {
       if (change.action === 'delete') {
-        const gone = fx ? this.views.get(key) : undefined;
-        if (gone) this.orbitFx.burnUp(gone, this.camera.zoom);
+        const gone = this.views.get(key);
+        // Deleting a player shape silences it (the cached element outlives
+        // the shape); scheduled shared starts die with it too.
+        if (gone && (gone.type === 'audio' || gone.type === 'video')) {
+          this.cancelPendingMedia(key);
+          try {
+            this.mediaElement(gone)?.pause();
+          } catch {
+            /* ignore */
+          }
+        }
+        if (fx && gone) this.orbitFx.burnUp(gone, this.camera.zoom);
         this.detachShape(key);
         this.views.delete(key);
         this.grid.remove(key);
