@@ -4615,15 +4615,24 @@ export class Engine {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    const rect = this.canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
     // Wheel / trackpad scroll always zooms (pan is Space/MMB/hand only).
     const dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+    this.wheelZoom(e.clientX, e.clientY, dy);
+  };
+
+  /**
+   * Same zoom the canvas gets, for wheel events over DOM overlays (player
+   * cards): buttons/sliders must not swallow board zoom. Public so the
+   * overlay can forward with a non-passive listener.
+   */
+  wheelZoom(clientX: number, clientY: number, dy: number): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
     this.camera.zoomAt(sx, sy, this.w / 2, this.h / 2, Math.exp(-dy * 0.0022));
     this.clampPending = true;
     this.dirty = true;
-  };
+  }
 
   private onDblClick = (e: MouseEvent): void => {
     if (this.editing) return;

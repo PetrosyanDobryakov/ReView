@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.16.25
+
+### Player cards behave like board objects
+
+- **Wheel over buttons/sliders zooms the board.** The canvas never sees
+  events over the overlay, so the card forwards them (native non-passive
+  listener); a focused slider no longer eats the wheel either.
+- **No viewport clamping.** Cards sit at true coords and slide off-screen
+  exactly like the shape under them instead of sticking to the edge and
+  vanishing. Applies to the video dock too.
+- **Video dock is board-fixed.** The control tab scales with zoom to match
+  the frame width instead of staying constant on screen.
+- **Wide audio window fills itself.** Controls stretch to the rect width —
+  extra space grows the sliders (timeline first) instead of empty margins.
+
 ## 0.16.24
 
 ### Audio alignment, backdrop window and sync repairs
