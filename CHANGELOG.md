@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.16.29
+
+### Volume follow, quiet tweaks, rights foundation
+
+- **Shared volume slider follows.** The follower's Общая громкость now
+  tracks the driver's hand live (paused while dragging it yourself).
+- **No notice on tweaks.** Volume and scrub commits ride as quiet states:
+  followers apply with no "now playing" toast. Starts/stops still announce;
+  a tweak landing mid-countdown folds into it without restarting or
+  announcing.
+- **Rights, simplified and extensible.** The settings toggle is gone:
+  driving is owner/editors only, viewers stay local with a locked row, and
+  the owner grants co-hosts per peer as before. One resolved `roleOf(...)`
+  now backs every permission (media today, object locking tomorrow);
+  Connection → You shows your role (владелец/соведущий/участник).
+
 ## 0.16.28
 
 ### Shared-audio rights

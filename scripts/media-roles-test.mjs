@@ -9,11 +9,11 @@ import {
   MEDIA_WARN_GRACE_MS,
   MEDIA_WARN_MS,
   canControlMedia,
-  canDriveShared,
   decodeMediaState,
   encodeMediaState,
   nextMediaState,
   parseRoles,
+  roleOf,
   seekTargetAt,
 } from '../src/core/mediaRoles.ts';
 
@@ -82,18 +82,29 @@ import {
 
 // --- shared-audio mode ---------------------------------------------------------
 {
-  // Open boards (default): anyone with an id drives, no setup.
-  assert.equal(canDriveShared(true, 'owner', {}, 'stranger'), true);
-  assert.equal(canDriveShared(true, null, {}, 'stranger'), true);
-  assert.equal(canDriveShared(true, 'owner', {}, 'owner'), true);
-  assert.equal(canDriveShared(true, 'owner', {}, ''), false); // no id, no drive
-  // Restricted boards: owner + editors only.
-  assert.equal(canDriveShared(false, 'owner', {}, 'owner'), true);
-  assert.equal(canDriveShared(false, 'owner', { e: 'editor' }, 'e'), true);
-  assert.equal(canDriveShared(false, 'owner', {}, 'stranger'), false);
-  assert.equal(canDriveShared(false, null, { e: 'editor' }, 'e'), true);
-  assert.equal(canDriveShared(false, null, {}, 'stranger'), false);
-  assert.equal(canDriveShared(false, 'owner', {}, ''), false);
+  // Quiet flag: explicit true survives, absent stays absent (old states
+  // round-trip byte-identically), garbage stays a valid loud state.
+  const st = { playing: true, pos: 3, at: 1700000000000, vol: 0.5, by: 'u' };
+  assert.deepEqual(decodeMediaState(encodeMediaState(st)), st);
+  assert.equal(decodeMediaState(encodeMediaState(st)).quiet, undefined);
+  assert.equal(decodeMediaState(encodeMediaState({ ...st, quiet: true })).quiet, true);
+  assert.equal(
+    decodeMediaState(encodeMediaState({ ...st, quiet: true })).playing,
+    true
+  );
+  const noisy = { ...st, quiet: 'yes' };
+  assert.equal(decodeMediaState(encodeMediaState(noisy)).quiet, undefined);
+}
+
+// --- roles: one resolved value for every future permission --------------------
+{
+  assert.equal(roleOf('owner', {}, 'owner'), 'owner');
+  assert.equal(roleOf('owner', { e: 'editor' }, 'e'), 'editor');
+  assert.equal(roleOf('owner', {}, 'stranger'), 'viewer');
+  assert.equal(roleOf(null, {}, 'stranger'), 'viewer');
+  assert.equal(roleOf(null, { e: 'editor' }, 'e'), 'editor');
+  assert.equal(roleOf('owner', {}, ''), 'viewer');
+  assert.equal(roleOf(undefined, {}, ''), 'viewer');
 }
 
 console.log('media-roles-test: ok');

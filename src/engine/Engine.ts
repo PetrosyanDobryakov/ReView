@@ -2592,6 +2592,29 @@ export class Engine {
         this.dirty = true;
         return;
       }
+      // Quiet tweaks (volume, scrub commits) apply with no notice — not even
+      // a late one under clock skew; the seek math already lands on target.
+      // A running countdown still owns the start: fold the tweak into the
+      // pending state (volume live now, still paused) and keep its timer.
+      if (st.quiet === true) {
+        const el = this.mediaElement(v);
+        if (!el) return;
+        const pend = this.pendingMedia.get(id);
+        if (pend && pend.state.playing) {
+          pend.state = { ...pend.state, vol: st.vol, pos: st.pos };
+          try {
+            el.volume = Math.max(0, Math.min(1, st.vol)) * localMediaVolume();
+          } catch {
+            /* ignore */
+          }
+          this.dirty = true;
+          return;
+        }
+        this.cancelPendingMedia(id);
+        this.applyMediaElement(el, st, Date.now());
+        this.dirty = true;
+        return;
+      }
       const delay = st.at - Date.now();
       if (delay > MEDIA_WARN_GRACE_MS) {
         if (st.at >= this.bootMs) {
@@ -2715,10 +2738,9 @@ export class Engine {
   }
 
   /**
-   * Shared transport for audio/video ("for everyone"). Driving follows the
-   * board shared-audio mode: open boards (default) let any peer drive, so a
-   * friend's press plays for all followers; restricted boards limit driving
-   * to owner/editors (owner flips the mode, kick still guards trolls).
+   * Shared transport for audio/video ("for everyone"). Driving is
+   * owner/editors only (the owner grants editors in Connection); viewers
+   * stay local-only with a locked row. Kick still guards trolls.
    * Written untracked so transport never pollutes undo. Returns false for
    * non-media shapes or when not permitted. Omitted fields keep
    * playing/pos/vol.
@@ -2726,11 +2748,11 @@ export class Engine {
    * A fresh start counts down MEDIA_WARN_MS so everyone starts together
    * (instant when alone); stops and volume apply immediately.
    */
-  setMediaSharedState(id: string, patch: { playing?: boolean; pos?: number; vol?: number }): boolean {
+  setMediaSharedState(id: string, patch: { playing?: boolean; pos?: number; vol?: number; quiet?: boolean }): boolean {
     try {
       const v = this.views.get(id);
       if (!v || (v.type !== 'audio' && v.type !== 'video')) return false;
-      if (!store.iDriveSharedMedia()) return false;
+      if (!store.iControlMedia()) return false;
       const el = this.mediaElement(v);
       const cur = decodeMediaState(v.mediaState);
       const now = Date.now();
@@ -2761,6 +2783,7 @@ export class Engine {
         at: patch.playing === true ? (solo ? now : now + MEDIA_WARN_MS) : now,
         vol: patch.vol ?? cur?.vol ?? 1,
         by: this.myMediaId(),
+        ...(patch.quiet === true ? { quiet: true } : null),
       };
       const raw = encodeMediaState(st);
       store.patchShapesUntracked([[id, { mediaState: raw }]]);

@@ -8,7 +8,7 @@ import {
   setFollowMediaEnabled,
   setLocalMediaVolume,
 } from '../core/mediaRoles';
-import { iDriveSharedMedia } from '../core/store';
+import { iControlMedia } from '../core/store';
 import {
   fmtAudioTime,
   getAudio,
@@ -126,12 +126,14 @@ function MediaCard({
   const timeRef = useRef<HTMLSpanElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
   const seekingRef = useRef(false);
+  const volAllLive = useRef(false);
+  const allVolRef = useRef(100);
   const [playing, setPlaying] = useState(false);
   const [sharedPlaying, setSharedPlaying] = useState(false);
   const [follow, setFollow] = useState(() => followMediaEnabled());
-  // May I drive the shared transport? Board mode (open default) + roles.
-  // Losing it mid-countdown cancels my pending start.
-  const [can, setCan] = useState(() => iDriveSharedMedia());
+  // May I drive the shared transport? Owner/editors only; viewers stay
+  // local with a locked row. Losing it mid-countdown cancels my pending start.
+  const [can, setCan] = useState(() => iControlMedia());
   const [selfVol, setSelfVol] = useState(() => Math.round(localMediaVolume() * 100));
   const [allVol, setAllVol] = useState(() => {
     try {
@@ -144,11 +146,12 @@ function MediaCard({
   });
   const stateRef = useRef({ playing, sharedPlaying, follow, can });
   stateRef.current = { playing, sharedPlaying, follow, can };
+  allVolRef.current = allVol;
 
   useEffect(() => {
     const poll = window.setInterval(() => {
       try {
-        const next = iDriveSharedMedia();
+        const next = iControlMedia();
         if (next !== stateRef.current.can) {
           setCan(next);
           if (!next) engine.cancelPendingMedia(shapeId);
@@ -243,6 +246,13 @@ function MediaCard({
         if (isPlaying !== stateRef.current.playing) setPlaying(isPlaying);
         const sp = decodeMediaState(v.mediaState)?.playing === true;
         if (sp !== stateRef.current.sharedPlaying) setSharedPlaying(sp);
+        // Shared volume rides in: the follower's slider follows the driver's
+        // hand, unless I'm dragging it myself right now (commit wins).
+        const gv = decodeMediaState(v.mediaState)?.vol;
+        if (typeof gv === 'number' && !volAllLive.current) {
+          const pct = Math.round(gv * 100);
+          if (pct !== allVolRef.current) setAllVol(pct);
+        }
         const dur = el && Number.isFinite(el.duration) ? el.duration : NaN;
         if (seekRef.current && !seekingRef.current) {
           seekRef.current.value = String(
@@ -377,7 +387,7 @@ function MediaCard({
       if (!v) return;
       const el = kind === 'audio' ? getAudio(mediaUrl(v)) : getVideo(mediaUrl(v));
       if (el && Number.isFinite(el.currentTime)) {
-        void engine.setMediaSharedState(shapeId, { pos: el.currentTime });
+        void engine.setMediaSharedState(shapeId, { pos: el.currentTime, quiet: true });
       }
     } catch {
       /* ignore */
@@ -399,6 +409,7 @@ function MediaCard({
 
   const volAllPreview = (pct: number) => {
     setAllVol(pct);
+    volAllLive.current = true;
     const local = Math.max(0, Math.min(1, selfVol / 100));
     withElement((el) => {
       try {
@@ -411,7 +422,8 @@ function MediaCard({
 
   const volAllCommit = (pct: number) => {
     setAllVol(pct);
-    engine.setMediaSharedState(shapeId, { vol: Math.max(0, Math.min(1, pct / 100)) });
+    volAllLive.current = false;
+    engine.setMediaSharedState(shapeId, { vol: Math.max(0, Math.min(1, pct / 100)), quiet: true });
   };
 
   // Controls fragment: for audio it lives in the scaled inner wrapper that
