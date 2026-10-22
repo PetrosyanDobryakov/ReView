@@ -3192,6 +3192,9 @@ export const AUDIO_CARD_W = 280;
 export const AUDIO_CARD_H = 196;
 /** Participant card content height (fewer rows) — overlay estimate only. */
 export const AUDIO_CARD_H_GUEST = 152;
+/** Readable minimums (world units): the window cannot narrow below its buttons. */
+export const AUDIO_MIN_W = 240;
+export const AUDIO_MIN_H = 150;
 
 function drawVideoPlayAffordance(ctx: CanvasRenderingContext2D, v: ShapeView): void {
   const cx = v.x + v.w / 2;
