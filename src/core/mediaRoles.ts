@@ -102,6 +102,40 @@ export function seekTargetAt(state: MediaState, now: number): number | null {
 }
 
 /**
+ * Am I currently in step with the shared session? Drives the follow button:
+ * lit = following and converged, unlit = opted out or diverged (local pause
+ * / scrub / resume-from-behind while the session runs). Pure so the overlay
+ * can derive it every frame and node tests can pin it.
+ *
+ * - Not following, no state, or no element yet: nothing to diverge from.
+ * - Countdown pending for me: converges at fire, counts as in sync.
+ * - Playing: element must play within slop of the shared target (an ended
+ *   element at a fully-played target counts as synced).
+ * - Paused: element must rest at the shared pos.
+ */
+export function isMediaInSync(
+  el: { paused: boolean; ended: boolean; currentTime: number; duration: number } | null,
+  st: MediaState | null,
+  followOn: boolean,
+  pending: boolean,
+): boolean {
+  if (!followOn || !st) return true;
+  if (pending) return true;
+  if (st.playing) {
+    if (!el) return true;
+    const target = seekTargetAt(st, Date.now());
+    if (target === null || !Number.isFinite(el.currentTime)) return true;
+    if (el.ended && Number.isFinite(el.duration) && target >= el.duration - 0.5) return true;
+    if (el.paused) return false;
+    return Math.abs(el.currentTime - target) <= MEDIA_SYNC_SLOP_S;
+  }
+  if (!el) return true;
+  if (!el.paused) return false;
+  if (!Number.isFinite(el.currentTime) || !Number.isFinite(st.pos)) return true;
+  return Math.abs(el.currentTime - st.pos) <= 0.6;
+}
+
+/**
  * Apply only when newer than what we already follow (echo + reorder guard).
  * Returns the state to follow, or null to ignore.
  */

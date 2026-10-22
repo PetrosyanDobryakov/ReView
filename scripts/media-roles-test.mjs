@@ -11,6 +11,7 @@ import {
   canControlMedia,
   decodeMediaState,
   encodeMediaState,
+  isMediaInSync,
   nextMediaState,
   parseRoles,
   roleOf,
@@ -105,6 +106,46 @@ import {
   assert.equal(roleOf(null, { e: 'editor' }, 'e'), 'editor');
   assert.equal(roleOf('owner', {}, ''), 'viewer');
   assert.equal(roleOf(undefined, {}, ''), 'viewer');
+}
+
+// --- follow-button truth: converged or diverged --------------------------------
+{
+  const live = { playing: true, pos: 10, at: Date.now() - 2000, vol: 1, by: 'a' };
+  const pausedSt = { ...live, playing: false };
+  const atPos = { paused: false, ended: false, currentTime: 12, duration: 60 };
+  // Unfollowed / stateless / element-less: nothing to diverge from.
+  assert.equal(isMediaInSync(atPos, live, false, false), true);
+  assert.equal(isMediaInSync(atPos, null, true, false), true);
+  assert.equal(isMediaInSync(null, live, true, false), true);
+  // Countdown pending for me counts as in sync.
+  assert.equal(isMediaInSync({ ...atPos, paused: true }, live, true, true), true);
+  // Playing session: paused or off-target element diverges.
+  assert.equal(isMediaInSync(atPos, live, true, false), true);
+  assert.equal(isMediaInSync({ ...atPos, paused: true }, live, true, false), false);
+  assert.equal(isMediaInSync({ ...atPos, currentTime: 40 }, live, true, false), false);
+  // Ended at a fully-played target still counts as synced.
+  assert.equal(
+    isMediaInSync(
+      { paused: true, ended: true, currentTime: 60, duration: 60 },
+      { ...live, pos: 58 },
+      true,
+      false
+    ),
+    true
+  );
+  // Paused session: rest at the shared pos or diverge.
+  assert.equal(
+    isMediaInSync({ paused: true, ended: false, currentTime: 10, duration: 60 }, pausedSt, true, false),
+    true
+  );
+  assert.equal(
+    isMediaInSync({ paused: true, ended: false, currentTime: 14, duration: 60 }, pausedSt, true, false),
+    false
+  );
+  assert.equal(
+    isMediaInSync({ paused: false, ended: false, currentTime: 10, duration: 60 }, pausedSt, true, false),
+    false
+  );
 }
 
 console.log('media-roles-test: ok');

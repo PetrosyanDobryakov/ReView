@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.16.31
+
+### Follow means in sync + button cleanup
+
+- **The follow button tells the truth.** It stays lit only while actually
+  converged with the shared session: a local pause/scrub/resume while it
+  runs unlights it (visibly behind), pressing it catches up with a seek
+  jump, opting out still toggles off. Pure `isMediaInSync` predicate,
+  covered by media-roles-test.
+- **Big play triangle removed.** It was unclear; transport lives in the two
+  labeled rows now (shared restart-from-0 moved into «Всем»).
+- **Buttons read as buttons.** Transport buttons get tinted substrates
+  (stronger for the shared one) and semibold labels.
+
 ## 0.16.30
 
 ### Video dock redo and cursor layer
