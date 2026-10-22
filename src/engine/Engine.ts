@@ -2715,11 +2715,13 @@ export class Engine {
   }
 
   /**
-   * Shared transport for audio/video ("for everyone"). Open transport: any
-   * peer may drive it — a friend's press plays for all followers (the
-   * owner/editor rights UI stays for later refinement; kick guards trolls).
+   * Shared transport for audio/video ("for everyone"). Driving follows the
+   * board shared-audio mode: open boards (default) let any peer drive, so a
+   * friend's press plays for all followers; restricted boards limit driving
+   * to owner/editors (owner flips the mode, kick still guards trolls).
    * Written untracked so transport never pollutes undo. Returns false for
-   * non-media shapes. Omitted fields keep playing/pos/vol.
+   * non-media shapes or when not permitted. Omitted fields keep
+   * playing/pos/vol.
    *
    * A fresh start counts down MEDIA_WARN_MS so everyone starts together
    * (instant when alone); stops and volume apply immediately.
@@ -2728,6 +2730,7 @@ export class Engine {
     try {
       const v = this.views.get(id);
       if (!v || (v.type !== 'audio' && v.type !== 'video')) return false;
+      if (!store.iDriveSharedMedia()) return false;
       const el = this.mediaElement(v);
       const cur = decodeMediaState(v.mediaState);
       const now = Date.now();

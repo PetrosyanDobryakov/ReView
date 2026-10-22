@@ -9,7 +9,7 @@ import { attachSync, detachSync, fetchBlobFromPeers, hasDistinctRemoteCollaborat
 import { attachDesktopMirror } from './desktopBoards';
 import { flushIndexedDbPersistence, withIdbTimeout } from './idbFlush';
 import { attachDocBlobs, attachImageBlobs, clearBlobMisses, collectBlobHashes, collectLegacyMedia, mediaBlobStore, prefetchBlobs, setRemoteBlobFetcher } from './mediaBlobs';
-import { canControlMedia, parseRoles, type MediaRole } from './mediaRoles';
+import { canControlMedia, canDriveShared, parseRoles, type MediaRole } from './mediaRoles';
 export type { MediaRole } from './mediaRoles';
 import {
   boardHadRemoteCollaborators,
@@ -577,6 +577,8 @@ export const META_TITLE = 'title';
 export const META_OWNER_ID = 'ownerId';
 /** JSON `{ userId: 'editor' }` — owner grants; single writer (the owner). */
 export const META_ROLES = 'roles';
+/** '0' = shared audio restricted to owner/editors; absent/otherwise = open to all. */
+export const META_MEDIA_OPEN = 'mediaOpen';
 
 export function metaRolesRaw(): string | null {
   const raw = meta.get(META_ROLES);
@@ -605,6 +607,40 @@ export function iControlMedia(): boolean {
     return canControlMedia(metaOwnerId(), boardRoles(), myUserId());
   } catch {
     return false;
+  }
+}
+
+/** Board shared-audio mode: open (default, key absent) or editors-only. */
+export function metaMediaOpen(): boolean {
+  try {
+    return meta.get(META_MEDIA_OPEN) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Flip the shared-audio mode (owner only, local guard). Open = anyone may
+ * drive (a friend's press plays for all, no setup); restricted = only
+ * owner/editors drive, everyone else stays local-only. Fail-open: any error
+ * keeps 0.16.27 behavior.
+ */
+export function setMediaOpen(open: boolean): boolean {
+  try {
+    if (!iOwnBoard()) return false;
+    setMeta({ [META_MEDIA_OPEN]: open ? '1' : '0' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when this device's user may drive the shared transport right now. */
+export function iDriveSharedMedia(): boolean {
+  try {
+    return canDriveShared(metaMediaOpen(), metaOwnerId(), boardRoles(), myUserId());
+  } catch {
+    return true;
   }
 }
 

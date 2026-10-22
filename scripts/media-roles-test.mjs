@@ -9,6 +9,7 @@ import {
   MEDIA_WARN_GRACE_MS,
   MEDIA_WARN_MS,
   canControlMedia,
+  canDriveShared,
   decodeMediaState,
   encodeMediaState,
   nextMediaState,
@@ -77,6 +78,22 @@ import {
   assert.equal(canControlMedia('owner', {}, ''), false);
   // grantMediaRole lives in store.ts (needs a board doc) and stays untested
   // here; the permission predicate above is the part that matters.
+}
+
+// --- shared-audio mode ---------------------------------------------------------
+{
+  // Open boards (default): anyone with an id drives, no setup.
+  assert.equal(canDriveShared(true, 'owner', {}, 'stranger'), true);
+  assert.equal(canDriveShared(true, null, {}, 'stranger'), true);
+  assert.equal(canDriveShared(true, 'owner', {}, 'owner'), true);
+  assert.equal(canDriveShared(true, 'owner', {}, ''), false); // no id, no drive
+  // Restricted boards: owner + editors only.
+  assert.equal(canDriveShared(false, 'owner', {}, 'owner'), true);
+  assert.equal(canDriveShared(false, 'owner', { e: 'editor' }, 'e'), true);
+  assert.equal(canDriveShared(false, 'owner', {}, 'stranger'), false);
+  assert.equal(canDriveShared(false, null, { e: 'editor' }, 'e'), true);
+  assert.equal(canDriveShared(false, null, {}, 'stranger'), false);
+  assert.equal(canDriveShared(false, 'owner', {}, ''), false);
 }
 
 console.log('media-roles-test: ok');

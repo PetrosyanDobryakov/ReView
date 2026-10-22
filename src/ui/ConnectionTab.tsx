@@ -7,6 +7,8 @@ import {
   boardRoles,
   grantMediaRole,
   iOwnBoard,
+  metaMediaOpen,
+  setMediaOpen,
   type MediaRole,
 } from '../core/store';
 import { APP_BUILD } from '../core/version';
@@ -162,6 +164,7 @@ export function ConnectionTab({
   const [kickedIds, setKickedIds] = useState<string[]>(() => p2pClient.blockedPeers());
   const [roster, setRoster] = useState<PeerCursor[]>(() => p2pClient.collectPeers());
   const [roles, setRoles] = useState<Record<string, MediaRole>>(() => boardRoles());
+  const [mediaOpen, setMediaOpenState] = useState(() => metaMediaOpen());
   const boardSession = Boolean(getCurrentBoardId());
   const desktop = isDesktop();
   const mode = readMode(prefs);
@@ -174,6 +177,7 @@ export function ConnectionTab({
     setKickedIds(p2pClient.blockedPeers());
     setRoster(p2pClient.collectPeers());
     setRoles(boardRoles());
+    setMediaOpenState(metaMediaOpen());
   }), []);
 
   useEffect(() => onPeers((list) => setRoster(list)), []);
@@ -583,6 +587,24 @@ export function ConnectionTab({
         ) : null}
         {owner ? (
           <p className="sheet-hint">{t(locale, 'rolesHint')}</p>
+        ) : null}
+        {owner && boardSession ? (
+          <div className="sheet-actions">
+            <button
+              type="button"
+              aria-pressed={mediaOpen}
+              title={t(locale, 'mediaOpenAllHint')}
+              className={`style-btn p2p-mini${mediaOpen ? ' active' : ''}`}
+              onClick={() => {
+                if (setMediaOpen(!mediaOpen)) setMediaOpenState(!mediaOpen);
+              }}
+            >
+              {t(locale, 'mediaOpenAll')}
+            </button>
+          </div>
+        ) : null}
+        {!mediaOpen ? (
+          <p className="sheet-hint">{t(locale, 'mediaLockedHint')}</p>
         ) : null}
       </section>
 
