@@ -120,6 +120,24 @@ export function canControlMedia(
   return roles[userId] === 'editor';
 }
 
+/**
+ * Who may drive the shared transport, given the board's shared-audio mode.
+ * Open boards (the default, incl. key absent) let anyone drive — a friend's
+ * press plays for all followers with no setup. Restricted boards limit
+ * driving to owner/editors; everyone else stays local-only with a locked
+ * row in the player. Pure (node-testable); meta access lives in store.ts.
+ */
+export function canDriveShared(
+  open: boolean,
+  ownerId: string | null | undefined,
+  roles: Record<string, MediaRole>,
+  userId: string,
+): boolean {
+  if (!userId) return false;
+  if (open) return true;
+  return canControlMedia(ownerId, roles, userId);
+}
+
 const FOLLOW_KEY = 'review-follow-media';
 const LOCAL_VOL_KEY = 'review-media-volume';
 

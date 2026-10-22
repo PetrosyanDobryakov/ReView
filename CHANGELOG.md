@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.16.28
+
+### Shared-audio rights
+
+- **Board mode (owner only, default open).** Settings → Connection:
+  «Общий звук для всех» — open boards let anyone drive (a friend's press
+  plays for all, zero setup); restricted boards limit driving to
+  owner/editors. Synced in board meta, no migration (absent = open).
+- **Locked row for viewers.** Without driving rights the "for all" row
+  disables with a lock hint, the big button toggles locally, and losing
+  rights mid-countdown cancels the pending start.
+- **Co-hosts.** Grant/revoke per peer as before (Connection → participant);
+  editors drive restricted boards.
+- Pure `canDriveShared` predicate covered by media-roles-test.
+
 ## 0.16.27
 
 ### Transport states and open driving
