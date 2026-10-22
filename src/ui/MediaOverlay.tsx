@@ -17,11 +17,9 @@ import {
   AUDIO_CARD_H,
   AUDIO_CARD_H_GUEST,
 } from '../core/shapes';
-import { clampToVisualViewport } from '../core/pointerEnv';
 import { t } from './i18n';
 
 const CARD_W = 280;
-const CARD_H = 280;
 
 function PlayGlyph({ playing }: { playing: boolean }) {
   return playing ? (
@@ -92,10 +90,13 @@ function VolRow({
  * it, a second "stop for all" row plus the shared volume.
  *
  * Audio is a board object like a photo: the themed backdrop fills its world
- * rect exactly (so the selection frame always hugs it), and the controls
- * contain-fit inside without distorting. Manual resize stretches w/h freely
- * with readable minimums; the player zooms with the board. Video docks below
- * its frame.
+ * rect exactly (so the selection frame always hugs it). The controls
+ * contain-fit but stretch horizontally: extra width grows the sliders, so a
+ * wide window means a longer timeline. The player zooms with the board.
+ * Video docks the same controls under its frame, scaled to the frame width.
+ *
+ * Board-object rules: true coords, no viewport clamp (slides off-screen like
+ * any shape), and wheel over buttons/sliders zooms the board.
  *
  * Play semantics: participant toggles local playback; organizer starts the
  * countdown for everyone when idle, otherwise toggles locally (all-stop is
@@ -152,6 +153,26 @@ function MediaCard({
     return () => window.clearInterval(poll);
   }, [engine]);
 
+  // Wheel over buttons/sliders zooms the board like anywhere else: the
+  // canvas never sees events over this sibling, so forward them. Native
+  // listener (not React onWheel) so preventDefault actually works — this
+  // also stops a focused slider from eating the wheel as a value change.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        engine.wheelZoom(e.clientX, e.clientY, e.deltaY !== 0 ? e.deltaY : e.deltaX);
+      } catch {
+        /* ignore */
+      }
+    };
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
+  }, [engine]);
+
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -171,15 +192,16 @@ function MediaCard({
           return;
         }
         box.style.display = '';
-        // Audio is a board object: the themed backdrop (this box) fills the
-        // world rect exactly, so the selection frame always hugs it. The
-        // controls contain-fit inside and never distort. Video docks below.
+        // Board objects, not popups: true coords, no viewport clamp — the
+        // card slides off-screen exactly like the shape under it (the cull
+        // above hides it only when fully out). Wheel over controls zooms the
+        // board (forwarded by the effect below, since the canvas never sees
+        // events over this sibling).
         const screenW = Math.max(1, b.x - a.x);
         const screenH = Math.max(1, b.y - a.y);
         if (kind === 'audio') {
-          const pos = clampToVisualViewport(a.x, a.y, screenW, screenH);
-          box.style.left = `${Math.round(pos.left)}px`;
-          box.style.top = `${Math.round(pos.top)}px`;
+          box.style.left = `${Math.round(a.x)}px`;
+          box.style.top = `${Math.round(a.y)}px`;
           box.style.width = `${Math.round(screenW)}px`;
           box.style.height = `${Math.round(screenH)}px`;
           box.style.borderRadius = `${Math.max(4, Math.round((12 * screenW) / CARD_W))}px`;
@@ -187,17 +209,26 @@ function MediaCard({
           const inner = innerRef.current;
           if (inner) {
             const estH = stateRef.current.can ? AUDIO_CARD_H : AUDIO_CARD_H_GUEST;
+            // Contain-fit scale, but the content width stretches to fill:
+            // extra horizontal space grows the sliders (timeline first), so
+            // a wide window means finer scrubbing instead of empty margins.
             const kc = Math.max(0.01, Math.min(screenW / CARD_W, screenH / estH));
-            inner.style.left = `${((screenW - CARD_W * kc) / 2).toFixed(1)}px`;
+            inner.style.width = `${(screenW / kc).toFixed(1)}px`;
+            inner.style.left = '0px';
             inner.style.top = `${((screenH - estH * kc) / 2).toFixed(1)}px`;
             const t = `scale(${kc.toFixed(4)})`;
             if (inner.style.transform !== t) inner.style.transform = t;
           }
         } else {
-          const pos = clampToVisualViewport(a.x, b.y + 8, CARD_W, CARD_H);
-          box.style.left = `${Math.round(pos.left)}px`;
-          box.style.top = `${Math.round(pos.top)}px`;
+          // Video dock: same width as the frame on screen at any zoom —
+          // fixed to the board like audio, not constant on screen.
+          const k = screenW / CARD_W;
+          box.style.left = `${Math.round(a.x)}px`;
+          box.style.top = `${Math.round(b.y + 8)}px`;
           box.style.width = `${CARD_W}px`;
+          box.style.borderRadius = `${Math.max(4, Math.round(12 * k))}px`;
+          const t = `scale(${k.toFixed(4)})`;
+          if (box.style.transform !== t) box.style.transform = t;
         }
         const url = mediaUrl(v);
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
@@ -505,6 +536,7 @@ function MediaCard({
         zIndex: 60,
         minWidth: 0,
         pointerEvents: 'none',
+        transformOrigin: 'top left',
         borderColor: selected ? 'var(--chrome-accent)' : undefined,
       }}
     >
