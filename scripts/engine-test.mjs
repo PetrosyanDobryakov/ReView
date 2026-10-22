@@ -1300,6 +1300,11 @@ const recCtx = new Proxy(
   }
 );
 engine.drawPeers(recCtx);
+// Cursor glyphs + names paint on the transparent top layer (above DOM
+// player cards), not the main ctx: inject the recorder and assert there.
+engine.cursorCanvas = {};
+engine.cursorCtx = recCtx;
+engine.paintPeerCursors();
 assert.deepEqual(
   paintedLabels.sort(),
   ['Legacy', 'Viewer'],
