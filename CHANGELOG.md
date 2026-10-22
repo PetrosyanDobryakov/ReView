@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.16.30
+
+### Video dock redo and cursor layer
+
+- **Constant corners.** Both player cards keep the theme 12px radius at any
+  zoom instead of scaling it with the board.
+- **Longitudinal video dock.** One ~3:1 tab scaled to the frame width:
+  transport buttons in a row, both volume sliders full width below. No more
+  square, no more cramped timeline.
+- **Aligned sliders, both cards.** Transport buttons share one fixed width
+  and volume labels one fixed column, so sliders line up regardless of
+  label lengths.
+- **Cards below chrome.** Player cards drop to z 10: toolbar, panels,
+  menus and dialogs cover them again instead of the reverse.
+- **Peer cursors above cards.** Glyph + name paint on a dedicated
+  transparent canvas (below chrome) instead of the board canvas, so foreign
+  cursors stay visible over opaque cards. Drafts/selections stay board
+  content underneath.
+
 ## 0.16.29
 
 ### Volume follow, quiet tweaks, rights foundation

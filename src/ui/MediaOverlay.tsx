@@ -19,6 +19,12 @@ import {
 import { t } from './i18n';
 
 const CARD_W = 280;
+/** Video dock content width: longitudinal (~3:1), scaled to frame width. */
+const VIDEO_W = 480;
+/** Transport buttons share one fixed width so both sliders align. */
+const BTN_W = 104;
+/** Volume label column shares one fixed width for the same reason. */
+const VOL_LABEL_W = 96;
 
 function PlayGlyph({ playing }: { playing: boolean }) {
   return playing ? (
@@ -58,7 +64,7 @@ function VolRow({
         title={label}
         style={{
           flex: 'none',
-          maxWidth: 96,
+          width: VOL_LABEL_W,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -88,17 +94,21 @@ function VolRow({
 /**
  * Always-visible player card for one media shape, laid out like the mockup:
  * bare outline Play at the left, filename pill over a thin timeline with live
- * time, then "stop for me" plus my volume — and, when this device may drive
- * it, a second "stop for all" row plus the shared volume.
+ * time, then "for me" plus my volume — and a second "for all" row plus the
+ * shared volume (locked without driving rights).
  *
  * Audio is a board object like a photo: the themed backdrop fills its world
  * rect exactly (so the selection frame always hugs it). The controls
  * contain-fit but stretch horizontally: extra width grows the sliders, so a
  * wide window means a longer timeline. The player zooms with the board.
- * Video docks the same controls under its frame, scaled to the frame width.
+ * Video docks one longitudinal tab (~3:1: transport buttons in a row, both
+ * volume sliders full width below), scaled to the frame width.
  *
  * Board-object rules: true coords, no viewport clamp (slides off-screen like
- * any shape), and wheel over buttons/sliders zooms the board.
+ * any shape), constant 12px theme corners at any zoom, wheel over
+ * buttons/sliders zooms the board. Cards sit below interface chrome (z 10);
+ * peer cursor glyphs paint on a dedicated top canvas so they stay visible
+ * over opaque cards.
  *
  * Play semantics: participant toggles local playback; organizer starts the
  * countdown for everyone when idle, otherwise toggles locally (all-stop is
@@ -214,7 +224,6 @@ function MediaCard({
           box.style.top = `${Math.round(a.y)}px`;
           box.style.width = `${Math.round(screenW)}px`;
           box.style.height = `${Math.round(screenH)}px`;
-          box.style.borderRadius = `${Math.max(4, Math.round((12 * screenW) / CARD_W))}px`;
           if (box.style.transform) box.style.transform = '';
           const inner = innerRef.current;
           if (inner) {
@@ -230,13 +239,13 @@ function MediaCard({
             if (inner.style.transform !== t) inner.style.transform = t;
           }
         } else {
-          // Video dock: same width as the frame on screen at any zoom —
-          // fixed to the board like audio, not constant on screen.
-          const k = screenW / CARD_W;
+          // Video dock: longitudinal tab, same width as the frame on screen
+          // at any zoom — fixed to the board like audio. Constant 12px
+          // corners from the theme class (never zoom-scaled).
+          const k = screenW / VIDEO_W;
           box.style.left = `${Math.round(a.x)}px`;
           box.style.top = `${Math.round(b.y + 8)}px`;
-          box.style.width = `${CARD_W}px`;
-          box.style.borderRadius = `${Math.max(4, Math.round(12 * k))}px`;
+          box.style.width = `${VIDEO_W}px`;
           const t = `scale(${k.toFixed(4)})`;
           if (box.style.transform !== t) box.style.transform = t;
         }
@@ -426,130 +435,172 @@ function MediaCard({
     engine.setMediaSharedState(shapeId, { vol: Math.max(0, Math.min(1, pct / 100)), quiet: true });
   };
 
-  // Controls fragment: for audio it lives in the scaled inner wrapper that
-  // contain-fits the world rect; for video it flows directly in the box.
-  const controls = (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
-        <button
-          type="button"
-          style={{
-            width: 56,
-            height: 56,
-            flex: 'none',
-            pointerEvents: 'auto',
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            color: 'var(--chrome-text)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-          aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
-          onClick={pressPlay}
-        >
-          <PlayGlyph playing={can ? sharedPlaying : playing} />
-        </button>
-        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 5 }}>
-            <span
-              ref={nameRef}
-              className="p2p-tag"
-              style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}
-            />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              ref={seekRef}
-              type="range"
-              min={0}
-              max={1000}
-              defaultValue={0}
-              aria-label={t(locale, 'mediaSeek')}
-              style={{ flex: 1, minWidth: 0, accentColor: 'var(--chrome-accent)', pointerEvents: 'auto' }}
-              onPointerDown={() => {
-                seekingRef.current = true;
-              }}
-              onPointerUp={() => {
-                seekCommit();
-              }}
-              onBlur={() => {
-                seekCommit();
-              }}
-              onChange={(e) => seekSelf(Number(e.target.value) / 1000)}
-            />
-            <span ref={timeRef} className="sheet-mono" style={{ flex: 'none' }}>
-              --:--
-            </span>
-          </div>
+  // Controls: audio stacks rows in the scaled inner wrapper that contain-fits
+  // the world rect; video lays out one longitudinal tab (~3:1) in a dock
+  // scaled to the frame width. Transport buttons share one fixed width and
+  // volume labels one fixed column, so sliders always align in both cards.
+  const topRow = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
+      <button
+        type="button"
+        style={{
+          width: 56,
+          height: 56,
+          flex: 'none',
+          pointerEvents: 'auto',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          color: 'var(--chrome-text)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        title={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
+        aria-label={t(locale, kind === 'audio' ? 'ctxAudioToggle' : 'ctxVideoToggle')}
+        onClick={pressPlay}
+      >
+        <PlayGlyph playing={can ? sharedPlaying : playing} />
+      </button>
+      <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 5 }}>
+          <span
+            ref={nameRef}
+            className="p2p-tag"
+            style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            ref={seekRef}
+            type="range"
+            min={0}
+            max={1000}
+            defaultValue={0}
+            aria-label={t(locale, 'mediaSeek')}
+            style={{ flex: 1, minWidth: 0, accentColor: 'var(--chrome-accent)', pointerEvents: 'auto' }}
+            onPointerDown={() => {
+              seekingRef.current = true;
+            }}
+            onPointerUp={() => {
+              seekCommit();
+            }}
+            onBlur={() => {
+              seekCommit();
+            }}
+            onChange={(e) => seekSelf(Number(e.target.value) / 1000)}
+          />
+          <span ref={timeRef} className="sheet-mono" style={{ flex: 'none' }}>
+            --:--
+          </span>
         </div>
       </div>
+    </div>
+  );
+  const meButton = (
+    <button
+      type="button"
+      className="style-btn"
+      style={{ flex: 'none', width: BTN_W, pointerEvents: 'auto' }}
+      onClick={toggleSelf}
+    >
+      {t(locale, playing ? 'mediaStopSelf' : 'mediaPlaySelf')}
+    </button>
+  );
+  const allButton = (
+    <button
+      type="button"
+      className="style-btn"
+      style={{ flex: 'none', width: BTN_W, pointerEvents: 'auto', opacity: can ? undefined : 0.45 }}
+      disabled={!can}
+      title={t(locale, can ? (sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint') : 'mediaLockedHint')}
+      onClick={() => {
+        if (stateRef.current.sharedPlaying) {
+          void engine.setMediaSharedState(shapeId, { playing: false });
+        } else {
+          void engine.setMediaSharedState(shapeId, { playing: true });
+        }
+      }}
+    >
+      {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
+    </button>
+  );
+  const selfVolRow = (
+    <VolRow
+      label={t(locale, 'mediaVolSelf')}
+      value={selfVol}
+      onInput={volSelf}
+    />
+  );
+  const allVolRow = (
+    <VolRow
+      label={t(locale, 'mediaVolAll')}
+      value={allVol}
+      onInput={volAllPreview}
+      onCommit={volAllCommit}
+      disabled={!can}
+    />
+  );
+  const followButton = (
+    <button
+      type="button"
+      aria-pressed={follow}
+      title={t(locale, 'mediaFollowHint')}
+      className={`style-btn p2p-mini${follow ? ' active' : ''}`}
+      style={{ pointerEvents: 'auto' }}
+      onClick={() => {
+        const next = !follow;
+        setFollow(next);
+        setFollowMediaEnabled(next);
+        if (next) engine.refollowMedia(shapeId);
+      }}
+    >
+      {t(locale, 'mediaFollow')}
+    </button>
+  );
+  const controls = (
+    <>
+      {topRow}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, pointerEvents: 'none' }}>
-        <button
-          type="button"
-          className="style-btn"
-          style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto' }}
-          onClick={toggleSelf}
-        >
-          {t(locale, playing ? 'mediaStopSelf' : 'mediaPlaySelf')}
-        </button>
+        {meButton}
         <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
-          <VolRow
-            label={t(locale, 'mediaVolSelf')}
-            value={selfVol}
-            onInput={volSelf}
-          />
+          {selfVolRow}
         </div>
       </div>
       <div
         style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, pointerEvents: 'none' }}
         title={can ? undefined : t(locale, 'mediaLockedHint')}
       >
-        <button
-          type="button"
-          className="style-btn"
-          style={{ flex: 'none', minWidth: 100, pointerEvents: 'auto', opacity: can ? undefined : 0.45 }}
-          disabled={!can}
-          title={t(locale, can ? (sharedPlaying ? 'mediaStopAllHint' : 'mediaPlayAllHint') : 'mediaLockedHint')}
-          onClick={() => {
-            if (stateRef.current.sharedPlaying) {
-              void engine.setMediaSharedState(shapeId, { playing: false });
-            } else {
-              void engine.setMediaSharedState(shapeId, { playing: true });
-            }
-          }}
-        >
-          {t(locale, sharedPlaying ? 'mediaStopAll' : 'mediaPlayAll')}
-        </button>
+        {allButton}
         <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none', opacity: can ? undefined : 0.45 }}>
-          <VolRow
-            label={t(locale, 'mediaVolAll')}
-            value={allVol}
-            onInput={volAllPreview}
-            onCommit={volAllCommit}
-            disabled={!can}
-          />
+          {allVolRow}
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6, pointerEvents: 'none' }}>
-        <button
-          type="button"
-          aria-pressed={follow}
-          title={t(locale, 'mediaFollowHint')}
-          className={`style-btn p2p-mini${follow ? ' active' : ''}`}
-          style={{ pointerEvents: 'auto' }}
-          onClick={() => {
-            const next = !follow;
-            setFollow(next);
-            setFollowMediaEnabled(next);
-            if (next) engine.refollowMedia(shapeId);
-          }}
-        >
-          {t(locale, 'mediaFollow')}
-        </button>
+        {followButton}
+      </div>
+    </>
+  );
+  // Longitudinal video tab: buttons in one row, both volume sliders full
+  // width below — same controls, nothing square, sliders always aligned.
+  const videoControls = (
+    <>
+      {topRow}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, pointerEvents: 'none' }}>
+        {meButton}
+        {allButton}
+        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }} />
+        {followButton}
+      </div>
+      <div style={{ paddingTop: 6, pointerEvents: 'none' }}>
+        {selfVolRow}
+      </div>
+      <div
+        style={{ paddingTop: 4, pointerEvents: 'none', opacity: can ? undefined : 0.45 }}
+        title={can ? undefined : t(locale, 'mediaLockedHint')}
+      >
+        {allVolRow}
       </div>
     </>
   );
@@ -562,7 +613,7 @@ function MediaCard({
       aria-label={t(locale, kind === 'audio' ? 'infoAudio' : 'infoVideo')}
       style={{
         position: 'fixed',
-        zIndex: 60,
+        zIndex: 10,
         minWidth: 0,
         pointerEvents: 'none',
         transformOrigin: 'top left',
@@ -584,7 +635,7 @@ function MediaCard({
           {controls}
         </div>
       ) : (
-        controls
+        videoControls
       )}
     </div>
   );

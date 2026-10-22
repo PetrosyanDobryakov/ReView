@@ -551,6 +551,13 @@ export class Engine {
   /** Board drawing surface — overlays use this to distinguish canvas vs chrome hits. */
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  /**
+   * Transparent cursor layer above DOM player cards (below chrome): peers'
+   * glyphs used to slide under opaque cards. Drafts/selections stay on the
+   * main canvas (board content). Null in node tests / stub canvases.
+   */
+  private cursorCanvas: HTMLCanvasElement | null = null;
+  private cursorCtx: CanvasRenderingContext2D | null = null;
   private resizer: ResizeObserver;
   private w = 0;
   private h = 0;
@@ -680,6 +687,26 @@ export class Engine {
     this.resize();
     this.resizer = new ResizeObserver(this.resize);
     this.resizer.observe(canvas);
+    try {
+      if (typeof document !== 'undefined' && canvas.parentElement) {
+        const cc = document.createElement('canvas');
+        cc.style.position = 'absolute';
+        cc.style.inset = '0';
+        cc.style.width = '100%';
+        cc.style.height = '100%';
+        cc.style.pointerEvents = 'none';
+        cc.style.zIndex = '150';
+        cc.setAttribute('aria-hidden', 'true');
+        canvas.parentElement.appendChild(cc);
+        const cctx = cc.getContext('2d');
+        if (cctx) {
+          this.cursorCanvas = cc;
+          this.cursorCtx = cctx;
+        }
+      }
+    } catch {
+      /* node tests / stub canvas: cursors simply have no top layer */
+    }
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
@@ -1084,6 +1111,15 @@ export class Engine {
     } catch {
       /* ignore */
     }
+    try {
+      if (this.cursorCanvas?.parentElement) {
+        this.cursorCanvas.parentElement.removeChild(this.cursorCanvas);
+      }
+    } catch {
+      /* ignore */
+    }
+    this.cursorCanvas = null;
+    this.cursorCtx = null;
     for (const [, pend] of this.pendingMedia) {
       try {
         clearTimeout(pend.timer);
@@ -4108,6 +4144,10 @@ export class Engine {
     this.dpr = Math.max(1, Math.min(3, raw));
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
+    if (this.cursorCanvas) {
+      this.cursorCanvas.width = Math.round(this.w * this.dpr);
+      this.cursorCanvas.height = Math.round(this.h * this.dpr);
+    }
     this.dirty = true;
   };
 
@@ -5659,6 +5699,7 @@ export class Engine {
     this.drawConnecting(ctx);
     this.tool.render(this, ctx);
     this.drawPeers(ctx);
+    this.paintPeerCursors();
     if (this.crop) this.drawCropOverlay(ctx);
     if (this.exportPick && this.exportRect) {
       const s = 1 / this.camera.zoom;
@@ -5735,8 +5776,6 @@ export class Engine {
     const holdSec = smooth ? PEER_MOTION_HOLD_SEC : PEER_MOTION_REALTIME_HOLD_SEC;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const myPage = store.currentPageId();
-    const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
-    const glyph = 20 * s;
     const boardBg = this.paperFill || store.viewPaperBg();
 
     for (const peer of this.remotePeers) {
@@ -5851,23 +5890,56 @@ export class Engine {
       // Hold frames between awareness packets so brief gaps do not freeze the
       // glyph at packet rate (realtime uses dead-reckon; smooth uses spring).
       if (!reduce && peerMotionShouldAnimate(pos, now, holdSec)) this.peersAnimating = true;
+      // Glyph + name paint on the cursor layer (paintPeerCursors) — above DOM
+      // player cards. Drafts/selections above stay here (board content).
+    }
+  }
 
-      const fill = peer.color || '#7c8cff';
-      const icon = peerToolIcon(peer.tool);
-
-      ctx.save();
-      ctx.translate(pos.x, pos.y);
-
-      paintPeerToolGlyph(ctx, icon, glyph, fill, outline, 1.4 * s);
-
-      const label = peer.name;
-      ctx.font = `500 ${11 * s}px ${BOARD_TYPEFACE}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = fill;
-      ctx.fillText(label, glyph * 0.62, -glyph * 0.48);
-
-      ctx.restore();
+  /**
+   * Peer cursor glyphs on the transparent top layer (screen px, constant
+   * size). Reads the poses drawPeers stepped this frame — never steps twice.
+   * Same visibility rules (page, away, viewport) so both layers agree.
+   */
+  private paintPeerCursors(): void {
+    const cc = this.cursorCanvas;
+    const cctx = this.cursorCtx;
+    if (!cc || !cctx) return;
+    try {
+      cctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      cctx.clearRect(0, 0, this.w, this.h);
+      if (!this.remotePeers.length) return;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const myPage = store.currentPageId();
+      const outline = peerToolOutline(this.paperFill || store.viewPaperBg());
+      const glyph = 20;
+      for (const peer of this.remotePeers) {
+        if (peer.page != null && peer.page !== myPage) continue;
+        if (peer.viewing === false) continue;
+        if (peer.x === null || peer.y === null) continue;
+        let pos = this.peerLerp.get(peer.id);
+        if (!pos) {
+          pos = initPeerMotion(peer.x, peer.y, now);
+          this.peerLerp.set(peer.id, pos);
+        }
+        const screen = this.worldToScreen(pos.x, pos.y);
+        const edgePad = 40;
+        if (screen.x < edgePad || screen.x > this.w - edgePad || screen.y < edgePad || screen.y > this.h - edgePad) {
+          continue;
+        }
+        const fill = peer.color || '#7c8cff';
+        const icon = peerToolIcon(peer.tool);
+        cctx.save();
+        cctx.translate(screen.x, screen.y);
+        paintPeerToolGlyph(cctx, icon, glyph, fill, outline, 1.4);
+        cctx.font = `500 11px ${BOARD_TYPEFACE}`;
+        cctx.textAlign = 'left';
+        cctx.textBaseline = 'bottom';
+        cctx.fillStyle = fill;
+        cctx.fillText(peer.name, glyph * 0.62, -glyph * 0.48);
+        cctx.restore();
+      }
+    } catch {
+      /* cursor layer never breaks paint */
     }
   }
 
