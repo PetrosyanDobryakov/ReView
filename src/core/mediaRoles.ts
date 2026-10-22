@@ -7,15 +7,22 @@
  * Followers seek to `pos + (now - at) / 1000` while playing; a few seconds of
  * clock skew hide inside the re-seek threshold.
  *
+ * Volume tweaks and scrub commits ride as `quiet` states: followers apply
+ * them with no notice. Starts/stops always announce.
+ *
  * Rights: the board owner (`META_OWNER_ID`, claimed by the creator device) may
  * drive everyone and grant `editor` to user ids (`META_ROLES` JSON, single
  * writer — the owner). Everyone else gets local-only transport. Enforcement is
  * UI-level: P2P has no server, so a determined client could write state
  * anyway — same honesty as kick.
  *
+ * Roles are the shared foundation for future permissions (object locking,
+ * …): resolve one `roleOf(...)` per user, then ask a pure predicate per
+ * feature. Store-backed helpers (boardRoles/iControlMedia/iOwnBoard/
+ * grantMediaRole) live in store.ts.
+ *
  * NOTE: dependency-free on purpose (no store/user imports) so node unit tests
- * can import this module directly. Store-backed helpers
- * (boardRoles/iControlMedia/iOwnBoard/grantMediaRole) live in store.ts.
+ * can import this module directly.
  */
 
 export type MediaRole = 'editor';
@@ -30,6 +37,8 @@ export interface MediaState {
   vol: number;
   /** Writer user id (echo guard). */
   by: string;
+  /** Volume/scrub tweaks apply with no notice when true. Absent = announce. */
+  quiet?: boolean;
 }
 
 /** Re-seek only when further than this from the shared position (seconds). */
@@ -46,6 +55,8 @@ export function encodeMediaState(s: MediaState): string {
     at: Math.floor(s.at) || 0,
     vol: clampVol(s.vol),
     by: String(s.by ?? '').slice(0, 64),
+    // Written only when true so old states round-trip byte-identically.
+    ...(s.quiet === true ? { quiet: true } : null),
   });
 }
 
@@ -58,7 +69,15 @@ export function decodeMediaState(raw: unknown): MediaState | null {
     if (typeof v.at !== 'number' || !Number.isFinite(v.at)) return null;
     if (typeof v.vol !== 'number' || !Number.isFinite(v.vol)) return null;
     if (typeof v.by !== 'string' || !v.by) return null;
-    return { playing: v.playing, pos: clampPos(v.pos), at: v.at, vol: clampVol(v.vol), by: v.by };
+    return {
+      playing: v.playing,
+      pos: clampPos(v.pos),
+      at: v.at,
+      vol: clampVol(v.vol),
+      by: v.by,
+      // Survives only when explicitly written; absent stays absent.
+      ...(typeof v.quiet === 'boolean' ? { quiet: v.quiet } : null),
+    };
   } catch {
     return null;
   }
@@ -121,21 +140,21 @@ export function canControlMedia(
 }
 
 /**
- * Who may drive the shared transport, given the board's shared-audio mode.
- * Open boards (the default, incl. key absent) let anyone drive — a friend's
- * press plays for all followers with no setup. Restricted boards limit
- * driving to owner/editors; everyone else stays local-only with a locked
- * row in the player. Pure (node-testable); meta access lives in store.ts.
+ * Board roles as one resolved value — the foundation for every future
+ * permission (media driving today, object locking tomorrow). Owner is the
+ * board creator (META_OWNER_ID); editors are granted by the owner
+ * (META_ROLES); everyone else is a viewer. No id = viewer.
  */
-export function canDriveShared(
-  open: boolean,
+export type BoardRole = 'owner' | 'editor' | 'viewer';
+
+export function roleOf(
   ownerId: string | null | undefined,
   roles: Record<string, MediaRole>,
   userId: string,
-): boolean {
-  if (!userId) return false;
-  if (open) return true;
-  return canControlMedia(ownerId, roles, userId);
+): BoardRole {
+  if (!userId) return 'viewer';
+  if (ownerId && ownerId === userId) return 'owner';
+  return roles[userId] === 'editor' ? 'editor' : 'viewer';
 }
 
 const FOLLOW_KEY = 'review-follow-media';
