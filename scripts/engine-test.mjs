@@ -88,7 +88,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, ORBIT_COLORS, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowWaypoints, insertArrowWaypoint, removeArrowWaypoint, ARROW_MAX_POINTS, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, ORBIT_COLORS, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowWaypoints, projectArrowInsert, insertArrowWaypoint, removeArrowWaypoint, ARROW_MAX_POINTS, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -1479,6 +1479,14 @@ assert.equal(described.head[0] > 90, true, 'arrow head sits at the tip');
   assert.equal(removeArrowWaypoint(free4, 0), null, 'nothing to delete on 2 waypoints');
   assert.equal(removeArrowWaypoint(glued, 1), null, 'glued arrows refuse delete');
   assert.ok(ARROW_MAX_POINTS >= 64, 'waypoint cap exported');
+  // Projection reports the splice point; MIN_D refuses crowded plants.
+  const proj = projectArrowInsert(free4, 50, 0, 30, 0);
+  assert.ok(proj && proj.index === 1, 'projection targets the middle splice');
+  assert.equal(projectArrowInsert(free4, 50, 500, 30, 0), null, 'far projection misses');
+  assert.equal(projectArrowInsert(free4, 2, 0, 30, 20), null, 'MIN_D guards the endpoints');
+  assert.equal(insertArrowWaypoint(free4, 2, 0, 30, 20), null, 'MIN_D blocks the insert too');
+  const insMin = insertArrowWaypoint(free4, 50, 0, 30, 1);
+  assert.ok(insMin && insMin.length === 6, 'small MIN_D still inserts mid-shaft');
 }
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0x01, 0x02, 0x03, 0xd9]);

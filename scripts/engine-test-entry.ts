@@ -1,7 +1,7 @@
 export { Engine } from '../src/engine/Engine';
 export * as store from '../src/core/store';
 export { settings, penStrokeWidthForSize } from '../src/core/settings';
-export { cropFractions, describeArrow, displayInk, uncroppedBox, restoreUncroppedBox, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, shapeLassoProbes, pointInShape, docPageIndex, docPageStep, arrowBounds, arrowHitPolyline, arrowWaypoints, insertArrowWaypoint, removeArrowWaypoint, ARROW_MAX_POINTS, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom, getPaintZoom, boardNeedsMediaPaint, MEDIA_HOST_TYPES } from '../src/core/shapes';
+export { cropFractions, describeArrow, displayInk, uncroppedBox, restoreUncroppedBox, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, shapeLassoProbes, pointInShape, docPageIndex, docPageStep, arrowBounds, arrowHitPolyline, arrowWaypoints, projectArrowInsert, insertArrowWaypoint, removeArrowWaypoint, ARROW_MAX_POINTS, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom, getPaintZoom, boardNeedsMediaPaint, MEDIA_HOST_TYPES } from '../src/core/shapes';
 export { ORBIT_PAPER, ORBIT_COLORS } from '../src/core/orbit';
 export { isWriteGestureActive, closeWriteGate } from '../src/core/writeGate';
 export {
