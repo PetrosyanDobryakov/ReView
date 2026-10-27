@@ -289,6 +289,8 @@ export function StyleBar({
   const rectTargets = selected.filter((v) => v.type === 'rect' && !v.locked);
   const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
   const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
+  /** Opacity works for every type (pen carries its own alpha the same way). */
+  const opacityTargets = selected.filter((v) => !v.locked);
 
   const showFill =
     (showShapeDraw && tool !== 'arrow' && tool !== 'calculator') || fillTargets.length > 0;
@@ -303,10 +305,11 @@ export function StyleBar({
     (showShapeDraw && tool !== 'sticky' && tool !== 'graph' && tool !== 'calculator') || outlineTargets.length > 0;
   const showCorners = tool === 'rect' || rectTargets.length > 0;
   const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
+  const showOpacity = opacityTargets.length > 0;
 
-  const want = showEraser || showFill || showStroke || showText || showPenStyle;
+  const want = showEraser || showFill || showStroke || showText || showPenStyle || showOpacity;
   const shown = useExitPresence(want, MOTION.enter);
-  const flags = { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead };
+  const flags = { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;
@@ -319,14 +322,14 @@ export function StyleBar({
     view.showOutlineWidth,
     view.showCorners,
     view.showArrowHead,
+    view.showOpacity,
   ]
     .map(Number)
     .join('');
 
   if (!shown) return null;
 
-  const fillValue = fillTargets[0]?.fill ?? (shape.filled ? shape.fill : 'transparent');
-  const fillOn = hasFill(fillValue);
+  const fillValue = fillTargets[0]?.fill ?? (shape.filled ? shape.fill : 'transparent');  const fillOn = hasFill(fillValue);
   const strokeValue = strokeTargets[0]?.stroke ?? penTargets[0]?.stroke ?? (showPen ? pen.color : shape.stroke);
   const outlineWidth = outlineTargets[0]?.strokeWidth ?? shape.strokeWidth;
   const cornersRound =
@@ -334,6 +337,7 @@ export function StyleBar({
       ? rectTargets.every((v) => (v.cornerRadius === undefined ? true : v.cornerRadius > 0))
       : shape.rounded;
   const arrowHeadValue = arrowTargets[0]?.arrowHead ?? shape.arrowHead;
+  const opacityValue = Math.round((opacityTargets[0]?.alpha ?? 1) * 100);
 
   const live = editTarget && editLiveFormat
     ? {
@@ -534,6 +538,19 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{pen.size}</span>
+          <input
+            className="size-slider"
+            type="range"
+            min={0}
+            max={100}
+            value={pen.smoothing ?? 0}
+            title={t(locale, 'smoothing')}
+            aria-label={t(locale, 'smoothing')}
+            onChange={(e) => {
+              updatePenSettings({ smoothing: Number(e.target.value) });
+            }}
+          />
+          <span className="size-value">{pen.smoothing ?? 0}</span>
         </>
       )}
       {view.showFill && (
@@ -669,6 +686,26 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{arrowHeadValue}</span>
+        </>
+      )}
+      {view.showOpacity && (
+        <>
+          <span className="panel-label">{t(locale, 'opacity')}</span>
+          <input
+            className="size-slider"
+            type="range"
+            min={5}
+            max={100}
+            value={opacityValue}
+            title={t(locale, 'opacity')}
+            aria-label={t(locale, 'opacity')}
+            onChange={(e) => {
+              const alpha = Number(e.target.value) / 100;
+              patchShapes(opacityTargets.map((v) => [v.id, { alpha }]));
+              onPatched();
+            }}
+          />
+          <span className="size-value">{opacityValue}</span>
         </>
       )}
       {view.showText && (

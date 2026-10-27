@@ -4,6 +4,8 @@ export interface PenSettings {
   color: string;
   size: number;
   style: PenStyle;
+  /** Stroke stabilizer 0..100 (0 = raw input). Local-only, never synced. */
+  smoothing: number;
 }
 
 export interface ShapeSettings {
@@ -48,6 +50,7 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
     color: '#eceae4',
     size: 3,
     style: 'marker',
+    smoothing: 30,
   },
   shape: {
     fill: '#ffffff',
@@ -104,6 +107,9 @@ function restore(): void {
       if (typeof p.color === 'string') settings.pen.color = p.color;
       if (typeof p.size === 'number' && p.size > 0 && p.size < 200) settings.pen.size = p.size;
       if (p.style === 'marker' || p.style === 'highlighter') settings.pen.style = p.style;
+      if (typeof p.smoothing === 'number' && Number.isFinite(p.smoothing)) {
+        settings.pen.smoothing = Math.min(100, Math.max(0, Math.round(p.smoothing)));
+      }
     }
     if (bag.shape && typeof bag.shape === 'object') {
       const s = bag.shape as Record<string, unknown>;

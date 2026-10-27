@@ -925,6 +925,18 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         { label: t(locale, 'ctxDuplicate'), hint: `${modKey()}+D`, run: () => { commitOpenEditors(); e?.duplicateSelection(); } },
         { label: t(locale, 'ctxDelete'), hint: 'Delete', danger: true, run: () => e?.deleteSelection() }
       );
+      const unlockedCount = selected.filter((v) => !v.locked).length;
+      const touchedGroups = new Set(selected.filter((v) => v.groupId).map((v) => v.groupId as string));
+      if (unlockedCount >= 2) {
+        menuEntries.push(
+          { label: t(locale, 'ctxGroup'), hint: `${modKey()}+G`, run: () => { commitOpenEditors(); e?.groupSelection(); } }
+        );
+      }
+      if (touchedGroups.size) {
+        menuEntries.push(
+          { label: t(locale, 'ctxUngroup'), hint: `${modKey()}+Shift+G`, run: () => { commitOpenEditors(); e?.ungroupSelection(); } }
+        );
+      }
 
       const typeExtras: MenuAction[] = [];
       if (menuView.type === 'image') {
@@ -976,8 +988,19 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       if (menuView.type === 'pen') {
         typeExtras.push({ label: t(locale, 'ctxCsv'), run: () => e?.exportCsvSelection() });
       }
+      if (menuView.type === 'doc') {
+        typeExtras.push(
+          { label: t(locale, 'ctxDownloadPdf'), run: () => void e?.downloadDocPdf() }
+        );
+      }
+      if (menuView.type === 'text' || menuView.type === 'sticky') {
+        typeExtras.push(
+          { label: t(locale, 'ctxDownloadTxt'), run: () => e?.downloadTextSelection() }
+        );
+      }
       if (menuView.type === 'table') {
         typeExtras.push(
+          { label: t(locale, 'ctxCsv'), run: () => e?.exportTableCsvSelection() },
           { label: t(locale, 'ctxTableAddRow'), run: () => e?.tableInsertRow(shapeId) },
           { label: t(locale, 'ctxTableAddCol'), run: () => e?.tableInsertCol(shapeId) },
           { label: t(locale, 'ctxTableDelRow'), danger: true, run: () => e?.tableRemoveRow(shapeId) },

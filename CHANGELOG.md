@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.16.33
+
+### Opacity, downloads, smoothing, arrow waypoints, grouping
+
+- **Opacity for everything.** StyleBar gains a transparency slider for any
+  selection (5–100%); canvas, DOM player panels and SVG export honor it.
+  Pen/highlighter keep working as before.
+- **Downloads.** Table → CSV (Excel BOM), text/sticky → TXT, doc → PDF
+  (context menu; photo/video/audio originals unchanged).
+- **Tablet stabilizer.** One Euro smoothing on pen input with a 0–100
+  strength slider next to brush size (0 = raw, default 30). Pressure
+  untouched; local-only, never synced.
+- **Arrow waypoints.** Free arrows render elbows through stored waypoints
+  (new poly curve; legacy cubics untouched). Selected free arrows show
+  draggable dots; double-click an edge inserts, double-click a middle dot
+  deletes. Glued arrows keep the auto curve.
+- **Grouping.** Ctrl+G / Ctrl+Shift+G + context menu; click selects the
+  group, again drills to the member, once more pops out; Esc steps up.
+  Move/resize/delete/duplicate/align work on groups; full-group copies
+  regroup, partial copies drop the id. Synced as a plain string, undoable.
+- **Home back button + double-click reset** (0.16.32): «Назад к доске» in
+  the header; double-click empty space returns to select.
+
 ## 0.16.32
 
 ### Back to board + double-click reset

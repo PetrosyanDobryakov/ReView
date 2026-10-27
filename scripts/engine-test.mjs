@@ -88,7 +88,7 @@ const canvas = {
   getContext: () => ctxProxy,
 };
 
-const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, ORBIT_COLORS, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
+const { Engine, store, settings, displayInk, computeSnap, alignViews, visualBox, applyKeybinds, getColorBinds, getToolBinds, tableGrid, normalizeTableSizes, shiftTableDivider, tableRiderIds, tableCarries, splitStrokeByErasedIndices, shapesToSvg, jpegToPdf, defaultFontSizeFor, cropFractions, uncroppedBox, restoreUncroppedBox, describeArrow, renderFormula, isFormulaCached, shapesFromClipboardText, worldPortDir, connectedArrowGeometry, tableCellAt, containedInShape, hostRiderIds, stackOrderIndex, localToWorld, rotateShapeAround, arrowHeadLength, mapAlongTableFractions, tableAxisIndex, textOverlayPaddingCss, textOverlayWidthPx, textOverlayLineHeight, LABEL_LINE_HEIGHT, TEXT_LINE_HEIGHT, TABLE_CELL_PAD_X, STICKY_TEXT_PAD, shapeLabelInnerWidth, FRAME_LABEL_PAD_X, frameHeaderHeight, frameTitleLine, tableCellStyle, labelInk, overlayDisplayColor, SHAPE_FONT, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W, reanchorCroppedBox, penStrokeWidthForSize, textOverlayAllowsRich, flushOpenTextEditor, persistOpenEditors, ORBIT_PAPER, ORBIT_COLORS, isWriteGestureActive, closeWriteGate, exportDownloadEnabled, cssBackgroundIsHighlight, measureStyleFromSpans, htmlToSpans, spansToPlain, pointInShape, docPageIndex, docPageStep, graphBlurCancels, graphChromeKind, overlayKeepEdit, overlayCommitEdit, overlayFinishNow, require2dContext, zoomedPortalPosition, arrowBounds, arrowHitPolyline, arrowWaypoints, insertArrowWaypoint, removeArrowWaypoint, ARROW_MAX_POINTS, arrowGeomCacheSizeForTest, clearArrowGeomCacheForTest, wrapText: wrapTextLines, wrapTextCacheSizeForTest, clearWrapTextCacheForTest, setPaintZoom } = await import('./engine-bundle.mjs');
 
 const engine = new Engine(canvas);
 assert.equal(engine.tool.id, 'select', 'default tool is select');
@@ -1443,6 +1443,43 @@ const described = describeArrow({
 });
 assert.ok(described, 'describeArrow returns geometry');
 assert.equal(described.head[0] > 90, true, 'arrow head sits at the tip');
+
+// --- arrow waypoints (free arrows only) ------------------------------------------
+{
+  const free4 = { id: 'a4', type: 'arrow', x: 0, y: 0, w: 100, h: 0, strokeWidth: 2, points: [0, 0, 100, 0] };
+  const glued = { ...free4, id: 'ag', fromId: 's1', toId: 's2', fromPort: 'e', toPort: 'w' };
+  assert.deepEqual(arrowWaypoints(free4).length, 2, 'free arrow exposes start/end');
+  assert.equal(arrowWaypoints(glued), null, 'glued arrows keep the auto curve');
+  assert.equal(arrowWaypoints({ ...free4, points: [0] }), null, 'malformed points stay bbox-driven');
+  // Insert into a straight 4-point arrow splits the visible shaft.
+  const ins = insertArrowWaypoint(free4, 50, 0, 30);
+  assert.ok(ins && ins.length === 6, 'edge insert makes a 3-waypoint poly');
+  assert.deepEqual([ins[0], ins[1], ins[4], ins[5]], [0, 0, 100, 0], 'endpoints preserved');
+  // Waypoint sits on the visible (auto-bent) shaft, within click tolerance.
+  const shaft = arrowHitPolyline(free4);
+  let shaftDist = Infinity;
+  for (let i = 0; i + 3 < shaft.length; i += 2) {
+    const ax = shaft[i], ay = shaft[i + 1], bx = shaft[i + 2], by = shaft[i + 3];
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.min(1, Math.max(0, ((ins[2] - ax) * dx + (ins[3] - ay) * dy) / (dx * dx + dy * dy || 1)));
+    shaftDist = Math.min(shaftDist, Math.hypot(ins[2] - (ax + dx * t), ins[3] - (ay + dy * t)));
+  }
+  assert.ok(shaftDist < 1.5, 'waypoint lands on the shaft');
+  assert.ok(Math.hypot(ins[2] - 50, ins[3]) <= 30, 'waypoint within click tolerance');
+  assert.equal(insertArrowWaypoint(free4, 50, 500, 30), null, 'far clicks miss');
+  const poly = describeArrow({ ...free4, points: ins });
+  assert.ok(poly && poly.pathD.includes('L'), 'poly renders elbows, not a bezier');
+  // Insert into a 6-point poly pads past the legacy-cubic length 8.
+  const ins2 = insertArrowWaypoint({ ...free4, points: ins }, 75, 0, 30);
+  assert.ok(ins2 && ins2.length === 10, 'second insert normalizes past length 8');
+  // Delete the middle elbow of a 6-point arrow back to straight.
+  const del = removeArrowWaypoint({ ...free4, points: ins }, 1);
+  assert.deepEqual(del, [0, 0, 100, 0], 'middle delete restores straight');
+  assert.equal(removeArrowWaypoint({ ...free4, points: ins }, 0), null, 'endpoints stay');
+  assert.equal(removeArrowWaypoint(free4, 0), null, 'nothing to delete on 2 waypoints');
+  assert.equal(removeArrowWaypoint(glued, 1), null, 'glued arrows refuse delete');
+  assert.ok(ARROW_MAX_POINTS >= 64, 'waypoint cap exported');
+}
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0x01, 0x02, 0x03, 0xd9]);
 const pdf = jpegToPdf(jpeg, 4, 4);
