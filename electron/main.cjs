@@ -506,7 +506,12 @@ async function installUpdate() {
     const best = await latestRelease();
     if (!best || !newer(best.version, app.getVersion())) return 'latest';
     const suffix = assetSuffix(kind);
-    const asset = best.release.assets?.find((a) => a.name.endsWith(suffix));
+    const candidates = best.release.assets?.filter((a) => a.name.endsWith(suffix)) ?? [];
+    // Prefer the asset built for this release version: a re-pushed tag can
+    // leave stale same-suffix builds behind (0.16.33 shipped 0.16.32
+    // binaries once), and first-match would install the old code forever.
+    const asset =
+      candidates.find((a) => a.name.includes(`-${best.version}-`)) ?? candidates[0];
     if (!asset) throw new Error(`no ${suffix} in ${best.release.tag_name}`);
     const progress = (got, total) => win?.webContents.send('review-update', { got, total });
     if (kind === 'appimage') {
