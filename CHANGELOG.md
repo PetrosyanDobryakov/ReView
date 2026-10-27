@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.34
+
+### Feedback button + calmer Home footer
+
+- **Report a bug from Home.** New feedback icon in the Home header (left
+  of settings, Home only): opens the OnlineTestpad
+  bug/suggestion form in a new tab. Tooltip in ru/en/zh.
+- **Footer cleanup.** Removed the storage fine-print line from the Home
+  footer; the «Save others’ boards» switch stays at the bottom left.
+
 ## 0.16.33
 
 ### Opacity, downloads, smoothing, arrow waypoints, grouping

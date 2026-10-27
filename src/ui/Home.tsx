@@ -42,6 +42,8 @@ import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '..
 import { appInviteUrl, canSelfUpdate, installDesktopUpdate, isDesktop, resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
+const FEEDBACK_URL = 'https://onlinetestpad.com/s/ReView-survey-on-bugs-and-suggestions';
+
 const REL_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
   ['second', 60],
   ['minute', 60],
@@ -430,6 +432,16 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
           )}
         </div>
         <div className="island meta-island">
+          <a
+            className="icon-btn"
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noreferrer"
+            title={t(locale, 'feedback')}
+            aria-label={t(locale, 'feedback')}
+          >
+            <Icon name="feedback" />
+          </a>
           <button
             type="button"
             className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
@@ -701,10 +713,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         </div>
 
         <footer className="home-foot">
-          <p className="home-foot-note">
-            <Icon name="warn" size={14} />
-            <span>{t(locale, isDesktop() ? 'storageNoticeDesktop' : 'storageNotice')}</span>
-          </p>
           <div className="home-foot-row">
             <button
               type="button"
