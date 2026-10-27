@@ -453,7 +453,7 @@ export function StyleBar({
     <div className={`island style-island${want ? '' : ' is-leaving'}`}>
       <div className="style-island-body" key={mode}>
       {view.showEraser && (
-        <>
+        <div className="style-group">
           <button
             type="button"
             className={`style-btn${eraser.mode === 'whole' ? ' active' : ''}`}
@@ -485,10 +485,10 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{eraser.size}</span>
-        </>
+        </div>
       )}
       {view.showPenStyle && (
-        <>
+        <div className="style-group">
           <button
             type="button"
             className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
@@ -538,23 +538,12 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{pen.size}</span>
-          <input
-            className="size-slider"
-            type="range"
-            min={0}
-            max={100}
-            value={pen.smoothing ?? 0}
-            title={t(locale, 'smoothing')}
-            aria-label={t(locale, 'smoothing')}
-            onChange={(e) => {
-              updatePenSettings({ smoothing: Number(e.target.value) });
-            }}
-          />
-          <span className="size-value">{pen.smoothing ?? 0}</span>
-        </>
+        </div>
       )}
-      {view.showFill && (
-        <>
+      {(view.showFill || view.showCorners) && (
+        <div className="style-group">
+          {view.showFill && (
+          <>
           <span className="panel-label">{t(locale, 'fill')}</span>
           <button
             type="button"
@@ -584,10 +573,10 @@ export function StyleBar({
               }
             }}
           />
-        </>
-      )}
-      {view.showCorners && (
-        <>
+          </>
+          )}
+          {view.showCorners && (
+          <>
           <div className="toolbelt-sep" />
           <button
             type="button"
@@ -621,10 +610,14 @@ export function StyleBar({
           >
             {t(locale, 'cornersRound')}
           </button>
-        </>
+          </>
+          )}
+        </div>
       )}
-      {view.showStroke && (
-        <>
+      {(view.showStroke || view.showOutlineWidth || view.showArrowHead) && (
+        <div className="style-group">
+          {view.showStroke && (
+          <>
           <span className="panel-label">{t(locale, 'stroke')}</span>
           <ColorSlots
             locale={locale}
@@ -642,9 +635,9 @@ export function StyleBar({
             }}
           />
         </>
-      )}
-      {view.showOutlineWidth && (
-        <>
+          )}
+          {view.showOutlineWidth && (
+          <>
           <input
             className="size-slider"
             type="range"
@@ -663,10 +656,10 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{outlineWidth}</span>
-        </>
-      )}
-      {view.showArrowHead && (
-        <>
+          </>
+          )}
+          {view.showArrowHead && (
+          <>
           <span className="panel-label">{t(locale, 'arrowHead')}</span>
           <input
             className="size-slider"
@@ -686,10 +679,12 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{arrowHeadValue}</span>
-        </>
+          </>
+          )}
+        </div>
       )}
       {view.showOpacity && (
-        <>
+        <div className="style-group">
           <span className="panel-label">{t(locale, 'opacity')}</span>
           <input
             className="size-slider"
@@ -706,10 +701,10 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{opacityValue}</span>
-        </>
+        </div>
       )}
       {view.showText && (
-        <>
+        <div className="style-group">
           <div className="text-format" role="group" aria-label={t(locale, 'textFormat')}>
             <FormatBtn
               label={t(locale, 'textBold')}
@@ -787,7 +782,7 @@ export function StyleBar({
               applyFormat({ size: Number(next) });
             }}
           />
-        </>
+        </div>
       )}
       </div>
     </div>

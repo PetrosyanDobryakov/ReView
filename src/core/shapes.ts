@@ -1374,17 +1374,26 @@ function normalizeArrowPoints(out: number[]): number[] | null {
 }
 
 /**
- * Insert a waypoint into a free arrow at the projection of (x, y).
- * Poly arrows split the nearest stored segment; 4-point arrows split the
- * visible sampled shaft (becoming poly). Legacy free cubics (8/12/…)
- * refuse — drag endpoints only. Returns the new points or null.
+ * Projection of (x, y) onto a free arrow for waypoint insertion: the point
+ * plus the stored index it would splice at. Poly arrows split the nearest
+ * stored segment; 4-point arrows split the visible sampled shaft. Waypoints
+ * must land at least minD from their would-be neighbours (no crowding).
+ * Returns null when not insertable (glued/legacy/missing/tight).
  */
-export function insertArrowWaypoint(v: ShapeView, x: number, y: number, tol: number): number[] | null {
+export function projectArrowInsert(
+  v: ShapeView,
+  x: number,
+  y: number,
+  tol: number,
+  minD = 0
+): { x: number; y: number; index: number } | null {
   const wps = arrowWaypoints(v);
   if (!wps || wps.length < 2) return null;
   const pts = v.points ?? [];
   const poly = pts.length >= 6 && pts.length % 4 !== 0;
   if (!poly && pts.length !== 4) return null;
+  const far = (px: number, py: number, ax: number, ay: number) =>
+    Math.hypot(px - ax, py - ay) >= minD;
   if (poly) {
     let best = -1;
     let bestD = tol;
@@ -1400,9 +1409,10 @@ export function insertArrowWaypoint(v: ShapeView, x: number, y: number, tol: num
       }
     }
     if (best < 0) return null;
-    const out = pts.slice(0, (best + 1) * 2);
-    out.push(bx, by);
-    return normalizeArrowPoints(out.concat(pts.slice((best + 1) * 2)));
+    if (minD > 0 && (!far(bx, by, wps[best].x, wps[best].y) || !far(bx, by, wps[best + 1].x, wps[best + 1].y))) {
+      return null;
+    }
+    return { x: bx, y: by, index: best + 1 };
   }
   // 4-point arrow: split the visible sampled shaft.
   const shaft = getArrowGeom(v)?.shaft ?? [];
@@ -1420,7 +1430,28 @@ export function insertArrowWaypoint(v: ShapeView, x: number, y: number, tol: num
     }
   }
   if (!found) return null;
-  return normalizeArrowPoints([pts[0], pts[1], bx, by, pts[2], pts[3]]);
+  if (minD > 0 && (!far(bx, by, pts[0], pts[1]) || !far(bx, by, pts[2], pts[3]))) return null;
+  return { x: bx, y: by, index: 1 };
+}
+
+/**
+ * Insert a waypoint into a free arrow at the projection of (x, y).
+ * Legacy free cubics (8/12/…) refuse — drag endpoints only.
+ * Returns the new points or null.
+ */
+export function insertArrowWaypoint(
+  v: ShapeView,
+  x: number,
+  y: number,
+  tol: number,
+  minD = 0
+): number[] | null {
+  const found = projectArrowInsert(v, x, y, tol, minD);
+  if (!found) return null;
+  const pts = v.points ?? [];
+  const out = pts.slice(0, found.index * 2);
+  out.push(found.x, found.y);
+  return normalizeArrowPoints(out.concat(pts.slice(found.index * 2)));
 }
 
 /**

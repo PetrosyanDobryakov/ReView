@@ -1204,9 +1204,20 @@ button.brand {
 
 .style-island-body {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 10px;
+  max-width: min(700px, calc(100vw - 32px));
+  animation: body-in var(--chrome-dur) var(--chrome-ease);
+}
+
+/* One wrapped control cluster (never splits mid-control). */
+.style-group {
+  display: flex;
   align-items: center;
   gap: 8px;
-  animation: body-in var(--chrome-dur) var(--chrome-ease);
+  min-width: 0;
 }
 
 .text-format {

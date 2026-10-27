@@ -21,6 +21,7 @@ import {
   setToolBind,
 } from '../core/keybindings';
 import { readPenSlots } from '../core/penColors';
+import { onSettingsChange, settings, updatePenSettings } from '../core/settings';
 import { adaptInkOnce } from '../core/store';
 import { LOCALES, writeLocale, type LocaleId } from '../core/locale';
 import {
@@ -217,6 +218,7 @@ export function SettingsSheet({
   const [listening, setListening] = useState<BindTarget | null>(null);
   const [uiScaleDraft, setUiScaleDraft] = useState<number | null>(null);
   const [cursorScaleDraft, setCursorScaleDraft] = useState<number | null>(null);
+  const [penSmoothing, setPenSmoothing] = useState(() => settings.pen.smoothing ?? 0);
 
   const paperPresets = pickerPaperPresets(prefs.orbitUnlocked);
   const orbitPaperSelected = isOrbitPaper(bg);
@@ -250,10 +252,16 @@ export function SettingsSheet({
     };
     syncBinds();
     setPrefs(readPrefs());
+    setPenSmoothing(settings.pen.smoothing ?? 0);
     setNetLogOn(isNetLogEnabled());
     setResetArmed(false);
     if (isDesktop()) void desktopHostInfo().then((i) => setDataDir(i?.dataDir ?? i?.boardsDir ?? null));
-    return onKeybindsChange(syncBinds);
+    const offSettings = onSettingsChange(() => setPenSmoothing(settings.pen.smoothing ?? 0));
+    const offBinds = onKeybindsChange(syncBinds);
+    return () => {
+      offSettings();
+      offBinds();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -414,6 +422,31 @@ export function SettingsSheet({
                     </button>
                   ))}
                 </SlideTrack>
+              </section>
+
+              <section className="sheet-section">
+                <h3>
+                  <SwapText text={t(locale, 'penStylus')} />
+                </h3>
+                <label className="sheet-range">
+                  <span>{t(locale, 'smoothing')}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={penSmoothing}
+                    onChange={(e) => {
+                      const next = Math.min(100, Math.max(0, Math.round(Number(e.target.value))));
+                      setPenSmoothing(next);
+                      updatePenSettings({ smoothing: next });
+                    }}
+                  />
+                  <span className="sheet-range-value">{penSmoothing}</span>
+                </label>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'smoothingHint')} />
+                </p>
               </section>
 
               {desktop ? (

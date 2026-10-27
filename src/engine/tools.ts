@@ -1,7 +1,7 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H, projectArrowInsert, insertArrowWaypoint } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -157,12 +157,20 @@ export class SelectTool extends Tool {
   /**
    * Dragging an arrow waypoint dot (single-selected free arrow). BBox
    * corners win over endpoint dots (resize covers endpoints); middle
-   * waypoints reshape here.
+   * waypoints reshape here. `base` is the drag-start points (post-insert
+   * when the press created the dot); originals keep the pre-gesture copy
+   * so cancel also removes a just-inserted dot.
    */
-  private vertexDrag: { shapeId: string; index: number } | null = null;
+  private vertexDrag: { shapeId: string; index: number; base: number[] } | null = null;
+  /** Last vertex-drag release (double-click delete guard: drags don't delete). */
+  lastVertexUp: { t: number; moved: number } | null = null;
+  /** Last click-insert timestamp (a fresh dot's own double-click must not delete it). */
+  lastInsertAt = 0;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
+    // Insert preview is recomputed every idle frame; stale dots never linger.
+    engine.arrowInsertPreview = null;
     if (engine.hitTablePlus(p.world.x, p.world.y)) {
       engine.setCursor('pointer');
       return;
@@ -180,6 +188,20 @@ export class SelectTool extends Tool {
     if (engine.selection.size === 1 && engine.hitArrowVertex(p.screen.x, p.screen.y)) {
       engine.setCursor('move');
       return;
+    }
+    // Hovering a free arrow shaft previews the insert point (system cursor
+    // hides, ring dot shows); a press commits + drags it in one gesture.
+    if (engine.selection.size === 1) {
+      const sv = engine.views.get([...engine.selection][0]);
+      if (sv && sv.type === 'arrow' && !sv.locked && !sv.fromId && !sv.toId && !sv.groupId) {
+        const z = engine.camera.zoom;
+        const found = projectArrowInsert(sv, p.world.x, p.world.y, 12 / z, 14 / z);
+        if (found) {
+          engine.arrowInsertPreview = { shapeId: sv.id, x: found.x, y: found.y };
+          engine.setCursor('none');
+          return;
+        }
+      }
     }
     const div = engine.hitTableDivider(p.world.x, p.world.y);
     if (div) {
@@ -212,6 +234,7 @@ export class SelectTool extends Tool {
     this.moved = 0;
     this.mode = 'idle';
     this.marquee = null;
+    engine.arrowInsertPreview = null;
     this.originals.clear();
     this.stuck.clear();
     store.beginGesture();
@@ -273,11 +296,36 @@ export class SelectTool extends Tool {
       if (av) {
         const v = engine.views.get(av.shapeId);
         if (v && v.type === 'arrow' && v.points && !v.locked) {
-          this.vertexDrag = { shapeId: av.shapeId, index: av.index };
+          this.vertexDrag = { shapeId: av.shapeId, index: av.index, base: [...v.points] };
           this.originals.set(av.shapeId, { ...v, points: [...v.points] });
           this.snapshotRiders(engine);
           this.mode = 'vertex';
           return;
+        }
+      }
+      // Shaft press: commit the previewed waypoint and drag it at once
+      // (tap alone just plants it; MIN_D blocks double-planting).
+      const sv = engine.views.get([...engine.selection][0]);
+      if (sv && sv.type === 'arrow' && !sv.locked && !sv.fromId && !sv.toId && !sv.groupId && sv.points) {
+        const z = engine.camera.zoom;
+        const found = projectArrowInsert(sv, p.world.x, p.world.y, 12 / z, 14 / z);
+        if (found) {
+          const next = insertArrowWaypoint(sv, p.world.x, p.world.y, 12 / z, 14 / z);
+          if (next) {
+            const box = arrowBounds({ ...sv, points: next });
+            const live = engine.views.get(sv.id);
+            if (live) engine.views.set(sv.id, { ...live, points: next, x: box.x, y: box.y, w: box.w, h: box.h });
+            store.patchShapes([[sv.id, { points: next, x: box.x, y: box.y, w: box.w, h: box.h }]]);
+            // Base = post-insert points; originals keep the pre-gesture copy
+            // so cancel also removes the just-planted dot.
+            this.vertexDrag = { shapeId: sv.id, index: found.index, base: [...next] };
+            this.originals.set(sv.id, { ...sv, points: [...sv.points] });
+            this.snapshotRiders(engine);
+            this.mode = 'vertex';
+            this.lastInsertAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            engine.setDirty();
+            return;
+          }
         }
       }
     }
@@ -340,22 +388,15 @@ export class SelectTool extends Tool {
     if (hit || insideBounds) {
       const wasSelected = hit ? engine.selection.has(hit) : false;
       if (hit) {
-        // Groups: click a member selects the whole group; clicking again
-        // drills to the member, once more pops back out. Shift adds/removes
-        // the whole group.
-        const members = engine.groupMembers(hit);
-        const sel = engine.selection;
-        const selIsGroup = members.length > 1 && sel.size === members.length && members.every((id) => sel.has(id));
-        if (p.shift && sel.has(hit)) {
-          engine.setSelection([...sel].filter((id) => !members.includes(id)));
+        // Groups are rigid: setSelection expands any member to its whole
+        // group, so click selects groups and shift toggles whole groups.
+        if (p.shift && engine.selection.has(hit)) {
+          const drop = new Set(engine.groupMembers(hit));
+          engine.setSelection([...engine.selection].filter((id) => !drop.has(id)));
         } else if (p.shift) {
-          engine.setSelection([...sel, ...members.filter((id) => !sel.has(id))]);
-        } else if (members.length > 1 && selIsGroup) {
+          engine.setSelection([...engine.selection, hit]);
+        } else if (!engine.selection.has(hit)) {
           engine.setSelection([hit]);
-        } else if (sel.size === 1 && sel.has(hit) && members.length > 1) {
-          engine.setSelection(members);
-        } else if (!selIsGroup) {
-          engine.setSelection(members);
         }
       }
       // Tray hosts (tables / photos / PDFs / frames) select on first press and
@@ -396,14 +437,36 @@ export class SelectTool extends Tool {
     );
     if (this.mode === 'vertex' && this.vertexDrag) {
       const t = this.vertexDrag;
-      const o = this.originals.get(t.shapeId);
       const live = engine.views.get(t.shapeId);
-      if (!o || !live || live.type !== 'arrow' || !o.points) return;
+      if (!live || live.type !== 'arrow') return;
       const dx = p.world.x - this.start.x;
       const dy = p.world.y - this.start.y;
-      const points = [...o.points];
-      points[t.index * 2] = o.points[t.index * 2] + dx;
-      points[t.index * 2 + 1] = o.points[t.index * 2 + 1] + dy;
+      const points = [...t.base];
+      let px = t.base[t.index * 2] + dx;
+      let py = t.base[t.index * 2 + 1] + dy;
+      // Waypoints keep a minimum gap (screen-constant): slide around the
+      // neighbour instead of stacking.
+      const minD = 14 / engine.camera.zoom;
+      for (const j of [t.index - 1, t.index + 1]) {
+        if (j < 0 || j * 2 + 1 >= points.length) continue;
+        const nx = points[j * 2];
+        const ny = points[j * 2 + 1];
+        const d = Math.hypot(px - nx, py - ny);
+        if (d < minD) {
+          let vx = px - nx;
+          let vy = py - ny;
+          let vl = Math.hypot(vx, vy);
+          if (vl < 1e-6) {
+            vx = 1;
+            vy = 0;
+            vl = 1;
+          }
+          px = nx + (vx / vl) * minD;
+          py = ny + (vy / vl) * minD;
+        }
+      }
+      points[t.index * 2] = px;
+      points[t.index * 2 + 1] = py;
       // World-space points: bbox follows the geometry (same pad as creation).
       const box = arrowBounds({ ...live, points });
       engine.views.set(t.shapeId, { ...live, points, x: box.x, y: box.y, w: box.w, h: box.h });
@@ -648,6 +711,10 @@ export class SelectTool extends Tool {
       engine.updateConnectedArrows(new Set([this.resizing.shapeId, ...this.stuck.keys()]));
     }
     if (this.vertexDrag) {
+      this.lastVertexUp = {
+        t: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+        moved: this.moved,
+      };
       engine.updateConnectedArrows(new Set([this.vertexDrag.shapeId, ...this.stuck.keys()]));
     }
     if (this.mode === 'tablediv' && this.tableDiv) {
@@ -747,6 +814,7 @@ export class SelectTool extends Tool {
     this.mode = 'idle';
     this.resizing = null;
     this.vertexDrag = null;
+    this.lastVertexUp = null;
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.marquee = null;
@@ -1359,6 +1427,8 @@ abstract class BoxTool extends Tool {
   protected cur: { x: number; y: number } | null = null;
   protected movedScreen = 0;
   protected shift = false;
+  /** Last click-place (screen px + time) — a second tap in place resets instead of planting a twin. */
+  private lastPlace: { t: number; x: number; y: number } | null = null;
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.start = p.world;
@@ -1378,6 +1448,27 @@ abstract class BoxTool extends Tool {
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
+    // Double-click in one spot must not plant twin shapes: the second tap
+    // resets to select (the dblclick handler then just clears selection).
+    // Drags break the pair; pen/mouse drawing is exempt by design.
+    if (this.start && this.movedScreen < dragThresholdPx()) {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const lp = this.lastPlace;
+      if (
+        lp &&
+        now - lp.t < 350 &&
+        Math.hypot(p.screen.x - lp.x, p.screen.y - lp.y) < 12
+      ) {
+        this.lastPlace = null;
+        this.resetDraw();
+        engine.setTool('select');
+        engine.setSelection([]);
+        return;
+      }
+      this.lastPlace = { t: now, x: p.screen.x, y: p.screen.y };
+    } else {
+      this.lastPlace = null;
+    }
     const extra =
       this.shapeType === 'rect'
         ? { cornerRadius: settings.shape.rounded ? RECT_CORNER_RADIUS : 0 }
@@ -1390,6 +1481,7 @@ abstract class BoxTool extends Tool {
   }
 
   cancel(_engine: Engine): void {
+    this.lastPlace = null;
     this.resetDraw();
   }
 

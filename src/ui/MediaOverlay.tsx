@@ -198,6 +198,9 @@ function MediaCard({
           return;
         }
         box.style.display = '';
+        // First positioned frame reveals the card: mounting paints one
+        // unscaled frame otherwise (a huge flash at low zoom).
+        if (box.style.visibility !== 'visible') box.style.visibility = 'visible';
         // Board objects, not popups: true coords, no viewport clamp — the
         // card slides off-screen exactly like the shape under it (the cull
         // above hides it only when fully out). Wheel over controls zooms the
@@ -613,6 +616,7 @@ function MediaCard({
         position: 'fixed',
         zIndex: 10,
         minWidth: 0,
+        visibility: 'hidden',
         pointerEvents: 'none',
         transformOrigin: 'top left',
         borderColor: selected ? 'var(--chrome-accent)' : undefined,

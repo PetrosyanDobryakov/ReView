@@ -12,6 +12,24 @@
 - **Footer cleanup.** Removed the storage fine-print line from the Home
   footer; the «Save others’ boards» switch stays at the bottom left.
 
+### Interaction micro-batch
+
+- **Rigid groups.** Any touched member selects the whole group — partial
+  selections cannot exist, members never drift. One menu toggle
+  (Сгруппировать / Разгруппировать), Ctrl+G / Ctrl+Shift+G.
+- **Arrow insert flow.** Hovering a free arrow shaft hides the cursor and
+  shows a ring preview; press plants a draggable dot at once, repeat
+  presses edit it. Waypoints keep a 14px minimum gap (drag slides around
+  neighbours). Double-click a middle dot deletes (drags never delete);
+  shaft double-clicks never reset the tool.
+- **No twin shapes.** Double-click in one spot with a shape tool resets to
+  select instead of planting a second figure (pen/mouse exempt).
+- **Stabilizer tile.** Smoothing moved from StyleBar to Settings → System
+  as its own tile (0–100, default 30).
+- **Compact StyleBar.** Controls regroup into wrapping clusters (max two
+  rows); nothing removed.
+- **No player flash.** Cards stay hidden until the first positioned frame.
+
 ## 0.16.33
 
 ### Opacity, downloads, smoothing, arrow waypoints, grouping

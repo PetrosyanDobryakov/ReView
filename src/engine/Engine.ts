@@ -108,7 +108,7 @@ import {
   type AlignKind,
   alignViews,
 } from '../core/align';
-import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds, arrowWaypoints, insertArrowWaypoint, removeArrowWaypoint } from '../core/shapes';
+import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds, arrowWaypoints, projectArrowInsert, removeArrowWaypoint } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
@@ -453,6 +453,11 @@ export class Engine {
   private graphEditOrig = '';
   private calcEditId: string | null = null;
   remotePeers: PeerCursor[] = [];
+  /**
+   * Arrow insert preview (screen-space dot on the shaft while hovering it).
+   * Set/cleared by the select tool; painted in drawSelection. Null hides it.
+   */
+  arrowInsertPreview: { shapeId: string; x: number; y: number } | null = null;
   /**
    * Critically-damped peer cursor state (display pose + velocity + samples).
    * Purely local — awareness rate unchanged.
@@ -1279,9 +1284,18 @@ export class Engine {
 
   setSelection(ids: string[]): void {
     this.selection.clear();
+    // Rigid groups: any touched member pulls in its whole group, so a
+    // partial-group selection can never exist and members cannot drift
+    // apart — only whole-group ops until ungroup. setSelection is the single
+    // choke point (click, marquee, shortcuts), so every path complies.
+    const expanded = new Set<string>();
     for (const id of ids) {
-      if (this.views.has(id)) this.selection.add(id);
+      if (!this.views.has(id)) continue;
+      for (const mid of this.groupMembers(id)) {
+        if (this.views.has(mid)) expanded.add(mid);
+      }
     }
+    for (const id of expanded) this.selection.add(id);
     this.dirty = true;
     this.events.onSelection?.([...this.selection]);
     // Awareness only — peers see soft selection chrome; empty clears.
@@ -1392,13 +1406,14 @@ export class Engine {
 
   /**
    * Waypoint dot of a single-selected free arrow under a screen point
-   * (or null). Glued arrows keep their auto curve — no dots, no hit.
+   * (or null). Glued arrows keep their auto curve; grouped arrows are rigid
+   * (whole-group ops only) — no dots, no hit.
    */
   hitArrowVertex(sx: number, sy: number): { shapeId: string; index: number } | null {
     if (this.selection.size !== 1) return null;
     const id = [...this.selection][0];
     const v = this.views.get(id);
-    if (!v || v.type !== 'arrow' || v.locked || v.fromId || v.toId) return null;
+    if (!v || v.type !== 'arrow' || v.locked || v.fromId || v.toId || v.groupId) return null;
     const wps = arrowWaypoints(v);
     if (!wps) return null;
     const z = this.camera.zoom;
@@ -4886,15 +4901,22 @@ export class Engine {
   private onDblClick = (e: MouseEvent): void => {
     if (this.editing) return;
     const p = this.pointerInfo(e);
-    // Arrow waypoint editing (single-selected free arrow): dot removes a
-    // middle waypoint, edge gains one. Glued arrows keep the auto curve.
+    // Arrow waypoints (single-selected free arrow): a double-click on a
+    // middle dot deletes it — unless the pair just dragged/planted it
+    // (drags never delete, fresh dots survive their own double-click).
+    // Clicks already plant+drag points, so shaft double-clicks swallow here
+    // and never reset the tool under the cursor. Glued/grouped arrows skip.
     if (this.selection.size === 1 && !this.exportPick && !this.crop) {
       const sv = this.views.get([...this.selection][0]);
-      if (sv && sv.type === 'arrow' && !sv.locked && !sv.fromId && !sv.toId) {
+      if (sv && sv.type === 'arrow' && !sv.locked && !sv.fromId && !sv.toId && !sv.groupId) {
         const vh = this.hitArrowVertex(p.screen.x, p.screen.y);
         if (vh) {
           const wps = arrowWaypoints(sv);
-          if (wps && vh.index > 0 && vh.index < wps.length - 1) {
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const lv = this.tools.select.lastVertexUp;
+          const dragged = lv ? lv.moved > 6 : false;
+          const fresh = now - this.tools.select.lastInsertAt < 600;
+          if (wps && vh.index > 0 && vh.index < wps.length - 1 && !dragged && !fresh) {
             const next = removeArrowWaypoint(sv, vh.index);
             if (next) {
               const box = arrowBounds({ ...sv, points: next });
@@ -4904,13 +4926,9 @@ export class Engine {
           }
           return;
         }
-        const ins = insertArrowWaypoint(sv, p.world.x, p.world.y, 10 / this.camera.zoom);
-        if (ins) {
-          const box = arrowBounds({ ...sv, points: ins });
-          store.patchShapes([[sv.id, { points: ins, x: box.x, y: box.y, w: box.w, h: box.h }]]);
-          this.setDirty();
-          return;
-        }
+        // On/near the shaft: the two clicks already did their work.
+        const z = this.camera.zoom;
+        if (projectArrowInsert(sv, p.world.x, p.world.y, 12 / z, 0)) return;
       }
     }
     this.activateAtPoint(p);
@@ -5513,18 +5531,7 @@ export class Engine {
       e.preventDefault();
       const picking = this.exportPick;
       this.cancelTransientUi();
-      if (!picking) {
-        // Drilled into a group member: Esc steps back out to the group first.
-        if (this.selection.size === 1) {
-          const only = [...this.selection][0];
-          const members = this.groupMembers(only);
-          if (members.length > 1) {
-            this.setSelection(members);
-            return;
-          }
-        }
-        this.setSelection([]);
-      }
+      if (!picking) this.setSelection([]);
       return;
     }
     if (mod && e.code === 'KeyZ') {
@@ -6481,8 +6488,9 @@ export class Engine {
               ctx.strokeRect(cr.x + 1, cr.y + 1, cr.w - 2, cr.h - 2);
             }
           }
-          // Free arrows: waypoint dots for reshape (glued arrows keep auto curve).
-          if (v.type === 'arrow' && !v.fromId && !v.toId) {
+          // Free arrows: waypoint dots for reshape (glued arrows keep auto
+          // curve; grouped arrows are rigid — whole-group ops only).
+          if (v.type === 'arrow' && !v.fromId && !v.toId && !v.groupId) {
             const wps = arrowWaypoints(v);
             if (wps) {
               for (const p of wps) {
@@ -6494,6 +6502,15 @@ export class Engine {
                 ctx.lineWidth = 1.5 * s;
                 ctx.stroke();
               }
+            }
+            // Hovering the shaft previews the insert point (ring, no fill).
+            const prev = this.arrowInsertPreview;
+            if (prev && prev.shapeId === id && arrowWaypoints(v)) {
+              ctx.beginPath();
+              ctx.arc(prev.x, prev.y, hr, 0, Math.PI * 2);
+              ctx.strokeStyle = COLORS.selection;
+              ctx.lineWidth = 1.5 * s;
+              ctx.stroke();
             }
           }
         }
