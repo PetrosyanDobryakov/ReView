@@ -347,7 +347,23 @@ export function recordBoardVisit(id: string): void {
     const list = parseRecent(raw ? JSON.parse(raw) : []);
     const next = [{ id, at: Date.now() }, ...list.filter((e) => e.id !== id)].slice(0, RECENT_MAX);
     localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    localStorage.setItem(VISIT_SEQ_KEY, String(visitSeq() + 1));
   } catch {}
+}
+
+/**
+ * Monotonic visit counter (every board open bumps it). The Home back banner
+ * hides until the *next visit* — reopening the same board re-arms it,
+ * unlike id-based dismissal.
+ */
+const VISIT_SEQ_KEY = 'review-visit-seq';
+
+export function visitSeq(): number {
+  try {
+    return Number(localStorage.getItem(VISIT_SEQ_KEY)) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Recently visited boards (own + guest), newest first. Drops deleted boards. */

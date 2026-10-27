@@ -15,6 +15,7 @@ import {
   saveBoardLocally,
   isBoardPersistedLocally,
   listRecentBoards,
+  visitSeq,
   isOwnBoard,
   boardStorageKind,
 } from '../core/boards';
@@ -78,23 +79,26 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
   const [boards, setBoards] = useState<BoardMeta[]>(() => listBoards());
   const [recent, setRecent] = useState<BoardMeta[]>(() => listRecentBoards());
-  const [backDismissed, setBackDismissed] = useState<string | null>(() => {
+  const [backDismissedSeq, setBackDismissedSeq] = useState<number | null>(() => {
     try {
-      return localStorage.getItem('review-back-dismissed');
+      const raw = localStorage.getItem('review-back-dismissed');
+      const n = raw === null ? NaN : Number(raw);
+      return Number.isFinite(n) ? n : null;
     } catch {
       return null;
     }
   });
-  // Centered "back to the board I came from" banner; × dismisses it for
-  // this board id (a new visit re-arms it).
-  const backBoard = recent[0] && recent[0].id !== backDismissed ? recent[0] : null;
-  const dismissBackBoard = (id: string) => {
+  // Centered "back to the board I came from" banner; × hides it until the
+  // next board open (seq-based, so reopening the same board re-arms it).
+  const backBoard = recent[0] && visitSeq() !== backDismissedSeq ? recent[0] : null;
+  const dismissBackBoard = () => {
+    const seq = visitSeq();
     try {
-      localStorage.setItem('review-back-dismissed', id);
+      localStorage.setItem('review-back-dismissed', String(seq));
     } catch {
       /* ignore */
     }
-    setBackDismissed(id);
+    setBackDismissedSeq(seq);
   };
   const [activeTeam, setActiveTeam] = useState<string>('default');
   const [editingTeam, setEditingTeam] = useState<string | null>(null);
@@ -473,7 +477,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               className="icon-btn"
               title={t(locale, 'close')}
               aria-label={t(locale, 'close')}
-              onClick={() => dismissBackBoard(backBoard.id)}
+              onClick={dismissBackBoard}
             >
               ✕
             </button>
