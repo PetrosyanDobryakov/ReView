@@ -4842,6 +4842,22 @@ h3 .swap-text,
   gap: 16px;
   padding: 8px 2px 4px;
 }
+/* Centered back-to-board banner (dismissible). */
+.home-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+.home-back-go {
+  max-width: min(420px, calc(100vw - 120px));
+}
+.home-back-name {
+  overflow: hidden;
+  textOverflow: ellipsis;
+  white-space: nowrap;
+}
 .home-h1 {
   margin: 0;
   font-size: 34px;

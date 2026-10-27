@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.16.35
+
+### Interaction batch 2
+
+- **Home back banner.** «Назад к доске» moved from the header to a
+  centered dismissible banner (× forgets this board until the next visit).
+- **Arrow preview you can see.** The shaft hover ring actually repaints now
+  (it silently never did); vertex dots grab with grab/grabbing cursors,
+  distinct from object move.
+- **Hold to ungroup.** Разгруппировать needs an 800ms hold (no accidental
+  dissolves; Ctrl+Shift+G stays instant). Group ops refresh the open menu
+  live (Group↔Ungroup flips without reopening).
+- **Drag-only shapes.** Clicks plant nothing on any BoxTool figure —
+  double-clicks always fall through to tool reset.
+- **No mount flash, structurally.** Card geometry computes synchronously
+  for the first paint (same formula as the rAF), so no unscaled frame can
+  ever show, single- or multi-select.
+
 ## 0.16.34
 
 ### Feedback button + calmer Home footer
