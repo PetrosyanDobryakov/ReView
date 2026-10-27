@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.36
+
+### Back banner re-arms on revisit
+
+- **Dismissal is visit-based, not id-based.** The × used to forget the
+  board id, so reopening the same board never brought the banner back. Now
+  every board open bumps a visit counter and × hides until the next visit —
+  same board included.
+
 ## 0.16.35
 
 ### Interaction batch 2
