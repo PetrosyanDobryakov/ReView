@@ -377,6 +377,24 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       <header className="file-bar">
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
+          {recent[0] ? (
+            <>
+              <div className="island-sep" />
+              <button
+                type="button"
+                className="style-btn"
+                title={t(locale, 'backToBoard')}
+                aria-label={`${t(locale, 'backToBoard')}: ${recent[0].name}`}
+                onClick={() => navigateThemed(navigate, boardUrl(recent[0].id))}
+                style={{ maxWidth: 220 }}
+              >
+                <Icon name="chevronLeft" size={16} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {recent[0].name}
+                </span>
+              </button>
+            </>
+          ) : null}
           <div className="island-sep" />
           {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
             <button
