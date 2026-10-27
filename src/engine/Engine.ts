@@ -108,7 +108,7 @@ import {
   type AlignKind,
   alignViews,
 } from '../core/align';
-import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds } from '../core/shapes';
+import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds, arrowWaypoints, insertArrowWaypoint, removeArrowWaypoint } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
 import { updatePenSettings, updateShapeSettings } from '../core/settings';
@@ -1391,6 +1391,29 @@ export class Engine {
   }
 
   /**
+   * Waypoint dot of a single-selected free arrow under a screen point
+   * (or null). Glued arrows keep their auto curve — no dots, no hit.
+   */
+  hitArrowVertex(sx: number, sy: number): { shapeId: string; index: number } | null {
+    if (this.selection.size !== 1) return null;
+    const id = [...this.selection][0];
+    const v = this.views.get(id);
+    if (!v || v.type !== 'arrow' || v.locked || v.fromId || v.toId) return null;
+    const wps = arrowWaypoints(v);
+    if (!wps) return null;
+    const z = this.camera.zoom;
+    const ox = this.w / 2 - this.camera.x * z;
+    const oy = this.h / 2 - this.camera.y * z;
+    const rad = handleHitRadius();
+    for (let i = 0; i < wps.length; i++) {
+      const hx = wps[i].x * z + ox;
+      const hy = wps[i].y * z + oy;
+      if (Math.hypot(hx - sx, hy - sy) <= rad) return { shapeId: id, index: i };
+    }
+    return null;
+  }
+
+  /**
    * World-space center of the rotate knob for a hit id (`__group__` or shape id).
    * Same geometry as hit-test / paint — respect `rotateHandleTop` and shape rotation.
    * Confetti / celebrate effects should spawn from this point (or a pointer world fallback).
@@ -1833,6 +1856,47 @@ export class Engine {
     store.removeShapes(this.idsWithRidersInOrder(ids));
   }
 
+  /**
+   * All shape ids sharing the group of `id` (the id itself when ungrouped).
+   * Clicking a member selects this set; drill-in selects the member.
+   */
+  groupMembers(id: string): string[] {
+    const v = this.views.get(id);
+    const g = v?.groupId;
+    if (!v || !g) return [id];
+    const out: string[] = [];
+    for (const [mid, mv] of this.views) {
+      if (mv.groupId === g) out.push(mid);
+    }
+    return out.length ? out : [id];
+  }
+
+  /** Group the unlocked selection (≥2) under a fresh id. Flat, undoable. */
+  groupSelection(): void {
+    const ids = this.unlockedIds();
+    if (ids.length < 2) return;
+    const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    store.patchShapes(ids.map((id) => [id, { groupId: gid }] as [string, Partial<ShapeView>]));
+    this.setDirty();
+  }
+
+  /** Ungroup every group touched by the selection (whole groups, not just members). */
+  ungroupSelection(): void {
+    const gids = new Set<string>();
+    for (const id of this.selection) {
+      const g = this.views.get(id)?.groupId;
+      if (g) gids.add(g);
+    }
+    if (!gids.size) return;
+    const clear: Array<[string, readonly string[]]> = [];
+    for (const [id, v] of this.views) {
+      if (v.groupId && gids.has(v.groupId) && !v.locked) clear.push([id, ['groupId']]);
+    }
+    if (!clear.length) return;
+    store.patchShapesClearingKeys([], clear);
+    this.setDirty();
+  }
+
   private clipboard: ShapeView[] = [];
   private pasteN = 0;
   private pasteAt: { x: number; y: number } | null = null;
@@ -1841,6 +1905,21 @@ export class Engine {
   private cloneShapes(source: ShapeView[], dx: number, dy: number, pageId?: string): string[] {
     const idMap = new Map<string, string>();
     const ids: string[] = [];
+    // Fully-cloned groups stay together under a fresh id; partial copies
+    // drop the group (a distant copy must not join the original group).
+    const sourceIds = new Set(source.map((v) => v.id));
+    const groupRemap = new Map<string, string>();
+    for (const v of source) {
+      if (!v.groupId || groupRemap.has(v.groupId)) continue;
+      let full = true;
+      for (const [, mv] of this.views) {
+        if (mv.groupId === v.groupId && !sourceIds.has(mv.id)) {
+          full = false;
+          break;
+        }
+      }
+      groupRemap.set(v.groupId, full ? 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) : '');
+    }
     for (const v of source) {
       const newKey = store.addShape(
         {
@@ -1853,6 +1932,7 @@ export class Engine {
           fromPort: undefined,
           toId: undefined,
           toPort: undefined,
+          groupId: v.groupId ? groupRemap.get(v.groupId) || undefined : undefined,
         },
         pageId
       );
@@ -2240,6 +2320,61 @@ export class Engine {
     a.download = 'review-stroke.csv';
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  /** Single table → CSV (row-major cells, RFC quoting + BOM for Excel). */
+  exportTableCsvSelection(): void {
+    if (this.selection.size !== 1) return;
+    const v = this.views.get([...this.selection][0]);
+    if (!v || v.type !== 'table') return;
+    const { cols, rows, cells } = tableGrid(v);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const lines: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      const row: string[] = [];
+      for (let c = 0; c < cols; c++) row.push(q(cells[r * cols + c] ?? ''));
+      lines.push(row.join(','));
+    }
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-table.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  /** Single text/sticky → plain .txt. */
+  downloadTextSelection(): void {
+    if (this.selection.size !== 1) return;
+    const v = this.views.get([...this.selection][0]);
+    if (!v || (v.type !== 'text' && v.type !== 'sticky')) return;
+    const blob = new Blob([v.text ?? ''], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `review-${v.type}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  /** Single doc → PDF via the region exporter. */
+  async downloadDocPdf(): Promise<void> {
+    if (this.selection.size !== 1) return;
+    const v = this.views.get([...this.selection][0]);
+    if (!v || v.type !== 'doc') return;
+    try {
+      const result = await this.exportPdf(
+        { x: v.x, y: v.y, w: v.w, h: v.h },
+        { scale: 2, quality: 0.85, background: '#ffffff', ids: [v.id] }
+      );
+      if (!result) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(result.blob);
+      a.download = 'review-doc.pdf';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch {
+      /* ignore */
+    }
   }
 
   shapeInfo(id: string): { title: string; lines: string[] } | null {
@@ -4119,6 +4254,7 @@ export class Engine {
     'points',
     'pressures',
     'rotation',
+    'groupId',
     'fromId',
     'fromPort',
     'toId',
@@ -4749,7 +4885,35 @@ export class Engine {
 
   private onDblClick = (e: MouseEvent): void => {
     if (this.editing) return;
-    this.activateAtPoint(this.pointerInfo(e));
+    const p = this.pointerInfo(e);
+    // Arrow waypoint editing (single-selected free arrow): dot removes a
+    // middle waypoint, edge gains one. Glued arrows keep the auto curve.
+    if (this.selection.size === 1 && !this.exportPick && !this.crop) {
+      const sv = this.views.get([...this.selection][0]);
+      if (sv && sv.type === 'arrow' && !sv.locked && !sv.fromId && !sv.toId) {
+        const vh = this.hitArrowVertex(p.screen.x, p.screen.y);
+        if (vh) {
+          const wps = arrowWaypoints(sv);
+          if (wps && vh.index > 0 && vh.index < wps.length - 1) {
+            const next = removeArrowWaypoint(sv, vh.index);
+            if (next) {
+              const box = arrowBounds({ ...sv, points: next });
+              store.patchShapes([[sv.id, { points: next, x: box.x, y: box.y, w: box.w, h: box.h }]]);
+              this.setDirty();
+            }
+          }
+          return;
+        }
+        const ins = insertArrowWaypoint(sv, p.world.x, p.world.y, 10 / this.camera.zoom);
+        if (ins) {
+          const box = arrowBounds({ ...sv, points: ins });
+          store.patchShapes([[sv.id, { points: ins, x: box.x, y: box.y, w: box.w, h: box.h }]]);
+          this.setDirty();
+          return;
+        }
+      }
+    }
+    this.activateAtPoint(p);
   };
 
   /** Shared edit entry for dblclick (mouse) and double-tap (touch). */
@@ -5349,7 +5513,18 @@ export class Engine {
       e.preventDefault();
       const picking = this.exportPick;
       this.cancelTransientUi();
-      if (!picking) this.setSelection([]);
+      if (!picking) {
+        // Drilled into a group member: Esc steps back out to the group first.
+        if (this.selection.size === 1) {
+          const only = [...this.selection][0];
+          const members = this.groupMembers(only);
+          if (members.length > 1) {
+            this.setSelection(members);
+            return;
+          }
+        }
+        this.setSelection([]);
+      }
       return;
     }
     if (mod && e.code === 'KeyZ') {
@@ -5386,6 +5561,12 @@ export class Engine {
     if (mod && e.shiftKey && e.code === 'KeyL') {
       e.preventDefault();
       this.toggleLockSelection();
+      return;
+    }
+    if (mod && e.code === 'KeyG') {
+      e.preventDefault();
+      if (e.shiftKey) this.ungroupSelection();
+      else this.groupSelection();
       return;
     }
     if (mod && e.code === 'KeyX') {
@@ -6269,8 +6450,7 @@ export class Engine {
             this.paintRotateKnob(ctx, v.x + local.x, v.y + local.y, hr, s, topMid);
           }
           // ponytail: tables get FigJam-style [+]/[−] pills (push/pop row / column) + active-cell frame
-          if (v.type === 'table') {
-            for (const p of this.tablePlusPills(v)) {
+          if (v.type === 'table') {            for (const p of this.tablePlusPills(v)) {
               const px = v.x + p.lx;
               const py = v.y + p.ly;
               ctx.beginPath();
@@ -6299,6 +6479,21 @@ export class Engine {
               ctx.strokeStyle = COLORS.selection;
               ctx.lineWidth = 2 * s;
               ctx.strokeRect(cr.x + 1, cr.y + 1, cr.w - 2, cr.h - 2);
+            }
+          }
+          // Free arrows: waypoint dots for reshape (glued arrows keep auto curve).
+          if (v.type === 'arrow' && !v.fromId && !v.toId) {
+            const wps = arrowWaypoints(v);
+            if (wps) {
+              for (const p of wps) {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, hr * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = handleFill;
+                ctx.fill();
+                ctx.strokeStyle = COLORS.selection;
+                ctx.lineWidth = 1.5 * s;
+                ctx.stroke();
+              }
             }
           }
         }

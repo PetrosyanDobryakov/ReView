@@ -95,6 +95,12 @@ export interface ShapeView {
   pageThumbs?: Array<string | null>;
   page?: number;
   locked?: boolean;
+  /**
+   * Persistent group id (Ctrl+G). Clicking a member selects the whole
+   * group; drill-in and Esc navigate levels. Just a string — syncs free,
+   * undoable like any scalar. Absent = ungrouped.
+   */
+  groupId?: string;
   cropX?: number;
   cropY?: number;
   cropW?: number;
@@ -928,7 +934,8 @@ type Point = { x: number; y: number };
 type ArrowCurve =
   | { kind: 'line'; start: Point; end: Point; endAngle: number }
   | { kind: 'quadratic'; start: Point; control: Point; end: Point; endAngle: number }
-  | { kind: 'cubic'; start: Point; control1: Point; control2: Point; end: Point; endAngle: number };
+  | { kind: 'cubic'; start: Point; control1: Point; control2: Point; end: Point; endAngle: number }
+  | { kind: 'poly'; points: Point[]; start: Point; end: Point; endAngle: number };
 
 function isPortId(value: string | undefined): value is PortId {
   return value !== undefined && PORTS.some((port) => port === value);
@@ -942,6 +949,19 @@ function arrowCurve(v: ShapeView): ArrowCurve | null {
   const fromPort = isPortId(v.fromPort) ? v.fromPort : null;
   const toPort = isPortId(v.toPort) ? v.toPort : null;
   const isConnected = Boolean(v.fromId && v.toId && fromPort && toPort);
+
+  // Free arrows with elbows: even lengths ≥6 except legacy cubics (8, 12, …)
+  // draw straight segments through every stored waypoint. Lengths 8/12/…
+  // keep the old cubic render so existing docs never change shape.
+  if (!isConnected && pts.length >= 6 && pts.length % 4 !== 0) {
+    const points: Point[] = [];
+    for (let i = 0; i + 1 < pts.length; i += 2) points.push({ x: pts[i], y: pts[i + 1] });
+    const end = points[points.length - 1];
+    const prev = points[points.length - 2] ?? start;
+    let endAngle = Math.atan2(end.y - prev.y, end.x - prev.x);
+    if (!isFinite(endAngle)) endAngle = Math.atan2(end.y - start.y, end.x - start.x);
+    return { kind: 'poly', points, start, end, endAngle };
+  }
 
   if (pts.length >= 8) {
     const control1 = { x: pts[2], y: pts[3] };
@@ -997,6 +1017,16 @@ function arrowCurve(v: ShapeView): ArrowCurve | null {
 
 function pointOnArrowCurve(curve: ArrowCurve, t: number): Point {
   const u = 1 - t;
+  if (curve.kind === 'poly') {
+    const pts = curve.points;
+    const segs = Math.max(1, pts.length - 1);
+    const f = Math.min(0.99999, Math.max(0, t)) * segs;
+    const i = Math.min(segs - 1, Math.floor(f));
+    const u2 = f - i;
+    const a = pts[i];
+    const b = pts[i + 1];
+    return { x: a.x + (b.x - a.x) * u2, y: a.y + (b.y - a.y) * u2 };
+  }
   if (curve.kind === 'quadratic') {
     return {
       x: u * u * curve.start.x + 2 * u * t * curve.control.x + t * t * curve.end.x,
@@ -1027,7 +1057,16 @@ function pointOnArrowCurve(curve: ArrowCurve, t: number): Point {
 function arrowSampleSegments(curve: ArrowCurve): number {
   const { start, end } = curve;
   let span = Math.hypot(end.x - start.x, end.y - start.y);
-  if (curve.kind === 'quadratic') {
+  if (curve.kind === 'poly') {
+    let total = 0;
+    for (let i = 1; i < curve.points.length; i++) {
+      total += Math.hypot(
+        curve.points[i].x - curve.points[i - 1].x,
+        curve.points[i].y - curve.points[i - 1].y
+      );
+    }
+    span = Math.max(span, total);
+  } else if (curve.kind === 'quadratic') {
     span = Math.max(
       span,
       Math.hypot(curve.control.x - start.x, curve.control.y - start.y) +
@@ -1256,6 +1295,8 @@ export function describeArrow(
     pathD = `M${sx} ${sy} C${curve.control1.x + ox} ${curve.control1.y + oy} ${curve.control2.x + ox} ${curve.control2.y + oy} ${ex} ${ey}`;
   } else if (curve.kind === 'quadratic') {
     pathD = `M${sx} ${sy} Q${curve.control.x + ox} ${curve.control.y + oy} ${ex} ${ey}`;
+  } else if (curve.kind === 'poly') {
+    pathD = `M${sx} ${sy}` + curve.points.slice(1).map((p) => `L${p.x + ox} ${p.y + oy}`).join('');
   } else {
     pathD = `M${sx} ${sy} L${ex} ${ey}`;
   }
@@ -1268,6 +1309,132 @@ export function arrowHitPolyline(v: ShapeView): number[] {
   const geom = getArrowGeom(v);
   if (!geom) return v.points && v.points.length >= 2 ? v.points.slice() : [];
   return geom.hitPoly;
+}
+
+/** Max stored coords for a waypoint arrow (32 waypoints). */
+export const ARROW_MAX_POINTS = 64;
+
+/**
+ * Stored waypoints (start..end) of a free arrow, or null when the arrow is
+ * not waypoint-editable (glued arrows keep their auto curve; malformed
+ * point lists stay bbox-driven).
+ */
+export function arrowWaypoints(v: ShapeView): Array<{ x: number; y: number }> | null {
+  if (v.type !== 'arrow' || v.fromId || v.toId) return null;
+  const pts = v.points ?? [];
+  if (pts.length < 4 || pts.length % 2 !== 0) return null;
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i + 1 < pts.length; i += 2) {
+    const x = pts[i];
+    const y = pts[i + 1];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    out.push({ x, y });
+  }
+  return out.length >= 2 ? out : null;
+}
+
+function nearestOnSeg(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number
+): { x: number; y: number; d: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.min(1, Math.max(0, t));
+  const x = ax + dx * t;
+  const y = ay + dy * t;
+  return { x, y, d: Math.hypot(px - x, py - y) };
+}
+
+/**
+ * Keep stored lengths render-stable: exactly 4, or ≥6 with length % 4 !== 0
+ * (lengths 8/12/… render as legacy cubics). Forbidden lengths gain one
+ * invisible collinear midpoint before the end; over the cap → null.
+ */
+function normalizeArrowPoints(out: number[]): number[] | null {
+  if (out.length === 4) return out;
+  let cur = out;
+  let guard = 0;
+  while (cur.length >= 6 && cur.length % 4 === 0 && guard++ < 8) {
+    if (cur.length + 2 > ARROW_MAX_POINTS) return null;
+    const n = cur.length / 2;
+    const ax = cur[(n - 2) * 2];
+    const ay = cur[(n - 2) * 2 + 1];
+    const bx = cur[(n - 1) * 2];
+    const by = cur[(n - 1) * 2 + 1];
+    cur = [...cur.slice(0, (n - 1) * 2), (ax + bx) / 2, (ay + by) / 2, bx, by];
+  }
+  if (cur.length >= 6 && cur.length % 4 === 0) return null;
+  return cur;
+}
+
+/**
+ * Insert a waypoint into a free arrow at the projection of (x, y).
+ * Poly arrows split the nearest stored segment; 4-point arrows split the
+ * visible sampled shaft (becoming poly). Legacy free cubics (8/12/…)
+ * refuse — drag endpoints only. Returns the new points or null.
+ */
+export function insertArrowWaypoint(v: ShapeView, x: number, y: number, tol: number): number[] | null {
+  const wps = arrowWaypoints(v);
+  if (!wps || wps.length < 2) return null;
+  const pts = v.points ?? [];
+  const poly = pts.length >= 6 && pts.length % 4 !== 0;
+  if (!poly && pts.length !== 4) return null;
+  if (poly) {
+    let best = -1;
+    let bestD = tol;
+    let bx = 0;
+    let by = 0;
+    for (let i = 0; i + 1 < wps.length; i++) {
+      const r = nearestOnSeg(x, y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
+      if (r.d <= bestD) {
+        bestD = r.d;
+        best = i;
+        bx = r.x;
+        by = r.y;
+      }
+    }
+    if (best < 0) return null;
+    const out = pts.slice(0, (best + 1) * 2);
+    out.push(bx, by);
+    return normalizeArrowPoints(out.concat(pts.slice((best + 1) * 2)));
+  }
+  // 4-point arrow: split the visible sampled shaft.
+  const shaft = getArrowGeom(v)?.shaft ?? [];
+  let bestD = tol;
+  let bx = 0;
+  let by = 0;
+  let found = false;
+  for (let i = 0; i + 3 < shaft.length; i += 2) {
+    const r = nearestOnSeg(x, y, shaft[i], shaft[i + 1], shaft[i + 2], shaft[i + 3]);
+    if (r.d <= bestD) {
+      bestD = r.d;
+      bx = r.x;
+      by = r.y;
+      found = true;
+    }
+  }
+  if (!found) return null;
+  return normalizeArrowPoints([pts[0], pts[1], bx, by, pts[2], pts[3]]);
+}
+
+/**
+ * Delete a middle waypoint (endpoints stay). Forbidden lengths are padded
+ * back with an invisible midpoint, so the elbow still disappears without a
+ * render jump. Returns the new points or null.
+ */
+export function removeArrowWaypoint(v: ShapeView, index: number): number[] | null {
+  const wps = arrowWaypoints(v);
+  if (!wps || wps.length < 3) return null;
+  if (index <= 0 || index >= wps.length - 1) return null;
+  const out = wps.filter((_, i) => i !== index).flatMap((p) => [p.x, p.y]);
+  if (out.length < 4) return null;
+  return normalizeArrowPoints(out);
 }
 
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
@@ -1749,7 +1916,7 @@ export function drawShape(
   hideText = false,
   /** Table only: hide just this cell's text (the overlay covers it while editing). */
   hideCell?: { row: number; col: number },
-  /** When true, caller already applied `withShapeRotation` — avoid per-frame `{...v}` clones. */
+  /** When true, caller already applied `withShapeRotation` — avoids recursion. */
   skipRotation = false
 ): void {
   if (!skipRotation && shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
@@ -1758,6 +1925,31 @@ export function drawShape(
     );
     return;
   }
+  // Pen carries its own alpha (highlighter translucency); everything else
+  // multiplies the ambient alpha here, so opacity works for all types.
+  const ambient = v.type === 'pen' ? 1 : (v.alpha ?? 1);
+  if (!(ambient < 1)) {
+    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell);
+    return;
+  }
+  ctx.save();
+  ctx.globalAlpha = ctx.globalAlpha * ambient;
+  try {
+    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell);
+  } finally {
+    ctx.restore();
+  }
+}
+
+/** drawShape without rotation/alpha handling (see the wrapper above). */
+function drawShapeBody(
+  ctx: CanvasRenderingContext2D,
+  v: ShapeView,
+  textColor: string,
+  boardBg: string,
+  hideText: boolean,
+  hideCell: { row: number; col: number } | undefined
+): void {
   switch (v.type) {
     case 'rect': {
       ctx.strokeStyle = v.stroke;
@@ -3253,7 +3445,9 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   ctx.lineJoin = 'round';
   ctx.beginPath();
   ctx.moveTo(curve.start.x, curve.start.y);
-  if (curve.kind === 'cubic') {
+  if (curve.kind === 'poly') {
+    for (const p of curve.points.slice(1)) ctx.lineTo(p.x, p.y);
+  } else if (curve.kind === 'cubic') {
     ctx.bezierCurveTo(
       curve.control1.x,
       curve.control1.y,

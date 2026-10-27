@@ -8,6 +8,7 @@ import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW } from '../core/orbitDraw';
 import { drawOrbitEraser, drawOrbitLasso, drawOrbitMarquee } from './orbitField';
 import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue } from '../core/settings';
+import { createStrokeSmoother, type StrokeSmoother } from '../core/strokeSmooth';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
@@ -113,7 +114,7 @@ function rotatedHandleCursor(handle: HandleId, rotDeg: number): string {
 export class SelectTool extends Tool {
   readonly id = 'select';
   cursor = 'default';
-  private mode: 'idle' | 'move' | 'marquee' | 'rotate' | 'tablediv' | 'tableedge' = 'idle';
+  private mode: 'idle' | 'move' | 'marquee' | 'rotate' | 'tablediv' | 'tableedge' | 'vertex' = 'idle';
   private resizing: { shapeId: string; handle: HandleId } | null = null;
   private groupResizing: HandleId | null = null;
   private groupOrigBox: ShapeBox | null = null;
@@ -153,6 +154,12 @@ export class SelectTool extends Tool {
    * it got selected and the drag marquees — a tap must not clear the selection.
    */
   private downSelectedContainer = false;
+  /**
+   * Dragging an arrow waypoint dot (single-selected free arrow). BBox
+   * corners win over endpoint dots (resize covers endpoints); middle
+   * waypoints reshape here.
+   */
+  private vertexDrag: { shapeId: string; index: number } | null = null;
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
@@ -168,6 +175,10 @@ export class SelectTool extends Tool {
     if (h) {
       const v = engine.views.get(h.shapeId);
       engine.setCursor(rotatedHandleCursor(h.handle, shapeRotation(v ?? {})));
+      return;
+    }
+    if (engine.selection.size === 1 && engine.hitArrowVertex(p.screen.x, p.screen.y)) {
+      engine.setCursor('move');
       return;
     }
     const div = engine.hitTableDivider(p.world.x, p.world.y);
@@ -256,6 +267,20 @@ export class SelectTool extends Tool {
       this.snapshotRiders(engine);
       return;
     }
+    // Arrow waypoint dots (single-selected free arrow; bbox handles above win).
+    if (engine.selection.size === 1) {
+      const av = engine.hitArrowVertex(p.screen.x, p.screen.y);
+      if (av) {
+        const v = engine.views.get(av.shapeId);
+        if (v && v.type === 'arrow' && v.points && !v.locked) {
+          this.vertexDrag = { shapeId: av.shapeId, index: av.index };
+          this.originals.set(av.shapeId, { ...v, points: [...v.points] });
+          this.snapshotRiders(engine);
+          this.mode = 'vertex';
+          return;
+        }
+      }
+    }
     // interior table dividers win over move/marquee (single selected table only)
     if (engine.selection.size === 1) {
       const div = engine.hitTableDivider(p.world.x, p.world.y);
@@ -315,12 +340,22 @@ export class SelectTool extends Tool {
     if (hit || insideBounds) {
       const wasSelected = hit ? engine.selection.has(hit) : false;
       if (hit) {
-        if (p.shift && engine.selection.has(hit)) {
-          engine.setSelection([...engine.selection].filter((id) => id !== hit));
+        // Groups: click a member selects the whole group; clicking again
+        // drills to the member, once more pops back out. Shift adds/removes
+        // the whole group.
+        const members = engine.groupMembers(hit);
+        const sel = engine.selection;
+        const selIsGroup = members.length > 1 && sel.size === members.length && members.every((id) => sel.has(id));
+        if (p.shift && sel.has(hit)) {
+          engine.setSelection([...sel].filter((id) => !members.includes(id)));
         } else if (p.shift) {
-          engine.setSelection([...engine.selection, hit]);
-        } else if (!engine.selection.has(hit)) {
+          engine.setSelection([...sel, ...members.filter((id) => !sel.has(id))]);
+        } else if (members.length > 1 && selIsGroup) {
           engine.setSelection([hit]);
+        } else if (sel.size === 1 && sel.has(hit) && members.length > 1) {
+          engine.setSelection(members);
+        } else if (!selIsGroup) {
+          engine.setSelection(members);
         }
       }
       // Tray hosts (tables / photos / PDFs / frames) select on first press and
@@ -359,6 +394,23 @@ export class SelectTool extends Tool {
       this.moved,
       Math.hypot(p.world.x - this.start.x, p.world.y - this.start.y) * engine.camera.zoom
     );
+    if (this.mode === 'vertex' && this.vertexDrag) {
+      const t = this.vertexDrag;
+      const o = this.originals.get(t.shapeId);
+      const live = engine.views.get(t.shapeId);
+      if (!o || !live || live.type !== 'arrow' || !o.points) return;
+      const dx = p.world.x - this.start.x;
+      const dy = p.world.y - this.start.y;
+      const points = [...o.points];
+      points[t.index * 2] = o.points[t.index * 2] + dx;
+      points[t.index * 2 + 1] = o.points[t.index * 2 + 1] + dy;
+      // World-space points: bbox follows the geometry (same pad as creation).
+      const box = arrowBounds({ ...live, points });
+      engine.views.set(t.shapeId, { ...live, points, x: box.x, y: box.y, w: box.w, h: box.h });
+      store.patchShapes([[t.shapeId, { points, x: box.x, y: box.y, w: box.w, h: box.h }]]);
+      engine.setDirty();
+      return;
+    }
     if (this.mode === 'tablediv' && this.tableDiv) {
       const t = this.tableDiv;
       const v = engine.views.get(t.shapeId);
@@ -595,6 +647,9 @@ export class SelectTool extends Tool {
     if (this.resizing) {
       engine.updateConnectedArrows(new Set([this.resizing.shapeId, ...this.stuck.keys()]));
     }
+    if (this.vertexDrag) {
+      engine.updateConnectedArrows(new Set([this.vertexDrag.shapeId, ...this.stuck.keys()]));
+    }
     if (this.mode === 'tablediv' && this.tableDiv) {
       engine.updateConnectedArrows(new Set([this.tableDiv.shapeId, ...this.stuck.keys()]));
     }
@@ -609,6 +664,7 @@ export class SelectTool extends Tool {
     }
     this.mode = 'idle';
     this.resizing = null;
+    this.vertexDrag = null;
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.marquee = null;
@@ -690,6 +746,7 @@ export class SelectTool extends Tool {
     if (touched.size) engine.updateConnectedArrows(touched);
     this.mode = 'idle';
     this.resizing = null;
+    this.vertexDrag = null;
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.marquee = null;
@@ -722,6 +779,7 @@ export class SelectTool extends Tool {
     this.mode = 'idle';
     this.marquee = null;
     this.resizing = null;
+    this.vertexDrag = null;
     this.groupResizing = null;
     this.groupOrigBox = null;
     this.tableDiv = null;
@@ -1087,9 +1145,13 @@ export class PenTool extends Tool {
   private shift = false;
   /** Stylus only — mouse pressure is a flat 0.5 and must not force the ribbon path. */
   private capturePressure = false;
+  /** Tablet jitter stabilizer (One Euro), fresh per stroke. */
+  private smoother: StrokeSmoother = createStrokeSmoother(0);
 
   onDown(_engine: Engine, p: PointerInfo): void {
-    this.pts = [p.world.x, p.world.y];
+    this.smoother = createStrokeSmoother(settings.pen.smoothing);
+    const s = this.smoother.push(p.world.x, p.world.y);
+    this.pts = [s.x, s.y];
     this.capturePressure = p.pointerType === 'pen';
     this.pressures = this.capturePressure ? [clampPressure(p.pressure)] : [];
     this.last = p.world;
@@ -1107,12 +1169,13 @@ export class PenTool extends Tool {
       return;
     }
     this.last = p.world;
+    const s = this.smoother.push(p.world.x, p.world.y);
     const n = this.pts.length;
-    if (n >= 2 && Math.hypot(p.world.x - this.pts[n - 2], p.world.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
-    this.pts.push(p.world.x, p.world.y);
+    if (n >= 2 && Math.hypot(s.x - this.pts[n - 2], s.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
+    this.pts.push(s.x, s.y);
     if (this.capturePressure) this.pressures.push(clampPressure(p.pressure));
     const pen = effectivePen();
-    if (n >= 2) engine.orbitSprinkle(this.pts[n - 2], this.pts[n - 1], p.world.x, p.world.y, pen.color);
+    if (n >= 2) engine.orbitSprinkle(this.pts[n - 2], this.pts[n - 1], s.x, s.y, pen.color);
     publishDraft({
       kind: 'pen',
       points: this.pts,

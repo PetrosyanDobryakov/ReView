@@ -205,6 +205,9 @@ function MediaCard({
         // events over this sibling).
         const screenW = Math.max(1, b.x - a.x);
         const screenH = Math.max(1, b.y - a.y);
+        // DOM backdrop honors shape opacity like the canvas bodies do.
+        const dim = v.alpha !== undefined && v.alpha < 1 ? String(Math.max(0.05, v.alpha)) : '';
+        if (box.style.opacity !== dim) box.style.opacity = dim;
         if (kind === 'audio') {
           box.style.left = `${Math.round(a.x)}px`;
           box.style.top = `${Math.round(a.y)}px`;
