@@ -169,7 +169,9 @@ export class SelectTool extends Tool {
 
   onHover(engine: Engine, p: PointerInfo): void {
     if (this.mode !== 'idle') return;
-    // Insert preview is recomputed every idle frame; stale dots never linger.
+    // Insert preview is recomputed every idle frame; a transition either way
+    // dirties exactly one repaint so the ring never lags or lingers.
+    const hadPreview = engine.arrowInsertPreview !== null;
     engine.arrowInsertPreview = null;
     if (engine.hitTablePlus(p.world.x, p.world.y)) {
       engine.setCursor('pointer');
@@ -186,7 +188,8 @@ export class SelectTool extends Tool {
       return;
     }
     if (engine.selection.size === 1 && engine.hitArrowVertex(p.screen.x, p.screen.y)) {
-      engine.setCursor('move');
+      engine.setCursor('grab');
+      if (hadPreview) engine.setDirty();
       return;
     }
     // Hovering a free arrow shaft previews the insert point (system cursor
@@ -199,10 +202,12 @@ export class SelectTool extends Tool {
         if (found) {
           engine.arrowInsertPreview = { shapeId: sv.id, x: found.x, y: found.y };
           engine.setCursor('none');
+          engine.setDirty();
           return;
         }
       }
     }
+    if (hadPreview) engine.setDirty();
     const div = engine.hitTableDivider(p.world.x, p.world.y);
     if (div) {
       engine.setCursor(div.kind === 'col' ? 'ew-resize' : 'ns-resize');
@@ -300,6 +305,7 @@ export class SelectTool extends Tool {
           this.originals.set(av.shapeId, { ...v, points: [...v.points] });
           this.snapshotRiders(engine);
           this.mode = 'vertex';
+          engine.setCursor('grabbing');
           return;
         }
       }
@@ -323,6 +329,7 @@ export class SelectTool extends Tool {
             this.snapshotRiders(engine);
             this.mode = 'vertex';
             this.lastInsertAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            engine.setCursor('grabbing');
             engine.setDirty();
             return;
           }
@@ -1427,8 +1434,6 @@ abstract class BoxTool extends Tool {
   protected cur: { x: number; y: number } | null = null;
   protected movedScreen = 0;
   protected shift = false;
-  /** Last click-place (screen px + time) — a second tap in place resets instead of planting a twin. */
-  private lastPlace: { t: number; x: number; y: number } | null = null;
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.start = p.world;
@@ -1448,26 +1453,11 @@ abstract class BoxTool extends Tool {
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
-    // Double-click in one spot must not plant twin shapes: the second tap
-    // resets to select (the dblclick handler then just clears selection).
-    // Drags break the pair; pen/mouse drawing is exempt by design.
-    if (this.start && this.movedScreen < dragThresholdPx()) {
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const lp = this.lastPlace;
-      if (
-        lp &&
-        now - lp.t < 350 &&
-        Math.hypot(p.screen.x - lp.x, p.screen.y - lp.y) < 12
-      ) {
-        this.lastPlace = null;
-        this.resetDraw();
-        engine.setTool('select');
-        engine.setSelection([]);
-        return;
-      }
-      this.lastPlace = { t: now, x: p.screen.x, y: p.screen.y };
-    } else {
-      this.lastPlace = null;
+    // Shapes are drag-only (A→B): a click plants nothing, so double-clicks
+    // can never twin a figure and always fall through to tool reset.
+    if (!this.start || this.movedScreen < dragThresholdPx()) {
+      this.resetDraw();
+      return;
     }
     const extra =
       this.shapeType === 'rect'
@@ -1481,7 +1471,6 @@ abstract class BoxTool extends Tool {
   }
 
   cancel(_engine: Engine): void {
-    this.lastPlace = null;
     this.resetDraw();
   }
 
@@ -1496,7 +1485,7 @@ abstract class BoxTool extends Tool {
     return this.shift ? squareFromAnchor(this.start, this.cur) : normalizeBox(this.start, this.cur);
   }
 
-  /** Click places the default size; drag honours Shift-to-square. */
+  /** Drag honours Shift-to-square (clicks plant nothing — drag-only). */
   protected commitDrawnBox(p: PointerInfo): ShapeBox | null {
     if (!this.start || !this.cur) return null;
     this.shift = p.shift;

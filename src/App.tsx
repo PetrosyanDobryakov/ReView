@@ -927,10 +927,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       );
       const unlockedCount = selected.filter((v) => !v.locked).length;
       const touchedGroups = new Set(selected.filter((v) => v.groupId).map((v) => v.groupId as string));
-      // One toggle, never both: grouped selection offers Ungroup, otherwise Group.
+      // One toggle, never both: grouped selection offers Ungroup (press and
+      // hold — no accidental dissolves), otherwise Group.
       if (touchedGroups.size) {
         menuEntries.push(
-          { label: t(locale, 'ctxUngroup'), hint: `${modKey()}+Shift+G`, run: () => { commitOpenEditors(); e?.ungroupSelection(); } }
+          { label: t(locale, 'ctxUngroup'), hint: `${modKey()}+Shift+G`, holdMs: UNLOCK_HOLD_MS, run: () => { commitOpenEditors(); e?.ungroupSelection(); } }
         );
       } else if (unlockedCount >= 2) {
         menuEntries.push(

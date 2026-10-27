@@ -78,6 +78,24 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [teams, setTeams] = useState<Team[]>(() => listTeams());
   const [boards, setBoards] = useState<BoardMeta[]>(() => listBoards());
   const [recent, setRecent] = useState<BoardMeta[]>(() => listRecentBoards());
+  const [backDismissed, setBackDismissed] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('review-back-dismissed');
+    } catch {
+      return null;
+    }
+  });
+  // Centered "back to the board I came from" banner; × dismisses it for
+  // this board id (a new visit re-arms it).
+  const backBoard = recent[0] && recent[0].id !== backDismissed ? recent[0] : null;
+  const dismissBackBoard = (id: string) => {
+    try {
+      localStorage.setItem('review-back-dismissed', id);
+    } catch {
+      /* ignore */
+    }
+    setBackDismissed(id);
+  };
   const [activeTeam, setActiveTeam] = useState<string>('default');
   const [editingTeam, setEditingTeam] = useState<string | null>(null);
   const [teamName, setTeamName] = useState('');
@@ -379,24 +397,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       <header className="file-bar">
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
-          {recent[0] ? (
-            <>
-              <div className="island-sep" />
-              <button
-                type="button"
-                className="style-btn"
-                title={t(locale, 'backToBoard')}
-                aria-label={`${t(locale, 'backToBoard')}: ${recent[0].name}`}
-                onClick={() => navigateThemed(navigate, boardUrl(recent[0].id))}
-                style={{ maxWidth: 220 }}
-              >
-                <Icon name="chevronLeft" size={16} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {recent[0].name}
-                </span>
-              </button>
-            </>
-          ) : null}
           <div className="island-sep" />
           {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
             <button
@@ -456,6 +456,29 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       </header>
 
       <main className="home-shell">
+        {backBoard ? (
+          <div className="home-back">
+            <button
+              type="button"
+              className="style-btn home-back-go"
+              title={t(locale, 'backToBoard')}
+              aria-label={`${t(locale, 'backToBoard')}: ${backBoard.name}`}
+              onClick={() => navigateThemed(navigate, boardUrl(backBoard.id))}
+            >
+              <Icon name="chevronLeft" size={16} />
+              <span className="home-back-name">{backBoard.name}</span>
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title={t(locale, 'close')}
+              aria-label={t(locale, 'close')}
+              onClick={() => dismissBackBoard(backBoard.id)}
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
         <div className="home-hero">
           <h1 className="home-h1">{t(locale, 'boardsTitle')}</h1>
         </div>

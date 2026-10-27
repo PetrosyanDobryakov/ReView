@@ -1893,6 +1893,8 @@ export class Engine {
     const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     store.patchShapes(ids.map((id) => [id, { groupId: gid }] as [string, Partial<ShapeView>]));
     this.setDirty();
+    // Refresh React selection snapshots so the open menu flips Group→Ungroup live.
+    this.events.onSelection?.([...this.selection]);
   }
 
   /** Ungroup every group touched by the selection (whole groups, not just members). */
@@ -1910,6 +1912,8 @@ export class Engine {
     if (!clear.length) return;
     store.patchShapesClearingKeys([], clear);
     this.setDirty();
+    // Same live refresh: the open menu flips Ungroup→Group without reopening.
+    this.events.onSelection?.([...this.selection]);
   }
 
   private clipboard: ShapeView[] = [];

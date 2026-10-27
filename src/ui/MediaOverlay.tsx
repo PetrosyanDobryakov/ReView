@@ -27,6 +27,66 @@ const BTN_W = 104;
 /** Volume label column shares one fixed width for the same reason. */
 const VOL_LABEL_W = 96;
 
+interface MediaCardLayout {
+  left: number;
+  top: number;
+  width: number;
+  /** Null = auto height (video dock flows). */
+  height: number | null;
+  transform: string;
+  inner: { width: number; left: number; top: number; transform: string } | null;
+}
+
+/**
+ * Card geometry from the world rect — one formula for the first paint and
+ * the rAF loop, so mounting never flashes an unscaled card (the multi-select
+ * "one big player" flash). Audio fills its rect with contain-fit controls;
+ * the video dock matches the frame width.
+ */
+function layoutMediaCard(
+  engine: Engine,
+  shapeId: string,
+  kind: 'audio' | 'video'
+): MediaCardLayout | null {
+  const v = engine.views.get(shapeId);
+  if (!v || (v.type !== 'audio' && v.type !== 'video')) return null;
+  const a = engine.worldToScreen(v.x, v.y);
+  const b = engine.worldToScreen(v.x + v.w, v.y + v.h);
+  const screenW = Math.max(1, b.x - a.x);
+  const screenH = Math.max(1, b.y - a.y);
+  if (kind === 'audio') {
+    const estH = AUDIO_CARD_H;
+    // Contain-fit scale, but the content width stretches to fill:
+    // extra horizontal space grows the sliders (timeline first), so
+    // a wide window means finer scrubbing instead of empty margins.
+    const kc = Math.max(0.01, Math.min(screenW / CARD_W, screenH / estH));
+    return {
+      left: a.x,
+      top: a.y,
+      width: screenW,
+      height: screenH,
+      transform: '',
+      inner: {
+        width: screenW / kc,
+        left: 0,
+        top: (screenH - estH * kc) / 2,
+        transform: `scale(${kc.toFixed(4)})`,
+      },
+    };
+  }
+  // Video dock: longitudinal tab, same width as the frame on screen
+  // at any zoom — fixed to the board like audio, not constant on screen.
+  const k = screenW / VIDEO_W;
+  return {
+    left: a.x,
+    top: b.y + 8,
+    width: VIDEO_W,
+    height: null,
+    transform: `scale(${k.toFixed(4)})`,
+    inner: null,
+  };
+}
+
 function VolRow({
   label,
   value,
@@ -206,40 +266,25 @@ function MediaCard({
         // above hides it only when fully out). Wheel over controls zooms the
         // board (forwarded by the effect below, since the canvas never sees
         // events over this sibling).
-        const screenW = Math.max(1, b.x - a.x);
-        const screenH = Math.max(1, b.y - a.y);
+        const lay = layoutMediaCard(engine, shapeId, kind);
+        if (!lay) {
+          box.style.display = 'none';
+          return;
+        }
         // DOM backdrop honors shape opacity like the canvas bodies do.
         const dim = v.alpha !== undefined && v.alpha < 1 ? String(Math.max(0.05, v.alpha)) : '';
         if (box.style.opacity !== dim) box.style.opacity = dim;
-        if (kind === 'audio') {
-          box.style.left = `${Math.round(a.x)}px`;
-          box.style.top = `${Math.round(a.y)}px`;
-          box.style.width = `${Math.round(screenW)}px`;
-          box.style.height = `${Math.round(screenH)}px`;
-          if (box.style.transform) box.style.transform = '';
-          const inner = innerRef.current;
-          if (inner) {
-            const estH = AUDIO_CARD_H;
-            // Contain-fit scale, but the content width stretches to fill:
-            // extra horizontal space grows the sliders (timeline first), so
-            // a wide window means finer scrubbing instead of empty margins.
-            const kc = Math.max(0.01, Math.min(screenW / CARD_W, screenH / estH));
-            inner.style.width = `${(screenW / kc).toFixed(1)}px`;
-            inner.style.left = '0px';
-            inner.style.top = `${((screenH - estH * kc) / 2).toFixed(1)}px`;
-            const t = `scale(${kc.toFixed(4)})`;
-            if (inner.style.transform !== t) inner.style.transform = t;
-          }
-        } else {
-          // Video dock: longitudinal tab, same width as the frame on screen
-          // at any zoom — fixed to the board like audio. Constant 12px
-          // corners from the theme class (never zoom-scaled).
-          const k = screenW / VIDEO_W;
-          box.style.left = `${Math.round(a.x)}px`;
-          box.style.top = `${Math.round(b.y + 8)}px`;
-          box.style.width = `${VIDEO_W}px`;
-          const t = `scale(${k.toFixed(4)})`;
-          if (box.style.transform !== t) box.style.transform = t;
+        box.style.left = `${Math.round(lay.left)}px`;
+        box.style.top = `${Math.round(lay.top)}px`;
+        box.style.width = `${Math.round(lay.width)}px`;
+        if (lay.height !== null) box.style.height = `${Math.round(lay.height)}px`;
+        if (box.style.transform !== lay.transform) box.style.transform = lay.transform;
+        const inner = innerRef.current;
+        if (inner && lay.inner) {
+          inner.style.width = `${lay.inner.width.toFixed(1)}px`;
+          inner.style.left = `${lay.inner.left.toFixed(1)}px`;
+          inner.style.top = `${lay.inner.top.toFixed(1)}px`;
+          if (inner.style.transform !== lay.inner.transform) inner.style.transform = lay.inner.transform;
         }
         const url = mediaUrl(v);
         const el = kind === 'audio' ? getAudio(url) : getVideo(url);
@@ -606,6 +651,10 @@ function MediaCard({
     </>
   );
 
+  // First-paint geometry (same formula as the rAF): mounting must never
+  // flash an unscaled card. The rAF owns every field afterwards.
+  const initialLayout = layoutMediaCard(engine, shapeId, kind);
+
   return (
     <div
       ref={boxRef}
@@ -616,7 +665,15 @@ function MediaCard({
         position: 'fixed',
         zIndex: 10,
         minWidth: 0,
-        visibility: 'hidden',
+        visibility: initialLayout ? 'visible' : 'hidden',
+        left: initialLayout ? Math.round(initialLayout.left) : undefined,
+        top: initialLayout ? Math.round(initialLayout.top) : undefined,
+        width: initialLayout ? Math.round(initialLayout.width) : undefined,
+        height:
+          initialLayout && initialLayout.height !== null
+            ? Math.round(initialLayout.height)
+            : undefined,
+        transform: initialLayout?.transform || undefined,
         pointerEvents: 'none',
         transformOrigin: 'top left',
         borderColor: selected ? 'var(--chrome-accent)' : undefined,
@@ -627,9 +684,10 @@ function MediaCard({
           ref={innerRef}
           style={{
             position: 'absolute',
-            left: 0,
-            top: 0,
-            width: CARD_W,
+            left: initialLayout?.inner ? Math.round(initialLayout.inner.left) : 0,
+            top: initialLayout?.inner ? Math.round(initialLayout.inner.top) : 0,
+            width: initialLayout?.inner ? Math.round(initialLayout.inner.width) : CARD_W,
+            transform: initialLayout?.inner?.transform,
             pointerEvents: 'none',
             transformOrigin: 'top left',
           }}
