@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.32
+
+### Back to board + double-click reset
+
+- **Home back button.** Leaving a board for the menu keeps the visit log,
+  so Home shows «Назад к доске» with the board name (own and guest
+  visits; a deleted board simply hides it).
+- **Double-click empty space resets the tool** to select and clears the
+  selection (mouse and touch double-tap; crop and export picking keep
+  their flow, editors still open on shapes).
+
 ## 0.16.31
 
 ### Follow means in sync + button cleanup

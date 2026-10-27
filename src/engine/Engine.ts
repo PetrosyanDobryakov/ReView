@@ -4756,7 +4756,16 @@ export class Engine {
   private activateAtPoint(p: PointerInfo): void {
     const id = this.hitTest(p.world.x, p.world.y);
     // Empty board: no free-text spawn. Place text with the Text tool only.
-    if (!id) return;
+    if (!id) {
+      // Double-click empty space resets to the select tool (crop and export
+      // region picking keep their flow).
+      if (!this.exportPick && !this.crop) {
+        this.setTool('select');
+        this.setSelection([]);
+        this.dirty = true;
+      }
+      return;
+    }
     const type = this.views.get(id)?.type;
     if (type === 'image') {
       this.setSelection([id]);
