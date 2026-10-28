@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.44
+
+### Slots: digit keys + stable layout
+
+- **Digit keys (1–5) apply the remembered size**, exactly like clicking
+  the slot (settings + selected strokes).
+- **Fixed slot cells.** Circles scale 12–21px (max down 25%) inside
+  constant 30px cells — the row, popup anchor and island no longer shift
+  when thicknesses change. Dots transition smoothly.
+
 ## 0.16.43
 
 ### Slots scale with thickness

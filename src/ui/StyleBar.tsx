@@ -159,49 +159,58 @@ function ColorSlots({
 
   const activeColor = color.toLowerCase();
   const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
-  // Slot buttons scale with their thickness: thin colors are small circles,
-  // fat ones are big — color and size read at a glance, no dots needed.
+  // Slot buttons scale with their thickness (thin = small circle, fat =
+  // big); the cell stays fixed so the row and popup never shift around.
   const diamFor = (c: string): number | undefined => {
     if (!thickMode || !thicknessOf) return undefined;
     const s = Math.min(20, Math.max(1, thicknessOf(c)));
-    return Math.round(12 + ((s - 1) / 19) * 16);
+    return Math.round(12 + ((s - 1) / 19) * 9);
+  };
+  const toggleSlot = (c: string, i: number) => {
+    if (openSlot === i) setOpenSlot(null);
+    else {
+      onPick(c);
+      setOpenSlot(i);
+    }
   };
 
   return (
     <div className="pen-slots" ref={rootRef}>
       {slots.map((c, i) => {
         const diam = diamFor(c);
-        return (
+        const isActive = activeColor === c.toLowerCase();
+        return diam !== undefined ? (
           <button
             type="button"
             key={i}
-            className={`pen-slot${activeColor === c.toLowerCase() ? ' active' : ''}`}
-            style={{
-              background: c,
-              ...(diam !== undefined ? { width: diam, height: diam } : null),
-            }}
+            className="pen-cell"
             title={c}
             aria-label={`color ${i + 1}`}
-            aria-pressed={activeColor === c.toLowerCase()}
+            aria-pressed={isActive}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              // Apply + open the one config window (palette + thickness).
-              // Clicking the open slot closes it; right-click does the same.
-              if (openSlot === i) {
-                setOpenSlot(null);
-                return;
-              }
-              onPick(c);
-              setOpenSlot(i);
-            }}
+            onClick={() => toggleSlot(c, i)}
             onContextMenu={(e) => {
               e.preventDefault();
-              if (openSlot === i) setOpenSlot(null);
-              else {
-                onPick(c);
-                setOpenSlot(i);
-              }
+              toggleSlot(c, i);
             }}
+          >
+            <span
+              aria-hidden="true"
+              className={`pen-dot${isActive ? ' active' : ''}`}
+              style={{ width: diam, height: diam, background: c }}
+            />
+          </button>
+        ) : (
+          <button
+            type="button"
+            key={i}
+            className={`pen-slot${isActive ? ' active' : ''}`}
+            style={{ background: c }}
+            title={c}
+            aria-label={`color ${i + 1}`}
+            aria-pressed={isActive}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => toggleSlot(c, i)}
           />
         );
       })}

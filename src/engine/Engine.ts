@@ -111,8 +111,8 @@ import {
 import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds, arrowWaypoints, projectArrowInsert, removeArrowWaypoint } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
-import { updatePenSettings, updateShapeSettings } from '../core/settings';
-import { readPenSlots } from '../core/penColors';
+import { updatePenSettings, updateShapeSettings, penStrokeWidthForSize } from '../core/settings';
+import { readPenSlots, readPenSize } from '../core/penColors';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import {
   aimPeerMotion,
@@ -5788,14 +5788,24 @@ export class Engine {
           const slots = readPenSlots();
           const idx = Number(slot);
           const color = slots[idx] ?? slots[0];
-          updatePenSettings({ color });
+          if (!color) return;
+          // Same as slot click: every color carries its remembered size.
+          const remembered = readPenSize(color);
+          updatePenSettings(remembered !== undefined ? { color, size: remembered } : { color });
           updateShapeSettings({ stroke: color, fill: color });
           // also patch selected shapes
           const patches: Array<[string, Partial<import('../core/shapes').ShapeView>]> = [];
           for (const id of this.selection) {
             const v = this.views.get(id);
             if (!v || v.locked) continue;
-            if (v.type === 'pen') patches.push([id, { stroke: color }]);
+            if (v.type === 'pen') {
+              patches.push([
+                id,
+                remembered !== undefined
+                  ? { stroke: color, strokeWidth: penStrokeWidthForSize(v, remembered) }
+                  : { stroke: color },
+              ]);
+            }
             else if (['rect','ellipse','diamond','frame','triangle','parallelogram','hexagon','cylinder','terminator','subroutine','display','table'].includes(v.type)) patches.push([id, { fill: color, stroke: color }]);
             else if (v.type === 'sticky') patches.push([id, { fill: color }]);
             else if (v.type === 'text' || v.type === 'arrow') patches.push([id, { stroke: color, textColor: color }]);
