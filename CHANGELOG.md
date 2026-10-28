@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.45
+
+### One color cell everywhere but pen
+
+- **Fill/text/stroke use a single color cell** opening the shared palette
+  window (grid + customs + native picker) instead of five quick slots.
+  Pen keeps its thickness-coded slots; mixed selections fall back to the
+  cell. Popups shrink accordingly.
+
 ## 0.16.44
 
 ### Slots: digit keys + stable layout
