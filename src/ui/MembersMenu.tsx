@@ -97,6 +97,9 @@ export function MembersMenu({
   online,
   syncEnabled,
   peers,
+  canSummon,
+  onSummonAll,
+  onSummonPeer,
   onOpenConnection,
 }: {
   locale: LocaleId;
@@ -104,6 +107,10 @@ export function MembersMenu({
   online: boolean;
   syncEnabled: boolean;
   peers: PeerCursor[];
+  /** Host (owner/editor) may pull cameras to their view. */
+  canSummon: boolean;
+  onSummonAll: () => void;
+  onSummonPeer: (userId: string) => void;
   onOpenConnection: () => void;
 }) {
   const menuId = useId();
@@ -359,7 +366,19 @@ export function MembersMenu({
             </section>
 
             <section className="members-section">
-              <h3 className="members-section-title">{t(locale, 'membersOnBoard')}</h3>
+              <div className="members-section-head">
+                <h3 className="members-section-title">{t(locale, 'membersOnBoard')}</h3>
+              </div>
+              {canSummon && peers.length > 0 ? (
+                <button
+                  type="button"
+                  className="style-btn active members-invite-btn"
+                  title={t(locale, 'summonAllHint')}
+                  onClick={onSummonAll}
+                >
+                  {t(locale, 'summonAll')}
+                </button>
+              ) : null}
               {peers.length === 0 ? (
                 <p className="members-empty">{t(locale, 'membersAlone')}</p>
               ) : (
@@ -383,6 +402,16 @@ export function MembersMenu({
                             onChange={(e) => setPeerDisplay(peer.userId, { name: e.target.value })}
                           />
                         </label>
+                        {canSummon ? (
+                          <button
+                            type="button"
+                            className="style-btn p2p-mini"
+                            title={t(locale, 'summonOneHint')}
+                            onClick={() => onSummonPeer(peer.userId)}
+                          >
+                            {t(locale, 'summonOne')}
+                          </button>
+                        ) : null}
                         {peer.overridden ? (
                           <button
                             type="button"

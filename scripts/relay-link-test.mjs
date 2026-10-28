@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { RelayLink } from '../src/net/p2p/relayLink.ts';
 import { Frame } from '../src/net/p2p/protocol.ts';
+import { parseSummon } from '../src/net/types.ts';
 
 const noop = () => {};
 const events = { open: noop, message: noop, close: noop, signal: noop };
@@ -132,6 +133,20 @@ function openLink(capture) {
   assert.equal(frames[0][0], Frame.Ping); // hot still first after requeue
   assert.equal(frames[1][0], Frame.Sync);
   link.close();
+}
+
+// --- bring-to-me summon codec ------------------------------------------------------
+{
+  const good = { to: '*', x: 10, y: -20, zoom: 1.5, at: 1700000000000, by: 'host' };
+  assert.deepEqual(parseSummon(good), good);
+  assert.equal(parseSummon({ ...good, zoom: 99 }).zoom, 4, 'zoom clamps');
+  assert.equal(parseSummon({ ...good, zoom: -5 }).zoom, 0.1, 'zoom clamps low');
+  assert.equal(parseSummon(null), null);
+  assert.equal(parseSummon('garbage'), null);
+  assert.equal(parseSummon({ ...good, to: '' }), null);
+  assert.equal(parseSummon({ ...good, by: '' }).by, '', 'empty writer id still flies');
+  assert.equal(parseSummon({ ...good, x: NaN }), null);
+  assert.equal(parseSummon({ ...good, at: Infinity }), null);
 }
 
 console.log('relay-link-test: ok');

@@ -2,6 +2,8 @@
 
 const SLOTS_KEY = 'review-pen-slots';
 const CUSTOM_KEY = 'review-pen-custom-colors';
+/** Per-color brush size memory (Holst-style: black thin, green fat). */
+const SIZES_KEY = 'review-pen-sizes';
 
 export const DEFAULT_SLOTS: string[] = ['#ffffff', '#1c7ed6', '#e03131', '#fab005', '#2f9e44'];
 
@@ -80,4 +82,42 @@ export function removeCustomColor(color: string): string[] {
   const list = readCustomColors().filter((c) => c.toLowerCase() !== value);
   writeList(CUSTOM_KEY, list);
   return list;
+}
+
+function readSizes(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(SIZES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object') {
+        const out: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            out[k] = Math.min(200, Math.max(1, Math.round(v)));
+          }
+        }
+        return out;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+/** Remembered brush size for a color, or undefined (keep current size). */
+export function readPenSize(color: string): number | undefined {
+  const v = readSizes()[color.toLowerCase()];
+  return typeof v === 'number' ? v : undefined;
+}
+
+export function writePenSize(color: string, size: number): void {
+  if (!isHex(color)) return;
+  try {
+    const all = readSizes();
+    all[color.toLowerCase()] = Math.min(200, Math.max(1, Math.round(size)));
+    localStorage.setItem(SIZES_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
 }

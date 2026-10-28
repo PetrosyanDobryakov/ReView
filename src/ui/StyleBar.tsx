@@ -19,7 +19,7 @@ import {
   type TextSettings,
 } from '../core/settings';
 import { patchShapes } from '../core/store';
-import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSlots, removeCustomColor, writePenSlot } from '../core/penColors';
+import { addCustomColor, PALETTE_HUES, readCustomColors, readPenSize, readPenSlots, removeCustomColor, writePenSize, writePenSlot } from '../core/penColors';
 import type { LocaleId } from '../core/locale';
 import type { EditTarget } from '../engine/Engine';
 import { applyFormatToEditor, textOverlayAllowsRich, type LiveTextFormat } from '../core/textEditorFormat';
@@ -531,6 +531,7 @@ export function StyleBar({
             onChange={(e) => {
               const size = Number(e.target.value);
               updatePenSettings({ size });
+              writePenSize(pen.color, size);
               if (penTargets.length) {
                 patchShapes(penTargets.map((v) => [v.id, { strokeWidth: penStrokeWidthForSize(v, size) }]));
                 onPatched();
@@ -623,11 +624,16 @@ export function StyleBar({
             locale={locale}
             color={strokeValue}
             onPick={(c) => {
-              updatePenSettings({ color: c });
+              // Holst-style: every color remembers its own brush size.
+              const remembered = readPenSize(c);
+              const nextSize = remembered ?? pen.size;
+              updatePenSettings({ color: c, size: nextSize });
               updateShapeSettings({ stroke: c });
               const patches: Array<[string, Partial<ShapeView>]> = [];
               for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
-              for (const v of penTargets) patches.push([v.id, { stroke: c }]);
+              for (const v of penTargets) {
+                patches.push([v.id, { stroke: c, strokeWidth: penStrokeWidthForSize(v, nextSize) }]);
+              }
               if (patches.length) {
                 patchShapes(patches);
                 onPatched();

@@ -78,7 +78,7 @@ import type { ShapeBox, ShapeView } from '../core/shapes';
 import { HANDLES, Tools, pointInPolygon, polylineHitsPolygon } from './tools';
 import type { HandleId, PointerInfo, Tool, ToolId } from './tools';
 import type { PeerCursor } from '../net';
-import { sendCursor, publishTool, publishFocus, publishSelection, publishConfetti } from '../net';
+import { sendCursor, publishTool, publishFocus, publishSelection, publishConfetti, publishSummon } from '../net';
 import { samePeerSelection } from '../net/peerSelection';
 import {
   CONFETTI_ERUPT_MS,
@@ -374,6 +374,8 @@ export interface EngineEvents {
   onRequestCommitText?: () => void;
   /** Ask the host to toggle the UI chrome (KeyH) — session-only, never persisted. */
   onToggleUi?: () => void;
+  /** Ask the host to open board search (Ctrl+F). */
+  onSearch?: () => void;
   onTool?: (id: ToolId) => void;
   onError?: (message: string) => void;
   onToast?: (message: string) => void;
@@ -472,6 +474,8 @@ export class Engine {
   private frameDt = 1 / 60;
   /** Spring-follow remote cursors; default on = smooth follow, off snaps to latest sample. */
   private smoothPeerCursors = true;
+  /** Last applied summon `at` per peer (one-shot bring-to-me). */
+  private summonSeen = new Map<number, number>();
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -494,6 +498,9 @@ export class Engine {
     }
     for (const id of [...this.peerConfettiSeen.keys()]) {
       if (!live.has(id)) this.peerConfettiSeen.delete(id);
+    }
+    for (const id of [...this.summonSeen.keys()]) {
+      if (!live.has(id)) this.summonSeen.delete(id);
     }
 
     for (const peer of peers) {
@@ -521,6 +528,33 @@ export class Engine {
           this.peerConfettiSeen.set(peer.id, burst.id);
           if (wall - burst.t <= CONFETTI_STALE_MS) {
             this.triggerConfetti(burst.x, burst.y, burst.seed, false, burst.power);
+          }
+        }
+      }
+      // Bring-to-me summon (host → me or everyone): fresh (15s) + same
+      // page only, applied once by `at`. The camera eases there; any of
+      // my inputs overrides mid-flight.
+      const summon = peer.summon;
+      if (summon) {
+        const seenAt = this.summonSeen.get(peer.id) ?? -1;
+        if (summon.at > seenAt) {
+          this.summonSeen.set(peer.id, summon.at);
+          let me = '';
+          try {
+            me = loadUser().id;
+          } catch {
+            /* ignore */
+          }
+          if (
+            (summon.to === '*' || (me !== '' && summon.to === me)) &&
+            wall - summon.at < 15000
+          ) {
+            const myPage = store.currentPageId();
+            if (peer.page == null || peer.page === myPage) {
+              this.camera.flyTo(summon.x, summon.y, summon.zoom);
+              this.dirty = true;
+              this.events.onToast?.(t(readLocale(), 'summonToast'));
+            }
           }
         }
       }
@@ -2915,7 +2949,6 @@ export class Engine {
       return false;
     }
   }
-
   /** Re-run follow for one shape (follow toggle switched back on). */
   refollowMedia(id: string): void {
     try {
@@ -2924,6 +2957,34 @@ export class Engine {
       if (v) this.followMediaState(id, v);
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Bring-to-me (host menu): broadcast our view so followers fly to it.
+   * `toUserId` null = everyone. Owner/editors only (the menu gates too).
+   */
+  summonPeers(toUserId: string | null): boolean {
+    try {
+      if (!store.iControlMedia()) return false;
+      const view = this.camera.getView();
+      let me = '';
+      try {
+        me = loadUser().id;
+      } catch {
+        /* ignore */
+      }
+      publishSummon({
+        to: toUserId || '*',
+        x: view.x,
+        y: view.y,
+        zoom: view.zoom,
+        at: Date.now(),
+        by: me,
+      });
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -3413,6 +3474,63 @@ export class Engine {
 
   resetZoom(): void {
     this.camera.setZoom(1);
+  }
+
+  /** Viewport size in CSS px (minimap, overlays). */
+  viewportSize(): { w: number; h: number } {
+    return { w: this.w, h: this.h };
+  }
+
+  /** Instantly center the camera (minimap jump/drag). */
+  panCameraTo(x: number, y: number): void {
+    this.camera.jumpTo(x, y);
+    this.dirty = true;
+  }
+
+  /**
+   * Text matches on the active page for board search (texts, stickies,
+   * table cells, media file names). Capped; current page only.
+   */
+  searchBoard(query: string): Array<{ id: string; kind: string; snippet: string; box: ShapeBox }> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out: Array<{ id: string; kind: string; snippet: string; box: ShapeBox }> = [];
+    for (const [id, v] of this.views) {
+      if (!store.isOnActivePage(id)) continue;
+      const texts: string[] = [];
+      if (v.type === 'text' || v.type === 'sticky') {
+        if (v.text) texts.push(v.text);
+      } else if (v.type === 'table') {
+        try {
+          for (const c of tableGrid(v).cells) if (c) texts.push(c);
+        } catch {
+          /* ignore */
+        }
+      } else if (v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc') {
+        if (v.mediaName) texts.push(v.mediaName);
+      }
+      if (!texts.length) continue;
+      const hit = texts.find((t) => t.toLowerCase().includes(q));
+      if (hit === undefined) continue;
+      const at = hit.toLowerCase().indexOf(q);
+      const from = Math.max(0, at - 24);
+      const snippet =
+        (from > 0 ? '…' : '') + hit.slice(from, at + q.length + 24) + (at + q.length + 24 < hit.length ? '…' : '');
+      out.push({ id, kind: v.type, snippet, box: this.spatialBox(v) });
+      if (out.length >= 50) break;
+    }
+    return out;
+  }
+
+  /** Fly the camera to a shape box (search jump, summon follow). Smooth via targets; any input overrides. */
+  focusBox(box: ShapeBox): void {
+    this.camera.fitView(
+      { x: box.x - 60, y: box.y - 60, w: box.w + 120, h: box.h + 120 },
+      this.w,
+      this.h,
+      80
+    );
+    this.dirty = true;
   }
 
   fitContent(): void {
@@ -5556,6 +5674,11 @@ export class Engine {
     if (mod && e.code === 'KeyA') {
       e.preventDefault();
       this.setSelection([...this.views.keys()]);
+      return;
+    }
+    if (mod && e.code === 'KeyF') {
+      e.preventDefault();
+      this.events.onSearch?.();
       return;
     }
     if (mod && e.code === 'KeyC') {

@@ -28,6 +28,8 @@ export interface BoardMeta {
 
 const TEAMS_KEY = 'review-teams';
 const BOARDS_KEY = 'review-boards';
+/** Single favorite team id (Home opens it instead of Recent). */
+const FAV_TEAM_KEY = 'review-fav-team';
 
 function isBoardStatus(value: unknown): value is BoardStatus {
   return value === 'local' || value === 'shared' || value === 'remote';
@@ -128,8 +130,28 @@ export function deleteTeam(id: string): void {
   let teams = listTeams().filter((team) => team.id !== id);
   if (!teams.length) teams = [{ id: 'default', name: t(readLocale(), 'defaultTeam'), createdAt: Date.now() }];
   writeTeams(teams);
+  try {
+    if (localStorage.getItem(FAV_TEAM_KEY) === id) localStorage.removeItem(FAV_TEAM_KEY);
+  } catch {}
   const boards = listBoards().map((b) => (b.teamId === id ? { ...b, teamId: 'default' } : b));
   writeBoards(boards);
+}
+
+/** Favorite team id, or null (Home falls back to Recent). Single favorite. */
+export function favTeam(): string | null {
+  try {
+    const v = localStorage.getItem(FAV_TEAM_KEY);
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setFavTeam(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(FAV_TEAM_KEY, id);
+    else localStorage.removeItem(FAV_TEAM_KEY);
+  } catch {}
 }
 
 export function listBoards(): BoardMeta[] {

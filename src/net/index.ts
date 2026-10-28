@@ -1,6 +1,6 @@
 export { isSyncEnabled, boardRoomName } from './config';
 export { p2pClient, attachP2p, detachP2p, reconnectP2p } from './p2p';
-export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, CursorPos, AwarenessUser, PeerConfettiBurst } from './types';
+export type { SyncStatus, PeerCursor, PeerDraft, PeerErasePreview, PeerSummon, CursorPos, AwarenessUser, PeerConfettiBurst } from './types';
 export type { BlobBytes, BlobSource, MeshEvent } from './p2p/mesh';
 export type { MeshSnapshot, HubInfo, PeerInfo, LinkPath, LinkState, HubState, HubSource } from './p2p/types';
 export { normalizeHubUrl } from './p2p/hub';
@@ -33,7 +33,7 @@ export type { LanInfo } from './lan';
 
 import { p2pClient } from './p2p';
 import { boardRoomName } from './config';
-import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
+import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, PeerSummon, SyncStatus } from './types';
 import type { MeshSnapshot } from './p2p/types';
 import type { BlobBytes, BlobSource } from './p2p/mesh';
 import type { UserInfo } from '../core/user';
@@ -97,6 +97,10 @@ export function publishTool(tool: string): void {
 
 export function publishPage(page: string): void {
   p2pClient.publishPage(page);
+}
+
+export function publishSummon(s: PeerSummon): void {
+  p2pClient.publishSummon(s);
 }
 
 export function publishBoardView(viewing: boolean): void {

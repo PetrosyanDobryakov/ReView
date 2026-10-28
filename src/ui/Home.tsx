@@ -16,6 +16,8 @@ import {
   isBoardPersistedLocally,
   listRecentBoards,
   visitSeq,
+  favTeam,
+  setFavTeam,
   isOwnBoard,
   boardStorageKind,
 } from '../core/boards';
@@ -100,12 +102,21 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     }
     setBackDismissedSeq(seq);
   };
-  const [activeTeam, setActiveTeam] = useState<string>('default');
+  const [activeTeam, setActiveTeam] = useState<string>(() => {
+    try {
+      const fav = favTeam();
+      if (fav && listTeams().some((t) => t.id === fav)) return fav;
+    } catch {
+      /* ignore */
+    }
+    return 'recent';
+  });
   const [editingTeam, setEditingTeam] = useState<string | null>(null);
   const [teamName, setTeamName] = useState('');
   const [editingBoard, setEditingBoard] = useState<string | null>(null);
   const [boardName, setBoardName] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [favMenu, setFavMenu] = useState<{ x: number; y: number; teamId: string } | null>(null);
   const [joinLink, setJoinLink] = useState('');
   const [saveRemote, setSaveRemote] = useState(() => readPrefs().saveRemoteBoards);
   const [weights, setWeights] = useState<Record<string, number>>({});
@@ -550,7 +561,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                     setEditingTeam(team.id);
                     setTeamName(team.name);
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setFavMenu({ x: e.clientX, y: e.clientY, teamId: team.id });
+                  }}
                 >
+                  {favTeam() === team.id ? (
+                    <Icon name="star" size={12} />
+                  ) : null}
                   <span className="home-tab-name">{team.name}</span>
                   <span className="home-tab-count">{teamCount(team.id)}</span>
                 </button>
@@ -591,6 +609,48 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               )
             : null}
         </nav>
+        {favMenu ? (
+          <>
+            <button
+              type="button"
+              aria-label={t(locale, 'close')}
+              onClick={() => setFavMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setFavMenu(null);
+              }}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 199,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'default',
+              }}
+            />
+            <div
+              className="board-row-menu"
+              role="menu"
+              style={{
+                position: 'fixed',
+                left: Math.max(8, Math.min(favMenu.x, window.innerWidth - 220)),
+                top: Math.max(8, Math.min(favMenu.y, window.innerHeight - 80)),
+                zIndex: 200,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {menuItem(
+                'star',
+                favTeam() === favMenu.teamId ? t(locale, 'teamUnfavorite') : t(locale, 'teamFavorite'),
+                () => {
+                  setFavTeam(favTeam() === favMenu.teamId ? null : favMenu.teamId);
+                  setFavMenu(null);
+                }
+              )}
+            </div>
+          </>
+        ) : null}
 
         {filtered.length ? (
           <ul className="home-list" role="list">

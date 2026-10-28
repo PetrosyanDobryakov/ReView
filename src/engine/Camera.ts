@@ -70,6 +70,21 @@ export class Camera {
     this.tz = clamp(zoom, this.minZoom, this.maxZoom);
   }
 
+  /** Smooth fly-to (summon follow): targets only, update() eases; any input overrides mid-flight. */
+  flyTo(x: number, y: number, zoom: number): void {
+    this.tx = x;
+    this.ty = y;
+    this.tz = clamp(zoom, this.minZoom, this.maxZoom);
+  }
+
+  /** Instantly center (minimap jump/drag) — targets follow so no ease-back. */
+  jumpTo(x: number, y: number): void {
+    this.tx = x;
+    this.ty = y;
+    this.x = x;
+    this.y = y;
+  }
+
   fitView(box: ShapeBox, viewW: number, viewH: number, padding: number): void {
     const w = Math.max(box.w, 10);
     const h = Math.max(box.h, 10);

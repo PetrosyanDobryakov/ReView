@@ -26,7 +26,8 @@ import { randomPeerId } from './p2p/protocol';
 import { webrtcAvailable } from './p2p/webrtcLink';
 import { installNativeRtc } from './p2p/nativeRtc';
 import type { MeshSnapshot } from './p2p/types';
-import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, SyncStatus } from './types';
+import type { CursorPos, PeerCursor, PeerDraft, PeerErasePreview, PeerSummon, SyncStatus } from './types';
+import { parseSummon } from './types';
 import type { UserInfo } from '../core/user';
 
 /** Re-read hubs (LAN neighbours come and go) this often while a board is open. */
@@ -335,6 +336,7 @@ class P2pClient {
         focus: typeof st.focus === 'string' && (st.focus as string).trim() ? (st.focus as string).trim() : null,
         selection: parsePeerSelection(st.selection),
         confetti: parsePeerConfetti(st.confetti),
+        summon: parseSummon(st.summon),
       });
     }
     return [...byUser.values()];
@@ -408,6 +410,14 @@ class P2pClient {
     this.hotAwareness.flushNow();
   }
   publishPage(page: string): void { if (this.lastPage === page) return; this.lastPage = page; this.write('page', page); }
+  /**
+   * Bring-to-me summon (one-shot broadcast; recipients filter `to` and
+   * apply once by `at`). Flushed immediately like confetti.
+   */
+  publishSummon(s: PeerSummon): void {
+    this.write('summon', { ...s });
+    try { this.hotAwareness.flushNow(); } catch {}
+  }
   publishBoardView(viewing: boolean): void {
     if (this.lastViewing === viewing) return;
     this.lastViewing = viewing;
