@@ -715,6 +715,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           <span className="board-meta-weight">{weightLabel}</span>
                         </>
                       ) : null}
+                      {b.status === 'remote' ? (
+                        <>
+                          <span className="board-meta-sep" aria-hidden="true">·</span>
+                          <span className="p2p-tag" title={t(locale, 'foreignBoard')}>
+                            {t(locale, 'foreignBoard')}
+                          </span>
+                        </>
+                      ) : null}
                       {sessionOnly ? <BoardStorageBadge meta={b} locale={locale} /> : null}
                     </span>
                   </span>

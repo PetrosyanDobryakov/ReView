@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.41
+
+### Foreign badge + one pen popup
+
+- **«Чужая» mark.** Remote boards get a Foreign tag in the Home list and
+  next to the board title (ru/en/zh).
+- **Old pen size slider removed.** Thickness lives in the slot popup now.
+- **One pen window.** Slot click applies the color and opens a single
+  popup: thickness slider on top, palette + customs below. Right-click
+  opens the same window (touch-friendly). Slot dots keep the slot color
+  (white dots washed them out) with contrast rings.
+
 ## 0.16.40
 
 ### Favorite popup fix + pen slot thickness

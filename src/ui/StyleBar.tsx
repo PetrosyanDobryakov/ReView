@@ -106,8 +106,8 @@ function ColorSlots({
 }) {
   const [slots, setSlots] = useState<string[]>(() => readPenSlots());
   const [customs, setCustoms] = useState<string[]>(() => readCustomColors());
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
-  const [thickIdx, setThickIdx] = useState<number | null>(null);
+  // One popup per slot: palette (reassign) + thickness slider together.
+  const [openSlot, setOpenSlot] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastAddAt = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -132,26 +132,24 @@ function ColorSlots({
   });
 
   useEffect(() => {
-    if (openIdx === null && thickIdx === null) return;
+    if (openSlot === null) return;
     const onDown = (e: PointerEvent) => {
       if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
       // native color dialog can emit a stray outside pointerdown on focus return
       if (performance.now() - lastAddAt.current < 600) return;
-      setOpenIdx(null);
-      setThickIdx(null);
+      setOpenSlot(null);
     };
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
-  }, [openIdx, thickIdx]);
+  }, [openSlot]);
 
   const pick = (c: string) => {
-    if (openIdx !== null) {
-      writePenSlot(openIdx, c);
+    if (openSlot !== null) {
+      writePenSlot(openSlot, c);
       setSlots(readPenSlots());
     }
     onPick(c);
-    setOpenIdx(null);
-    setThickIdx(null);
+    // Stays open: color + thickness are configured in the one window.
   };
 
   const shadeRows: string[][] = [];
@@ -161,9 +159,9 @@ function ColorSlots({
 
   const activeColor = color.toLowerCase();
   const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
-  const dotFor = (c: string): number => {
+  const dotFor = (c: string): { size: number; fill: string } => {
     const s = thickMode && thicknessOf ? thicknessOf(c) : 0;
-    return Math.min(13, Math.max(4, 3 + s * 0.55));
+    return { size: Math.min(11, Math.max(4, 3 + s * 0.5)), fill: c };
   };
 
   return (
@@ -179,53 +177,70 @@ function ColorSlots({
           aria-pressed={activeColor === c.toLowerCase()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            if (thickMode) {
-              // Pen mode: apply + open the thickness popup (right-click
-              // reassigns the slot color instead).
-              if (thickIdx === i) {
-                setThickIdx(null);
-                return;
-              }
-              onPick(c);
-              setOpenIdx(null);
-              setThickIdx(i);
-              return;
-            }
-            if (openIdx === i) {
-              setOpenIdx(null);
+            // Apply + open the one config window (palette + thickness).
+            // Clicking the open slot closes it; right-click does the same.
+            if (openSlot === i) {
+              setOpenSlot(null);
               return;
             }
             onPick(c);
-            setOpenIdx(i);
+            setOpenSlot(i);
           }}
-          onContextMenu={
-            thickMode
-              ? (e) => {
-                  e.preventDefault();
-                  setThickIdx(null);
-                  setOpenIdx(openIdx === i ? null : i);
-                }
-              : undefined
-          }
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (openSlot === i) setOpenSlot(null);
+            else {
+              onPick(c);
+              setOpenSlot(i);
+            }
+          }}
         >
           {thickMode ? (
             <span
               aria-hidden="true"
               style={{
                 display: 'block',
-                width: dotFor(c),
-                height: dotFor(c),
+                width: dotFor(c).size,
+                height: dotFor(c).size,
                 borderRadius: '50%',
-                background: '#ffffff',
-                boxShadow: '0 0 0 1.5px rgba(0,0,0,0.55)',
+                background: dotFor(c).fill,
+                boxShadow: '0 0 0 1.5px #ffffff, 0 0 0 3px rgba(0,0,0,0.55)',
                 pointerEvents: 'none',
               }}
             />
           ) : null}
         </button>
       ))}
-      {openIdx !== null && (
+      {openSlot !== null && (
         <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')}>
+          {thickMode && slots[openSlot] ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="panel-label" style={{ flex: 'none' }}>
+                {t(locale, 'brushSize')}
+              </span>
+              <input
+                className="size-slider"
+                type="range"
+                min={1}
+                max={20}
+                value={(thicknessOf as (color: string) => number)(slots[openSlot] as string)}
+                aria-label={t(locale, 'brushSize')}
+                onChange={(e) => {
+                  const size = Number(e.target.value);
+                  (onThickness as (color: string, size: number) => void)(
+                    slots[openSlot] as string,
+                    size
+                  );
+                  // Refresh the dots (storage is the source of truth).
+                  setSlots(readPenSlots());
+                }}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <span className="size-value">
+                {(thicknessOf as (color: string) => number)(slots[openSlot] as string)}
+              </span>
+            </div>
+          ) : null}
           <div className="pen-pop-grid">
             {shadeRows.map((row, ri) =>
               row.map((c, ci) => (
@@ -287,8 +302,8 @@ function ColorSlots({
               onChange={(e) => {
                 // live: preview on slot; customs list is committed on the native change event
                 lastAddAt.current = performance.now();
-                if (openIdx !== null) {
-                  writePenSlot(openIdx, e.target.value);
+                if (openSlot !== null) {
+                  writePenSlot(openSlot, e.target.value);
                   setSlots(readPenSlots());
                 }
                 onPick(e.target.value);
@@ -297,72 +312,6 @@ function ColorSlots({
           </label>
         </div>
       )}
-      {thickMode && thickIdx !== null && slots[thickIdx] ? (
-        <ThicknessPop
-          locale={locale}
-          color={slots[thickIdx] as string}
-          thicknessOf={thicknessOf as (color: string) => number}
-          onThickness={onThickness as (color: string, size: number) => void}
-          onRefresh={() => setSlots(readPenSlots())}
-          onEditColor={() => {
-            setThickIdx(null);
-            setOpenIdx(thickIdx);
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function ThicknessPop({
-  locale,
-  color,
-  thicknessOf,
-  onThickness,
-  onRefresh,
-  onEditColor,
-}: {
-  locale: LocaleId;
-  color: string;
-  thicknessOf: (color: string) => number;
-  onThickness: (color: string, size: number) => void;
-  onRefresh: () => void;
-  onEditColor: () => void;
-}) {
-  const value = thicknessOf(color);
-  return (
-    <div className="pen-pop" role="dialog" aria-label={t(locale, 'brushSize')}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span className="panel-label" style={{ flex: 1 }}>
-          {t(locale, 'brushSize')} · {color}
-        </span>
-        <button
-          type="button"
-          className="style-btn p2p-mini"
-          title={t(locale, 'penColors')}
-          onClick={onEditColor}
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {t(locale, 'penColors')}
-        </button>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
-        <input
-          className="size-slider"
-          type="range"
-          min={1}
-          max={20}
-          value={value}
-          aria-label={t(locale, 'brushSize')}
-          onChange={(e) => {
-            onThickness(color, Number(e.target.value));
-            // Refresh the dots (storage is the source of truth).
-            onRefresh();
-          }}
-          style={{ flex: 1, minWidth: 0 }}
-        />
-        <span className="size-value">{value}</span>
-      </div>
     </div>
   );
 }
@@ -644,24 +593,6 @@ export function StyleBar({
           >
             {t(locale, 'highlighter')}
           </button>
-          <input
-            className="size-slider"
-            type="range"
-            min={1}
-            max={20}
-            value={pen.size}
-            title={t(locale, 'brushSize')}
-            onChange={(e) => {
-              const size = Number(e.target.value);
-              updatePenSettings({ size });
-              writePenSize(pen.color, size);
-              if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { strokeWidth: penStrokeWidthForSize(v, size) }]));
-                onPatched();
-              }
-            }}
-          />
-          <span className="size-value">{pen.size}</span>
         </div>
       )}
       {(view.showFill || view.showCorners) && (
