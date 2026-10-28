@@ -1663,6 +1663,9 @@ button.brand {
   border: 2px solid var(--chrome-border);
   padding: 0;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: transform var(--chrome-dur-fast) var(--chrome-ease), box-shadow var(--chrome-dur-fast) var(--chrome-ease);
 }
 
