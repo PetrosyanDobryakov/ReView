@@ -990,21 +990,14 @@ function arrowCurve(v: ShapeView): ArrowCurve | null {
   }
 
   if (pts.length === 4) {
-    const midpoint = {
-      x: (start.x + end.x) / 2,
-      y: (start.y + end.y) / 2,
+    // Free arrows draw straight (glued arrows route from their ports in
+    // the cubic branch above). No auto-bend: what you drag is what you get.
+    return {
+      kind: 'line',
+      start,
+      end,
+      endAngle: Math.atan2(end.y - start.y, end.x - start.x),
     };
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const normal = { x: -dy / len, y: dx / len };
-    const bend = Math.min(40, len * 0.18) * arrowBendSign(dx, dy);
-    const control = {
-      x: midpoint.x + normal.x * bend * 0.5,
-      y: midpoint.y + normal.y * bend * 0.5,
-    };
-    const endAngle = Math.atan2(end.y - control.y, end.x - control.x);
-    return { kind: 'quadratic', start, control, end, endAngle };
   }
 
   return {

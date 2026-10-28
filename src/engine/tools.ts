@@ -1,6 +1,6 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
-import { COLORS, displayInk, withAlpha, hasFill, type PortId, arrowBendSign, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
+import { COLORS, displayInk, withAlpha, hasFill, type PortId, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
 import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H, projectArrowInsert, insertArrowWaypoint } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
@@ -2059,12 +2059,8 @@ export class ArrowTool extends Tool {
     if (!this.start || !this.cur) return;
     const end = this.snappedEnd();
     const ax = this.start.x, ay = this.start.y, bx = end.x, by = end.y;
-    const mx = (ax + bx) / 2, my = (ay + by) / 2;
-    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len, ny = dx / len;
-    const bend = Math.min(30, len * 0.15) * arrowBendSign(dx, dy);
-    const cx = mx + nx * bend * 0.5, cy = my + ny * bend * 0.5;
-    const ang = Math.atan2(by - cy, bx - cx);
+    // Straight preview: free arrows commit straight (glued ones bend later).
+    const ang = Math.atan2(by - ay, bx - ax);
     const head = settings.shape.arrowHead;
     const ink = displayInk(settings.shape.stroke, store.viewPaperBg());
     ctx.save();
@@ -2076,7 +2072,7 @@ export class ArrowTool extends Tool {
     ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(ax, ay);
-    ctx.quadraticCurveTo(cx, cy, bx, by);
+    ctx.lineTo(bx, by);
     ctx.stroke();
     const hx1 = bx - head * Math.cos(ang - 0.42), hy1 = by - head * Math.sin(ang - 0.42);
     const hx2 = bx - head * Math.cos(ang + 0.42), hy2 = by - head * Math.sin(ang + 0.42);
