@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.16.46
+
+### Shelf scroll, straight arrows, honest multi-bar
+
+- **«Ещё» shelf scrolls.** Tool rows live in a capped scroll area instead
+  of running off-screen; the block-scheme flyout stays unclipped.
+- **Free arrows draw straight.** The auto-bend applies only to glued
+  (port-routed) arrows now; the tool preview matches. Old bent arrows
+  straighten (the bend was never stored data).
+- **Mixed multi-select shows opacity only.** Same-type multis keep the
+  full bar; mixed sets no longer pretend to edit stickers + arrowheads
+  at once.
+
 ## 0.16.45
 
 ### One color cell everywhere but pen

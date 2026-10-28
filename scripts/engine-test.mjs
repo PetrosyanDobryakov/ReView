@@ -3872,25 +3872,33 @@ const bowArr = store.addShape({
   points: [209000, 209000, 209200, 209000],
 });
 const bowLasso = [
-  { x: 209090, y: 209006 },
-  { x: 209110, y: 209006 },
-  { x: 209110, y: 209016 },
-  { x: 209090, y: 209016 },
+  { x: 209090, y: 208996 },
+  { x: 209110, y: 208996 },
+  { x: 209110, y: 209004 },
+  { x: 209090, y: 209004 },
 ];
 assert.ok(
   engine.selectByPolygon(bowLasso).includes(bowArr),
-  'lasso on an arrow bow selects the painted curve, not only the chord'
+  'lasso on a straight arrow selects the chord'
 );
 const bowView = engine.views.get(bowArr);
 const bowVisual = visualBox(bowView);
-assert.ok(bowVisual.y + bowVisual.h > bowView.y + bowView.h + 0.5, 'arrow visual bounds include the bow beyond the stored box');
+assert.ok(
+  bowVisual.x <= 209000 && bowVisual.x + bowVisual.w >= 209200,
+  'straight arrow bounds span the chord'
+);
+assert.ok(
+  Math.abs(bowVisual.y + bowVisual.h / 2 - 209000) < 2,
+  'straight arrow bounds stay centered on the chord (no bow)'
+);
 const headGeom = describeArrow(bowView);
-assert.ok(headGeom, 'quadratic arrow has a head');
+assert.ok(headGeom, 'straight arrow has a head');
+assert.ok(!/[QC]/.test(headGeom.pathD), 'free arrow describes a straight shaft, not a curve');
 const [hx, hy, wx, wy] = headGeom.head;
 const wing = { x: (hx + wx * 2) / 3, y: (hy + wy * 2) / 3 };
 assert.equal(engine.hitTest(wing.x, wing.y), bowArr, 'clicking an arrowhead wing selects the arrow');
 
-// Arrow geom cache: repeated bounds/hit lookups reuse tessellation; mid-bow still hits.
+// Arrow geom cache: repeated bounds/hit lookups reuse tessellation; the chord still hits.
 clearArrowGeomCacheForTest();
 const cacheWarm = engine.views.get(bowArr);
 const b0 = arrowBounds(cacheWarm);
@@ -3901,7 +3909,7 @@ const poly1 = arrowHitPolyline(cacheWarm);
 assert.equal(arrowGeomCacheSizeForTest(), 1, 'repeat arrow lookups reuse the same cache entry');
 assert.deepEqual(b0, b1, 'cached arrow bounds stay stable');
 assert.strictEqual(poly0, poly1, 'cached hit polyline is the same array reference');
-assert.equal(pointInShape(cacheWarm, 209100, 209009), true, 'cached arrow hit-test still follows the painted bow');
+assert.equal(pointInShape(cacheWarm, 209100, 209000), true, 'cached arrow hit-test follows the straight shaft');
 assert.equal(pointInShape(cacheWarm, 209100, 209080), false, 'cached arrow misses far from the shaft');
 
 // Wrap-text cache: identical font+width+text reuses lines; miss outside pen AABB is cheap.
@@ -3931,10 +3939,10 @@ engine.setSelection([]);
 engine.setTool('select');
 const marqueeTool = engine.tools.get('select');
 const marqueeInfo = (x, y) => ({ screen: { x: 0, y: 0 }, world: { x, y }, shift: false, alt: false });
-marqueeTool.onDown(engine, marqueeInfo(209090, 209030));
-marqueeTool.onMove(engine, marqueeInfo(209110, 209007));
-marqueeTool.onUp(engine, marqueeInfo(209110, 209007));
-assert.ok(engine.selection.has(bowArr), 'marquee that covers only the bow selects the arrow');
+marqueeTool.onDown(engine, marqueeInfo(209090, 208990));
+marqueeTool.onMove(engine, marqueeInfo(209110, 209010));
+marqueeTool.onUp(engine, marqueeInfo(209110, 209010));
+assert.ok(engine.selection.has(bowArr), 'marquee over the straight shaft selects the arrow');
 engine.setSelection([]);
 
 const cropRideImg = store.addShape({
@@ -4135,8 +4143,18 @@ const madeArr = [...store.board.keys()].filter((k) => !beforeArr.has(k));
 assert.equal(madeArr.length, 1, 'arrow tool created one arrow');
 const madeView = engine.views.get(madeArr[0]);
 const madeVisual = visualBox(madeView);
-assert.ok(Math.abs(madeView.w - madeVisual.w) < 1e-6, 'new arrows store visual width including bow and head');
-assert.ok(madeView.h > 12, 'new arrows store visual height including the bow');
+assert.ok(Math.abs(madeView.w - madeVisual.w) < 1e-6, 'new arrows store visual width including the head');
+const madeDesc = describeArrow(madeView);
+assert.ok(madeDesc && !/[QC]/.test(madeDesc.pathD), 'new free arrows draw straight');
+// Hit poly = straight chord samples plus the head triangle at the tip.
+const madePoly = arrowHitPolyline(madeView);
+let offChord = 0;
+for (let i = 0; i + 1 < madePoly.length; i += 2) {
+  const onChord = Math.abs(madePoly[i + 1] - 216000) < 1e-6;
+  const nearTip = madePoly[i] > 216200 - (madeView.arrowHead ?? 14) - 1;
+  if (!onChord && !nearTip) offChord++;
+}
+assert.equal(offChord, 0, 'new free arrows hit-test the chord, not a bow');
 engine.setSelection([]);
 
 assert.equal(textOverlayAllowsRich({ type: 'text' }), true, 'plain text overlay keeps rich shortcuts');

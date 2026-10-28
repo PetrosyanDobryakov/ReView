@@ -1354,6 +1354,17 @@ button.brand {
   width: 220px;
   gap: 4px;
 }
+/* Long shelves scroll instead of running off-screen (submenu stays a
+   sibling so its flyout is never clipped). */
+.more-pop .more-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  max-height: min(320px, calc(100vh - 260px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
 .tool-btn.more-row {
   display: grid;
   grid-template-columns: 22px 1fr;

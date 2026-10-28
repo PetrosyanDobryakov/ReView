@@ -463,10 +463,29 @@ export function StyleBar({
   const showCorners = tool === 'rect' || rectTargets.length > 0;
   const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
   const showOpacity = opacityTargets.length > 0;
-
-  const want = showEraser || showFill || showStroke || showText || showPenStyle || showOpacity;
+  // Mixed multi-select edits an unclear subset (sticker rows + arrowhead at
+  // once) — restrict to opacity, which is meaningful for everything. A
+  // uniform multi-select keeps its full bar.
+  const mixedMulti =
+    selected.length > 1 &&
+    opacityTargets.length > 0 &&
+    !opacityTargets.every((v) => v.type === opacityTargets[0].type);
+  const want =
+    showEraser || showPenStyle || showOpacity || (!mixedMulti && (showFill || showStroke || showText));
   const shown = useExitPresence(want, MOTION.enter);
-  const flags = { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity };
+  const flags = mixedMulti
+    ? {
+        showEraser,
+        showFill: false,
+        showStroke: false,
+        showText: false,
+        showPenStyle: false,
+        showOutlineWidth: false,
+        showCorners: false,
+        showArrowHead: false,
+        showOpacity,
+      }
+    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;

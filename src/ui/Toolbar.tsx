@@ -333,6 +333,7 @@ function MoreMenu({
             }}
           >
             <div className="block-scheme-popover-title">{t(locale, 'more')}</div>
+            <div className="more-rows" role="group" aria-label={t(locale, 'more')}>
             {ids.map((id) => (
               <button
                 key={id}
@@ -371,6 +372,7 @@ function MoreMenu({
                 <span className="more-row-label">{t(locale, id)}</span>
               </button>
             ))}
+            </div>
             <div
               className="more-sub"
               onMouseEnter={() => setSub(true)}
