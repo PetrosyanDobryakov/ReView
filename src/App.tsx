@@ -19,6 +19,8 @@ import type { ExportSource } from './ui/ExportDialog';
 import type { ShapeBox } from './core/shapes';
 import type { AlignKind } from './core/align';
 import { Icon } from './ui/icons';
+import { BoardSearch } from './ui/BoardSearch';
+import { MiniMap } from './ui/MiniMap';
 import { modKey, t, type MessageKey } from './ui/i18n';
 import {
   pauseBoardView,
@@ -37,6 +39,8 @@ import {
   onBoardReady,
   currentPageId,
   getCurrentBoardId,
+  iOwnBoard,
+  boardRoles,
 } from './core/store';
 import {
   onSyncStatus,
@@ -175,6 +179,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [editGraph, setEditGraph] = useState<GraphEditTarget | null>(null);
   const [editCalc, setEditCalc] = useState<CalculatorEditTarget | null>(null);
   const [exportState, setExportState] = useState<{ source: ExportSource; rect: ShapeBox | null } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [pageEpoch, setPageEpoch] = useState(0);
   const [notices, setNotices] = useState<Notice[]>([]);
   const noticeId = useRef(0);
@@ -666,6 +671,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       }
     };
     engine.events.onToggleUi = () => setUiHidden((v) => !v);
+    engine.events.onSearch = () => setSearchOpen(true);
     // ponytail: remember viewport per board+page (localStorage), restore on enter
     const lastCameraKey = { v: '' };
     const persistCamera = () => {
@@ -1208,6 +1214,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             onClose={() => setExportState(null)}
           />
         )}
+        {searchOpen && engine && (
+          <BoardSearch
+            engine={engine}
+            locale={locale}
+            revision={shapeCount}
+            onClose={() => setSearchOpen(false)}
+          />
+        )}
       </div>
 
       {uiHidden && (
@@ -1408,12 +1422,25 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             online={sync.online}
             syncEnabled={sync.enabled}
             peers={peers}
+            canSummon={iOwnBoard() || boardRoles()[loadUser().id] === 'editor'}
+            onSummonAll={() => engineRef.current?.summonPeers(null)}
+            onSummonPeer={(userId) => engineRef.current?.summonPeers(userId)}
             onOpenConnection={() => {
               setSettingsFocus('connection');
               setSettingsOpen(true);
             }}
           />
           <div className="island-sep" />
+          <button
+            type="button"
+            className={`icon-btn${searchOpen ? ' is-open' : ''}`}
+            title={`${t(locale, 'boardSearch')} (Ctrl+F)`}
+            aria-label={t(locale, 'boardSearch')}
+            aria-expanded={searchOpen}
+            onClick={() => setSearchOpen((v) => !v)}
+          >
+            <Icon name="search" />
+          </button>
           <button
             type="button"
             className={`icon-btn${settingsOpen ? ' is-open' : ''}`}
@@ -1447,6 +1474,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onRemeasureText={(ids) => engineRef.current?.remeasureTextShapes(ids)}
         onSyncEditFormat={(root, fallback) => setEditLiveFormat(readLiveFormat(root, fallback))}
       />
+      {engine && <MiniMap engine={engine} locale={locale} />}
       {/* ponytail: removed align panel from top per user — was broken in Orbit and unwanted */}
       {/* <AlignBar engine={engine} locale={locale} selectionCount={selectionCount} totalCount={shapeCount} /> */}
 

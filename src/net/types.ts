@@ -62,8 +62,36 @@ export type PeerCursor = {
   selection: string[] | null;
   /** Latest confetti cannon burst (awareness only; one-shot by id; power = spam intensity). */
   confetti: PeerConfettiBurst | null;
+  /** Latest bring-to-me summon (awareness only; applied once by `at`). */
+  summon: PeerSummon | null;
 };
 
 export type CursorPos = { x: number; y: number };
+
+/**
+ * Bring-to-me summon (host → everyone or one peer). Broadcast; recipients
+ * filter by `to` ('*' or their user id) and apply once by `at`. Same-page
+ * only — cross-page summons are ignored, never auto-switch.
+ */
+export type PeerSummon = {
+  to: string;
+  x: number;
+  y: number;
+  zoom: number;
+  at: number;
+  by: string;
+};
+
+export function parseSummon(raw: unknown): PeerSummon | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.to !== 'string' || !s.to) return null;
+  const { x, y, zoom, at } = s;
+  if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+  if (typeof y !== 'number' || !Number.isFinite(y)) return null;
+  if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return null;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+  return { to: s.to, x, y, zoom: Math.min(4, Math.max(0.1, zoom)), at, by: typeof s.by === 'string' ? s.by : '' };
+}
 
 export type AwarenessUser = UserInfo;

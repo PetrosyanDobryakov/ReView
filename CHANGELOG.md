@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.16.39
+
+### Teams, sizes, search, minimap, summon
+
+- **Favorite team.** Right-click a team tab → favorite (star); Home opens
+  it instead of Recent. No favorite → Recent is now the default tab.
+  Deleting the favorite clears it.
+- **Size per color.** Every pen color remembers its own brush size
+  (Holst-style: black thin, green fat). Picking a slot applies its size;
+  the size slider saves into the current color. Marker/highlighter math
+  unchanged.
+- **Board search.** Ctrl+F (or the top-bar icon): texts, stickies, table
+  cells, media file names on the active page. Enter flies to the match
+  and selects it; arrows cycle, Esc closes.
+- **Minimap.** Corner icon bottom-right toggles a live overview (type
+  colors, accent viewport frame, persisted). Click/drag pans, wheel zooms
+  like the board.
+- **Bring to me (host).** Members menu: «Всех ко мне» + per-peer «Ко мне»
+  (owner/editors; everyone else just follows). Awareness summon, applied
+  once, same-page only, stale-proof; camera eases over, any input wins.
+  Recipients get a toast. Continuous follow-me deliberately skipped.
+
 ## 0.16.38
 
 ### Desktop window follows the route
