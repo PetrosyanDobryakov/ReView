@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.16.42
+
+### Readable slot dots
+
+- **Perceptual dot spread.** Slot dots scale with sqrt across 1..20, so
+  neighbouring thicknesses read differently (the linear ramp was flat).
+
 ## 0.16.41
 
 ### Foreign badge + one pen popup
