@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.38
+
+### Desktop window follows the route
+
+- **Board owns the full window.** Entering a board maximizes the desktop
+  window; leaving for Home restores it (Electron only, browsers untouched).
+  Only self-applied state reverts, so a hand-maximized window is left
+  alone and board-to-board hops don't flicker.
+
 ## 0.16.37
 
 ### Player mount flash, for real this time

@@ -47,6 +47,7 @@ import {
   publishPage,
   publishBoardView,
   onSyncLifecycle,
+  desktopWindowBoard,
   type SyncStatus,
   type PeerCursor,
 } from './net';
@@ -584,6 +585,9 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   useEffect(() => {
     // Re-init if leaveBoard nulled the id (Strict Mode remount / HMR).
     initBoard(boardId);
+    // Desktop: a board owns the full window; leaving restores it (unmount
+    // cleanup below — separate effect so board-to-board hops don't flicker).
+    desktopWindowBoard(true);
     setEphemeral(!persistence);
     if (isOrbitPaper(viewPaperBg()) || isOrbitPaper(readPrefs().paperBg ?? '')) {
       applyOrbitToolDefaults();
@@ -820,6 +824,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       pauseBoardView();
     };
   }, [boardId]);
+
+  // Mount-only: leaving the board (unmount) gives the window back.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    desktopWindowBoard(false);
+  }, []);
 
   const handleTool = (id: ToolId) => {
     const engine = engineRef.current;
