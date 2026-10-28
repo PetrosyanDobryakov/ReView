@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.40
+
+### Favorite popup fix + pen slot thickness
+
+- **Favorite popup no longer spans the screen.** A leftover `right: 0`
+  from the menu class stretched it; now pinned to the cursor.
+- **Slots show their thickness.** Every pen slot carries a dot sized by
+  its remembered brush size. Clicking a slot applies it and opens a
+  thickness popup (slider commits live); right-click (or the palette
+  button in the popup) reassigns the slot color as before.
+
 ## 0.16.39
 
 ### Teams, sizes, search, minimap, summon

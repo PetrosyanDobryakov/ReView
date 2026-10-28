@@ -636,6 +636,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                 position: 'fixed',
                 left: Math.max(8, Math.min(favMenu.x, window.innerWidth - 220)),
                 top: Math.max(8, Math.min(favMenu.y, window.innerHeight - 80)),
+                right: 'auto',
                 zIndex: 200,
               }}
               onClick={(e) => e.stopPropagation()}

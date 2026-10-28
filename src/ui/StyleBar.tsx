@@ -90,10 +90,24 @@ function formatFromShape(v: ShapeView): {
 }
 
 /** Miro-style quick slots + palette popup (shared across pen / fill / stroke / text). */
-function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string; onPick: (c: string) => void }) {
+function ColorSlots({
+  locale,
+  color,
+  onPick,
+  thicknessOf,
+  onThickness,
+}: {
+  locale: LocaleId;
+  color: string;
+  onPick: (c: string) => void;
+  /** Pen mode: dot size source + thickness popup per slot. Absent = plain color slots. */
+  thicknessOf?: (color: string) => number;
+  onThickness?: (color: string, size: number) => void;
+}) {
   const [slots, setSlots] = useState<string[]>(() => readPenSlots());
   const [customs, setCustoms] = useState<string[]>(() => readCustomColors());
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [thickIdx, setThickIdx] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastAddAt = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -118,16 +132,17 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
   });
 
   useEffect(() => {
-    if (openIdx === null) return;
+    if (openIdx === null && thickIdx === null) return;
     const onDown = (e: PointerEvent) => {
       if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
       // native color dialog can emit a stray outside pointerdown on focus return
       if (performance.now() - lastAddAt.current < 600) return;
       setOpenIdx(null);
+      setThickIdx(null);
     };
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
-  }, [openIdx]);
+  }, [openIdx, thickIdx]);
 
   const pick = (c: string) => {
     if (openIdx !== null) {
@@ -136,6 +151,7 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
     }
     onPick(c);
     setOpenIdx(null);
+    setThickIdx(null);
   };
 
   const shadeRows: string[][] = [];
@@ -144,6 +160,11 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
   }
 
   const activeColor = color.toLowerCase();
+  const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
+  const dotFor = (c: string): number => {
+    const s = thickMode && thicknessOf ? thicknessOf(c) : 0;
+    return Math.min(13, Math.max(4, 3 + s * 0.55));
+  };
 
   return (
     <div className="pen-slots" ref={rootRef}>
@@ -158,6 +179,18 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
           aria-pressed={activeColor === c.toLowerCase()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
+            if (thickMode) {
+              // Pen mode: apply + open the thickness popup (right-click
+              // reassigns the slot color instead).
+              if (thickIdx === i) {
+                setThickIdx(null);
+                return;
+              }
+              onPick(c);
+              setOpenIdx(null);
+              setThickIdx(i);
+              return;
+            }
             if (openIdx === i) {
               setOpenIdx(null);
               return;
@@ -165,7 +198,31 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
             onPick(c);
             setOpenIdx(i);
           }}
-        />
+          onContextMenu={
+            thickMode
+              ? (e) => {
+                  e.preventDefault();
+                  setThickIdx(null);
+                  setOpenIdx(openIdx === i ? null : i);
+                }
+              : undefined
+          }
+        >
+          {thickMode ? (
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'block',
+                width: dotFor(c),
+                height: dotFor(c),
+                borderRadius: '50%',
+                background: '#ffffff',
+                boxShadow: '0 0 0 1.5px rgba(0,0,0,0.55)',
+                pointerEvents: 'none',
+              }}
+            />
+          ) : null}
+        </button>
       ))}
       {openIdx !== null && (
         <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')}>
@@ -240,6 +297,72 @@ function ColorSlots({ locale, color, onPick }: { locale: LocaleId; color: string
           </label>
         </div>
       )}
+      {thickMode && thickIdx !== null && slots[thickIdx] ? (
+        <ThicknessPop
+          locale={locale}
+          color={slots[thickIdx] as string}
+          thicknessOf={thicknessOf as (color: string) => number}
+          onThickness={onThickness as (color: string, size: number) => void}
+          onRefresh={() => setSlots(readPenSlots())}
+          onEditColor={() => {
+            setThickIdx(null);
+            setOpenIdx(thickIdx);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ThicknessPop({
+  locale,
+  color,
+  thicknessOf,
+  onThickness,
+  onRefresh,
+  onEditColor,
+}: {
+  locale: LocaleId;
+  color: string;
+  thicknessOf: (color: string) => number;
+  onThickness: (color: string, size: number) => void;
+  onRefresh: () => void;
+  onEditColor: () => void;
+}) {
+  const value = thicknessOf(color);
+  return (
+    <div className="pen-pop" role="dialog" aria-label={t(locale, 'brushSize')}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="panel-label" style={{ flex: 1 }}>
+          {t(locale, 'brushSize')} · {color}
+        </span>
+        <button
+          type="button"
+          className="style-btn p2p-mini"
+          title={t(locale, 'penColors')}
+          onClick={onEditColor}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {t(locale, 'penColors')}
+        </button>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+        <input
+          className="size-slider"
+          type="range"
+          min={1}
+          max={20}
+          value={value}
+          aria-label={t(locale, 'brushSize')}
+          onChange={(e) => {
+            onThickness(color, Number(e.target.value));
+            // Refresh the dots (storage is the source of truth).
+            onRefresh();
+          }}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+        <span className="size-value">{value}</span>
+      </div>
     </div>
   );
 }
@@ -623,6 +746,15 @@ export function StyleBar({
           <ColorSlots
             locale={locale}
             color={strokeValue}
+            thicknessOf={(c) => readPenSize(c) ?? pen.size}
+            onThickness={(c, size) => {
+              updatePenSettings({ size });
+              writePenSize(c, size);
+              if (penTargets.length) {
+                patchShapes(penTargets.map((v) => [v.id, { strokeWidth: penStrokeWidthForSize(v, size) }]));
+                onPatched();
+              }
+            }}
             onPick={(c) => {
               // Holst-style: every color remembers its own brush size.
               const remembered = readPenSize(c);
