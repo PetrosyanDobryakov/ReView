@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.43
+
+### Slots scale with thickness
+
+- **No dots, no rings.** Slot buttons themselves scale 12–28px by their
+  remembered brush size (thin color = small circle, fat = big): color and
+  size read at a glance. Thickness popup unchanged.
+
 ## 0.16.42
 
 ### Readable slot dots

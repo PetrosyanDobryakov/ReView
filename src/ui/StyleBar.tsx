@@ -159,60 +159,52 @@ function ColorSlots({
 
   const activeColor = color.toLowerCase();
   const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
-  const dotFor = (c: string): { size: number; fill: string } => {
-    const s = thickMode && thicknessOf ? thicknessOf(c) : 0;
-    // Perceptual spread across 1..20: neighbours must read differently.
-    const spread = (Math.sqrt(Math.max(1, s)) - 1) / (Math.sqrt(20) - 1);
-    return { size: Math.min(14, Math.max(4, 4 + spread * 10)), fill: c };
+  // Slot buttons scale with their thickness: thin colors are small circles,
+  // fat ones are big — color and size read at a glance, no dots needed.
+  const diamFor = (c: string): number | undefined => {
+    if (!thickMode || !thicknessOf) return undefined;
+    const s = Math.min(20, Math.max(1, thicknessOf(c)));
+    return Math.round(12 + ((s - 1) / 19) * 16);
   };
 
   return (
     <div className="pen-slots" ref={rootRef}>
-      {slots.map((c, i) => (
-        <button
-          type="button"
-          key={i}
-          className={`pen-slot${activeColor === c.toLowerCase() ? ' active' : ''}`}
-          style={{ background: c }}
-          title={c}
-          aria-label={`color ${i + 1}`}
-          aria-pressed={activeColor === c.toLowerCase()}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            // Apply + open the one config window (palette + thickness).
-            // Clicking the open slot closes it; right-click does the same.
-            if (openSlot === i) {
-              setOpenSlot(null);
-              return;
-            }
-            onPick(c);
-            setOpenSlot(i);
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            if (openSlot === i) setOpenSlot(null);
-            else {
+      {slots.map((c, i) => {
+        const diam = diamFor(c);
+        return (
+          <button
+            type="button"
+            key={i}
+            className={`pen-slot${activeColor === c.toLowerCase() ? ' active' : ''}`}
+            style={{
+              background: c,
+              ...(diam !== undefined ? { width: diam, height: diam } : null),
+            }}
+            title={c}
+            aria-label={`color ${i + 1}`}
+            aria-pressed={activeColor === c.toLowerCase()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              // Apply + open the one config window (palette + thickness).
+              // Clicking the open slot closes it; right-click does the same.
+              if (openSlot === i) {
+                setOpenSlot(null);
+                return;
+              }
               onPick(c);
               setOpenSlot(i);
-            }
-          }}
-        >
-          {thickMode ? (
-            <span
-              aria-hidden="true"
-              style={{
-                display: 'block',
-                width: dotFor(c).size,
-                height: dotFor(c).size,
-                borderRadius: '50%',
-                background: dotFor(c).fill,
-                boxShadow: '0 0 0 1.5px #ffffff, 0 0 0 3px rgba(0,0,0,0.55)',
-                pointerEvents: 'none',
-              }}
-            />
-          ) : null}
-        </button>
-      ))}
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              if (openSlot === i) setOpenSlot(null);
+              else {
+                onPick(c);
+                setOpenSlot(i);
+              }
+            }}
+          />
+        );
+      })}
       {openSlot !== null && (
         <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')}>
           {thickMode && slots[openSlot] ? (
