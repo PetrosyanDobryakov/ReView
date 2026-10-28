@@ -116,6 +116,21 @@ export function canSelfUpdate(): boolean {
 }
 
 /**
+ * Desktop window follows the route: maximized on a board, restored on Home.
+ * Electron only (no Tauri command, browsers can't own the window) and
+ * fire-and-forget — a missed call just leaves the current size.
+ */
+export function desktopWindowBoard(enter: boolean): void {
+  try {
+    const shell = electron();
+    if (!shell) return;
+    void shell.invoke(enter ? 'window_maximize' : 'window_restore').catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Install the newest release of this line. Resolves `restarting` (the app
  * quits and comes back updated), `opened` (an installer window is shown) or
  * `latest`; rejects when this copy cannot update itself.

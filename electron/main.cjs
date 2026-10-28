@@ -391,6 +391,25 @@ const commands = {
 
   update_install: () => installUpdate(),
 
+  // Board route owns the window size: maximized on a board, restored on
+  // Home. Only self-applied state is reverted, so a window the user
+  // maximized by hand (or unmaximized mid-board) is left alone.
+  window_maximize() {
+    if (!win || win.isDestroyed()) return false;
+    if (!win.isMaximized() && !win.isFullScreen()) {
+      win.maximize();
+      boardMaximized = true;
+    }
+    return true;
+  },
+
+  window_restore() {
+    if (!win || win.isDestroyed()) return false;
+    if (boardMaximized && win.isMaximized()) win.unmaximize();
+    boardMaximized = false;
+    return true;
+  },
+
   blob_load(args) {
     if (!validHash(args?.hash)) throw new Error('bad blob hash');
     try {
@@ -495,6 +514,9 @@ async function download(url, file, onProgress) {
 }
 
 let updating = false;
+
+/** Set only when the board route maximized the window (see window_restore). */
+let boardMaximized = false;
 
 /** Returns `restarting` (the app quits and comes back), `opened` (an installer is shown) or `latest`. */
 async function installUpdate() {
