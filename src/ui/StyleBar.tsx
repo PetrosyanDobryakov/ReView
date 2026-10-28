@@ -161,7 +161,9 @@ function ColorSlots({
   const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
   const dotFor = (c: string): { size: number; fill: string } => {
     const s = thickMode && thicknessOf ? thicknessOf(c) : 0;
-    return { size: Math.min(11, Math.max(4, 3 + s * 0.5)), fill: c };
+    // Perceptual spread across 1..20: neighbours must read differently.
+    const spread = (Math.sqrt(Math.max(1, s)) - 1) / (Math.sqrt(20) - 1);
+    return { size: Math.min(14, Math.max(4, 4 + spread * 10)), fill: c };
   };
 
   return (
