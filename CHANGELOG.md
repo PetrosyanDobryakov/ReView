@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.37
+
+### Player mount flash, for real this time
+
+- **Root cause found.** The card reuses the `board-row-menu` theme class,
+  whose mount animation animates `transform` — overriding the dock's
+  `scale(k)` for ~200ms. Every fresh dock painted at natural 480px and
+  then snapped to size (most visible at low zoom, e.g. multi-selecting).
+  Cards now opt out of the animation; geometry was already synchronous.
+
 ## 0.16.36
 
 ### Back banner re-arms on revisit

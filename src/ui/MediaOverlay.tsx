@@ -665,6 +665,9 @@ function MediaCard({
         position: 'fixed',
         zIndex: 10,
         minWidth: 0,
+        // No mount animation: the theme class animates transform, which
+        // would override scale(k) and flash the dock at natural size.
+        animation: 'none',
         visibility: initialLayout ? 'visible' : 'hidden',
         left: initialLayout ? Math.round(initialLayout.left) : undefined,
         top: initialLayout ? Math.round(initialLayout.top) : undefined,
