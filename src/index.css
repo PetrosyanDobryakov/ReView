@@ -1678,6 +1678,36 @@ button.brand {
   transform: scale(1.08);
 }
 
+/* Fixed pen cells: the dot inside scales with thickness, the cell never
+   does — the row, popup anchor and island keep their size. */
+.pen-cell {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.pen-dot {
+  border-radius: 50%;
+  border: 2px solid var(--chrome-border);
+  transition:
+    width var(--chrome-dur-fast) var(--chrome-ease),
+    height var(--chrome-dur-fast) var(--chrome-ease),
+    transform var(--chrome-dur-fast) var(--chrome-ease),
+    box-shadow var(--chrome-dur-fast) var(--chrome-ease);
+}
+.pen-cell:hover .pen-dot {
+  transform: scale(1.1);
+}
+.pen-dot.active {
+  box-shadow: 0 0 0 2px var(--chrome-accent-strong);
+}
+
 .pen-pop {
   position: absolute;
   left: 50%;
