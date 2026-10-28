@@ -89,34 +89,30 @@ function formatFromShape(v: ShapeView): {
   };
 }
 
-/** Miro-style quick slots + palette popup (shared across pen / fill / stroke / text). */
-function ColorSlots({
+/**
+ * Shared palette window: thickness slider (pen slots only) + shade grid +
+ * customs + native picker. Self-contained (customs, outside-close); the
+ * parent only opens/closes it and handles picks.
+ */
+function PalettePop({
   locale,
-  color,
-  onPick,
-  thicknessOf,
-  onThickness,
+  activeColor,
+  thickness,
+  onPickSwatch,
+  onNativeColor,
+  onClose,
 }: {
   locale: LocaleId;
-  color: string;
-  onPick: (c: string) => void;
-  /** Pen mode: dot size source + thickness popup per slot. Absent = plain color slots. */
-  thicknessOf?: (color: string) => number;
-  onThickness?: (color: string, size: number) => void;
+  activeColor: string;
+  thickness: { value: number; onChange: (size: number) => void } | null;
+  onPickSwatch: (c: string) => void;
+  onNativeColor: (c: string) => void;
+  onClose: () => void;
 }) {
-  const [slots, setSlots] = useState<string[]>(() => readPenSlots());
   const [customs, setCustoms] = useState<string[]>(() => readCustomColors());
-  // One popup per slot: palette (reassign) + thickness slider together.
-  const [openSlot, setOpenSlot] = useState<number | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const lastAddAt = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const syncSlots = () => setSlots(readPenSlots());
-    window.addEventListener('review-pen-slots', syncSlots);
-    return () => window.removeEventListener('review-pen-slots', syncSlots);
-  }, []);
 
   // native 'change' fires once on dialog confirm — use it to commit to custom colors
   // (synthetic onChange fires continuously while dragging in the native picker)
@@ -132,16 +128,183 @@ function ColorSlots({
   });
 
   useEffect(() => {
-    if (openSlot === null) return;
     const onDown = (e: PointerEvent) => {
-      if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
+      if (e.target instanceof Node && popRef.current?.contains(e.target)) return;
       // native color dialog can emit a stray outside pointerdown on focus return
       if (performance.now() - lastAddAt.current < 600) return;
-      setOpenSlot(null);
+      onClose();
     };
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
-  }, [openSlot]);
+  }, [onClose]);
+
+  const shadeRows: string[][] = [];
+  for (let row = 0; row < PALETTE_HUES[0].length; row++) {
+    shadeRows.push(PALETTE_HUES.map((hue) => hue[row]));
+  }
+
+  return (
+    <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')} ref={popRef}>
+      {thickness ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="panel-label" style={{ flex: 'none' }}>
+            {t(locale, 'brushSize')}
+          </span>
+          <input
+            className="size-slider"
+            type="range"
+            min={1}
+            max={20}
+            value={thickness.value}
+            aria-label={t(locale, 'brushSize')}
+            onChange={(e) => thickness.onChange(Number(e.target.value))}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <span className="size-value">{thickness.value}</span>
+        </div>
+      ) : null}
+      <div className="pen-pop-grid">
+        {shadeRows.map((row, ri) =>
+          row.map((c, ci) => (
+            <button
+              type="button"
+              key={`${ri}-${ci}`}
+              className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
+              style={{ background: c }}
+              title={c}
+              aria-label={c}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onPickSwatch(c)}
+            />
+          ))
+        )}
+      </div>
+      {customs.length > 0 && (
+        <>
+          <span className="panel-label">
+            {t(locale, 'customColors')} · {t(locale, 'rightClickDelete')}
+          </span>
+          <div className="pen-pop-grid customs">
+            {customs.map((c) => (
+              <button
+                type="button"
+                key={c}
+                className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
+                style={{ background: c }}
+                title={c}
+                aria-label={c}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onPickSwatch(c)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCustoms(removeCustomColor(c));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    setCustoms(removeCustomColor(c));
+                  }
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
+      <label className="pen-add" title={t(locale, 'addColor')}>
+        <span>{t(locale, 'addColor')}</span>
+        <input
+          ref={addInputRef}
+          type="color"
+          value={/^#[0-9a-fA-F]{6}$/.test(activeColor) ? activeColor : '#ffffff'}
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            lastAddAt.current = performance.now();
+          }}
+          onChange={(e) => {
+            // live: preview; customs list is committed on the native change event
+            lastAddAt.current = performance.now();
+            onNativeColor(e.target.value);
+          }}
+        />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * One color cell + the shared window (pen slots use the full ColorSlots
+ * with thickness-coded circles instead).
+ */
+function ColorCell({
+  locale,
+  color,
+  title,
+  onPick,
+}: {
+  locale: LocaleId;
+  color: string;
+  title: string;
+  onPick: (c: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = /^#[0-9a-fA-F]{6}$/.test(color) ? color : 'transparent';
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        className={`pen-slot${open ? ' active' : ''}`}
+        style={{ background: shown, width: 22, height: 22 }}
+        title={title}
+        aria-label={title}
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open ? (
+        <PalettePop
+          locale={locale}
+          activeColor={color.toLowerCase()}
+          thickness={null}
+          onPickSwatch={(c) => {
+            onPick(c);
+            setOpen(false);
+          }}
+          onNativeColor={(c) => {
+            onPick(c);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/** Miro-style quick slots + palette popup (pen: thickness-coded circles). */
+function ColorSlots({
+  locale,
+  color,
+  onPick,
+  thicknessOf,
+  onThickness,
+}: {
+  locale: LocaleId;
+  color: string;
+  onPick: (c: string) => void;
+  /** Pen mode: dot size source + thickness popup per slot. Absent = plain color slots. */
+  thicknessOf?: (color: string) => number;
+  onThickness?: (color: string, size: number) => void;
+}) {
+  const [slots, setSlots] = useState<string[]>(() => readPenSlots());
+  // One popup per slot: palette (reassign) + thickness slider together.
+  const [openSlot, setOpenSlot] = useState<number | null>(null);
+
+  useEffect(() => {
+    const syncSlots = () => setSlots(readPenSlots());
+    window.addEventListener('review-pen-slots', syncSlots);
+    return () => window.removeEventListener('review-pen-slots', syncSlots);
+  }, []);
 
   const pick = (c: string) => {
     if (openSlot !== null) {
@@ -151,11 +314,6 @@ function ColorSlots({
     onPick(c);
     // Stays open: color + thickness are configured in the one window.
   };
-
-  const shadeRows: string[][] = [];
-  for (let row = 0; row < PALETTE_HUES[0].length; row++) {
-    shadeRows.push(PALETTE_HUES.map((hue) => hue[row]));
-  }
 
   const activeColor = color.toLowerCase();
   const thickMode = typeof thicknessOf === 'function' && typeof onThickness === 'function';
@@ -175,7 +333,7 @@ function ColorSlots({
   };
 
   return (
-    <div className="pen-slots" ref={rootRef}>
+    <div className="pen-slots">
       {slots.map((c, i) => {
         const diam = diamFor(c);
         const isActive = activeColor === c.toLowerCase();
@@ -214,107 +372,31 @@ function ColorSlots({
           />
         );
       })}
-      {openSlot !== null && (
-        <div className="pen-pop" role="dialog" aria-label={t(locale, 'penColors')}>
-          {thickMode && slots[openSlot] ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="panel-label" style={{ flex: 'none' }}>
-                {t(locale, 'brushSize')}
-              </span>
-              <input
-                className="size-slider"
-                type="range"
-                min={1}
-                max={20}
-                value={(thicknessOf as (color: string) => number)(slots[openSlot] as string)}
-                aria-label={t(locale, 'brushSize')}
-                onChange={(e) => {
-                  const size = Number(e.target.value);
-                  (onThickness as (color: string, size: number) => void)(
-                    slots[openSlot] as string,
-                    size
-                  );
-                  // Refresh the dots (storage is the source of truth).
-                  setSlots(readPenSlots());
-                }}
-                style={{ flex: 1, minWidth: 0 }}
-              />
-              <span className="size-value">
-                {(thicknessOf as (color: string) => number)(slots[openSlot] as string)}
-              </span>
-            </div>
-          ) : null}
-          <div className="pen-pop-grid">
-            {shadeRows.map((row, ri) =>
-              row.map((c, ci) => (
-                <button
-                  type="button"
-                  key={`${ri}-${ci}`}
-                  className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
-                  style={{ background: c }}
-                  title={c}
-                  aria-label={c}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pick(c)}
-                />
-              ))
-            )}
-          </div>
-          {customs.length > 0 && (
-            <>
-              <span className="panel-label">
-                {t(locale, 'customColors')} · {t(locale, 'rightClickDelete')}
-              </span>
-              <div className="pen-pop-grid customs">
-                {customs.map((c) => (
-                  <button
-                    type="button"
-                    key={c}
-                    className={`pen-pop-swatch${activeColor === c.toLowerCase() ? ' active' : ''}`}
-                    style={{ background: c }}
-                    title={c}
-                    aria-label={c}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => pick(c)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setCustoms(removeCustomColor(c));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Delete' || e.key === 'Backspace') {
-                        e.preventDefault();
-                        setCustoms(removeCustomColor(c));
-                      }
-                    }}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-          <label className="pen-add" title={t(locale, 'addColor')}>
-            <span>{t(locale, 'addColor')}</span>
-            <input
-              ref={addInputRef}
-              type="color"
-              value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#ffffff'}
-              onMouseDown={(e) => e.preventDefault()}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                lastAddAt.current = performance.now();
-              }}
-              onChange={(e) => {
-                // live: preview on slot; customs list is committed on the native change event
-                lastAddAt.current = performance.now();
-                if (openSlot !== null) {
-                  writePenSlot(openSlot, e.target.value);
-                  setSlots(readPenSlots());
+      {openSlot !== null && slots[openSlot] ? (
+        <PalettePop
+          locale={locale}
+          activeColor={activeColor}
+          thickness={
+            thickMode
+              ? {
+                  value: thicknessOf(slots[openSlot] as string),
+                  onChange: (size) => {
+                    onThickness(slots[openSlot] as string, size);
+                    // Refresh the dots (storage is the source of truth).
+                    setSlots(readPenSlots());
+                  },
                 }
-                onPick(e.target.value);
-              }}
-            />
-          </label>
-        </div>
-      )}
+              : null
+          }
+          onPickSwatch={(c) => pick(c)}
+          onNativeColor={(c) => {
+            writePenSlot(openSlot, c);
+            setSlots(readPenSlots());
+            onPick(c);
+          }}
+          onClose={() => setOpenSlot(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -524,6 +606,26 @@ export function StyleBar({
     }
   };
 
+  // Pen slots when stroking pens, one color cell for every other target.
+  const strokeIsPen =
+    showPen || (strokeTargets.length > 0 && strokeTargets.every((v) => v.type === 'pen'));
+  const pickStrokeColor = (c: string) => {
+    // Holst-style: every color remembers its own brush size.
+    const remembered = readPenSize(c);
+    const nextSize = remembered ?? pen.size;
+    updatePenSettings({ color: c, size: nextSize });
+    updateShapeSettings({ stroke: c });
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
+    for (const v of penTargets) {
+      patches.push([v.id, { stroke: c, strokeWidth: penStrokeWidthForSize(v, nextSize) }]);
+    }
+    if (patches.length) {
+      patchShapes(patches);
+      onPatched();
+    }
+  };
+
   return (
     <div className={`island style-island${want ? '' : ' is-leaving'}`}>
       <div className="style-island-body" key={mode}>
@@ -620,9 +722,10 @@ export function StyleBar({
           >
             <Icon name="noFill" size={16} />
           </button>
-          <ColorSlots
+          <ColorCell
             locale={locale}
             color={fillOn ? fillValue : ''}
+            title={t(locale, 'fill')}
             onPick={(c) => {
               updateShapeSettings({ fill: c, filled: true });
               if (fillTargets.length) {
@@ -677,6 +780,7 @@ export function StyleBar({
           {view.showStroke && (
           <>
           <span className="panel-label">{t(locale, 'stroke')}</span>
+          {strokeIsPen ? (
           <ColorSlots
             locale={locale}
             color={strokeValue}
@@ -689,23 +793,16 @@ export function StyleBar({
                 onPatched();
               }
             }}
-            onPick={(c) => {
-              // Holst-style: every color remembers its own brush size.
-              const remembered = readPenSize(c);
-              const nextSize = remembered ?? pen.size;
-              updatePenSettings({ color: c, size: nextSize });
-              updateShapeSettings({ stroke: c });
-              const patches: Array<[string, Partial<ShapeView>]> = [];
-              for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
-              for (const v of penTargets) {
-                patches.push([v.id, { stroke: c, strokeWidth: penStrokeWidthForSize(v, nextSize) }]);
-              }
-              if (patches.length) {
-                patchShapes(patches);
-                onPatched();
-              }
-            }}
+            onPick={pickStrokeColor}
           />
+          ) : (
+          <ColorCell
+            locale={locale}
+            color={strokeValue}
+            title={t(locale, 'stroke')}
+            onPick={pickStrokeColor}
+          />
+          )}
         </>
           )}
           {view.showOutlineWidth && (
@@ -832,9 +929,10 @@ export function StyleBar({
             />
           </div>
           <div className="toolbelt-sep" />
-          <ColorSlots
+          <ColorCell
             locale={locale}
             color={textValue}
+            title={t(locale, 'textFormat')}
             onPick={(c) => {
               // ponytail: never mutate stored color — display adapts via displayInk
               applyFormat({ color: c });
