@@ -1,8 +1,9 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, rollDieValue,
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, rollDieValue, figurePolygon,
  NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H, projectArrowInsert, insertArrowWaypoint } from '../core/shapes';
+import type { FigureKind } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -67,7 +68,11 @@ export type ToolId =
   | 'display'
   | 'table'
   | 'flashcard'
-  | 'die';
+  | 'die'
+  | 'star'
+  | 'pentagon'
+  | 'octagon'
+  | 'cross';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
@@ -1460,7 +1465,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -1932,6 +1937,54 @@ export class DieTool extends BoxTool {
     ctx.stroke();
     ctx.restore();
   }
+}
+
+/** Plain geometric figures: no labels, select tool after create. */
+abstract class FigureTool extends FlowchartTool {
+  protected openEditorOnCreate = false;
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.beginPreview(engine, ctx);
+    if (!box) return;
+    const pts = figurePolygon(this.shapeType as FigureKind, box.x, box.y, box.w, box.h);
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class StarTool extends FigureTool {
+  readonly id = 'star';
+  readonly shapeType = 'star';
+  readonly defaultW = 120;
+  readonly defaultH = 120;
+}
+
+export class PentagonTool extends FigureTool {
+  readonly id = 'pentagon';
+  readonly shapeType = 'pentagon';
+  readonly defaultW = 120;
+  readonly defaultH = 110;
+}
+
+export class OctagonTool extends FigureTool {
+  readonly id = 'octagon';
+  readonly shapeType = 'octagon';
+  readonly defaultW = 120;
+  readonly defaultH = 120;
+}
+
+export class CrossTool extends FigureTool {
+  readonly id = 'cross';
+  readonly shapeType = 'cross';
+  readonly defaultW = 100;
+  readonly defaultH = 100;
 }
 
 export class TriangleTool extends FlowchartTool {
@@ -2522,6 +2575,10 @@ export class Tools {
   readonly table = new TableTool();
   readonly flashcard = new FlashcardTool();
   readonly die = new DieTool();
+  readonly star = new StarTool();
+  readonly pentagon = new PentagonTool();
+  readonly octagon = new OctagonTool();
+  readonly cross = new CrossTool();
 
   get(id: ToolId): Tool {
     return this[id];

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.16.54
+
+### Figures tab (shapes merged, +4 new)
+
+- **One «Figures» tab for everything geometric.** The strip rect/ellipse
+  buttons and the block-scheme flyout are gone — 14 figures (rect,
+  ellipse, triangle, diamond, **star, pentagon, octagon, cross**,
+  hexagon, parallelogram, cylinder, terminator, subroutine, display) in
+  a single grid. The button shows the last used figure; rows drag out to
+  the strip if you want a favorite pinned.
+- Saved toolbars keep their old rect/ellipse buttons until reorganized;
+  fresh installs start merged.
+
 ## 0.16.53
 
 ### Flashcards + dice

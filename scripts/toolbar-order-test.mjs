@@ -23,7 +23,7 @@ const messy = readOrders({
   more: ['graph', 'triangle', 'select'],
 });
 assert.deepEqual(messy.nav, ['select', 'pen', 'lasso', 'pan'], 'nav cleaned + backfilled');
-assert.deepEqual(messy.create, ['eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled');
+assert.deepEqual(messy.create, ['eraser', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled (figures live in the tab)');
 assert.deepEqual(messy.more, [...MORE_DEFAULTS], 'shelf keeps only parkable, no dupes');
 
 // park eraser on the shelf, pull graph out to the strip
@@ -39,7 +39,7 @@ o = moveToolInOrders(o, 'eraser', 'more', null, false);
 assert.deepEqual(o.more[o.more.length - 1], 'eraser', 'append to shelf end');
 
 // invalid moves are no-ops (same reference)
-assert.equal(moveToolInOrders(o, 'diamond', 'create', null, false), o, 'scheme shapes stay in the submenu');
+assert.equal(moveToolInOrders(o, 'diamond', 'create', null, false), o, 'non-parkable figure tools never move');
 assert.equal(moveToolInOrders(o, 'nope', 'more', null, false), o, 'unknown ids ignored');
 const appended = moveToolInOrders(o, 'pen', 'create', 'nope', false);
 assert.equal(appended.create.at(-1), 'pen', 'missing anchor appends');

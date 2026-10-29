@@ -12,7 +12,7 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross';
 
 /** Photo / video / audio / PDF hosts that magnetize notes above them in z-order. */
 export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'audio', 'doc']);
@@ -41,6 +41,10 @@ export const NON_ERASABLE_TYPES: ReadonlySet<ShapeType> = new Set([
   'terminator',
   'subroutine',
   'display',
+  'star',
+  'pentagon',
+  'octagon',
+  'cross',
 ]);
 
 export type TextAlign = 'left' | 'center' | 'right';
@@ -495,8 +499,41 @@ export function rollDieValue(): number {
   return Math.floor(Math.random() * 6) + 1;
 }
 
-/** Pip layout in unit-box coords for a die face (standard arrangement). */
-export function diePips(value: number): Array<[number, number]> {
+export type FigureKind = 'star' | 'pentagon' | 'octagon' | 'cross';
+
+/** Vertex loop for the plain geometric figures (world coords, unrotated box). */
+export function figurePolygon(kind: FigureKind, x: number, y: number, w: number, h: number): Array<[number, number]> {
+  if (kind === 'cross') {
+    const x1 = x + w / 3, x2 = x + (2 * w) / 3;
+    const y1 = y + h / 3, y2 = y + (2 * h) / 3;
+    return [
+      [x1, y], [x2, y], [x2, y1], [x + w, y1], [x + w, y2], [x2, y2],
+      [x2, y + h], [x1, y + h], [x1, y2], [x, y2], [x, y1], [x1, y1],
+    ];
+  }
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  if (kind === 'star') {
+    // Elliptical star so it fills non-square boxes like the other figures.
+    const rx = w / 2;
+    const ry = h / 2;
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 1 : 0.42;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      pts.push([cx + Math.cos(a) * rx * r, cy + Math.sin(a) * ry * r]);
+    }
+    return pts;
+  }
+  const n = kind === 'pentagon' ? 5 : 8;
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    pts.push([cx + (Math.cos(a) * w) / 2, cy + (Math.sin(a) * h) / 2]);
+  }
+  return pts;
+}
+/** Pip layout in unit-box coords for a die face (standard arrangement). */export function diePips(value: number): Array<[number, number]> {
   const c: [number, number] = [0.5, 0.5];
   const tl: [number, number] = [0.3, 0.3];
   const tr: [number, number] = [0.7, 0.3];
@@ -2189,6 +2226,20 @@ function drawShapeBody(
         ctx.fill();
       }
       ctx.restore();
+      break;
+    }
+    case 'star':
+    case 'pentagon':
+    case 'octagon':
+    case 'cross': {
+      const pts = figurePolygon(v.type, v.x, v.y, v.w, v.h);
+      ctx.beginPath();
+      pts.forEach(([px, py], i) => {
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      fillAndStrokePath(ctx, v);
       break;
     }
     case 'triangle': {

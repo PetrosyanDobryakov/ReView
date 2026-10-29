@@ -31,6 +31,10 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'table',
   'flashcard',
   'die',
+  'star',
+  'pentagon',
+  'octagon',
+  'cross',
 ];
 
 const DEFAULT_TOOL_BINDS: ToolBinds = {
@@ -58,6 +62,10 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   table: '',
   flashcard: 'KeyB',
   die: 'KeyX',
+  star: '',
+  pentagon: '',
+  octagon: '',
+  cross: '',
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {

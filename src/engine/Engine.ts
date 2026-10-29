@@ -2483,6 +2483,10 @@ export class Engine {
         display: 'infoDisplay',
         flashcard: 'infoFlashcard',
         die: 'infoDie',
+        star: 'infoStar',
+        pentagon: 'infoPentagon',
+        octagon: 'infoOctagon',
+        cross: 'infoCross',
       } as const
     )[v.type] as unknown as string ?? 'infoRect';
     const lines = [
@@ -3601,7 +3605,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die' || v.type === 'star' || v.type === 'pentagon' || v.type === 'octagon' || v.type === 'cross') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };

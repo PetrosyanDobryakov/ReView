@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { ToolId } from '../engine/tools';
 import { onPrefsChange, readPrefs, writePrefs } from '../core/prefs';
 import {
-  SCHEME,
+  FIGURES,
   isParkable,
   moveToolInOrders,
   readOrders as readToolbarOrders,
@@ -171,7 +171,7 @@ function ToolButtons({
   );
 }
 
-/** Overflow shelf: parked tool rows + nested block-scheme submenu. Rows are draggable both ways.
+/** Overflow shelf: parked tool rows, draggable both ways.
  * Menu is portaled: ≤720 `.toolbelt-scroll` uses overflow-x:auto (which forces y clipping) +
  * mask-image, so an in-tree absolute popover was painted/clipped away on phone — tap looked dead. */
 function MoreMenu({
@@ -191,8 +191,6 @@ function MoreMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [sub, setSub] = useState(false);
-  const [lastSchemeTool, setLastSchemeTool] = useState<ToolId>('diamond');
   const [drop, setDrop] = useState<{ id: ToolId; after: boolean } | null>(null);
   const [dragId, setDragId] = useState<ToolId | null>(null);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
@@ -200,7 +198,6 @@ function MoreMenu({
 
   const close = useCallback(() => {
     setOpen(false);
-    setSub(false);
   }, []);
 
   const placeMenu = useCallback(() => {
@@ -210,7 +207,7 @@ function MoreMenu({
     const scale =
       parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const width = 220;
-    const estimatedHeight = Math.min(410, 48 + ids.length * 44 + 52);
+    const estimatedHeight = Math.min(410, 48 + ids.length * 44 + 16);
     const scaledW = width * scale;
     const centered = {
       left: rect.left + rect.width / 2 - scaledW / 2,
@@ -230,14 +227,24 @@ function MoreMenu({
   }, [ids.length]);
 
   useEffect(() => {
-    if (SCHEME.includes(tool)) setLastSchemeTool(tool);
-  }, [tool]);
+    if (!open) return;
+    const active = menuRef.current?.querySelector<HTMLButtonElement>('button');
+    active?.focus();
+  }, [open]);
 
   const prevTool = useRef(tool);
   useEffect(() => {
     if (prevTool.current !== tool) close();
     prevTool.current = tool;
   }, [tool, close]);
+
+  const isActive = ids.includes(tool);
+
+  const pick = (id: ToolId) => {
+    onTool(id);
+    close();
+    btnRef.current?.focus();
+  };
 
   useLayoutEffect(() => {
     if (!open) {
@@ -269,7 +276,7 @@ function MoreMenu({
       window.removeEventListener('resize', onReflow);
       window.removeEventListener('scroll', onReflow, true);
     };
-  }, [open, placeMenu, sub]);
+  }, [open, placeMenu]);
 
   useEffect(() => {
     if (!open) return;
@@ -292,23 +299,6 @@ function MoreMenu({
       document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open, close]);
-
-  useEffect(() => {
-    if (!open) return;
-    const active = menuRef.current?.querySelector<HTMLButtonElement>(
-      '[data-scheme-active="true"], button'
-    );
-    active?.focus();
-  }, [open]);
-
-  const isActive = ids.includes(tool) || SCHEME.includes(tool);
-
-  const pick = (id: ToolId) => {
-    if (SCHEME.includes(id)) setLastSchemeTool(id);
-    onTool(id);
-    close();
-    btnRef.current?.focus();
-  };
 
   const beginDrag = (e: React.DragEvent, id: ToolId) => {
     if (!allowReorder) {
@@ -390,43 +380,6 @@ function MoreMenu({
               </button>
             ))}
             </div>
-            <div
-              className="more-sub"
-              onMouseEnter={() => setSub(true)}
-              onMouseLeave={() => setSub(false)}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="tool-btn more-row"
-                aria-haspopup="menu"
-                aria-expanded={sub}
-                title={t(locale, 'blockScheme')}
-                onClick={() => setSub((v) => !v)}
-              >
-                <Icon name={lastSchemeTool as IconName} size={TOOLBELT_ICON_SIZE} />
-                <span className="more-row-label">{t(locale, 'blockScheme')}</span>
-                <Icon name="chevronRight" size={14} />
-              </button>
-              {sub && (
-                <div className="island block-scheme-submenu" role="menu" aria-label={t(locale, 'blockScheme')}>
-                  {SCHEME.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="menuitemradio"
-                      className={`tool-btn${tool === id ? ' active' : ''}`}
-                      title={t(locale, id)}
-                      aria-label={t(locale, id)}
-                      aria-checked={tool === id}
-                      onClick={() => pick(id)}
-                    >
-                      <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>,
           document.body
         )
@@ -446,7 +399,6 @@ function MoreMenu({
         aria-expanded={open}
         onClick={() => {
           setOpen((v) => !v);
-          setSub(false);
         }}
         onDragOver={(e) => {
           // Spring-load: hovering the shelf button mid-drag opens the popover.
@@ -455,7 +407,6 @@ function MoreMenu({
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             setOpen(true);
-            setSub(false);
           }
         }}
         onDrop={(e) => {
@@ -470,6 +421,208 @@ function MoreMenu({
         }}
       >
         <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
+      </button>
+      {menu}
+    </div>
+  );
+}
+
+/** Figures tab: every geometric shape in one grid. Replaces the strip
+ * rect/ellipse buttons and the old scheme flyout. Rows drag out to the
+ * strip; the button shows the last used figure. */
+function FiguresMenu({
+  tool,
+  locale,
+  onTool,
+}: {
+  tool: ToolId;
+  locale: LocaleId;
+  onTool: (id: ToolId) => void;
+}) {
+  const menuId = useId();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [dragId, setDragId] = useState<ToolId | null>(null);
+  const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
+  const [lastFigure, setLastFigure] = useState<ToolId>('rect');
+  const allowReorder = !isCoarsePointer();
+
+  const close = useCallback(() => setOpen(false), []);
+
+  const placeMenu = useCallback(() => {
+    const trigger = btnRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const scale =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+    const width = 220;
+    const estimatedHeight = Math.min(410, 48 + FIGURES.length * 44 + 16);
+    const scaledW = width * scale;
+    const centered = {
+      left: rect.left + rect.width / 2 - scaledW / 2,
+      right: rect.left + rect.width / 2 + scaledW / 2,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+    setMenuStyle(
+      zoomedPortalPosition(centered, {
+        width,
+        estimatedHeight,
+        align: 'left',
+        scale,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    placeMenu();
+    const onReflow = () => placeMenu();
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
+    // Same real-geometry correction as the More shelf (long grid).
+    const raf = requestAnimationFrame(() => {
+      const el = menuRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const margin = 8;
+      let dy = 0;
+      if (r.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - r.bottom;
+      else if (r.top < margin) dy = margin - r.top;
+      if (Math.abs(dy) > 1) {
+        const scale =
+          parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+        setMenuStyle((cur) => (cur ? { left: cur.left, top: cur.top + dy / scale } : cur));
+      }
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
+    };
+  }, [open, placeMenu]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      btnRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open, close]);
+
+  const prevTool = useRef(tool);
+  useEffect(() => {
+    if (prevTool.current !== tool) close();
+    prevTool.current = tool;
+  }, [tool, close]);
+
+  useEffect(() => {
+    if (!open) return;
+    const active = menuRef.current?.querySelector<HTMLButtonElement>('button');
+    active?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (FIGURES.includes(tool)) setLastFigure(tool);
+  }, [tool]);
+
+  const isActive = FIGURES.includes(tool);
+
+  const pick = (id: ToolId) => {
+    setLastFigure(id);
+    onTool(id);
+    close();
+    btnRef.current?.focus();
+  };
+
+  const beginDrag = (e: React.DragEvent, id: ToolId) => {
+    if (!allowReorder) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    armToolbarClickSuppress();
+    setDragId(id);
+  };
+  const endDrag = () => {
+    setDragId(null);
+    clearToolbarClickSuppressSoon();
+  };
+
+  const menu =
+    open && menuStyle
+      ? createPortal(
+          <div
+            ref={menuRef}
+            id={menuId}
+            className="island block-scheme-popover more-pop"
+            role="menu"
+            aria-label={t(locale, 'figures')}
+            style={{ left: menuStyle.left, top: menuStyle.top }}
+          >
+            <div className="block-scheme-popover-title">{t(locale, 'figures')}</div>
+            <div className="more-rows" role="group" aria-label={t(locale, 'figures')}>
+            {FIGURES.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="menuitem"
+                draggable={allowReorder}
+                className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}`}
+                title={t(locale, id)}
+                aria-label={t(locale, id)}
+                onDragStart={(e) => beginDrag(e, id)}
+                onDragEnd={endDrag}
+                onClick={() => {
+                  if (suppressToolbarClick) return;
+                  pick(id);
+                }}
+              >
+                <Icon name={id as IconName} size={TOOLBELT_ICON_SIZE} />
+                <span className="more-row-label">{t(locale, id)}</span>
+              </button>
+            ))}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div className="tool-group">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`tool-btn${isActive ? ' active' : ''}`}
+        title={t(locale, 'figures')}
+        aria-label={t(locale, 'figures')}
+        aria-pressed={isActive}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name={lastFigure as IconName} size={TOOLBELT_ICON_SIZE} />
       </button>
       {menu}
     </div>
@@ -516,7 +669,6 @@ export function Toolbar({
   };
 
   const hasSelection = selectionCount > 0;
-  const hasStrip = orders.nav.length > 0 || orders.create.length > 0;
 
   return (
     <div
@@ -533,7 +685,9 @@ export function Toolbar({
         {orders.create.length > 0 && (
           <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
         )}
-        {hasStrip && <div className="toolbelt-sep" />}
+        <div className="toolbelt-sep" />
+        <FiguresMenu tool={tool} locale={locale} onTool={onTool} />
+        <div className="toolbelt-sep" />
         <MoreMenu tool={tool} locale={locale} ids={orders.more} onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
         <div className="tool-group">

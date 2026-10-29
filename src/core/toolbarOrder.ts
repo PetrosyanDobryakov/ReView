@@ -5,15 +5,23 @@ import type { ToolId } from '../engine/tools';
 export type StripGroup = 'nav' | 'create' | 'more';
 
 export const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
-export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
+export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'arrow', 'sticky', 'text'];
 /** Default More-shelf rows (specialty tools). Frame lives here, not in the
     scheme flyout — tutors reach for it constantly. */
 export const MORE_DEFAULTS: ToolId[] = ['graph', 'calculator', 'table', 'frame', 'flashcard', 'die'];
-export const SCHEME: ToolId[] = [
-  'diamond',
+/** Figures tab: every geometric shape in one grid (rect/ellipse left the
+ * strip; the scheme flyout is gone — same tools, one place). */
+export const FIGURES: ToolId[] = [
+  'rect',
+  'ellipse',
   'triangle',
-  'parallelogram',
+  'diamond',
+  'star',
+  'pentagon',
   'hexagon',
+  'octagon',
+  'parallelogram',
+  'cross',
   'cylinder',
   'terminator',
   'subroutine',
@@ -24,7 +32,7 @@ const PARKABLE_SET = new Set<string>([...NAV_DEFAULTS, ...CREATE_DEFAULTS, ...MO
 
 /**
  * Tools that can live on the strip or be parked in the More shelf.
- * Scheme shapes stay in the nested fly-out submenu — never rows.
+ * Figures live in the Figures tab (rows drag out to the strip).
  */
 export function isParkable(id: string): id is ToolId {
   return PARKABLE_SET.has(id);

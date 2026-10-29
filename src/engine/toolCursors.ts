@@ -95,6 +95,10 @@ const SPECS: Partial<Record<ToolId, CursorSpec>> = {
   table: { icon: 'table', hx: 12, hy: 12 },
   flashcard: { icon: 'flashcard', hx: 12, hy: 12 },
   die: { icon: 'die', hx: 12, hy: 12 },
+  star: { icon: 'star', hx: 12, hy: 12 },
+  pentagon: { icon: 'pentagon', hx: 12, hy: 12 },
+  octagon: { icon: 'octagon', hx: 12, hy: 12 },
+  cross: { icon: 'cross', hx: 12, hy: 12 },
 };
 
 const cache = new Map<string, string>();
