@@ -4595,7 +4595,17 @@ export class Engine {
         e.button === 0 &&
         (lp.x < f.x - eps || lp.x > f.x + f.w + eps || lp.y < f.y - eps || lp.y > f.y + f.h + eps);
       if (farOutside) {
-        this.cancelCrop();
+        // Clicking empty space finishes the crop (Esc still bails out).
+        // Untouched box = silent exit, no junk undo step.
+        const b = this.crop.box;
+        const o = this.crop.origBox;
+        const same =
+          Math.abs(b.x - o.x) < 1e-6 &&
+          Math.abs(b.y - o.y) < 1e-6 &&
+          Math.abs(b.w - o.w) < 1e-6 &&
+          Math.abs(b.h - o.h) < 1e-6;
+        if (same) this.cancelCrop();
+        else this.applyCrop();
         return;
       }
       this.cropPointerDown(e);

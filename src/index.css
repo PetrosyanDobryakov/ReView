@@ -5066,8 +5066,14 @@ h3 .swap-text,
 .home-bottom-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 12px 2px 4px;
+}
+/* Save-others toggle lives in the actions row (right), so the footer stays
+   tiny and the update nudge never grows the page into scrolling. */
+.home-bottom-switch {
+  margin-left: auto;
 }
 .home-join {
   display: flex;
@@ -5500,7 +5506,7 @@ h3 .swap-text,
 .home-foot-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px 20px;
   padding-top: 12px;
