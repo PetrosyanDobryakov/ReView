@@ -102,6 +102,11 @@ export function clearPeerDisplay(peerUserId: string): void {
   writeStore(store);
 }
 
+/** Local renames/recolors are gone from the UI — drop any stored ones. */
+export function clearAllPeerDisplays(): void {
+  writeStore({});
+}
+
 export function onPeerDisplayChange(cb: () => void): () => void {
   listeners.add(cb);
   return () => {

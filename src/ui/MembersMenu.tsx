@@ -11,15 +11,7 @@ import {
   lanBoardUrl,
   resolveInviteBoardUrl,
 } from '../net';
-import { clearPeerDisplay, setPeerDisplay } from '../core/peerDisplay';
-import {
-  loadUser,
-  onUserChange,
-  saveUser,
-  saveUserColor,
-  USER_COLOR_PALETTE,
-  type UserInfo,
-} from '../core/user';
+import { loadUser, onUserChange, saveUser, saveUserColor, USER_COLOR_PALETTE, type UserInfo } from '../core/user';
 import { Icon } from './icons';
 import { t } from './i18n';
 import { zoomedPortalPosition } from './portalPlace';
@@ -126,6 +118,7 @@ export function MembersMenu({
   const [lanLoading, setLanLoading] = useState(false);
   const [lanError, setLanError] = useState(false);
   const [inviteFlash, setInviteFlash] = useState<'ok' | 'fail' | null>(null);
+  const [showNetHint, setShowNetHint] = useState(false);
 
   useEffect(() => onUserChange((u) => {
     setUser(u);
@@ -198,7 +191,7 @@ export function MembersMenu({
       window.removeEventListener('resize', onReflow);
       window.removeEventListener('scroll', onReflow, true);
     };
-  }, [open, placeMenu, peers.length, lanHosts.length, lanLoading, inviteFlash]);
+  }, [open, placeMenu, peers.length, lanHosts.length, lanLoading, inviteFlash, showNetHint]);
 
   useEffect(() => {
     if (!open) return;
@@ -292,8 +285,18 @@ export function MembersMenu({
               <section className="members-section">
                 <div className="members-section-head">
                   <h3 className="members-section-title">{t(locale, 'membersInviteNet')}</h3>
+                  <button
+                    type="button"
+                    className={`members-hint-btn${showNetHint ? ' is-open' : ''}`}
+                    aria-expanded={showNetHint}
+                    aria-label={t(locale, 'membersInviteNetHint')}
+                    title={t(locale, 'membersInviteNetHint')}
+                    onClick={() => setShowNetHint((v) => !v)}
+                  >
+                    ?
+                  </button>
                 </div>
-                <p className="members-empty">{t(locale, 'membersInviteNetHint')}</p>
+                {showNetHint ? <p className="members-empty">{t(locale, 'membersInviteNetHint')}</p> : null}
                 <button
                   type="button"
                   className="style-btn active members-invite-btn"
@@ -314,6 +317,7 @@ export function MembersMenu({
                   {statusLabel}
                 </p>
               </div>
+              <p className="members-empty">{t(locale, 'membersLanOnly')}</p>
               {lanLoading ? (
                 <p className="members-empty">{t(locale, 'syncLanLoading')}</p>
               ) : lanError || !primaryHost ? (
@@ -372,7 +376,7 @@ export function MembersMenu({
               {canSummon && peers.length > 0 ? (
                 <button
                   type="button"
-                  className="style-btn active members-invite-btn"
+                  className="style-btn members-invite-btn members-summon-all"
                   title={t(locale, 'summonAllHint')}
                   onClick={onSummonAll}
                 >
@@ -384,50 +388,21 @@ export function MembersMenu({
               ) : (
                 <ul className="members-list">
                   {peers.map((peer) => (
-                    <li key={peer.id} className="members-peer">
-                      <div className="members-peer-head">
-                        <Face color={peer.color} />
-                        <label className="members-field members-field-grow">
-                          <span className="visually-hidden">{t(locale, 'peerLocalName')}</span>
-                          <input
-                            type="text"
-                            className="nick-input"
-                            value={peer.name}
-                            maxLength={24}
-                            title={
-                              peer.overridden
-                                ? `${peer.publishedName} → ${peer.name}`
-                                : peer.publishedName
-                            }
-                            onChange={(e) => setPeerDisplay(peer.userId, { name: e.target.value })}
-                          />
-                        </label>
-                        {canSummon ? (
-                          <button
-                            type="button"
-                            className="style-btn p2p-mini"
-                            title={t(locale, 'summonOneHint')}
-                            onClick={() => onSummonPeer(peer.userId)}
-                          >
-                            {t(locale, 'summonOne')}
-                          </button>
-                        ) : null}
-                        {peer.overridden ? (
-                          <button
-                            type="button"
-                            className="style-btn members-reset"
-                            title={t(locale, 'membersResetLocal')}
-                            onClick={() => clearPeerDisplay(peer.userId)}
-                          >
-                            {t(locale, 'membersResetLocal')}
-                          </button>
-                        ) : null}
-                      </div>
-                      <ColorRow
-                        value={peer.color}
-                        label={t(locale, 'membersColor')}
-                        onPick={(c) => setPeerDisplay(peer.userId, { color: c })}
-                      />
+                    <li key={peer.id} className="members-peer members-peer-simple">
+                      <Face color={peer.color} title={peer.publishedName} />
+                      <span className="members-peer-name" title={peer.publishedName}>
+                        {peer.name}
+                      </span>
+                      {canSummon ? (
+                        <button
+                          type="button"
+                          className="style-btn p2p-mini members-summon-one"
+                          title={t(locale, 'summonOneHint')}
+                          onClick={() => onSummonPeer(peer.userId)}
+                        >
+                          {t(locale, 'summonOne')}
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
