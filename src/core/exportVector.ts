@@ -17,6 +17,7 @@ import {
   frameHeaderHeight,
   frameTitleLine,
   flashcardSideText,
+  figurePolygon,
   diePips,
   graphCurvePath,
   labelInk,
@@ -734,6 +735,10 @@ export function shapesToSvg(
       parts.push(
         `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${Math.min(14, Math.min(v.w, v.h) * 0.22)}" ${paint(v, `${opacity}${xf}`)}/>${pips}`
       );
+      continue;
+    }
+    if (v.type === 'star' || v.type === 'pentagon' || v.type === 'octagon' || v.type === 'cross') {
+      parts.push(polygon(figurePolygon(v.type, x, y, v.w, v.h), v, `${opacity}${xf}`));
       continue;
     }
     parts.push(
