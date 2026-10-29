@@ -144,6 +144,9 @@ const DRAFT_TIP_LEAD_SEC = 0.25;
 
 /** Laser-pointer trail lifetime after the tip stops (local + peers). */
 const LASER_FADE_MS = 1500;
+/** Flip-card squash-stretch + dice shuffle durations. */
+const FLIP_MS = 260;
+const DIE_MS = 550;
 
 /** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
 function peerDraftPaintDirty(a: PeerDraft | null | undefined, b: PeerDraft | null | undefined): boolean {
@@ -487,6 +490,11 @@ export class Engine {
    * stopped drawing. Never shapes, never synced — pure overlay with a deadline.
    */
   private laserFades = new Map<string, { points: number[]; stroke: string; strokeWidth: number; until: number }>();
+  /** Card flip / dice roll animation start (performance.now) per shape id. */
+  private flipAnims = new Map<string, number>();
+  private dieAnims = new Map<string, number>();
+  /** Current rAF timestamp for paint-time animation. */
+  private frameNow = 0;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -3640,6 +3648,64 @@ export class Engine {
     this.events.onComment?.(null);
   }
 
+  /**
+   * Card flip (squash-stretch) + dice shuffle. Change detection lives in
+   * the shape observer; this just plays and drives frames while alive.
+   */
+  private paintShapeFx(
+    ctx: CanvasRenderingContext2D,
+    v: ShapeView,
+    textColor: string,
+    paperBg: string,
+    hideText: boolean,
+    hideCell: { row: number; col: number } | undefined
+  ): void {
+    const now = this.frameNow;
+    const draw = (view: ShapeView): void => drawShape(ctx, view, textColor, paperBg, hideText, hideCell);
+    if (this.reduceMotion) {
+      this.flipAnims.delete(v.id);
+      this.dieAnims.delete(v.id);
+      draw(v);
+      return;
+    }
+    const flipStart = v.type === 'flashcard' ? this.flipAnims.get(v.id) : undefined;
+    if (flipStart !== undefined) {
+      const t = (now - flipStart) / FLIP_MS;
+      if (t >= 1 || now < flipStart) {
+        this.flipAnims.delete(v.id);
+        draw(v);
+        return;
+      }
+      const sx = Math.max(0.03, Math.abs(Math.cos(t * Math.PI)));
+      const cx = v.x + v.w / 2;
+      ctx.save();
+      ctx.translate(cx, 0);
+      ctx.scale(sx, 1);
+      ctx.translate(-cx, 0);
+      draw(v);
+      ctx.restore();
+      this.peersAnimating = true;
+      this.dirty = true;
+      return;
+    }
+    const dieStart = v.type === 'die' ? this.dieAnims.get(v.id) : undefined;
+    if (dieStart !== undefined) {
+      const t = (now - dieStart) / DIE_MS;
+      if (t >= 1 || now < dieStart) {
+        this.dieAnims.delete(v.id);
+        draw(v);
+        return;
+      }
+      const sides = v.sides ?? 6;
+      const fake = 1 + (Math.floor(now / 80) % sides);
+      draw({ ...v, dieValue: fake });
+      this.peersAnimating = true;
+      this.dirty = true;
+      return;
+    }
+    draw(v);
+  }
+
   openTextEditor(id: string): void {
     const v = this.views.get(id);
     if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die' || v.type === 'star' || v.type === 'pentagon' || v.type === 'octagon' || v.type === 'cross' || v.type === 'comment') return;
@@ -4495,7 +4561,17 @@ export class Engine {
     if (existing && existing.m === m) return;
     this.detachShape(key);
     const cb = (ev: Y.YMapEvent<unknown>) => {
+      const old = this.views.get(key);
       const v = this.migrateLegacyAudio(key, { ...store.readShape(m), id: key });
+      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      // Card flip / dice roll: (re)start the local animation on any change,
+      // local or synced — peers see the same flourish.
+      if (old && v.type === 'flashcard' && (old.flipped ?? false) !== (v.flipped ?? false)) {
+        this.flipAnims.set(key, nowMs);
+      }
+      if (old && v.type === 'die' && old.dieValue !== v.dieValue && v.dieValue !== undefined) {
+        this.dieAnims.set(key, nowMs);
+      }
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.followMediaState(key, v);
@@ -5975,6 +6051,7 @@ export class Engine {
       const dt = Math.min((t - this.lastT) / 1000 || 0.016, 0.05);
       this.lastT = t;
       this.frameDt = dt;
+      this.frameNow = t;
       // Pan / wheel input can arrive many times per frame (1000 Hz mice,
       // smooth wheels); bounding the board once per frame is enough.
       if (this.clampPending) {
@@ -6152,7 +6229,7 @@ export class Engine {
         });
         ctx.restore();
       } else {
-        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
+        this.paintShapeFx(ctx, v, theme.text, paperBg, hideText, hideCell);
       }
     };
     // Paint in stacking order without scanning the whole board order when most

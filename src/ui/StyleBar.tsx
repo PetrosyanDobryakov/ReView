@@ -7,6 +7,7 @@ import {
   updateEraserSettings,
   updatePenSettings,
   updateShapeSettings,
+  updateStampSettings,
   updateTextSettings,
   ARROW_HEAD_MAX,
   ARROW_HEAD_MIN,
@@ -16,6 +17,7 @@ import {
   type EraserSettings,
   type PenSettings,
   type ShapeSettings,
+  type StampSettings,
   type TextSettings,
 } from '../core/settings';
 import { patchShapes } from '../core/store';
@@ -409,6 +411,7 @@ export function StyleBar({
   shape,
   text,
   eraser,
+  stamp,
   editing,
   editTarget,
   editLiveFormat,
@@ -425,6 +428,7 @@ export function StyleBar({
   shape: ShapeSettings;
   text: TextSettings;
   eraser: EraserSettings;
+  stamp: StampSettings;
   editing: boolean;
   editTarget: EditTarget | null;
   editLiveFormat: LiveTextFormat | null;
@@ -465,6 +469,8 @@ export function StyleBar({
   const showCorners = tool === 'rect' || rectTargets.length > 0;
   const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
   const showOpacity = opacityTargets.length > 0;
+  /** Stamp size while the stamp tool is armed (no selection). */
+  const showStampSize = tool === 'stamp' && drawing;
   /** No-stroke toggle: drawing fill-capable tools, or any outlined selection. */
   const showNoStroke =
     (showShapeDraw && tool !== 'calculator' && tool !== 'pen') || outlineTargets.length > 0;
@@ -484,7 +490,7 @@ export function StyleBar({
   /** Dice sides + pip color — same single-type rule. */
   const showDie = dieTargets.length > 0 && !mixedMulti;
   const want =
-    showEraser || showPenStyle || showOpacity || showFlash || showDie || (!mixedMulti && (showFill || showStroke || showText));
+    showEraser || showPenStyle || showOpacity || showFlash || showDie || showStampSize || (!mixedMulti && (showFill || showStroke || showText));
   const shown = useExitPresence(want, MOTION.enter);
   const flags = mixedMulti
     ? {
@@ -499,8 +505,9 @@ export function StyleBar({
         showOpacity,
         showFlash: false,
         showDie: false,
+        showStampSize,
       }
-    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity, showFlash, showDie };
+    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity, showFlash, showDie, showStampSize };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;
@@ -516,6 +523,7 @@ export function StyleBar({
     view.showOpacity,
     view.showFlash,
     view.showDie,
+    view.showStampSize,
   ]
     .map(Number)
     .join('');
@@ -699,6 +707,24 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{eraser.size}</span>
+        </div>
+      )}
+      {view.showStampSize && (
+        <div className="style-group">
+          <span className="panel-label">{t(locale, 'stampSize')}</span>
+          <input
+            className="size-slider"
+            type="range"
+            min={16}
+            max={160}
+            value={stamp.size}
+            title={t(locale, 'stampSize')}
+            aria-label={t(locale, 'stampSize')}
+            onChange={(e) => {
+              updateStampSettings({ size: Number(e.target.value) });
+            }}
+          />
+          <span className="size-value">{stamp.size}</span>
         </div>
       )}
       {view.showPenStyle && (

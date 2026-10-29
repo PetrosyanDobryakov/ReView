@@ -46,7 +46,7 @@ export function CommentOverlay({
           lastThread.current = v.thread;
           setMessages(parseThread(v.thread));
         }
-        const p = engine.worldToScreen(v.x, v.y);
+        const p = engine.worldToScreen(v.x + v.w / 2, v.y + v.h / 2);
         const w = 288;
         const left = Math.min(Math.max(8, p.x - w / 2), window.innerWidth - w - 8);
         const below = p.y + 24;

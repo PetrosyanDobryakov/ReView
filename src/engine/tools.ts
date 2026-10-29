@@ -2599,10 +2599,21 @@ export class StampTool extends Tool {
   readonly id = 'stamp';
   cursor = 'crosshair';
   emoji = '👍';
+  private ghost: { x: number; y: number } | null = null;
+
+  onHover(_engine: Engine, p: PointerInfo): void {
+    this.ghost = { ...p.world };
+  }
+
+  onMove(_engine: Engine, p: PointerInfo): void {
+    this.ghost = { ...p.world };
+  }
 
   onUp(_engine: Engine, p: PointerInfo): void {
     if (!this.emoji) return;
-    const size = 44;
+    const size = settings.stamp.size;
+    // Slight random tilt so a row of stamps feels hand-placed.
+    const rotation = (Math.random() - 0.5) * 0.35;
     store.addShape({
       type: 'text',
       x: p.world.x - size / 2,
@@ -2615,8 +2626,26 @@ export class StampTool extends Tool {
       text: this.emoji,
       fontSize: size,
       textAlign: 'center',
+      rotation,
     });
     store.endGesture();
+  }
+
+  render(_engine: Engine, ctx: CanvasRenderingContext2D): void {
+    // Translucent ghost of the armed emoji under the cursor.
+    if (!this.ghost || !this.emoji) return;
+    const size = settings.stamp.size;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.font = `${size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.emoji, this.ghost.x, this.ghost.y);
+    ctx.restore();
+  }
+
+  cancel(_engine: Engine): void {
+    this.ghost = null;
   }
 }
 

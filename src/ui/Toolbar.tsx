@@ -13,7 +13,7 @@ import {
 import { codeToDisplay, getToolBind, onKeybindsChange } from '../core/keybindings';
 import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
-import { t, type MessageKey } from './i18n';
+import { t } from './i18n';
 import { SlideTrack } from './SlideTrack';
 import { isCoarsePointer } from '../core/pointerEnv';
 import { zoomedPortalPosition } from './portalPlace';
@@ -55,7 +55,6 @@ export interface ToolbarProps {
   onTool: (id: ToolId) => void;
   onDelete: () => void;
   onCopy: () => void;
-  onPaste: () => void;
   onDuplicate: () => void;
   onInsertImage: () => void;
   onCrop: () => void;
@@ -267,7 +266,12 @@ function MoreMenu({
       return;
     }
     placeMenu();
-    const onReflow = () => placeMenu();
+    const onReflow = (e: Event) => {
+      // Inner list scroll must not move the popup (it used to fly upward).
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      placeMenu();
+    };
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
     // Estimates lie on long shelves: correct with real geometry once
@@ -437,7 +441,7 @@ function MoreMenu({
           clearToolbarClickSuppressNow();
         }}
       >
-        <Icon name="sparkles" size={TOOLBELT_ICON_SIZE} />
+        <Icon name="dots" size={TOOLBELT_ICON_SIZE} />
       </button>
       {menu}
     </div>
@@ -499,7 +503,12 @@ function FiguresMenu({
       return;
     }
     placeMenu();
-    const onReflow = () => placeMenu();
+    const onReflow = (e: Event) => {
+      // Inner list scroll must not move the popup (it used to fly upward).
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      placeMenu();
+    };
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
     // Same dock-to-trigger correction as the More shelf (long grid).
@@ -698,7 +707,12 @@ function ReactionsMenu({
       return;
     }
     placeMenu();
-    const onReflow = () => placeMenu();
+    const onReflow = (e: Event) => {
+      // Inner list scroll must not move the popup (it used to fly upward).
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      placeMenu();
+    };
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
     return () => {
@@ -794,15 +808,6 @@ function ReactionsMenu({
   );
 }
 
-function actionLabel(
-  locale: LocaleId,
-  enabled: MessageKey,
-  disabled: MessageKey,
-  ok: boolean
-): string {
-  return t(locale, ok ? enabled : disabled);
-}
-
 export function Toolbar({
   locale,
   tool,
@@ -812,7 +817,6 @@ export function Toolbar({
   onTool,
   onDelete,
   onCopy,
-  onPaste,
   onDuplicate,
   onInsertImage,
   onCrop,
@@ -850,16 +854,12 @@ export function Toolbar({
         {orders.nav.length > 0 && (
           <ToolButtons ids={orders.nav} tool={tool} locale={locale} group="nav" onTool={onTool} onMove={moveTool} />
         )}
-        {orders.nav.length > 0 && orders.create.length > 0 && <div className="toolbelt-sep" />}
         {orders.create.length > 0 && (
           <ToolButtons ids={orders.create} tool={tool} locale={locale} group="create" onTool={onTool} onMove={moveTool} />
         )}
-        <div className="toolbelt-sep" />
         <FiguresMenu tool={tool} locale={locale} onTool={onTool} />
-        <div className="toolbelt-sep" />
-        <MoreMenu tool={tool} locale={locale} ids={orders.more} onTool={onTool} onMove={moveTool} />
-        <div className="toolbelt-sep" />
         <ReactionsMenu tool={tool} locale={locale} onStamp={onStamp} />
+        <MoreMenu tool={tool} locale={locale} ids={orders.more} onTool={onTool} onMove={moveTool} />
         <div className="toolbelt-sep" />
         <div className="tool-group">
           {hasSelection && (
@@ -872,16 +872,12 @@ export function Toolbar({
               <Icon name="copy" size={TOOLBELT_ICON_SIZE} />
             </button>
           )}
-          <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'paste')} aria-label={t(locale, 'paste')} onClick={onPaste}>
-            <Icon name="paste" size={TOOLBELT_ICON_SIZE} />
-          </button>
           {hasSelection && (
             <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'duplicate')} aria-label={t(locale, 'duplicate')} onClick={onDuplicate}>
               <Icon name="duplicate" size={TOOLBELT_ICON_SIZE} />
             </button>
           )}
         </div>
-        <div className="toolbelt-sep" />
         <div className="tool-group">
           <button type="button" className="tool-btn" data-commit-edit title={t(locale, 'export')} aria-label={t(locale, 'export')} onClick={onExport}>
             <Icon name="download" size={TOOLBELT_ICON_SIZE} />
@@ -923,19 +919,18 @@ export function Toolbar({
               >
                 <Icon name="close" size={TOOLBELT_ICON_SIZE} />
               </button>
-            ) : (
+            ) : canCrop ? (
               <button
                 key="crop"
                 type="button"
-                className="tool-btn"
-                title={actionLabel(locale, 'crop', 'cropDisabled', canCrop)}
-                aria-label={actionLabel(locale, 'crop', 'cropDisabled', canCrop)}
-                disabled={!canCrop}
+                className="tool-btn tool-pop"
+                title={t(locale, 'crop')}
+                aria-label={t(locale, 'crop')}
                 onClick={onCrop}
               >
                 <Icon name="crop" size={TOOLBELT_ICON_SIZE} />
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

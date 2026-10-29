@@ -41,13 +41,18 @@ export interface EraserSettings {
   mode: EraserMode;
 }
 
+export interface StampSettings {
+  /** Emoji stamp size in world px. */
+  size: number;
+}
+
 export const SHAPE_STROKE_MIN = 1;
 export const SHAPE_STROKE_MAX = 16;
 export const ARROW_HEAD_MIN = 6;
 export const ARROW_HEAD_MAX = 48;
 export const RECT_CORNER_RADIUS = 6;
 
-export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSettings; eraser: EraserSettings } = {
+export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSettings; eraser: EraserSettings; stamp: StampSettings } = {
   pen: {
     color: '#eceae4',
     size: 3,
@@ -76,6 +81,9 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
   eraser: {
     size: 32,
     mode: 'whole',
+  },
+  stamp: {
+    size: 44,
   },
 };
 
@@ -152,6 +160,10 @@ function restore(): void {
       if (typeof e.size === 'number' && e.size > 0 && e.size < 400) settings.eraser.size = e.size;
       if (e.mode === 'whole' || e.mode === 'partial') settings.eraser.mode = e.mode;
     }
+    if (bag.stamp && typeof bag.stamp === 'object') {
+      const st = bag.stamp as Record<string, unknown>;
+      if (typeof st.size === 'number' && st.size >= 16 && st.size <= 160) settings.stamp.size = st.size;
+    }
   } catch {
     /* ignore */
   }
@@ -196,6 +208,15 @@ export function updateEraserSettings(patch: Partial<EraserSettings>): void {
   emit();
 }
 
+export function updateStampSettings(patch: Partial<StampSettings>): void {
+  Object.assign(settings.stamp, patch);
+  if (typeof patch.size === 'number') {
+    settings.stamp.size = Math.min(160, Math.max(16, Math.round(patch.size)));
+  }
+  persist();
+  emit();
+}
+
 export function onSettingsChange(l: Listener): () => void {
   listeners.add(l);
   return () => {
@@ -211,6 +232,7 @@ export function exportSettingsSnapshot(): SettingsSnapshot {
     shape: { ...settings.shape },
     text: { ...settings.text },
     eraser: { ...settings.eraser },
+    stamp: { ...settings.stamp },
   };
 }
 
@@ -220,6 +242,7 @@ export function applySettingsSnapshot(raw: SettingsSnapshot): void {
   if (raw.shape && typeof raw.shape === 'object') Object.assign(settings.shape, raw.shape);
   if (raw.text && typeof raw.text === 'object') Object.assign(settings.text, raw.text);
   if (raw.eraser && typeof raw.eraser === 'object') Object.assign(settings.eraser, raw.eraser);
+  if (raw.stamp && typeof raw.stamp === 'object') Object.assign(settings.stamp, raw.stamp);
   if (settings.shape.fill === 'transparent' || settings.shape.fill === 'none') {
     settings.shape.filled = false;
   }

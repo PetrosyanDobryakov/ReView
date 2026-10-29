@@ -4,6 +4,7 @@ import { Engine } from './engine/Engine';
 import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
+import { rollDieValue } from './core/shapes';
 import { Toolbar } from './ui/Toolbar';
 import { SettingsSheet } from './ui/SettingsSheet';
 import { MembersMenu } from './ui/MembersMenu';
@@ -25,6 +26,7 @@ import { MiniMap } from './ui/MiniMap';
 import { modKey, t, type MessageKey } from './ui/i18n';
 import {
   pauseBoardView,
+  patchShape,
   meta,
   metaBg,
   metaGrid,
@@ -227,6 +229,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [shape, setShape] = useState({ ...settings.shape });
   const [text, setText] = useState({ ...settings.text });
   const [eraser, setEraser] = useState({ ...settings.eraser });
+  const [stamp, setStamp] = useState({ ...settings.stamp });
   const [bg, setBg] = useState(() => viewPaperBg());
   const [gridOn, setGridOn] = useState(metaGrid());
   const [cropActive, setCropActive] = useState(false);
@@ -800,6 +803,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setShape({ ...settings.shape });
       setText({ ...settings.text });
       setEraser({ ...settings.eraser });
+      setStamp({ ...settings.stamp });
     });
     const offSync = onSyncStatus(setSync);
     return () => {
@@ -1027,6 +1031,29 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
           { label: t(locale, 'ctxTableDelCol'), danger: true, run: () => e?.tableRemoveCol(shapeId) },
           { label: t(locale, 'ctxTableHeader'), run: () => e?.tableToggleHeader(shapeId) }
         );
+      }
+      if (menuView.type === 'flashcard') {
+        const view = engine?.views.get(shapeId);
+        const flipped = view?.flipped === true;
+        typeExtras.push({
+          label: t(locale, flipped ? 'flashcardShowQuestion' : 'flashcardShowAnswer'),
+          run: () => {
+            if (!view || view.locked) return;
+            e?.setSelection([shapeId]);
+            patchShape(shapeId, { flipped: !flipped });
+          },
+        });
+      }
+      if (menuView.type === 'die') {
+        typeExtras.push({
+          label: t(locale, 'dieReroll'),
+          run: () => {
+            const view = engine?.views.get(shapeId);
+            if (!view || view.locked) return;
+            e?.setSelection([shapeId]);
+            patchShape(shapeId, { dieValue: rollDieValue(view.sides ?? 6) });
+          },
+        });
       }
       if (typeExtras.length) {
         pushSep(menuEntries);
@@ -1481,6 +1508,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         shape={shape}
         text={text}
         eraser={eraser}
+        stamp={stamp}
         editing={!!editTarget}
         editTarget={editTarget}
         editLiveFormat={editLiveFormat}
@@ -1526,10 +1554,6 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         onCopy={() => {
           commitOpenEditors();
           engineRef.current?.copySelection();
-        }}
-        onPaste={() => {
-          commitOpenEditors();
-          void engineRef.current?.pasteFromClipboard();
         }}
         onDuplicate={() => {
           commitOpenEditors();

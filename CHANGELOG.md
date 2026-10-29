@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.16.58
+
+### Pins fixed, toolbar order, flip/dice motion, livelier stamps, slimmer strip
+
+- **Comment pins fixed.** Hit-test and render finally agree on the pin
+  center (was offset by half the box); popup composer is a clean column.
+- **More is ⋯ and last.** Dots icon, moved right of reactions; a single
+  separator after it splits tools from actions.
+- **Popups survive inner scroll.** Wheel over the shelf no longer
+  re-runs placement (that flung them upward).
+- **Card flip + dice roll animate** (squash-stretch / face shuffle,
+  synced peers see it too; off with reduced motion).
+- **Flip in the context menu** next to the StyleBar button.
+- **Stamps feel hand-placed**: slight random tilt, translucent ghost
+  under the cursor, size slider in the StyleBar.
+- **Paste + idle crop buttons gone from the strip.** Crop appears in
+  its slot only with a photo selected (Ctrl+V still pastes).
+
 ## 0.16.57
 
 ### Docked popups, flashcard edit, dice sides, no-stroke, frame align, info times, honest binds, thread pins

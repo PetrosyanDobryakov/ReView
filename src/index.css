@@ -1495,8 +1495,12 @@ button.brand {
 }
 .comment-compose {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
+}
+.comment-compose .home-btn {
+  align-self: flex-end;
 }
 .comment-input {
   flex: 1;
