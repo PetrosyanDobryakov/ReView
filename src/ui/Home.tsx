@@ -41,7 +41,7 @@ import { NoticeCenter, type Notice } from './Notices';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
-import { APP_BUILD, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
+import { APP_BUILD, APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
 import { appInviteUrl, canSelfUpdate, installDesktopUpdate, isDesktop, resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
@@ -150,6 +150,12 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
       alive = false;
     };
   }, []);
+
+  // Home owns the window title: leaving a board must not leave its name
+  // stuck in the OS chrome.
+  useEffect(() => {
+    document.title = t(locale, 'title');
+  }, [locale]);
 
   const refresh = useCallback(() => {
     setTeams(listTeams());
@@ -413,38 +419,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         <div className="island file-island">
           <span className="brand">{t(locale, 'brand')}</span>
           <div className="island-sep" />
-          {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
-            <button
-              type="button"
-              className="home-version warn"
-              disabled={updateProgress !== null}
-              title={updateNote ?? `${t(locale, 'updateAvailable')} (${APP_BUILD})`}
-              onClick={() => void runUpdate()}
-            >
-              {updateProgress === null
-                ? updateNote ?? `${t(locale, 'updateInstall')} v${verStatus.latest}`
-                : updateProgress < 0
-                  ? t(locale, 'updateDownloading')
-                  : `${t(locale, 'updateDownloading')} ${Math.round(updateProgress * 100)}%`}
-            </button>
-          ) : verStatus?.kind === 'outdated' ? (
-            <a
-              className="home-version warn"
-              href={verStatus.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`${t(locale, 'updateAvailable')} (${APP_BUILD})`}
-            >
-              {t(locale, 'updateAvailable')} — v{verStatus.latest}
-            </a>
-          ) : (
-            <span
-              className={`home-version${verStatus?.kind === 'dev' ? ' dev' : ''}`}
-              title={verStatus?.kind === 'dev' ? t(locale, 'devVersion') : APP_BUILD}
-            >
-              v{APP_BUILD}
-            </span>
-          )}
+          {/* Top badge is always the running version (short); the full
+              build id lives in the tooltip + <meta name="review-build">. */}
+          <span
+            className={`home-version${verStatus?.kind === 'dev' ? ' dev' : ''}`}
+            title={verStatus?.kind === 'dev' ? t(locale, 'devVersion') : APP_BUILD}
+          >
+            v{APP_VERSION}
+          </span>
         </div>
         <div className="island meta-island">
           <a
@@ -809,6 +791,41 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
         </div>
 
         <footer className="home-foot">
+          {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
+            <button
+              type="button"
+              className="home-update-nudge"
+              disabled={updateProgress !== null}
+              title={updateNote ?? `${t(locale, 'updateAvailable')} (${APP_BUILD} → v${verStatus.latest})`}
+              onClick={() => void runUpdate()}
+            >
+              <span className="home-update-dot" aria-hidden="true" />
+              <span className="home-update-text">
+                {t(locale, 'updateAvailable')} — v{verStatus.latest}
+              </span>
+              <span className="home-update-cta">
+                {updateProgress === null
+                  ? updateNote ?? t(locale, 'updateInstall')
+                  : updateProgress < 0
+                    ? t(locale, 'updateDownloading')
+                    : `${t(locale, 'updateDownloading')} ${Math.round(updateProgress * 100)}%`}
+              </span>
+            </button>
+          ) : verStatus?.kind === 'outdated' ? (
+            <a
+              className="home-update-nudge"
+              href={verStatus.url}
+              target="_blank"
+              rel="noreferrer"
+              title={`${t(locale, 'updateAvailable')} (${APP_BUILD} → v${verStatus.latest})`}
+            >
+              <span className="home-update-dot" aria-hidden="true" />
+              <span className="home-update-text">
+                {t(locale, 'updateAvailable')} — v{verStatus.latest}
+              </span>
+              <span className="home-update-cta">{t(locale, 'updateInstall')}</span>
+            </a>
+          ) : null}
           <div className="home-foot-row">
             <button
               type="button"

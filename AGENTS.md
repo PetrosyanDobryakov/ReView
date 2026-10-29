@@ -23,7 +23,7 @@ Semver lives in `package.json` (and matching `package-lock.json`). Current line 
 3. **After every version bump:** push `dev-warexpor` to GitHub. If the Cloudflare workers are in use, also `bash scripts/deploy.sh all`. Never leave https://review.zpro-driftman.workers.dev/ ahead of `origin/dev-warexpor` as the normal state after a product ship.
 4. **`main`:** fast-forward only when Warexpor explicitly says the tip is stable enough — not automatic on every patch.
 5. **One tip lineage:** work from latest `origin/dev-warexpor`. If two agents race the same next version, rebase and take the next free patch — do not publish duplicate `0.15.N` tips.
-6. **Verify live:** Home `v{version}+{sha}` / `node scripts/check-live-version.mjs` / `<meta name="review-build">` should match the pushed tip after deploy.
+6. **Verify live:** Home badge `v{version}` (full build in its tooltip) / `node scripts/check-live-version.mjs` / `<meta name="review-build">` should match the pushed tip after deploy.
 
 ## Cursor Cloud specific instructions
 

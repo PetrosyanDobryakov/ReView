@@ -5136,6 +5136,12 @@ h3 .swap-text,
   border: 1px solid var(--chrome-border);
   border-radius: 14px;
   background: var(--chrome-panel);
+  /* Long shelves scroll inside the card — the surrounding controls stay put. */
+  max-height: 52vh;
+  max-height: min(560px, 52dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .board-row {
   position: relative;
@@ -5463,6 +5469,69 @@ button.home-version:disabled {
   font-weight: 600;
 }
 
+/* Footer update nudge: noticeable but calm — one soft accent row, only the
+   dot breathes. */
+.home-update-nudge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--chrome-accent-strong) 38%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--chrome-accent-strong) 12%, var(--chrome-panel));
+  color: var(--chrome-text);
+  font-size: var(--chrome-type-label);
+  line-height: 1.3;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--chrome-dur-fast) var(--chrome-ease),
+    border-color var(--chrome-dur-fast) var(--chrome-ease);
+}
+button.home-update-nudge {
+  font-family: inherit;
+  text-align: left;
+}
+.home-update-nudge:hover {
+  background: color-mix(in srgb, var(--chrome-accent-strong) 18%, var(--chrome-panel));
+}
+.home-update-nudge:disabled {
+  cursor: progress;
+  opacity: 0.75;
+}
+.home-update-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chrome-accent-strong);
+  animation: home-update-pulse 2.4s ease-out infinite;
+}
+@keyframes home-update-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--chrome-accent-strong) 55%, transparent); }
+  70% { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.home-update-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.home-update-cta {
+  flex: none;
+  font-weight: 600;
+  color: var(--chrome-accent-strong);
+  white-space: nowrap;
+}
+.home-update-nudge:hover .home-update-cta {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 @media (max-width: 640px) {
   .home-root {
     padding: 68px 14px 20px;
@@ -5506,7 +5575,8 @@ button.home-version:disabled {
   .home-btn,
   .home-tab,
   .board-row,
-  .board-row-menu {
+  .board-row-menu,
+  .home-update-dot {
     transition: none;
     animation: none;
   }
