@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.55
+
+### Comment bubbles
+
+- **Comment tool on the strip** (`M`): speech-bubble notes with a tail —
+  impossible to miss on the board. Click plants, drag sizes, type right
+  away; double-click / `Enter` edits, search + SVG export included.
+
 ## 0.16.54
 
 ### Figures tab (shapes merged, +4 new)

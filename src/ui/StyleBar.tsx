@@ -30,10 +30,10 @@ import { MOTION, useExitPresence } from './motion';
 import { hasFill, defaultFontSizeFor } from '../core/shapes';
 
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table', 'flashcard', 'die'];
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table', 'flashcard', 'die', 'comment'];
 /** Calculator keeps its own face theme — no StyleBar fill/stroke. */
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross']);
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross', 'comment']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross', 'comment']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 

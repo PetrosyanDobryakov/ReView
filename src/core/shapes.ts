@@ -12,7 +12,7 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross' | 'comment';
 
 /** Photo / video / audio / PDF hosts that magnetize notes above them in z-order. */
 export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'audio', 'doc']);
@@ -374,6 +374,7 @@ const LABELLED_SHAPE_TYPES: ReadonlySet<ShapeType> = new Set([
   'subroutine',
   'display',
   'flashcard',
+  'comment',
 ]);
 
 /** Shapes that persist a `text` / `fontSize` field on the Y.Map. */
@@ -2240,6 +2241,51 @@ function drawShapeBody(
       });
       ctx.closePath();
       fillAndStrokePath(ctx, v);
+      break;
+    }
+    case 'comment': {
+      // Speech bubble: rounded body + tail — unmissable on the board.
+      const tail = Math.min(18, v.w * 0.12, v.h * 0.3);
+      const tx = v.x + Math.min(28, v.w * 0.2);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, 10);
+      ctx.fillStyle = v.fill;
+      ctx.fill();
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(tx, v.y + v.h - 1);
+      ctx.lineTo(tx - tail * 0.7, v.y + v.h + tail);
+      ctx.lineTo(tx + tail * 0.5, v.y + v.h - 1);
+      ctx.closePath();
+      ctx.fillStyle = v.fill;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      if (v.text && !hideText) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(v.x, v.y, v.w, v.h, 10);
+        ctx.clip();
+        const ink = labelInk(v, textColor, boardBg);
+        const size = v.fontSize ?? SHAPE_FONT;
+        const lineHeight = size * LABEL_LINE_HEIGHT;
+        const align = v.textAlign ?? 'left';
+        ctx.fillStyle = ink;
+        ctx.font = shapeFont(v, size);
+        ctx.textBaseline = 'top';
+        let lineY = v.y + 10;
+        for (const line of wrapText(ctx, v.text, Math.max(8, v.w - 20))) {
+          const lw = ctx.measureText(line).width;
+          const lx = lineAnchorX(v.x + 10, v.w - 20, lw, align);
+          ctx.fillText(line, lx, lineY);
+          lineY += lineHeight;
+          if (lineY > v.y + v.h - 8) break;
+        }
+        ctx.restore();
+      }
       break;
     }
     case 'triangle': {

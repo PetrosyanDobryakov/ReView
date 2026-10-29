@@ -2487,6 +2487,7 @@ export class Engine {
         pentagon: 'infoPentagon',
         octagon: 'infoOctagon',
         cross: 'infoCross',
+        comment: 'infoComment',
       } as const
     )[v.type] as unknown as string ?? 'infoRect';
     const lines = [
@@ -3543,6 +3544,8 @@ export class Engine {
       if (!store.isOnActivePage(id)) continue;
       const texts: string[] = [];
       if (v.type === 'text' || v.type === 'sticky') {
+        if (v.text) texts.push(v.text);
+      } else if (v.type === 'comment') {
         if (v.text) texts.push(v.text);
       } else if (v.type === 'flashcard') {
         if (v.text) texts.push(v.text);
@@ -5201,6 +5204,7 @@ export class Engine {
       'terminator',
       'subroutine',
       'display',
+      'comment',
     ]);
     if (type && TEXT_TYPES.has(type)) this.openTextEditor(id);
   };
