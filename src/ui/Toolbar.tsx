@@ -210,7 +210,7 @@ function MoreMenu({
     const scale =
       parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const width = 220;
-    const estimatedHeight = Math.min(360, 48 + ids.length * 44 + 52);
+    const estimatedHeight = Math.min(410, 48 + ids.length * 44 + 52);
     const scaledW = width * scale;
     const centered = {
       left: rect.left + rect.width / 2 - scaledW / 2,
@@ -248,7 +248,24 @@ function MoreMenu({
     const onReflow = () => placeMenu();
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
+    // Estimates lie on long shelves: correct with real geometry once
+    // painted (no loop — deps don't include menuStyle).
+    const raf = requestAnimationFrame(() => {
+      const el = menuRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const margin = 8;
+      let dy = 0;
+      if (r.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - r.bottom;
+      else if (r.top < margin) dy = margin - r.top;
+      if (Math.abs(dy) > 1) {
+        const scale =
+          parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+        setMenuStyle((cur) => (cur ? { left: cur.left, top: cur.top + dy / scale } : cur));
+      }
+    });
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('resize', onReflow);
       window.removeEventListener('scroll', onReflow, true);
     };
