@@ -1589,9 +1589,10 @@ export function removeArrowWaypoint(v: ShapeView, index: number): number[] | nul
 }
 
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
-  // Comment pins are screen-constant badges — hit in screen space.
+  // Comment pins are screen-constant badges — hit in screen space around
+  // the pin center.
   if (v.type === 'comment') {
-    return Math.hypot(px - v.x, py - v.y) * getPaintZoom() <= 16;
+    return Math.hypot(px - (v.x + v.w / 2), py - (v.y + v.h / 2)) * getPaintZoom() <= 20;
   }
   // Pens/arrows store world-space points; rotation is baked in when applied.
   if (v.type === 'pen') {
@@ -2296,11 +2297,14 @@ function drawShapeBody(
     case 'comment': {
       // Thread pin: screen-constant badge + white bubble glyph. The thread
       // itself lives in a popup (CommentOverlay), Miro-style.
+      // Anchor: pin CENTER (tool plants x/y top-left, center = click point).
       const z = getPaintZoom();
+      const cx = v.x + v.w / 2;
+      const cy = v.y + v.h / 2;
       const r = 13 / z;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(v.x, v.y, r, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = hasFill(v.fill) ? v.fill : '#748ffc';
       ctx.fill();
       ctx.lineWidth = Math.max(1.25, 1.75 / z);
@@ -2310,12 +2314,12 @@ function drawShapeBody(
       const g = r * 0.5;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.roundRect(v.x - g, v.y - g * 1.1, g * 2, g * 1.8, g * 0.4);
+      ctx.roundRect(cx - g, cy - g * 1.1, g * 2, g * 1.8, g * 0.4);
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(v.x - g * 0.25, v.y + g * 0.7);
-      ctx.lineTo(v.x - g * 0.05, v.y + g * 1.55);
-      ctx.lineTo(v.x + g * 0.55, v.y + g * 0.7);
+      ctx.moveTo(cx - g * 0.25, cy + g * 0.7);
+      ctx.lineTo(cx - g * 0.05, cy + g * 1.55);
+      ctx.lineTo(cx + g * 0.55, cy + g * 0.7);
       ctx.closePath();
       ctx.fill();
       // Unread-ish dot: message count when the thread is alive.
@@ -2326,7 +2330,7 @@ function drawShapeBody(
         ctx.textAlign = 'center';
         ctx.fillStyle = '#ffffff';
         ctx.globalAlpha = 0.9;
-        ctx.fillText(n > 9 ? '9+' : String(n), v.x, v.y - r - 8 / z);
+        ctx.fillText(n > 9 ? '9+' : String(n), cx, cy - r - 8 / z);
         ctx.globalAlpha = 1;
       }
       ctx.restore();

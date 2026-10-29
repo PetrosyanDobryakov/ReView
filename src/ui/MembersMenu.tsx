@@ -184,7 +184,12 @@ export function MembersMenu({
   useLayoutEffect(() => {
     if (!open) return;
     placeMenu();
-    const onReflow = () => placeMenu();
+    const onReflow = (e: Event) => {
+      // Inner list scroll must not move the popup.
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      placeMenu();
+    };
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
     return () => {

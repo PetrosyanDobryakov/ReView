@@ -462,10 +462,12 @@ export function shapesToSvg(
     if (v.type === 'comment') {
       // Thread pin: badge + message count (the thread itself is interactive).
       const n = parseThread(v.thread).length;
+      const cx = x + v.w / 2;
+      const cy = y + v.h / 2;
       const ink = esc(exportTextInk({ ...v, textColor: '#ffffff' }, inkPaper, '#ffffff'));
       parts.push(
-        `<g${opacity}${xf}><circle cx="${x}" cy="${y}" r="13" ${paint(v, '')}/>` +
-        `<text x="${x}" y="${y - 20}" font-size="12" text-anchor="middle" fill="${ink}">${n > 9 ? '9+' : n}</text></g>`
+        `<g${opacity}${xf}><circle cx="${cx}" cy="${cy}" r="13" ${paint(v, '')}/>` +
+        `<text x="${cx}" y="${cy - 20}" font-size="12" text-anchor="middle" fill="${ink}">${n > 9 ? '9+' : n}</text></g>`
       );
       continue;
     }
