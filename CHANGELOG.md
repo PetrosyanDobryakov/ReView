@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.16.48
+
+### Home polish: title, version, shelf scroll
+
+- **Window title no longer sticks.** Leaving a board resets the OS title to
+  plain ReView (it used to keep the last board's name until the next board).
+- **Version badge on top is always the running build.** Update prompts moved
+  out of it into a calm footer nudge: soft accent row with a gently pulsing
+  dot, current → new version in the tooltip, one click to update.
+- **Board shelf scrolls inside its card** (capped at ~half the viewport), so
+  the header, join field, tabs, import/new-board and footer stay put no
+  matter how long the list gets.
+- **Version badge is short now.** Top shows plain `v0.16.48` — the `+sha`
+  suffix was build provenance for deploy checks; it still lives in the
+  tooltip and `<meta name="review-build">`, just not in your face.
+
 ## 0.16.47
 
 ### More-shelf placement fix
