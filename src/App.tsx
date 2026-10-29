@@ -10,6 +10,7 @@ import { MembersMenu } from './ui/MembersMenu';
 import { StyleBar } from './ui/StyleBar';
 import { TextOverlay } from './ui/TextOverlay';
 import { MediaCards } from './ui/MediaOverlay';
+import { CommentOverlay } from './ui/CommentOverlay';
 import { NoticeCenter, type Notice } from './ui/Notices';
 import { GraphEditor } from './ui/GraphEditor';
 import { CalculatorPanel } from './ui/CalculatorPanel';
@@ -234,6 +235,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [menu, setMenu] = useState<BoardMenu | null>(null);
   const [ctxSubmenu, setCtxSubmenu] = useState<string | null>(null);
   const [info, setInfo] = useState<{ title: string; lines: string[] } | null>(null);
+  const [commentId, setCommentId] = useState<string | null>(null);
   const [chromeTheme, setChromeTheme] = useState<ChromeThemeId>(() => readChromeTheme());
   const [locale, setLocale] = useState<LocaleId>(() => readLocale());
   const [nick, setNick] = useState(() => loadUser().name);
@@ -613,6 +615,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       setMenu(m);
     };
     engine.events.onInfo = (i) => setInfo(i);
+    engine.events.onComment = (id) => setCommentId(id);
     engine.events.onStats = (s) => {
       setZoom(Math.round(s.zoom * 100));
       setShapeCount(s.shapes);
@@ -1195,6 +1198,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             shapes={mediaShapes}
             selectedIds={mediaSelectedIds}
             locale={locale}
+          />
+        )}
+        {commentId && engine && (
+          <CommentOverlay
+            engine={engine}
+            shapeId={commentId}
+            locale={locale}
+            onClose={() => engineRef.current?.closeComment()}
           />
         )}
         {exportState && engine && (

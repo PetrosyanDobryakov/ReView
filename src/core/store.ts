@@ -915,7 +915,25 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     text: m.get('text') as string | undefined,
     textBack: typeof m.get('textBack') === 'string' ? (m.get('textBack') as string) : undefined,
     flipped: m.get('flipped') === true ? true : undefined,
-    dieValue: typeof m.get('dieValue') === 'number' ? Math.min(6, Math.max(1, Math.round(m.get('dieValue') as number))) : undefined,    fontSize: (m.get('fontSize') as number | undefined) ?? defaultFontSizeFor(type),
+    dieValue: typeof m.get('dieValue') === 'number' ? Math.min(100, Math.max(1, Math.round(m.get('dieValue') as number))) : undefined,
+    sides: typeof m.get('sides') === 'number' ? Math.min(100, Math.max(2, Math.round(m.get('sides') as number))) : undefined,
+    createdAt: typeof m.get('createdAt') === 'number' ? (m.get('createdAt') as number) : undefined,
+    updatedAt: typeof m.get('updatedAt') === 'number' ? (m.get('updatedAt') as number) : undefined,
+    thread: (() => {
+      const t = m.get('thread');
+      if (typeof t === 'string' && t) return t;
+      // 0.16.55 bubbles kept visible text — carry it as the first message.
+      if (type === 'comment') {
+        const legacy = m.get('text');
+        if (typeof legacy === 'string' && legacy.trim()) {
+          const at = m.get('updatedAt');
+          return JSON.stringify([
+            { id: 'm0', user: '', text: legacy.slice(0, 2000), at: typeof at === 'number' ? at : Date.now() },
+          ]);
+        }
+      }
+      return undefined;
+    })(),    fontSize: (m.get('fontSize') as number | undefined) ?? defaultFontSizeFor(type),
     textColor: m.get('textColor') as string | undefined,
     bold: m.get('bold') === true,
     italic: m.get('italic') === true,
@@ -1017,8 +1035,12 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
       if (v.textBack) m.set('textBack', v.textBack);
       if (v.flipped) m.set('flipped', true);
     }
+    if (v.type === 'comment' && v.thread) m.set('thread', v.thread);
     if (v.type === 'die' && v.dieValue !== undefined) {
-      m.set('dieValue', Math.min(6, Math.max(1, Math.round(v.dieValue))));
+      m.set('dieValue', Math.min(100, Math.max(1, Math.round(v.dieValue))));
+    }
+    if (v.type === 'die' && v.sides !== undefined && v.sides !== 6) {
+      m.set('sides', Math.min(100, Math.max(2, Math.round(v.sides))));
     }
     if (v.richHtml) {
       const safe = sanitizeRichHtml(v.richHtml);
@@ -1046,6 +1068,9 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
   if (v.dash) m.set('dash', true);
+  // Timestamps: creation once, edits on every patch (undo replays count as edits too).
+  if (v.createdAt === undefined) m.set('createdAt', Date.now());
+  if (v.updatedAt === undefined) m.set('updatedAt', v.createdAt ?? Date.now());
   if (v.src) m.set('src', v.src);
   // Media by content hash; bytes live in the blob store, not in the doc.
   if (v.blob) m.set('blob', v.blob);
@@ -1129,6 +1154,7 @@ export function addShape(v: Omit<ShapeView, 'id'> & { id?: string }, pageId?: st
 function patchShapeInternal(id: string, patch: Partial<ShapeView>): void {
   const m = board.get(id);
   if (!m) return;
+  m.set('updatedAt', Date.now());
   // Apply scalar geometry first so points can be stored relative to the new origin.
   if (patch.x !== undefined) m.set('x', patch.x);
   if (patch.y !== undefined) m.set('y', patch.y);

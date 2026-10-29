@@ -27,13 +27,13 @@ import { t } from './i18n';
 import { Icon, type IconName } from './icons';
 import { ChromeSelect } from './ChromeSelect';
 import { MOTION, useExitPresence } from './motion';
-import { hasFill, defaultFontSizeFor } from '../core/shapes';
+import { hasFill, defaultFontSizeFor, rollDieValue } from '../core/shapes';
 
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
 const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table', 'flashcard', 'die', 'comment'];
 /** Calculator keeps its own face theme — no StyleBar fill/stroke. */
 const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross', 'comment']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross', 'comment']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die', 'star', 'pentagon', 'octagon', 'cross']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
@@ -444,6 +444,7 @@ export function StyleBar({
   const textTargets = selected.filter((v) => TEXT_TYPES.has(v.type) && !v.locked);
   const penTargets = selected.filter((v) => v.type === 'pen' && !v.locked);
   const flashTargets = selected.filter((v) => v.type === 'flashcard' && !v.locked);
+  const dieTargets = selected.filter((v) => v.type === 'die' && !v.locked);
   const rectTargets = selected.filter((v) => v.type === 'rect' && !v.locked);
   const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
   const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
@@ -464,6 +465,13 @@ export function StyleBar({
   const showCorners = tool === 'rect' || rectTargets.length > 0;
   const showArrowHead = tool === 'arrow' || arrowTargets.length > 0;
   const showOpacity = opacityTargets.length > 0;
+  /** No-stroke toggle: drawing fill-capable tools, or any outlined selection. */
+  const showNoStroke =
+    (showShapeDraw && tool !== 'calculator' && tool !== 'pen') || outlineTargets.length > 0;
+  const strokeOn =
+    outlineTargets.length > 0
+      ? outlineTargets.every((v) => v.stroke !== 'transparent')
+      : shape.stroked;
   // Mixed multi-select edits an unclear subset (sticker rows + arrowhead at
   // once) — restrict to opacity, which is meaningful for everything. A
   // uniform multi-select keeps its full bar.
@@ -473,8 +481,10 @@ export function StyleBar({
     !opacityTargets.every((v) => v.type === opacityTargets[0].type);
   /** Flip is a single-card action — hidden in mixed multis like everything else. */
   const showFlash = flashTargets.length > 0 && !mixedMulti;
+  /** Dice sides + pip color — same single-type rule. */
+  const showDie = dieTargets.length > 0 && !mixedMulti;
   const want =
-    showEraser || showPenStyle || showOpacity || showFlash || (!mixedMulti && (showFill || showStroke || showText));
+    showEraser || showPenStyle || showOpacity || showFlash || showDie || (!mixedMulti && (showFill || showStroke || showText));
   const shown = useExitPresence(want, MOTION.enter);
   const flags = mixedMulti
     ? {
@@ -488,8 +498,9 @@ export function StyleBar({
         showArrowHead: false,
         showOpacity,
         showFlash: false,
+        showDie: false,
       }
-    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity, showFlash };
+    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity, showFlash, showDie };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;
@@ -504,6 +515,7 @@ export function StyleBar({
     view.showArrowHead,
     view.showOpacity,
     view.showFlash,
+    view.showDie,
   ]
     .map(Number)
     .join('');
@@ -638,7 +650,8 @@ export function StyleBar({
     const remembered = readPenSize(c);
     const nextSize = remembered ?? pen.size;
     updatePenSettings({ color: c, size: nextSize });
-    updateShapeSettings({ stroke: c });
+    // Picking a color re-enables the stroke (mirror of the fill cell).
+    updateShapeSettings({ stroke: c, stroked: true });
     const patches: Array<[string, Partial<ShapeView>]> = [];
     for (const v of strokeTargets) patches.push([v.id, { stroke: c }]);
     for (const v of penTargets) {
@@ -801,7 +814,33 @@ export function StyleBar({
         <div className="style-group">
           {view.showStroke && (
           <>
-          <span className="panel-label">{t(locale, 'stroke')}</span>
+          {showNoStroke && (
+          <button
+            type="button"
+            className={`style-btn style-btn-icon${!strokeOn ? ' active' : ''}`}
+            title={t(locale, 'noStroke')}
+            aria-label={t(locale, 'noStroke')}
+            aria-pressed={!strokeOn}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (strokeOn) {
+                updateShapeSettings({ stroked: false });
+                if (outlineTargets.length) {
+                  patchShapes(outlineTargets.map((v) => [v.id, { stroke: 'transparent' }]));
+                  onPatched();
+                }
+              } else {
+                updateShapeSettings({ stroked: true });
+                if (outlineTargets.length) {
+                  patchShapes(outlineTargets.map((v) => [v.id, { stroke: shape.stroke }]));
+                  onPatched();
+                }
+              }
+            }}
+          >
+            <Icon name="noFill" size={16} />
+          </button>
+          )}
           {strokeIsPen ? (
           <ColorSlots
             locale={locale}
@@ -908,6 +947,38 @@ export function StyleBar({
           >
             {t(locale, flashTargets.some((v) => v.flipped === true) ? 'flashcardShowQuestion' : 'flashcardShowAnswer')}
           </button>
+        </div>
+      )}
+      {view.showDie && (
+        <div className="style-group">
+          <span className="panel-label">{t(locale, 'dieSides')}</span>
+          {[4, 6, 8, 10, 12, 20].map((s) => {
+            const cur = dieTargets[0]?.sides ?? 6;
+            return (
+              <button
+                key={s}
+                type="button"
+                className={`style-btn${cur === s ? ' active' : ''}`}
+                title={t(locale, 'dieSides')}
+                aria-pressed={cur === s}
+                onClick={() => {
+                  patchShapes(dieTargets.map((v) => [v.id, { sides: s, dieValue: rollDieValue(s) }]));
+                  onPatched();
+                }}
+              >
+                {s}
+              </button>
+            );
+          })}
+          <ColorCell
+            locale={locale}
+            color={dieTargets[0]?.textColor ?? '#eceae4'}
+            title={t(locale, 'diePips')}
+            onPick={(c) => {
+              patchShapes(dieTargets.map((v) => [v.id, { textColor: c }]));
+              onPatched();
+            }}
+          />
         </div>
       )}
       {view.showText && (

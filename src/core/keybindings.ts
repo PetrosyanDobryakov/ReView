@@ -43,6 +43,44 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   lasso: 'KeyQ',
   pan: '',
   pen: 'KeyP',
+  rect: '',
+  ellipse: '',
+  sticky: 'KeyS',
+  text: 'KeyT',
+  arrow: 'KeyL',
+  eraser: 'KeyE',
+  graph: '',
+  calculator: '',
+  diamond: '',
+  frame: '',
+  triangle: '',
+  parallelogram: '',
+  hexagon: '',
+  cylinder: '',
+  terminator: '',
+  subroutine: '',
+  display: '',
+  table: '',
+  flashcard: '',
+  die: '',
+  star: '',
+  pentagon: '',
+  octagon: '',
+  cross: '',
+  comment: '',
+  stamp: '',
+};
+
+/**
+ * Binds before the great unbinding (0.16.57): every tool had a default.
+ * Saved binds still equal to these are "never touched" — adopt the new
+ * default instead of resurrecting stale letters. Anything else is kept.
+ */
+const OLD_DEFAULT_TOOL_BINDS: ToolBinds = {
+  select: 'KeyV',
+  lasso: 'KeyQ',
+  pan: '',
+  pen: 'KeyP',
   rect: 'KeyR',
   ellipse: 'KeyO',
   sticky: 'KeyS',
@@ -111,7 +149,15 @@ function load(): Keybinds {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Keybinds>;
-      const tools = { ...DEFAULT_TOOL_BINDS, ...(parsed.tools ?? {}) };
+      const saved: Partial<ToolBinds> = parsed.tools ?? {};
+      const tools = { ...DEFAULT_TOOL_BINDS, ...saved };
+      // Adopt the new (mostly empty) defaults for binds the user never
+      // touched — still equal to the pre-0.16.57 default.
+      for (const k of Object.keys(DEFAULT_TOOL_BINDS) as ToolId[]) {
+        if (saved[k] === OLD_DEFAULT_TOOL_BINDS[k] && DEFAULT_TOOL_BINDS[k] !== OLD_DEFAULT_TOOL_BINDS[k]) {
+          tools[k] = DEFAULT_TOOL_BINDS[k];
+        }
+      }
       return stripReservedKeyH({
         tools,
         colors: migrateColorBinds(parsed.colors),

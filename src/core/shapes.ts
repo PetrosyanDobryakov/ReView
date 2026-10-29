@@ -81,6 +81,14 @@ export interface ShapeView {
   flipped?: boolean;
   /** Die face 1..6. */
   dieValue?: number;
+  /** Die sides (4/6/8/10/12/20). Omit = 6. */
+  sides?: number;
+  /** Comment thread as JSON (`CommentMessage[]`). */
+  thread?: string;
+  /** Epoch ms: shape creation (absent on pre-timestamp boards). */
+  createdAt?: number;
+  /** Epoch ms: last edit (absent on pre-timestamp boards). */
+  updatedAt?: number;
   textColor?: string;
   bold?: boolean;
   italic?: boolean;
@@ -486,18 +494,46 @@ export function flashcardSideText(v: Pick<ShapeView, 'text' | 'textBack' | 'flip
   return v.flipped === true ? (v.textBack ?? '') : (v.text ?? '');
 }
 
-/** Fair 1..6 for dice (crypto when available). */
-export function rollDieValue(): number {
+/** One comment-thread message. */
+export type CommentMessage = { id: string; user: string; text: string; at: number };
+
+/** Parse a comment `thread` field (tolerates legacy / foreign data). */
+export function parseThread(raw: string | undefined): CommentMessage[] {
+  if (!raw) return [];
+  try {
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const out: CommentMessage[] = [];
+    for (const m of arr) {
+      if (!m || typeof m !== 'object') continue;
+      const row = m as Record<string, unknown>;
+      if (typeof row.text !== 'string' || !row.text.trim()) continue;
+      out.push({
+        id: typeof row.id === 'string' ? row.id : '',
+        user: typeof row.user === 'string' ? row.user.slice(0, 40) : '',
+        text: row.text.slice(0, 2000),
+        at: typeof row.at === 'number' && Number.isFinite(row.at) ? row.at : 0,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Fair 1..sides for dice (crypto when available). */
+export function rollDieValue(sides = 6): number {
+  const n = Math.min(100, Math.max(2, Math.round(sides)));
   try {
     const buf = new Uint32Array(1);
     if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
       crypto.getRandomValues(buf);
-      return (buf[0] % 6) + 1;
+      return (buf[0] % n) + 1;
     }
   } catch {
     /* fall through */
   }
-  return Math.floor(Math.random() * 6) + 1;
+  return Math.floor(Math.random() * n) + 1;
 }
 
 export type FigureKind = 'star' | 'pentagon' | 'octagon' | 'cross';
@@ -1553,6 +1589,10 @@ export function removeArrowWaypoint(v: ShapeView, index: number): number[] | nul
 }
 
 export function pointInShape(v: ShapeView, px: number, py: number): boolean {
+  // Comment pins are screen-constant badges — hit in screen space.
+  if (v.type === 'comment') {
+    return Math.hypot(px - v.x, py - v.y) * getPaintZoom() <= 16;
+  }
   // Pens/arrows store world-space points; rotation is baked in when applied.
   if (v.type === 'pen') {
     const tol = v.strokeWidth / 2 + 3;
@@ -2143,8 +2183,9 @@ function drawShapeBody(
         ctx.fillStyle = ink;
         ctx.font = shapeFont(v, SHAPE_FONT);
         ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
-        const lx = v.x + pad;
+        const align = v.textAlign ?? 'left';
+        ctx.textAlign = align;
+        const lx = align === 'center' ? v.x + v.w / 2 : align === 'right' ? v.x + v.w - pad : v.x + pad;
         const ly = v.y + headerH / 2;
         ctx.fillText(title, lx, ly);
         const lw = ctx.measureText(title).width;
@@ -2208,8 +2249,9 @@ function drawShapeBody(
       break;
     }
     case 'die': {
-      // Game die: rounded body + pips for the synced face value.
-      const face = Math.min(6, Math.max(1, Math.round(v.dieValue ?? 1)));
+      // Game die: rounded body + pips for d6, numeral for other side counts.
+      const sides = v.sides ?? 6;
+      const face = Math.min(sides, Math.max(1, Math.round(v.dieValue ?? 1)));
       ctx.save();
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.w, v.h, Math.min(14, Math.min(v.w, v.h) * 0.22));
@@ -2219,12 +2261,20 @@ function drawShapeBody(
       ctx.lineWidth = v.strokeWidth;
       ctx.stroke();
       const ink = labelInk(v, textColor, boardBg);
-      ctx.fillStyle = ink;
-      const r = Math.max(1.5, Math.min(v.w, v.h) * 0.085);
-      for (const [fx, fy] of diePips(face)) {
-        ctx.beginPath();
-        ctx.arc(v.x + fx * v.w, v.y + fy * v.h, r, 0, Math.PI * 2);
-        ctx.fill();
+      if (sides === 6) {
+        ctx.fillStyle = ink;
+        const r = Math.max(1.5, Math.min(v.w, v.h) * 0.085);
+        for (const [fx, fy] of diePips(face)) {
+          ctx.beginPath();
+          ctx.arc(v.x + fx * v.w, v.y + fy * v.h, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = ink;
+        ctx.font = shapeFont(v, Math.min(v.w, v.h) * 0.5);
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(face), v.x + v.w / 2, v.y + v.h / 2);
       }
       ctx.restore();
       break;
@@ -2244,48 +2294,42 @@ function drawShapeBody(
       break;
     }
     case 'comment': {
-      // Speech bubble: rounded body + tail — unmissable on the board.
-      const tail = Math.min(18, v.w * 0.12, v.h * 0.3);
-      const tx = v.x + Math.min(28, v.w * 0.2);
+      // Thread pin: screen-constant badge + white bubble glyph. The thread
+      // itself lives in a popup (CommentOverlay), Miro-style.
+      const z = getPaintZoom();
+      const r = 13 / z;
       ctx.save();
       ctx.beginPath();
-      ctx.roundRect(v.x, v.y, v.w, v.h, 10);
-      ctx.fillStyle = v.fill;
+      ctx.arc(v.x, v.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = hasFill(v.fill) ? v.fill : '#748ffc';
       ctx.fill();
-      ctx.strokeStyle = v.stroke;
-      ctx.lineWidth = v.strokeWidth;
+      ctx.lineWidth = Math.max(1.25, 1.75 / z);
+      ctx.strokeStyle = 'rgba(10,10,12,0.35)';
       ctx.stroke();
+      // White bubble glyph.
+      const g = r * 0.5;
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.moveTo(tx, v.y + v.h - 1);
-      ctx.lineTo(tx - tail * 0.7, v.y + v.h + tail);
-      ctx.lineTo(tx + tail * 0.5, v.y + v.h - 1);
-      ctx.closePath();
-      ctx.fillStyle = v.fill;
+      ctx.roundRect(v.x - g, v.y - g * 1.1, g * 2, g * 1.8, g * 0.4);
       ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      if (v.text && !hideText) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.roundRect(v.x, v.y, v.w, v.h, 10);
-        ctx.clip();
-        const ink = labelInk(v, textColor, boardBg);
-        const size = v.fontSize ?? SHAPE_FONT;
-        const lineHeight = size * LABEL_LINE_HEIGHT;
-        const align = v.textAlign ?? 'left';
-        ctx.fillStyle = ink;
-        ctx.font = shapeFont(v, size);
-        ctx.textBaseline = 'top';
-        let lineY = v.y + 10;
-        for (const line of wrapText(ctx, v.text, Math.max(8, v.w - 20))) {
-          const lw = ctx.measureText(line).width;
-          const lx = lineAnchorX(v.x + 10, v.w - 20, lw, align);
-          ctx.fillText(line, lx, lineY);
-          lineY += lineHeight;
-          if (lineY > v.y + v.h - 8) break;
-        }
-        ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(v.x - g * 0.25, v.y + g * 0.7);
+      ctx.lineTo(v.x - g * 0.05, v.y + g * 1.55);
+      ctx.lineTo(v.x + g * 0.55, v.y + g * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      // Unread-ish dot: message count when the thread is alive.
+      const n = parseThread(v.thread).length;
+      if (n > 1 && !hideText) {
+        ctx.font = `700 ${Math.max(8, 10 / z)}px ${BOARD_TYPEFACE}`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.9;
+        ctx.fillText(n > 9 ? '9+' : String(n), v.x, v.y - r - 8 / z);
+        ctx.globalAlpha = 1;
       }
+      ctx.restore();
       break;
     }
     case 'triangle': {

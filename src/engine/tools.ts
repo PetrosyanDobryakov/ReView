@@ -9,7 +9,7 @@ import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
 import { ORBIT_DRAW } from '../core/orbitDraw';
 import { drawOrbitEraser, drawOrbitLasso, drawOrbitMarquee } from './orbitField';
-import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue } from '../core/settings';
+import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, shapeStrokeValue } from '../core/settings';
 import { createStrokeSmoother, type StrokeSmoother } from '../core/strokeSmooth';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
@@ -1552,7 +1552,7 @@ abstract class BoxTool extends Tool {
       type: this.shapeType,
       ...box,
       fill: fill ?? shapeFillValue(),
-      stroke: stroke ?? settings.shape.stroke,
+      stroke: stroke ?? shapeStrokeValue(),
       strokeWidth: strokeWidth ?? settings.shape.strokeWidth,
       ...rest,
     });
@@ -1661,22 +1661,26 @@ export class StickyTool extends BoxTool {
 export class CommentTool extends BoxTool {
   readonly id = 'comment';
   readonly shapeType = 'comment';
-  readonly defaultW = 200;
-  readonly defaultH = 120;
+  readonly defaultW = 28;
+  readonly defaultH = 28;
 
   onUp(engine: Engine, p: PointerInfo): void {
-    // Click plants a default bubble, drag sizes it — then type the comment.
+    // Click plants a pin (drag is ignored — pins are screen-constant).
     const box = this.commitDrawnBox(p);
     if (!box) return;
     const id = store.addShape({
       type: 'comment',
-      ...box,
-      fill: shapeFillValue(),
+      x: box.x + box.w / 2 - 14,
+      y: box.y + box.h / 2 - 14,
+      w: 28,
+      h: 28,
+      fill: '#748ffc',
       stroke: settings.shape.stroke,
-      strokeWidth: settings.shape.strokeWidth,
+      strokeWidth: 2,
       text: '',
+      thread: '[]',
     });
-    engine.openTextEditor(id);
+    if (id) engine.openComment(id);
   }
 
   render(engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -1685,10 +1689,11 @@ export class CommentTool extends BoxTool {
     const s = 1 / engine.camera.zoom;
     ctx.save();
     ctx.strokeStyle = COLORS.selection;
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillStyle = 'rgba(116,143,252,0.25)';
     ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();
-    ctx.roundRect(box.x, box.y, box.w, box.h, 10);
+    ctx.arc(box.x + box.w / 2, box.y + box.h / 2, 13 * s, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
@@ -1808,7 +1813,7 @@ export class TableTool extends BoxTool {
       type: 'table',
       ...box,
       fill: shapeFillValue(),
-      stroke: settings.shape.stroke,
+      stroke: shapeStrokeValue(),
       strokeWidth: settings.shape.strokeWidth,
       cols,
       rows,

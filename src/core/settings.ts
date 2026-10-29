@@ -15,6 +15,8 @@ export interface ShapeSettings {
   strokeWidth: number;
   /** When false, new shapes get a transparent fill. */
   filled: boolean;
+  /** When false, new shapes get a transparent stroke. */
+  stroked: boolean;
   /** Rounded corners for rectangles (sharp when false). */
   rounded: boolean;
   /** Arrow head length in world units. */
@@ -57,6 +59,7 @@ export const settings: { pen: PenSettings; shape: ShapeSettings; text: TextSetti
     stroke: '#6b6b66',
     strokeWidth: 2,
     filled: true,
+    stroked: true,
     rounded: true,
     arrowHead: 14,
   },
@@ -119,6 +122,7 @@ function restore(): void {
         settings.shape.strokeWidth = clamp(s.strokeWidth, SHAPE_STROKE_MIN, SHAPE_STROKE_MAX);
       }
       if (typeof s.filled === 'boolean') settings.shape.filled = s.filled;
+      if (typeof s.stroked === 'boolean') settings.shape.stroked = s.stroked;
       if (typeof s.rounded === 'boolean') settings.shape.rounded = s.rounded;
       if (typeof s.arrowHead === 'number') {
         settings.shape.arrowHead = clamp(s.arrowHead, ARROW_HEAD_MIN, ARROW_HEAD_MAX);
@@ -126,6 +130,10 @@ function restore(): void {
       // Legacy: transparent fill stored without filled flag.
       if (settings.shape.fill === 'transparent' || settings.shape.fill === 'none') {
         settings.shape.filled = false;
+      }
+      // Legacy: transparent stroke stored without stroked flag.
+      if (settings.shape.stroke === 'transparent' || settings.shape.stroke === 'none') {
+        settings.shape.stroked = false;
       }
     }
     if (bag.text && typeof bag.text === 'object') {
@@ -222,6 +230,11 @@ export function applySettingsSnapshot(raw: SettingsSnapshot): void {
 /** Fill string for newly drawn shapes (honours the no-fill toggle). */
 export function shapeFillValue(): string {
   return settings.shape.filled ? settings.shape.fill : 'transparent';
+}
+
+/** Stroke string for newly drawn shapes (honours the no-stroke toggle). */
+export function shapeStrokeValue(): string {
+  return settings.shape.stroked ? settings.shape.stroke : 'transparent';
 }
 
 export function penEffectFor(style: PenStyle, size: number): {
