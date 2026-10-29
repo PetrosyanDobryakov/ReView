@@ -3,7 +3,7 @@ import { perfHook } from '../core/perfHook';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, defaultFontSizeFor, docPageCount, docPageIndex, docPageStep, mediaUrl, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
+import { COLORS, defaultFontSizeFor, docPageCount, docPageIndex, docPageStep, mediaUrl, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, flashcardSideText, rollDieValue, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -2481,6 +2481,8 @@ export class Engine {
         terminator: 'infoTerminator',
         subroutine: 'infoSubroutine',
         display: 'infoDisplay',
+        flashcard: 'infoFlashcard',
+        die: 'infoDie',
       } as const
     )[v.type] as unknown as string ?? 'infoRect';
     const lines = [
@@ -3538,6 +3540,9 @@ export class Engine {
       const texts: string[] = [];
       if (v.type === 'text' || v.type === 'sticky') {
         if (v.text) texts.push(v.text);
+      } else if (v.type === 'flashcard') {
+        if (v.text) texts.push(v.text);
+        if (v.textBack) texts.push(v.textBack);
       } else if (v.type === 'table') {
         try {
           for (const c of tableGrid(v).cells) if (c) texts.push(c);
@@ -3596,7 +3601,7 @@ export class Engine {
 
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -3625,8 +3630,8 @@ export class Engine {
       y: tl.y,
       w: v.w,
       h: v.type === 'frame' ? frameHeaderHeight(v.h) : v.h,
-      text: v.type === 'frame' ? frameTitleLine(v.text) : (v.text ?? ''),
-      richHtml: v.type === 'frame' ? undefined : v.richHtml,
+      text: v.type === 'frame' ? frameTitleLine(v.text) : v.type === 'flashcard' ? flashcardSideText(v) : (v.text ?? ''),
+      richHtml: v.type === 'frame' || v.type === 'flashcard' ? undefined : v.richHtml,
       fontSize: v.fontSize ?? defaultFontSizeFor(v.type),
       color,
       type: v.type,
@@ -4235,6 +4240,14 @@ export class Engine {
     } else {
       const v = this.views.get(id);
       if (!v) return;
+      if (v.type === 'flashcard') {
+        // Plain sides only; the card keeps its box and overflow clips.
+        // Empty side is fine — the Q/A tag still shows.
+        store.patchShape(id, v.flipped === true ? { textBack: plain } : { text: plain });
+        if (target.fontSize !== undefined) store.patchShape(id, { fontSize: target.fontSize });
+        this.dirty = true;
+        return;
+      }
       if (!plain.trim() && v.type === 'text') {
         store.removeShapes([id]);
         this.setSelection([]);
@@ -5147,6 +5160,26 @@ export class Engine {
       if (tv) {
         const cell = tableCellAt(tv, p.world.x, p.world.y);
         this.openTableCellEditor(id, cell.row, cell.col);
+      }
+      return;
+    }
+    if (type === 'flashcard') {
+      // Double-click flips the study card; Enter edits the visible side.
+      const fv = this.views.get(id);
+      if (fv && !fv.locked) {
+        this.setSelection([id]);
+        store.patchShape(id, { flipped: fv.flipped !== true });
+        this.dirty = true;
+      }
+      return;
+    }
+    if (type === 'die') {
+      // Double-click re-rolls the die for everyone (plain synced scalar).
+      const dv = this.views.get(id);
+      if (dv && !dv.locked) {
+        this.setSelection([id]);
+        store.patchShape(id, { dieValue: rollDieValue() });
+        this.dirty = true;
       }
       return;
     }

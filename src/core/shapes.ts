@@ -12,7 +12,7 @@ import {
   shouldUseOrbitDraw,
 } from './orbitDraw';
 
-export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow' | 'image' | 'video' | 'audio' | 'doc' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die';
 
 /** Photo / video / audio / PDF hosts that magnetize notes above them in z-order. */
 export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'audio', 'doc']);
@@ -71,6 +71,12 @@ export interface ShapeView {
   alpha?: number;
   /** Pen stroke renders dashed (synced, undoable like any scalar). */
   dash?: boolean;
+  /** Flashcard answer side (question lives in `text`). Plain only, no rich. */
+  textBack?: string;
+  /** Flashcard shows the answer side when true. */
+  flipped?: boolean;
+  /** Die face 1..6. */
+  dieValue?: number;
   textColor?: string;
   bold?: boolean;
   italic?: boolean;
@@ -363,6 +369,7 @@ const LABELLED_SHAPE_TYPES: ReadonlySet<ShapeType> = new Set([
   'terminator',
   'subroutine',
   'display',
+  'flashcard',
 ]);
 
 /** Shapes that persist a `text` / `fontSize` field on the Y.Map. */
@@ -467,6 +474,50 @@ export function frameHeaderHeight(h: number): number {
 /** Frames paint a single header line; extra newlines never reach the canvas. */
 export function frameTitleLine(text: string | undefined): string {
   return (text ?? '').split('\n')[0] ?? '';
+}
+
+/** Flashcard visible side: question (`text`) or answer (`textBack`). */
+export function flashcardSideText(v: Pick<ShapeView, 'text' | 'textBack' | 'flipped'>): string {
+  return v.flipped === true ? (v.textBack ?? '') : (v.text ?? '');
+}
+
+/** Fair 1..6 for dice (crypto when available). */
+export function rollDieValue(): number {
+  try {
+    const buf = new Uint32Array(1);
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(buf);
+      return (buf[0] % 6) + 1;
+    }
+  } catch {
+    /* fall through */
+  }
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+/** Pip layout in unit-box coords for a die face (standard arrangement). */
+export function diePips(value: number): Array<[number, number]> {
+  const c: [number, number] = [0.5, 0.5];
+  const tl: [number, number] = [0.3, 0.3];
+  const tr: [number, number] = [0.7, 0.3];
+  const bl: [number, number] = [0.3, 0.7];
+  const br: [number, number] = [0.7, 0.7];
+  const ml: [number, number] = [0.3, 0.5];
+  const mr: [number, number] = [0.7, 0.5];
+  switch (Math.min(6, Math.max(1, Math.round(value)))) {
+    case 1:
+      return [c];
+    case 2:
+      return [tl, br];
+    case 3:
+      return [tl, c, br];
+    case 4:
+      return [tl, tr, bl, br];
+    case 5:
+      return [tl, tr, c, bl, br];
+    default:
+      return [tl, tr, ml, mr, bl, br];
+  }
 }
 
 /** Header row is bold even when the table itself is not. Overlay and SVG share this. */
@@ -2062,6 +2113,82 @@ function drawShapeBody(
         drawTextDecorations(ctx, lx, ly - size / 2, lw, size, ink, v.underline, v.strike);
         ctx.restore();
       }
+      break;
+    }
+    case 'flashcard': {
+      // Q/A study card: rounded body, tinted answer side, Q/A tag, wrapped
+      // centered text of the visible side, clipped to the body.
+      const flipped = v.flipped === true;
+      const sideText = flashcardSideText(v);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, 12);
+      ctx.fillStyle = v.fill;
+      ctx.fill();
+      if (flipped) {
+        ctx.fillStyle = 'rgba(124,140,255,0.12)';
+        ctx.fill();
+      }
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.stroke();
+      ctx.restore();
+      if (!hideText) {
+        const ink = labelInk(v, textColor, boardBg);
+        // Side tag, top-right, locale-free.
+        ctx.save();
+        ctx.font = shapeFont(v, 12);
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = ink;
+        ctx.globalAlpha = 0.55;
+        ctx.fillText(flipped ? 'A' : 'Q', v.x + v.w - 10, v.y + 8);
+        ctx.restore();
+        if (sideText) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(v.x, v.y, v.w, v.h, 12);
+          ctx.clip();
+          const size = v.fontSize ?? SHAPE_FONT;
+          const lineHeight = size * LABEL_LINE_HEIGHT;
+          ctx.font = shapeFont(v, size);
+          ctx.textBaseline = 'top';
+          const lines = wrapText(ctx, sideText, Math.max(8, v.w - 24));
+          const total = lines.length * lineHeight;
+          let lineY = v.y + Math.max(8, (v.h - total) / 2);
+          ctx.fillStyle = ink;
+          for (const line of lines) {
+            const lw = ctx.measureText(line).width;
+            const lx = lineAnchorX(v.x + 12, v.w - 24, lw, 'center');
+            ctx.fillText(line, lx, lineY);
+            lineY += lineHeight;
+            if (lineY > v.y + v.h - 8) break;
+          }
+          ctx.restore();
+        }
+      }
+      break;
+    }
+    case 'die': {
+      // Game die: rounded body + pips for the synced face value.
+      const face = Math.min(6, Math.max(1, Math.round(v.dieValue ?? 1)));
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.w, v.h, Math.min(14, Math.min(v.w, v.h) * 0.22));
+      ctx.fillStyle = v.fill;
+      ctx.fill();
+      ctx.strokeStyle = v.stroke;
+      ctx.lineWidth = v.strokeWidth;
+      ctx.stroke();
+      const ink = labelInk(v, textColor, boardBg);
+      ctx.fillStyle = ink;
+      const r = Math.max(1.5, Math.min(v.w, v.h) * 0.085);
+      for (const [fx, fy] of diePips(face)) {
+        ctx.beginPath();
+        ctx.arc(v.x + fx * v.w, v.y + fy * v.h, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
       break;
     }
     case 'triangle': {

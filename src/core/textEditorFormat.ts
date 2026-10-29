@@ -2,9 +2,9 @@
 
 const HILITE_HEX = '#ffe27a';
 
-/** Tables store plain cell strings; frames store a single title line. Rich overlay markup cannot persist there. */
+/** Tables store plain cell strings; frames store a single title line; flashcards store plain Q/A sides. Rich overlay markup cannot persist there. */
 export function textOverlayAllowsRich(target: { type?: string | null; tableCell?: unknown }): boolean {
-  return !target.tableCell && target.type !== 'frame';
+  return !target.tableCell && target.type !== 'frame' && target.type !== 'flashcard';
 }
 
 export type LiveTextFormat = {
