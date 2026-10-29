@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.16.50
+
+### Members menu cleanup
+
+- **Internet invite without the lecture.** The hint paragraph is gone; a
+  `?` next to the title expands it on demand. The copy button stays.
+- **LAN invite is explicit now.** Same section, but with a
+  same-Wi-Fi-only note and a «Copy LAN link» button, so nobody mixes it
+  up with the internet invite.
+- **No more renaming/recoloring other people.** Peer rows show their
+  published name + color with no editors; old local overrides are wiped
+  at boot. Your own nick + color stay.
+- **Bring-to-me is unmissable.** «All to me» is a full-width accent
+  button; each peer has an accent-outlined «To me».
+
 ## 0.16.49
 
 ### Three-row shelf + themed scrollbars

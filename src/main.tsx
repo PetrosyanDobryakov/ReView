@@ -9,6 +9,7 @@ import { applyChromeTheme, readChromeTheme, type ChromeThemeId } from './core/ch
 import { applyLocale, readLocale } from './core/locale';
 import { applyUiScale, migrateRotateHandleTopDefaultOff } from './core/prefs';
 import { migrateLegacyOrbitPaper } from './core/orbit';
+import { clearAllPeerDisplays } from './core/peerDisplay';
 import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
 import { getBoard, ensureBoardWithId } from './core/boards';
@@ -30,6 +31,8 @@ import './index.css';
 
 loadUser();
 bootstrapUserProfile();
+// Peer rename/recolor UI is gone — stored overrides would apply invisibly.
+clearAllPeerDisplays();
 // After profile apply: 0.15.2–0.15.5 defaulted rotateHandleTop on; flip stored on → off once.
 migrateRotateHandleTopDefaultOff();
 
