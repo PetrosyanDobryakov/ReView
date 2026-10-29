@@ -48,6 +48,7 @@ export interface ToolbarProps {
   onApplyCrop: () => void;
   onCancelCrop: () => void;
   onExport: () => void;
+  onStamp: (emoji: string) => void;
 }
 
 /** Shared drag-click guard: a drop anywhere must release it — the source button
@@ -629,6 +630,154 @@ function FiguresMenu({
   );
 }
 
+/** Emoji reactions: pick one, then stamp the board (stays armed). */
+export const STAMP_EMOJI = ['👍', '👎', '⭐', '❤️', '➕', '❓', '✖️', '✅'] as const;
+
+function ReactionsMenu({
+  tool,
+  locale,
+  onStamp,
+}: {
+  tool: ToolId;
+  locale: LocaleId;
+  onStamp: (emoji: string) => void;
+}) {
+  const menuId = useId();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  const placeMenu = useCallback(() => {
+    const trigger = btnRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const scale =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+    const width = 220;
+    const estimatedHeight = 200;
+    const scaledW = width * scale;
+    const centered = {
+      left: rect.left + rect.width / 2 - scaledW / 2,
+      right: rect.left + rect.width / 2 + scaledW / 2,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+    setMenuStyle(
+      zoomedPortalPosition(centered, {
+        width,
+        estimatedHeight,
+        align: 'left',
+        scale,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    placeMenu();
+    const onReflow = () => placeMenu();
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
+    return () => {
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
+    };
+  }, [open, placeMenu]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      btnRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open, close]);
+
+  const prevTool = useRef(tool);
+  useEffect(() => {
+    if (prevTool.current !== tool) close();
+    prevTool.current = tool;
+  }, [tool, close]);
+
+  const isActive = tool === 'stamp';
+
+  const menu =
+    open && menuStyle
+      ? createPortal(
+          <div
+            ref={menuRef}
+            id={menuId}
+            className="island block-scheme-popover more-pop"
+            role="menu"
+            aria-label={t(locale, 'reactions')}
+            style={{ left: menuStyle.left, top: menuStyle.top }}
+          >
+            <div className="block-scheme-popover-title">{t(locale, 'reactions')}</div>
+            <div className="reactions-grid" role="group" aria-label={t(locale, 'reactions')}>
+            {STAMP_EMOJI.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                role="menuitem"
+                className="reactions-cell"
+                aria-label={emoji}
+                title={emoji}
+                onClick={() => {
+                  onStamp(emoji);
+                  close();
+                  btnRef.current?.focus();
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div className="tool-group">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`tool-btn${isActive ? ' active' : ''}`}
+        title={t(locale, 'reactions')}
+        aria-label={t(locale, 'reactions')}
+        aria-pressed={isActive}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="reactions" size={TOOLBELT_ICON_SIZE} />
+      </button>
+      {menu}
+    </div>
+  );
+}
+
 function actionLabel(
   locale: LocaleId,
   enabled: MessageKey,
@@ -654,6 +803,7 @@ export function Toolbar({
   onApplyCrop,
   onCancelCrop,
   onExport,
+  onStamp,
 }: ToolbarProps) {
   const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
   const [orders, setOrders] = useState(readOrders);
@@ -689,6 +839,8 @@ export function Toolbar({
         <FiguresMenu tool={tool} locale={locale} onTool={onTool} />
         <div className="toolbelt-sep" />
         <MoreMenu tool={tool} locale={locale} ids={orders.more} onTool={onTool} onMove={moveTool} />
+        <div className="toolbelt-sep" />
+        <ReactionsMenu tool={tool} locale={locale} onStamp={onStamp} />
         <div className="toolbelt-sep" />
         <div className="tool-group">
           {hasSelection && (

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.56
+
+### Emoji reactions
+
+- **Reactions button on the strip.** 👍 👎 ⭐ ❤️ ➕ ❓ ✖️ ✅ in a grid —
+  pick one and stamp the board; stays armed for rapid fire, any other
+  tool (or double-click on empty space) disarms. Stamps are plain text
+  shapes: movable, erasable, synced.
+
 ## 0.16.55
 
 ### Comment bubbles
