@@ -1543,6 +1543,11 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             }
           }
         }}
+        onStamp={(emoji) => {
+          const e = engineRef.current;
+          if (e) e.tools.stamp.emoji = emoji;
+          handleTool('stamp');
+        }}
       />
 
       <SettingsSheet

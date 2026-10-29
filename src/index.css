@@ -1390,6 +1390,37 @@ button.brand {
   overflow-y: auto;
   scrollbar-width: thin;
 }
+/* Reactions picker: 4×2 emoji grid. */
+.more-pop .reactions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 2px;
+}
+.reactions-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--chrome-dur-fast) var(--chrome-ease),
+    border-color var(--chrome-dur-fast) var(--chrome-ease),
+    transform var(--chrome-dur-press) var(--chrome-ease);
+}
+.reactions-cell:hover {
+  background: var(--chrome-panel-2);
+  border-color: var(--chrome-border-soft);
+}
+.reactions-cell:active {
+  transform: scale(0.92);
+}
 .tool-btn.more-row {
   display: grid;
   grid-template-columns: 22px 1fr;

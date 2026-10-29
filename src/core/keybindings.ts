@@ -68,6 +68,7 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   octagon: '',
   cross: '',
   comment: 'KeyM',
+  stamp: '',
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {

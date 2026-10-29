@@ -73,7 +73,8 @@ export type ToolId =
   | 'pentagon'
   | 'octagon'
   | 'cross'
-  | 'comment';
+  | 'comment'
+  | 'stamp';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
@@ -2588,6 +2589,32 @@ export class LassoTool extends Tool {
   }
 }
 
+/** Emoji reactions: armed emoji stamps on click, stays armed for rapid fire. */
+export class StampTool extends Tool {
+  readonly id = 'stamp';
+  cursor = 'crosshair';
+  emoji = '👍';
+
+  onUp(_engine: Engine, p: PointerInfo): void {
+    if (!this.emoji) return;
+    const size = 44;
+    store.addShape({
+      type: 'text',
+      x: p.world.x - size / 2,
+      y: p.world.y - size / 2,
+      w: size,
+      h: size,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      text: this.emoji,
+      fontSize: size,
+      textAlign: 'center',
+    });
+    store.endGesture();
+  }
+}
+
 export class Tools {
   readonly select = new SelectTool();
   readonly lasso = new LassoTool();
@@ -2614,6 +2641,7 @@ export class Tools {
   readonly flashcard = new FlashcardTool();
   readonly die = new DieTool();
   readonly comment = new CommentTool();
+  readonly stamp = new StampTool();
   readonly star = new StarTool();
   readonly pentagon = new PentagonTool();
   readonly octagon = new OctagonTool();
