@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.47
+
+### More-shelf placement fix
+
+- **Popup no longer slides under the toolbar.** Height estimates lied on
+  long shelves; position now corrects from real geometry once painted
+  (estimate bumped to match the scrollable rows).
+
 ## 0.16.46
 
 ### Shelf scroll, straight arrows, honest multi-bar
