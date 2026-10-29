@@ -10,12 +10,26 @@ import {
   type StripGroup,
   type ToolbarOrders,
 } from '../core/toolbarOrder';
+import { codeToDisplay, getToolBind, onKeybindsChange } from '../core/keybindings';
 import { Icon, TOOLBELT_ICON_SIZE, type IconName } from './icons';
 import type { LocaleId } from '../core/locale';
 import { t, type MessageKey } from './i18n';
 import { SlideTrack } from './SlideTrack';
 import { isCoarsePointer } from '../core/pointerEnv';
 import { zoomedPortalPosition } from './portalPlace';
+
+/** Tool button title: label + the LIVE bind (rebinds show up immediately). */
+export function toolTitle(locale: LocaleId, id: ToolId): string {
+  const base = t(locale, id);
+  let bind = '';
+  try {
+    bind = getToolBind(id) ?? '';
+  } catch {
+    bind = '';
+  }
+  const disp = bind ? codeToDisplay(bind) : '';
+  return disp ? `${base} (${disp})` : base;
+}
 
 function readOrders(): ToolbarOrders {
   return readToolbarOrders(readPrefs().toolbarOrder);
@@ -136,8 +150,8 @@ function ToolButtons({
           key={id}
           className={`tool-btn${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
           data-slide-active={tool === id ? 'true' : undefined}
-          title={t(locale, id)}
-          aria-label={t(locale, id)}
+          title={toolTitle(locale, id)}
+          aria-label={toolTitle(locale, id)}
           aria-pressed={tool === id}
           draggable={allowReorder}
           onDragStart={(e) => beginDrag(e, id)}
@@ -260,17 +274,19 @@ function MoreMenu({
     // painted (no loop — deps don't include menuStyle).
     const raf = requestAnimationFrame(() => {
       const el = menuRef.current;
-      if (!el) return;
+      const trigger = btnRef.current;
+      if (!el || !trigger) return;
+      const scale =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
       const r = el.getBoundingClientRect();
-      const margin = 8;
-      let dy = 0;
-      if (r.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - r.bottom;
-      else if (r.top < margin) dy = margin - r.top;
-      if (Math.abs(dy) > 1) {
-        const scale =
-          parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
-        setMenuStyle((cur) => (cur ? { left: cur.left, top: cur.top + dy / scale } : cur));
-      }
+      const t = trigger.getBoundingClientRect();
+      const margin = 8 * scale;
+      const gap = 8 * scale;
+      // Dock the popup bottom to the trigger top so it hugs the toolbar
+      // instead of floating; clamp into the viewport on short screens.
+      const docked = t.top - gap - r.height;
+      const top = Math.max(margin, docked);
+      setMenuStyle((cur) => (cur ? { left: cur.left, top: top / scale } : cur));
     });
     return () => {
       cancelAnimationFrame(raf);
@@ -349,8 +365,8 @@ function MoreMenu({
                 role="menuitem"
                 draggable={allowReorder}
                 className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}${drop?.id === id ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
-                title={t(locale, id)}
-                aria-label={t(locale, id)}
+                title={toolTitle(locale, id)}
+                aria-label={toolTitle(locale, id)}
                 onDragStart={(e) => beginDrag(e, id)}
                 onDragEnd={endDrag}
                 onDragOver={(e) => {
@@ -486,20 +502,20 @@ function FiguresMenu({
     const onReflow = () => placeMenu();
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
-    // Same real-geometry correction as the More shelf (long grid).
+    // Same dock-to-trigger correction as the More shelf (long grid).
     const raf = requestAnimationFrame(() => {
       const el = menuRef.current;
-      if (!el) return;
+      const trigger = btnRef.current;
+      if (!el || !trigger) return;
+      const scale =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
       const r = el.getBoundingClientRect();
-      const margin = 8;
-      let dy = 0;
-      if (r.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - r.bottom;
-      else if (r.top < margin) dy = margin - r.top;
-      if (Math.abs(dy) > 1) {
-        const scale =
-          parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
-        setMenuStyle((cur) => (cur ? { left: cur.left, top: cur.top + dy / scale } : cur));
-      }
+      const t = trigger.getBoundingClientRect();
+      const margin = 8 * scale;
+      const gap = 8 * scale;
+      const docked = t.top - gap - r.height;
+      const top = Math.max(margin, docked);
+      setMenuStyle((cur) => (cur ? { left: cur.left, top: top / scale } : cur));
     });
     return () => {
       cancelAnimationFrame(raf);
@@ -590,8 +606,8 @@ function FiguresMenu({
                 role="menuitem"
                 draggable={allowReorder}
                 className={`tool-btn more-row${tool === id ? ' active' : ''}${dragId === id ? ' dragging' : ''}`}
-                title={t(locale, id)}
-                aria-label={t(locale, id)}
+                title={toolTitle(locale, id)}
+                aria-label={toolTitle(locale, id)}
                 onDragStart={(e) => beginDrag(e, id)}
                 onDragEnd={endDrag}
                 onClick={() => {
@@ -807,6 +823,9 @@ export function Toolbar({
 }: ToolbarProps) {
   const [toolHoverAnim, setToolHoverAnim] = useState(() => readPrefs().toolHoverAnim);
   const [orders, setOrders] = useState(readOrders);
+  // Rebinds must refresh button titles immediately (binds live outside prefs).
+  const [, setBindTick] = useState(0);
+  useEffect(() => onKeybindsChange(() => setBindTick((n) => n + 1)), []);
 
   useEffect(() => onPrefsChange((p) => setToolHoverAnim(p.toolHoverAnim)), []);
   useEffect(() => onPrefsChange(() => setOrders(readOrders())), []);

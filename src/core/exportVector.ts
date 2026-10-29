@@ -18,6 +18,7 @@ import {
   frameTitleLine,
   flashcardSideText,
   figurePolygon,
+  parseThread,
   diePips,
   graphCurvePath,
   labelInk,
@@ -459,16 +460,12 @@ export function shapesToSvg(
       continue;
     }
     if (v.type === 'comment') {
-      // Speech bubble: rounded body + tail + plain text.
-      const tail = Math.min(18, v.w * 0.12, v.h * 0.3);
-      const tx = x + Math.min(28, v.w * 0.2);
-      const size = v.fontSize ?? defaultFontSizeFor(v.type);
-      const ink = exportTextInk(v, inkPaper, '#eceae4');
-      const lineHeight = size * LABEL_LINE_HEIGHT;
-      const body = svgTextFromShape(v, x + 10, Math.max(8, v.w - 20), y + 10, v.textAlign ?? 'left', ink, '', lineHeight, size, y + v.h - 8);
+      // Thread pin: badge + message count (the thread itself is interactive).
+      const n = parseThread(v.thread).length;
+      const ink = esc(exportTextInk({ ...v, textColor: '#ffffff' }, inkPaper, '#ffffff'));
       parts.push(
-        `<g${opacity}${xf}><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="10" ${paint(v, '')}/>` +
-        `<polygon points="${tx},${y + v.h - 1} ${tx - tail * 0.7},${y + v.h + tail} ${tx + tail * 0.5},${y + v.h - 1}" ${paint(v, '')}/>${body}</g>`
+        `<g${opacity}${xf}><circle cx="${x}" cy="${y}" r="13" ${paint(v, '')}/>` +
+        `<text x="${x}" y="${y - 20}" font-size="12" text-anchor="middle" fill="${ink}">${n > 9 ? '9+' : n}</text></g>`
       );
       continue;
     }
@@ -676,14 +673,16 @@ export function shapesToSvg(
       if (title) {
         const size = v.fontSize ?? defaultFontSizeFor('frame');
         const ink = exportTextInk(v, inkPaper, '#eceae4');
-        const boxW = Math.max(20, v.w - FRAME_LABEL_PAD_X * 2);
+        const align = v.textAlign ?? 'left';
+        const boxW = align === 'left' ? Math.max(20, v.w - FRAME_LABEL_PAD_X * 2) : Math.max(20, v.w - FRAME_LABEL_PAD_X);
+        const boxX = align === 'left' ? x + FRAME_LABEL_PAD_X : x;
         const clipId = `frm${parts.length}`;
         const body = svgTextFromShape(
           { ...v, text: title, richHtml: undefined },
-          x + FRAME_LABEL_PAD_X,
+          boxX,
           Math.max(boxW, 1e6),
           y + headerH / 2 - size / 2,
-          'left',
+          align,
           ink,
           '',
           size * LABEL_LINE_HEIGHT,
@@ -691,7 +690,7 @@ export function shapesToSvg(
           y + headerH
         );
         parts.push(
-          `<g${xf} clip-path="url(#${clipId})"><clipPath id="${clipId}"><rect x="${x + FRAME_LABEL_PAD_X}" y="${y}" width="${boxW}" height="${headerH}"/></clipPath>${body}</g>`
+          `<g${xf} clip-path="url(#${clipId})"><clipPath id="${clipId}"><rect x="${boxX}" y="${y}" width="${boxW}" height="${headerH}"/></clipPath>${body}</g>`
         );
       }
       continue;
@@ -740,14 +739,18 @@ export function shapesToSvg(
       continue;
     }
     if (v.type === 'die') {
-      const face = Math.min(6, Math.max(1, Math.round(v.dieValue ?? 1)));
+      const sides = v.sides ?? 6;
+      const face = Math.min(sides, Math.max(1, Math.round(v.dieValue ?? 1)));
       const r = Math.max(1.5, Math.min(v.w, v.h) * 0.085);
       const ink = esc(exportTextInk(v, inkPaper, SHAPE_INK));
-      const pips = diePips(face)
-        .map(([fx, fy]) => `<circle cx="${x + fx * v.w}" cy="${y + fy * v.h}" r="${r}" fill="${ink}" stroke="none"/>`)
-        .join('');
+      const faceMark =
+        sides === 6
+          ? diePips(face)
+              .map(([fx, fy]) => `<circle cx="${x + fx * v.w}" cy="${y + fy * v.h}" r="${r}" fill="${ink}" stroke="none"/>`)
+              .join('')
+          : `<text x="${x + v.w / 2}" y="${y + v.h / 2}" font-size="${Math.min(v.w, v.h) * 0.5}" text-anchor="middle" dominant-baseline="central" fill="${ink}">${face}</text>`;
       parts.push(
-        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${Math.min(14, Math.min(v.w, v.h) * 0.22)}" ${paint(v, `${opacity}${xf}`)}/>${pips}`
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${Math.min(14, Math.min(v.w, v.h) * 0.22)}" ${paint(v, `${opacity}${xf}`)}/>${faceMark}`
       );
       continue;
     }

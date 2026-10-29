@@ -3,7 +3,7 @@ import { perfHook } from '../core/perfHook';
 import { Camera } from './Camera';
 import { Grid } from './Grid';
 import * as store from '../core/store';
-import { COLORS, defaultFontSizeFor, docPageCount, docPageIndex, docPageStep, mediaUrl, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, flashcardSideText, rollDieValue, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
+import { COLORS, defaultFontSizeFor, docPageCount, docPageIndex, docPageStep, mediaUrl, TABLE_FONT, TEXT_FONT, TEXT_LINE_HEIGHT, BOARD_TYPEFACE, boardFont, containedInShape, cropFractions, uncroppedBox, restoreUncroppedBox, withAlpha, frameHeaderHeight, frameTitleLine, flashcardSideText, rollDieValue, parseThread, tableCellStyle, TABLE_PILL_OUT, TABLE_PILL_R, TABLE_PILL_SPLIT, TEXT_TOOL_WRAP_W } from '../core/shapes';
 import {
   drawPenStroke,
   drawShape,
@@ -111,7 +111,7 @@ import {
 import { portPos, PORTS, EDGE_PORTS, type PortId, connectedArrowGeometry, worldPortDir, arrowBounds, withArrowVisualBounds, arrowWaypoints, projectArrowInsert, removeArrowWaypoint } from '../core/shapes';
 void PORTS;
 import { getToolBinds, getColorBinds } from '../core/keybindings';
-import { updatePenSettings, updateShapeSettings, penStrokeWidthForSize } from '../core/settings';
+import { updatePenSettings, updateShapeSettings, penStrokeWidthForSize, shapeStrokeValue } from '../core/settings';
 import { readPenSlots, readPenSize } from '../core/penColors';
 import { cursorCssForTool, clearToolCursorCache } from './toolCursors';
 import {
@@ -386,6 +386,8 @@ export interface EngineEvents {
   onCrop?: (active: boolean) => void;
   onContextMenu?: (menu: { x: number; y: number; shapeId: string | null; type: string | null; locked: boolean }) => void;
   onInfo?: (info: { title: string; lines: string[] } | null) => void;
+  /** Comment thread popup (pin click / new pin). Null closes. */
+  onComment?: (id: string | null) => void;
   onExportRegion?: (rect: ShapeBox | null) => void;
   /**
    * Shared media countdown/info for the notice center. Fired when a fresh
@@ -2490,10 +2492,28 @@ export class Engine {
         comment: 'infoComment',
       } as const
     )[v.type] as unknown as string ?? 'infoRect';
-    const lines = [
+    const lines: string[] = [];
+    const fmtTime = (ts: number): string => {
+      try {
+        return new Date(ts).toLocaleString(readLocale(), {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      } catch {
+        return new Date(ts).toLocaleString();
+      }
+    };
+    if (typeof v.createdAt === 'number') lines.push(`${t(locale, 'infoCreated')}: ${fmtTime(v.createdAt)}`);
+    if (typeof v.updatedAt === 'number' && v.updatedAt !== v.createdAt) {
+      lines.push(`${t(locale, 'infoEdited')}: ${fmtTime(v.updatedAt)}`);
+    }
+    lines.push(
       `${t(locale, 'infoSize')}: ${Math.round(v.w)} × ${Math.round(v.h)}`,
       `${t(locale, 'infoPos')}: ${Math.round(v.x)}, ${Math.round(v.y)}`,
-    ];
+    );
     if (v.points) lines.push(`${t(locale, 'infoPoints')}: ${v.points.length / 2}`);
     if (v.type === 'table') {
       const g = tableGrid(v);
@@ -3546,7 +3566,7 @@ export class Engine {
       if (v.type === 'text' || v.type === 'sticky') {
         if (v.text) texts.push(v.text);
       } else if (v.type === 'comment') {
-        if (v.text) texts.push(v.text);
+        for (const m of parseThread(v.thread)) if (m.text) texts.push(m.text);
       } else if (v.type === 'flashcard') {
         if (v.text) texts.push(v.text);
         if (v.textBack) texts.push(v.textBack);
@@ -3606,9 +3626,23 @@ export class Engine {
     this.dirty = true;
   }
 
+  /** Open a comment thread popup (pin click, new pin, Enter on a pin). */
+  openComment(id: string): void {
+    const v = this.views.get(id);
+    if (!v || v.type !== 'comment') return;
+    this.setSelection([id]);
+    this.events.onComment?.(id);
+    this.dirty = true;
+  }
+
+  /** Close the comment thread popup (the pin stays on the board). */
+  closeComment(): void {
+    this.events.onComment?.(null);
+  }
+
   openTextEditor(id: string): void {
     const v = this.views.get(id);
-    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die' || v.type === 'star' || v.type === 'pentagon' || v.type === 'octagon' || v.type === 'cross') return;
+    if (!v || v.locked || v.type === 'pen' || v.type === 'arrow' || v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc' || v.type === 'graph' || v.type === 'calculator' || v.type === 'die' || v.type === 'star' || v.type === 'pentagon' || v.type === 'octagon' || v.type === 'cross' || v.type === 'comment') return;
     // Tables edit one cell at a time — route to the cell editor.
     if (v.type === 'table') {
       const a = this.tableActive.get(id) ?? { r: 0, c: 0 };
@@ -4953,7 +4987,7 @@ export class Engine {
             type: 'arrow' as const,
             ...geom,
             fill: 'transparent',
-            stroke: settings.shape.stroke,
+            stroke: shapeStrokeValue(),
             strokeWidth: settings.shape.strokeWidth,
             arrowHead: settings.shape.arrowHead,
             fromId,
@@ -4973,7 +5007,7 @@ export class Engine {
           const draft = {
             type: 'arrow' as const,
             fill: 'transparent',
-            stroke: settings.shape.stroke,
+            stroke: shapeStrokeValue(),
             strokeWidth: settings.shape.strokeWidth,
             arrowHead: settings.shape.arrowHead,
             points: [a.x, a.y, b.x, b.y],
@@ -5170,22 +5204,12 @@ export class Engine {
       }
       return;
     }
-    if (type === 'flashcard') {
-      // Double-click flips the study card; Enter edits the visible side.
-      const fv = this.views.get(id);
-      if (fv && !fv.locked) {
-        this.setSelection([id]);
-        store.patchShape(id, { flipped: fv.flipped !== true });
-        this.dirty = true;
-      }
-      return;
-    }
     if (type === 'die') {
       // Double-click re-rolls the die for everyone (plain synced scalar).
       const dv = this.views.get(id);
       if (dv && !dv.locked) {
         this.setSelection([id]);
-        store.patchShape(id, { dieValue: rollDieValue() });
+        store.patchShape(id, { dieValue: rollDieValue(dv.sides ?? 6) });
         this.dirty = true;
       }
       return;
@@ -5204,8 +5228,15 @@ export class Engine {
       'terminator',
       'subroutine',
       'display',
-      'comment',
+      // Flashcards edit the visible side on double-click; flipping lives on
+      // the StyleBar button so the two never fight.
+      'flashcard',
+      // Comment pins open the thread popup instead (branch below).
     ]);
+    if (type === 'comment') {
+      this.openComment(id);
+      return;
+    }
     if (type && TEXT_TYPES.has(type)) this.openTextEditor(id);
   };
 
@@ -5835,6 +5866,7 @@ export class Engine {
       if (type === 'graph') this.openGraphEditor(id);
       else if (type === 'calculator') this.openCalculator(id);
       else if (type === 'image') this.startCropSelected();
+      else if (type === 'comment') this.openComment(id);
       else this.openTextEditor(id);
       return;
     }

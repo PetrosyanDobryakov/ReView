@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.16.57
+
+### Docked popups, flashcard edit, dice sides, no-stroke, frame align, info times, honest binds, thread pins
+
+- **Figures / More popups dock to the toolbar.** Real-geometry pass now
+  lands the popup bottom exactly on the trigger top instead of floating.
+- **Flashcard double-click edits again** (like all text); flipping lives
+  only on the StyleBar button.
+- **Dice: 4/6/8/10/12/20 sides** in the StyleBar (switching re-rolls),
+  pip color cell, numerals for non-d6.
+- **Contour label removed; «No outline» toggle added** (mirrors no-fill;
+  new shapes honour it, color preserved).
+- **Frame title alignment works** (canvas + editor + SVG export).
+- **Info panel shows created / edited times** (new shapes timestamped;
+  old ones show what's there).
+- **Hotkeys: rare tools unbound by default** (V/Q/P/E/S/T/L stay),
+  everything still rebindable in Settings; toolbar tooltips show the
+  LIVE bind right after a rebind; saved-but-untouched binds migrate.
+- **Comments are Miro-style pins now**: badge with bubble glyph,
+  click opens the thread popup, replies sync live, old bubble text
+  carried over as the first message.
+
 ## 0.16.56
 
 ### Emoji reactions

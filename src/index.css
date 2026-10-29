@@ -1421,6 +1421,102 @@ button.brand {
 .reactions-cell:active {
   transform: scale(0.92);
 }
+
+/* Comment thread popup (Miro-style): follows its pin, live replies. */
+.comment-pop {
+  position: fixed;
+  z-index: 230;
+  width: 288px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comment-title {
+  font-size: var(--chrome-type-label);
+  font-weight: 600;
+  color: var(--chrome-text);
+}
+.comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.comment-empty {
+  margin: 2px 0;
+  font-size: var(--chrome-type-label);
+  color: var(--chrome-text-dim);
+}
+.comment-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--chrome-panel-2);
+}
+.comment-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comment-user {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chrome-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comment-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--chrome-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.comment-text {
+  margin: 0;
+  font-size: var(--chrome-type-label);
+  line-height: 1.45;
+  color: var(--chrome-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.comment-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.comment-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 120px;
+  padding: 7px 10px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  background: var(--chrome-bg);
+  color: var(--chrome-text);
+  font: inherit;
+  font-size: var(--chrome-type-label);
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+}
+.comment-input:focus {
+  border-color: var(--chrome-active-ring);
+}
 .tool-btn.more-row {
   display: grid;
   grid-template-columns: 22px 1fr;
