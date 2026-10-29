@@ -556,6 +556,31 @@ html {
   box-sizing: border-box;
 }
 
+/* Themed scrollbars app-wide (Firefox + Chromium). Areas that must stay
+   scroll-less (.home-tabs-scroll, .file-island, …) keep their own `none`
+   rules, which beat this selector. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--chrome-text-dim) 55%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--chrome-text-dim) 45%, transparent);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--chrome-text-dim) 80%, transparent);
+}
+
 button,
 select,
 input,
@@ -5136,9 +5161,9 @@ h3 .swap-text,
   border: 1px solid var(--chrome-border);
   border-radius: 14px;
   background: var(--chrome-panel);
-  /* Long shelves scroll inside the card — the surrounding controls stay put. */
-  max-height: 52vh;
-  max-height: min(560px, 52dvh);
+  /* Long shelves scroll inside the card — the surrounding controls stay put.
+     Three rows + a peek of the fourth as a scroll hint. */
+  max-height: 208px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;

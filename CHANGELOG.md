@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.49
+
+### Three-row shelf + themed scrollbars
+
+- **Board shelf shows three rows**, then scrolls inside its card (a peek of
+  the fourth row hints there's more). Header, join, tabs and bottom actions
+  never move.
+- **Scrollbars match the theme app-wide** — thin dim thumb, transparent
+  track, brighter on hover (Chromium + Firefox). Covers the shelf, settings,
+  tool shelves and everything else; areas that must stay scroll-less keep
+  their hidden scrollbars.
+
 ## 0.16.48
 
 ### Home polish: title, version, shelf scroll
