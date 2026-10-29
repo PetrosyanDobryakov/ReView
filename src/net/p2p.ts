@@ -456,6 +456,8 @@ class P2pClient {
       stroke: d.stroke,
       strokeWidth: d.strokeWidth,
       ...(d.alpha !== undefined ? { alpha: d.alpha } : {}),
+      ...(d.dashed ? { dashed: true } : {}),
+      ...(d.laser ? { laser: true } : {}),
     };
     this.lastDraft = slim;
     this.hotAwareness.queue({ draft: slim });
@@ -557,6 +559,8 @@ function parseDraft(raw: unknown): PeerDraft | null {
     stroke: d.stroke,
     strokeWidth: d.strokeWidth,
     ...(typeof d.alpha === 'number' ? { alpha: d.alpha } : {}),
+    ...(d.dashed === true ? { dashed: true } : {}),
+    ...(d.laser === true ? { laser: true } : {}),
   };
 }
 

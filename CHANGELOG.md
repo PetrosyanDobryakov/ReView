@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.16.52
+
+### Contour opacity, pen styles, frames on the shelf
+
+- **Opacity lives in the contour group now.** Same slider + numeric value
+  as thickness — no more separate strip. Mixed multi-select keeps its
+  opacity-only bar.
+- **Pen styles: marker / highlighter / пунктир / указка.** Dashed strokes
+  persist like normal ink (sync, undo, SVG export). The laser is a hot
+  glowing trail: it fades in ~1.5 s, is never saved, and peers see it
+  live + fading through the draft channel.
+- **Frames moved out of the scheme submenu** into the More shelf
+  (draggable to the main strip, hotkey `F`). Title editor on create,
+  riders hosting — as before, just reachable.
+
 ## 0.16.51
 
 ### Crop commits on click-away, slimmer home footer

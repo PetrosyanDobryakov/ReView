@@ -142,12 +142,16 @@ import type { PeerDraft, PeerErasePreview } from '../net/types';
  */
 const DRAFT_TIP_LEAD_SEC = 0.25;
 
+/** Laser-pointer trail lifetime after the tip stops (local + peers). */
+const LASER_FADE_MS = 1500;
+
 /** True when live draft geometry/style needs a repaint (tip can move at fixed vert count). */
 function peerDraftPaintDirty(a: PeerDraft | null | undefined, b: PeerDraft | null | undefined): boolean {
   if (Boolean(a) !== Boolean(b)) return true;
   if (!a || !b) return false;
   if (a.stroke !== b.stroke || a.strokeWidth !== b.strokeWidth) return true;
   if ((a.alpha ?? 0.85) !== (b.alpha ?? 0.85)) return true;
+  if (!!a.dashed !== !!b.dashed || !!a.laser !== !!b.laser) return true;
   const ap = a.points;
   const bp = b.points;
   if (ap.length !== bp.length) return true;
@@ -476,6 +480,11 @@ export class Engine {
   private smoothPeerCursors = true;
   /** Last applied summon `at` per peer (one-shot bring-to-me). */
   private summonSeen = new Map<number, number>();
+  /**
+   * Laser-pointer trails fading out: own stroke (`self`) + one per peer that
+   * stopped drawing. Never shapes, never synced — pure overlay with a deadline.
+   */
+  private laserFades = new Map<string, { points: number[]; stroke: string; strokeWidth: number; until: number }>();
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -531,11 +540,25 @@ export class Engine {
           }
         }
       }
+            // Laser pointer: while the peer draws, the live draft glows (render
+      // below); once the draft clears, keep its last geometry fading.
+      const key = `peer-${peer.id}`;
+      if (peer.draft?.laser && peer.draft.points.length >= 4) {
+        if (this.laserFades.has(key)) this.laserFades.delete(key);
+      } else if (old?.draft?.laser && old.draft.points.length >= 4 && !peer.draft) {
+        this.laserFades.set(key, {
+          points: old.draft.points.slice(),
+          stroke: old.draft.stroke,
+          strokeWidth: old.draft.strokeWidth,
+          until: now + LASER_FADE_MS,
+        });
+        this.peersAnimating = true;
+        shouldPaint = true;
+      }
       // Bring-to-me summon (host → me or everyone): fresh (15s) + same
       // page only, applied once by `at`. The camera eases there; any of
       // my inputs overrides mid-flight.
-      const summon = peer.summon;
-      if (summon) {
+      const summon = peer.summon;      if (summon) {
         const seenAt = this.summonSeen.get(peer.id) ?? -1;
         if (summon.at > seenAt) {
           this.summonSeen.set(peer.id, summon.at);
@@ -2985,6 +3008,21 @@ export class Engine {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Own laser-pointer stroke just ended: keep the glowing trail fading for
+   * LASER_FADE_MS. Peers get the same via the draft channel (snapshot below).
+   */
+  pushLaserFade(points: number[], stroke: string, strokeWidth: number): void {
+    try {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this.laserFades.set('self', { points, stroke, strokeWidth, until: now + LASER_FADE_MS });
+      this.peersAnimating = true;
+      this.dirty = true;
+    } catch {
+      /* ignore */
     }
   }
 
@@ -6014,7 +6052,7 @@ export class Engine {
         if (cur.length >= 2) segments.push(cur);
         for (const seg of segments) {
           if (seg.length >= 2) {
-            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1);
+            drawPenStroke(ctx, seg, v.strokeWidth, displayInk(v.stroke, paperBg), v.alpha ?? 1, undefined, v.dash);
           }
         }
         return;
@@ -6158,13 +6196,24 @@ export class Engine {
 
       if (peer.draft && peer.draft.points.length >= 4) {
         const d = peer.draft;
-        drawPenStroke(
-          ctx,
-          smooth ? this.draftTipPoints(peer, d, now, s) : d.points,
-          d.strokeWidth,
-          displayInk(d.stroke, boardBg),
-          d.alpha ?? 0.85
-        );
+        const pts = smooth ? this.draftTipPoints(peer, d, now, s) : d.points;
+        if (d.laser) {
+          ctx.save();
+          ctx.shadowColor = d.stroke;
+          ctx.shadowBlur = 18;
+          drawPenStroke(ctx, pts, d.strokeWidth, displayInk(d.stroke, boardBg), 1);
+          ctx.restore();
+        } else {
+          drawPenStroke(
+            ctx,
+            pts,
+            d.strokeWidth,
+            displayInk(d.stroke, boardBg),
+            d.alpha ?? 0.85,
+            undefined,
+            d.dashed
+          );
+        }
         // Do not set peersAnimating from a static draft — setPeers already
         // dirties when tip/geometry changes (peerDraftPaintDirty). Keeping the
         // flag hot forced full-board paints after the tip went stable.
@@ -6263,6 +6312,26 @@ export class Engine {
       if (!reduce && peerMotionShouldAnimate(pos, now, holdSec)) this.peersAnimating = true;
       // Glyph + name paint on the cursor layer (paintPeerCursors) — above DOM
       // player cards. Drafts/selections above stay here (board content).
+    }
+
+    // Laser-pointer trails (own + peers whose draft just cleared): glowing,
+    // fading, never shapes. Expired entries drop; live ones keep frames hot.
+    if (this.laserFades.size) {
+      for (const [k, f] of [...this.laserFades]) {
+        const left = f.until - now;
+        if (left <= 0 || f.points.length < 4) {
+          this.laserFades.delete(k);
+          continue;
+        }
+        const a = Math.max(0, Math.min(1, left / LASER_FADE_MS));
+        ctx.save();
+        ctx.shadowColor = f.stroke;
+        ctx.shadowBlur = 18;
+        drawPenStroke(ctx, f.points, f.strokeWidth, displayInk(f.stroke, boardBg), a);
+        ctx.restore();
+        this.peersAnimating = true;
+      }
+      this.dirty = true;
     }
   }
 

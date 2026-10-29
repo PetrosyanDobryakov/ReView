@@ -69,6 +69,8 @@ export interface ShapeView {
   /** Degrees clockwise. Box shapes render rotated; pens/arrows bake into points. */
   rotation?: number;
   alpha?: number;
+  /** Pen stroke renders dashed (synced, undoable like any scalar). */
+  dash?: boolean;
   textColor?: string;
   bold?: boolean;
   italic?: boolean;
@@ -1789,9 +1791,10 @@ export function drawPenStroke(
   width: number,
   color: string,
   alpha: number,
-  pressures?: number[]
+  pressures?: number[],
+  dash?: boolean
 ): void {
-  paintPenStroke(ctx, pts, width, color, alpha, pressures);
+  paintPenStroke(ctx, pts, width, color, alpha, pressures, dash);
 }
 
 function paintPenStroke(
@@ -1800,7 +1803,8 @@ function paintPenStroke(
   width: number,
   color: string,
   alpha: number,
-  pressures?: number[]
+  pressures?: number[],
+  dash?: boolean
 ): void {
   ctx.save();
   ctx.strokeStyle = color;
@@ -1808,6 +1812,7 @@ function paintPenStroke(
   ctx.fillStyle = color;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (dash) ctx.setLineDash([Math.max(2, width * 1.6), Math.max(2, width * 1.2)]);
   if (pts.length === 2) {
     const useP = pressureVaries(pressures, 1);
     const w = useP ? width * (0.35 + 0.65 * (pressures![0] ?? 0.5)) : width;
@@ -1817,7 +1822,9 @@ function paintPenStroke(
     ctx.restore();
     return;
   }
-  if (pressureVaries(pressures, pts.length / 2)) {
+  // Pressure ribbon is fill-based — dashes can't follow it, fall back to the
+  // smooth constant-width path so dashed strokes stay dashed.
+  if (!dash && pressureVaries(pressures, pts.length / 2)) {
     strokePressureRibbon(ctx, pts, width, pressures!);
   } else {
     strokeSmoothPath(ctx, pts, width);
@@ -2296,7 +2303,8 @@ function drawShapeBody(
         v.strokeWidth,
         displayInk(v.stroke, boardBg),
         v.alpha ?? 1,
-        v.pressures
+        v.pressures,
+        v.dash
       );
       break;
     case 'arrow':
