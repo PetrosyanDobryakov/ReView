@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.16.51
+
+### Crop commits on click-away, slimmer home footer
+
+- **Photo crop finishes on empty-space click.** Clicking off the photo now
+  applies the crop (untouched box = silent exit, no junk undo); Esc still
+  cancels, Enter still applies.
+- **Home footer can't grow the page anymore.** The «save others’ boards»
+  toggle moved into the actions row (right of New board); the footer
+  renders only for the update nudge / desktop promo, so the nudge never
+  pushes the page into scrolling.
+
 ## 0.16.50
 
 ### Members menu cleanup

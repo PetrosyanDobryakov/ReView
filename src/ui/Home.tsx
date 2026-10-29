@@ -788,9 +788,23 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
             <Icon name="plus" size={16} />
             {t(locale, 'newBoard')}
           </button>
+          <button
+            type="button"
+            className={`sheet-switch home-foot-switch home-bottom-switch${saveRemote ? ' on' : ''}`}
+            role="switch"
+            aria-checked={saveRemote}
+            title={t(locale, 'saveRemoteBoardsHint')}
+            onClick={toggleSaveRemote}
+          >
+            <span className="switch" aria-hidden="true">
+              <span className="switch-thumb" />
+            </span>
+            <span>{t(locale, 'saveRemoteBoards')}</span>
+          </button>
         </div>
 
-        <footer className="home-foot">
+        {(verStatus?.kind === 'outdated' || !isDesktop()) && (
+          <footer className="home-foot">
           {verStatus?.kind === 'outdated' && canSelfUpdate() ? (
             <button
               type="button"
@@ -826,27 +840,15 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
               <span className="home-update-cta">{t(locale, 'updateInstall')}</span>
             </a>
           ) : null}
-          <div className="home-foot-row">
-            <button
-              type="button"
-              className={`sheet-switch home-foot-switch${saveRemote ? ' on' : ''}`}
-              role="switch"
-              aria-checked={saveRemote}
-              title={t(locale, 'saveRemoteBoardsHint')}
-              onClick={toggleSaveRemote}
-            >
-              <span className="switch" aria-hidden="true">
-                <span className="switch-thumb" />
-              </span>
-              <span>{t(locale, 'saveRemoteBoards')}</span>
-            </button>
-            {!isDesktop() && (
+          {!isDesktop() && (
+            <div className="home-foot-row">
               <a className="home-foot-cta" href={RELEASES_URL} target="_blank" rel="noreferrer" title={t(locale, 'desktopCta')}>
                 {t(locale, 'desktopCta')}
               </a>
-            )}
-          </div>
+            </div>
+          )}
         </footer>
+        )}
       </main>
 
       <SettingsSheet
