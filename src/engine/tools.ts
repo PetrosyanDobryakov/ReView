@@ -1,7 +1,8 @@
 import type { Engine } from './Engine';
 import * as store from '../core/store';
 import { COLORS, displayInk, withAlpha, hasFill, type PortId, connectedArrowGeometry, arrowBounds, withArrowVisualBounds } from '../core/shapes';
-import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H, projectArrowInsert, insertArrowWaypoint } from '../core/shapes';
+import { drawPenStroke, intersects, normalizeBox, pointInShape, polylineDistance, pressureVaries, rollDieValue,
+ NON_ERASABLE_TYPES, AUDIO_MIN_W, AUDIO_MIN_H, projectArrowInsert, insertArrowWaypoint } from '../core/shapes';
 import { TABLE_CELL_H, TABLE_CELL_W, TABLE_DEFAULT_COLS, TABLE_DEFAULT_ROWS, normalizeTableCells, shiftTableDivider, hostRiderIds, stackOrderIndex, tableGrid, mapAlongTableFractions, RIDER_HOST_TYPES } from '../core/shapes';
 import type { ShapeBox, ShapeView } from '../core/shapes';
 import { isOrbitPaper } from '../core/orbit';
@@ -64,7 +65,9 @@ export type ToolId =
   | 'terminator'
   | 'subroutine'
   | 'display'
-  | 'table';
+  | 'table'
+  | 'flashcard'
+  | 'die';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
@@ -1457,7 +1460,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -1871,6 +1874,62 @@ export class FrameTool extends BoxTool {
     ctx.stroke();
     ctx.fillStyle = 'rgba(236,234,228,0.09)';
     ctx.fillRect(box.x, box.y, box.w, 18);
+    ctx.restore();
+  }
+}
+
+export class FlashcardTool extends BoxTool {
+  readonly id = 'flashcard';
+  readonly shapeType = 'flashcard';
+  readonly defaultW = 240;
+  readonly defaultH = 160;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    // Click plants a default card, drag sizes it — then type the question.
+    const id = this.finishShape(p, { text: '' });
+    if (id) engine.openTextEditor(id);
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.previewBox();
+    if (!box) return;
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1.5 * s;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class DieTool extends BoxTool {
+  readonly id = 'die';
+  readonly shapeType = 'die';
+  readonly defaultW = 76;
+  readonly defaultH = 76;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    // Click plants a rolled die, drag sizes the box. Double-click re-rolls.
+    const id = this.finishShape(p, { dieValue: rollDieValue() });
+    if (id) engine.setSelection([id]);
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.previewBox();
+    if (!box) return;
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1.5 * s;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 12);
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 }
@@ -2461,6 +2520,8 @@ export class Tools {
   readonly arrow = new ArrowTool();
   readonly eraser = new EraserTool();
   readonly table = new TableTool();
+  readonly flashcard = new FlashcardTool();
+  readonly die = new DieTool();
 
   get(id: ToolId): Tool {
     return this[id];

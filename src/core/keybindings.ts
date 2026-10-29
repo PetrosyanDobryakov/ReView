@@ -29,6 +29,8 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'graph',
   'calculator',
   'table',
+  'flashcard',
+  'die',
 ];
 
 const DEFAULT_TOOL_BINDS: ToolBinds = {
@@ -54,6 +56,8 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   subroutine: 'KeyI',
   display: 'KeyK',
   table: '',
+  flashcard: 'KeyB',
+  die: 'KeyX',
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {

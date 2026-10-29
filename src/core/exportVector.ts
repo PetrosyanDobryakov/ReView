@@ -16,6 +16,8 @@ import {
   displayInk,
   frameHeaderHeight,
   frameTitleLine,
+  flashcardSideText,
+  diePips,
   graphCurvePath,
   labelInk,
   imageHasCrop,
@@ -709,8 +711,28 @@ export function shapesToSvg(
       parts.push(
         `<text x="${x + 10}" y="${y + 18}" font-size="11" fill="${esc(exportTextInk({ ...v, fill: body, stroke: bezel }, inkPaper, SHAPE_INK))}"${xf}>${esc(mode)}</text>`
       );
+    parts.push(
+      `<text x="${x + v.w - 10}" y="${y + 48}" font-size="16" text-anchor="end" fill="${esc(exportTextInk({ ...v, fill: body, stroke: bezel }, inkPaper, SHAPE_INK))}"${xf}>${esc(label)}</text>`
+      );
+      continue;
+    }
+    if (v.type === 'flashcard') {
       parts.push(
-        `<text x="${x + v.w - 10}" y="${y + 48}" font-size="16" text-anchor="end" fill="${esc(exportTextInk({ ...v, fill: body, stroke: bezel }, inkPaper, SHAPE_INK))}"${xf}>${esc(label)}</text>`
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="12" ${paint(v, `${opacity}${xf}`)}/>`
+      );
+      const side = { ...v, text: flashcardSideText(v) };
+      parts.push(label(side, x, y, xf, inkPaper));
+      continue;
+    }
+    if (v.type === 'die') {
+      const face = Math.min(6, Math.max(1, Math.round(v.dieValue ?? 1)));
+      const r = Math.max(1.5, Math.min(v.w, v.h) * 0.085);
+      const ink = esc(exportTextInk(v, inkPaper, SHAPE_INK));
+      const pips = diePips(face)
+        .map(([fx, fy]) => `<circle cx="${x + fx * v.w}" cy="${y + fy * v.h}" r="${r}" fill="${ink}" stroke="none"/>`)
+        .join('');
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="${Math.min(14, Math.min(v.w, v.h) * 0.22)}" ${paint(v, `${opacity}${xf}`)}/>${pips}`
       );
       continue;
     }

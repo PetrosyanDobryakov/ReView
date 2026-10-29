@@ -59,6 +59,10 @@ export const ICON_PATHS = {
   display: 'M3 5h11l5 7-5 7H3z',
   // Evenly spaced layers — closed top plate, open shelves (no stem).
   more: 'M12 2.5l8 4-8 4-8-4zM4 12.5l8 4 8-4M4 17.5l8 4 8-4',
+  // Overlapping study cards — reads as a deck, distinct from copy.
+  flashcard: 'M10 10h10v10H10zM4 14V4h10',
+  // Die showing five — body plus corner/center pips.
+  die: 'M5 5h14v14H5zM8.5 8.5a1 1 0 1 0 0.01 0M15.5 8.5a1 1 0 1 0 0.01 0M12 12a1 1 0 1 0 0.01 0M8.5 15.5a1 1 0 1 0 0.01 0M15.5 15.5a1 1 0 1 0 0.01 0',
   // Flowchart: top node + two branches (rects drawn separately in Icon).
   blockScheme: 'M12 6V10.5H4V14M12 10.5H20V14',
   chevronDown: 'M6 9l6 6 6-6',

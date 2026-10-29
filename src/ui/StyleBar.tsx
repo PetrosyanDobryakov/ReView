@@ -30,10 +30,10 @@ import { MOTION, useExitPresence } from './motion';
 import { hasFill, defaultFontSizeFor } from '../core/shapes';
 
 const TEXT_SIZES = [12, 14, 16, 18, 24, 32, 48, 64];
-const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table'];
+const SHAPE_TOOLS: ToolId[] = ['rect', 'ellipse', 'sticky', 'arrow', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'calculator', 'table', 'flashcard', 'die'];
 /** Calculator keeps its own face theme — no StyleBar fill/stroke. */
-const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
-const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table']);
+const FILL_TYPES = new Set(['rect', 'ellipse', 'sticky', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die']);
+const STROKE_TYPES = new Set(['rect', 'ellipse', 'arrow', 'pen', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'graph', 'table', 'flashcard', 'die']);
 const TEXT_TYPES = new Set(['text', 'sticky', 'rect', 'ellipse', 'diamond', 'frame', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display', 'table']);
 const CENTERED_TYPES = new Set(['rect', 'ellipse', 'diamond', 'triangle', 'parallelogram', 'hexagon', 'cylinder', 'terminator', 'subroutine', 'display']);
 
@@ -443,6 +443,7 @@ export function StyleBar({
   const strokeTargets = selected.filter((v) => STROKE_TYPES.has(v.type) && !v.locked);
   const textTargets = selected.filter((v) => TEXT_TYPES.has(v.type) && !v.locked);
   const penTargets = selected.filter((v) => v.type === 'pen' && !v.locked);
+  const flashTargets = selected.filter((v) => v.type === 'flashcard' && !v.locked);
   const rectTargets = selected.filter((v) => v.type === 'rect' && !v.locked);
   const arrowTargets = selected.filter((v) => v.type === 'arrow' && !v.locked);
   const outlineTargets = strokeTargets.filter((v) => v.type !== 'pen');
@@ -470,8 +471,10 @@ export function StyleBar({
     selected.length > 1 &&
     opacityTargets.length > 0 &&
     !opacityTargets.every((v) => v.type === opacityTargets[0].type);
+  /** Flip is a single-card action — hidden in mixed multis like everything else. */
+  const showFlash = flashTargets.length > 0 && !mixedMulti;
   const want =
-    showEraser || showPenStyle || showOpacity || (!mixedMulti && (showFill || showStroke || showText));
+    showEraser || showPenStyle || showOpacity || showFlash || (!mixedMulti && (showFill || showStroke || showText));
   const shown = useExitPresence(want, MOTION.enter);
   const flags = mixedMulti
     ? {
@@ -484,8 +487,9 @@ export function StyleBar({
         showCorners: false,
         showArrowHead: false,
         showOpacity,
+        showFlash: false,
       }
-    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity };
+    : { showEraser, showFill, showStroke, showText, showPenStyle, showOutlineWidth, showCorners, showArrowHead, showOpacity, showFlash };
   const hold = useRef(flags);
   if (want) hold.current = flags;
   const view = hold.current;
@@ -499,6 +503,7 @@ export function StyleBar({
     view.showCorners,
     view.showArrowHead,
     view.showOpacity,
+    view.showFlash,
   ]
     .map(Number)
     .join('');
@@ -887,6 +892,22 @@ export function StyleBar({
           <span className="size-value">{opacityValue}</span>
           </>
           )}
+        </div>
+      )}
+      {view.showFlash && (
+        <div className="style-group">
+          <button
+            type="button"
+            className="style-btn"
+            title={t(locale, 'flashcardFlipHint')}
+            onClick={() => {
+              const anyFlipped = flashTargets.some((v) => v.flipped === true);
+              patchShapes(flashTargets.map((v) => [v.id, { flipped: !anyFlipped }]));
+              onPatched();
+            }}
+          >
+            {t(locale, flashTargets.some((v) => v.flipped === true) ? 'flashcardShowQuestion' : 'flashcardShowAnswer')}
+          </button>
         </div>
       )}
       {view.showText && (

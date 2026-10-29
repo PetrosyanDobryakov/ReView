@@ -913,7 +913,9 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     stroke: (m.get('stroke') as string) ?? COLORS.stroke,
     strokeWidth: (m.get('strokeWidth') as number) ?? 2,
     text: m.get('text') as string | undefined,
-    fontSize: (m.get('fontSize') as number | undefined) ?? defaultFontSizeFor(type),
+    textBack: typeof m.get('textBack') === 'string' ? (m.get('textBack') as string) : undefined,
+    flipped: m.get('flipped') === true ? true : undefined,
+    dieValue: typeof m.get('dieValue') === 'number' ? Math.min(6, Math.max(1, Math.round(m.get('dieValue') as number))) : undefined,    fontSize: (m.get('fontSize') as number | undefined) ?? defaultFontSizeFor(type),
     textColor: m.get('textColor') as string | undefined,
     bold: m.get('bold') === true,
     italic: m.get('italic') === true,
@@ -1011,6 +1013,13 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     if (v.strike) m.set('strike', true);
     if (v.textAlign && v.textAlign !== 'left') m.set('textAlign', v.textAlign);
     if (v.highlight) m.set('highlight', true);
+    if (v.type === 'flashcard') {
+      if (v.textBack) m.set('textBack', v.textBack);
+      if (v.flipped) m.set('flipped', true);
+    }
+    if (v.type === 'die' && v.dieValue !== undefined) {
+      m.set('dieValue', Math.min(6, Math.max(1, Math.round(v.dieValue))));
+    }
     if (v.richHtml) {
       const safe = sanitizeRichHtml(v.richHtml);
       if (safe && safe.includes('<')) m.set('richHtml', safe);
