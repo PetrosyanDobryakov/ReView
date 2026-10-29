@@ -35,6 +35,7 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'pentagon',
   'octagon',
   'cross',
+  'comment',
 ];
 
 const DEFAULT_TOOL_BINDS: ToolBinds = {
@@ -66,6 +67,7 @@ const DEFAULT_TOOL_BINDS: ToolBinds = {
   pentagon: '',
   octagon: '',
   cross: '',
+  comment: 'KeyM',
 };
 
 const DEFAULT_COLOR_BINDS: ColorBinds = {

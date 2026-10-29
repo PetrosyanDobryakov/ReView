@@ -458,6 +458,20 @@ export function shapesToSvg(
       parts.push(`<g${opacity}${xf}>${note}${clipped}</g>`);
       continue;
     }
+    if (v.type === 'comment') {
+      // Speech bubble: rounded body + tail + plain text.
+      const tail = Math.min(18, v.w * 0.12, v.h * 0.3);
+      const tx = x + Math.min(28, v.w * 0.2);
+      const size = v.fontSize ?? defaultFontSizeFor(v.type);
+      const ink = exportTextInk(v, inkPaper, '#eceae4');
+      const lineHeight = size * LABEL_LINE_HEIGHT;
+      const body = svgTextFromShape(v, x + 10, Math.max(8, v.w - 20), y + 10, v.textAlign ?? 'left', ink, '', lineHeight, size, y + v.h - 8);
+      parts.push(
+        `<g${opacity}${xf}><rect x="${x}" y="${y}" width="${v.w}" height="${v.h}" rx="10" ${paint(v, '')}/>` +
+        `<polygon points="${tx},${y + v.h - 1} ${tx - tail * 0.7},${y + v.h + tail} ${tx + tail * 0.5},${y + v.h - 1}" ${paint(v, '')}/>${body}</g>`
+      );
+      continue;
+    }
     if (v.type === 'table') {
       const g = tableGrid(v);
       const cumX = (i: number) => {

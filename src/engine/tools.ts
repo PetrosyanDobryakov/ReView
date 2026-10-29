@@ -72,7 +72,8 @@ export type ToolId =
   | 'star'
   | 'pentagon'
   | 'octagon'
-  | 'cross';
+  | 'cross'
+  | 'comment';
 
 export interface PointerInfo {
   screen: { x: number; y: number };
@@ -1465,7 +1466,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 }
 
 abstract class BoxTool extends Tool {
-  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross';
+  abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross' | 'comment';
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -1650,6 +1651,43 @@ export class StickyTool extends BoxTool {
     ctx.setLineDash([4 * s, 4 * s]);
     ctx.beginPath();
     ctx.roundRect(box.x, box.y, box.w, box.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class CommentTool extends BoxTool {
+  readonly id = 'comment';
+  readonly shapeType = 'comment';
+  readonly defaultW = 200;
+  readonly defaultH = 120;
+
+  onUp(engine: Engine, p: PointerInfo): void {
+    // Click plants a default bubble, drag sizes it — then type the comment.
+    const box = this.commitDrawnBox(p);
+    if (!box) return;
+    const id = store.addShape({
+      type: 'comment',
+      ...box,
+      fill: shapeFillValue(),
+      stroke: settings.shape.stroke,
+      strokeWidth: settings.shape.strokeWidth,
+      text: '',
+    });
+    engine.openTextEditor(id);
+  }
+
+  render(engine: Engine, ctx: CanvasRenderingContext2D): void {
+    const box = this.previewBox();
+    if (!box) return;
+    const s = 1 / engine.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = COLORS.selection;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1.5 * s;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 10);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
@@ -2575,6 +2613,7 @@ export class Tools {
   readonly table = new TableTool();
   readonly flashcard = new FlashcardTool();
   readonly die = new DieTool();
+  readonly comment = new CommentTool();
   readonly star = new StarTool();
   readonly pentagon = new PentagonTool();
   readonly octagon = new OctagonTool();

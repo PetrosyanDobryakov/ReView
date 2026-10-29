@@ -23,7 +23,7 @@ const messy = readOrders({
   more: ['graph', 'triangle', 'select'],
 });
 assert.deepEqual(messy.nav, ['select', 'pen', 'lasso', 'pan'], 'nav cleaned + backfilled');
-assert.deepEqual(messy.create, ['eraser', 'arrow', 'sticky', 'text'], 'create cleaned + backfilled (figures live in the tab)');
+assert.deepEqual(messy.create, ['eraser', 'arrow', 'sticky', 'text', 'comment'], 'create cleaned + backfilled (figures live in the tab)');
 assert.deepEqual(messy.more, [...MORE_DEFAULTS], 'shelf keeps only parkable, no dupes');
 
 // park eraser on the shelf, pull graph out to the strip
