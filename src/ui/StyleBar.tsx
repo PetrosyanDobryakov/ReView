@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import type { ToolId } from '../engine/tools';
 import type { ShapeView, TextAlign } from '../core/shapes';
 import {
-  effectivePen,
+  penEffectFor,
   penStrokeWidthForSize,
   updateEraserSettings,
   updatePenSettings,
@@ -685,38 +685,36 @@ export function StyleBar({
       )}
       {view.showPenStyle && (
         <div className="style-group">
-          <button
-            type="button"
-            className={`style-btn${pen.style === 'marker' ? ' active' : ''}`}
-            title={t(locale, 'markerHint')}
-            aria-pressed={pen.style === 'marker'}
-            onClick={() => {
-              updatePenSettings({ style: 'marker' });
-              const next = effectivePen();
-              if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
-                onPatched();
-              }
-            }}
-          >
-            {t(locale, 'marker')}
-          </button>
-          <button
-            type="button"
-            className={`style-btn${pen.style === 'highlighter' ? ' active' : ''}`}
-            title={t(locale, 'highlighterHint')}
-            aria-pressed={pen.style === 'highlighter'}
-            onClick={() => {
-              updatePenSettings({ style: 'highlighter' });
-              const next = effectivePen();
-              if (penTargets.length) {
-                patchShapes(penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width }]));
-                onPatched();
-              }
-            }}
-          >
-            {t(locale, 'highlighter')}
-          </button>
+          {(
+            [
+              { style: 'marker', label: 'marker', hint: 'markerHint' },
+              { style: 'highlighter', label: 'highlighter', hint: 'highlighterHint' },
+              { style: 'dashed', label: 'dashed', hint: 'dashedHint' },
+              { style: 'laser', label: 'laser', hint: 'laserHint' },
+            ] as const
+          ).map((s) => (
+            <button
+              key={s.style}
+              type="button"
+              className={`style-btn${pen.style === s.style ? ' active' : ''}`}
+              title={t(locale, s.hint)}
+              aria-pressed={pen.style === s.style}
+              onClick={() => {
+                updatePenSettings({ style: s.style });
+                // Laser leaves no shapes behind — nothing to restyle.
+                if (s.style === 'laser') return;
+                const next = penEffectFor(s.style, pen.size);
+                if (penTargets.length) {
+                  patchShapes(
+                    penTargets.map((v) => [v.id, { alpha: next.alpha, strokeWidth: next.width, dash: next.dash }])
+                  );
+                  onPatched();
+                }
+              }}
+            >
+              {t(locale, s.label)}
+            </button>
+          ))}
         </div>
       )}
       {(view.showFill || view.showCorners) && (
@@ -794,7 +792,7 @@ export function StyleBar({
           )}
         </div>
       )}
-      {(view.showStroke || view.showOutlineWidth || view.showArrowHead) && (
+      {(view.showStroke || view.showOutlineWidth || view.showArrowHead || view.showOpacity) && (
         <div className="style-group">
           {view.showStroke && (
           <>
@@ -869,10 +867,8 @@ export function StyleBar({
           <span className="size-value">{arrowHeadValue}</span>
           </>
           )}
-        </div>
-      )}
-      {view.showOpacity && (
-        <div className="style-group">
+          {view.showOpacity && (
+          <>
           <span className="panel-label">{t(locale, 'opacity')}</span>
           <input
             className="size-slider"
@@ -889,6 +885,8 @@ export function StyleBar({
             }}
           />
           <span className="size-value">{opacityValue}</span>
+          </>
+          )}
         </div>
       )}
       {view.showText && (

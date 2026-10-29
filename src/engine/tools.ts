@@ -1257,16 +1257,29 @@ export class PenTool extends Tool {
       stroke: pen.color,
       strokeWidth: pen.width,
       alpha: pen.alpha,
+      ...(pen.dash ? { dashed: true } : {}),
+      ...(pen.laser ? { laser: true } : {}),
     });
   }
 
-  onUp(_engine: Engine): void {
+  onUp(engine: Engine): void {
     if (!this.active) return;
     this.active = false;
     publishDraft(null);
     const shift = this.shift;
     this.shift = false;
     const points = shift ? this.straightPoints() : this.pts;
+    const pen = effectivePen();
+    // Laser pointer: glowing trail only — fade locally + on peers, never a shape.
+    if (pen.laser && !shift && points.length >= 4) {
+      engine.pushLaserFade(points.slice(), pen.color, pen.width);
+      this.pts = [];
+      this.pressures = [];
+      this.capturePressure = false;
+      this.last = null;
+      store.endGesture();
+      return;
+    }
     const pressures = this.capturePressure
       ? shift
         ? [this.pressures[0] ?? 0.5, this.pressures.at(-1) ?? 0.5]
@@ -1335,7 +1348,6 @@ export class PenTool extends Tool {
       }
     }
 
-    const pen = effectivePen();
     const pad = pen.width / 2 + 2;
     let minX = Infinity;
     let minY = Infinity;
@@ -1359,6 +1371,7 @@ export class PenTool extends Tool {
       stroke: pen.color,
       strokeWidth: pen.width,
       alpha: pen.alpha,
+      ...(pen.dash ? { dash: true } : {}),
       points,
       pressures: hasPressure ? slice : undefined,
     });
@@ -1385,13 +1398,30 @@ export class PenTool extends Tool {
     const points = this.shift ? this.straightPoints() : this.pts;
     if (points.length < 2) return;
     const bg = store.viewPaperBg();
+    if (pen.laser) {
+      // Live laser: hot glow, no commit preview semantics to preserve.
+      ctx.save();
+      ctx.shadowColor = pen.color;
+      ctx.shadowBlur = 18;
+      drawPenStroke(
+        ctx,
+        points,
+        pen.width,
+        displayInk(pen.color, bg),
+        1,
+        undefined
+      );
+      ctx.restore();
+      return;
+    }
     drawPenStroke(
       ctx,
       points,
       pen.width,
       displayInk(pen.color, bg),
       pen.alpha * 0.9,
-      this.shift || !this.capturePressure ? undefined : this.pressures
+      this.shift || !this.capturePressure ? undefined : this.pressures,
+      pen.dash
     );
   }
 

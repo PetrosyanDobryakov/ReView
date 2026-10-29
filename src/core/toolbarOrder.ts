@@ -6,8 +6,9 @@ export type StripGroup = 'nav' | 'create' | 'more';
 
 export const NAV_DEFAULTS: ToolId[] = ['select', 'lasso', 'pan'];
 export const CREATE_DEFAULTS: ToolId[] = ['pen', 'eraser', 'rect', 'ellipse', 'arrow', 'sticky', 'text'];
-/** Default More-shelf rows (specialty tools). */
-export const MORE_DEFAULTS: ToolId[] = ['graph', 'calculator', 'table'];
+/** Default More-shelf rows (specialty tools). Frame lives here, not in the
+    scheme flyout — tutors reach for it constantly. */
+export const MORE_DEFAULTS: ToolId[] = ['graph', 'calculator', 'table', 'frame'];
 export const SCHEME: ToolId[] = [
   'diamond',
   'triangle',
@@ -17,7 +18,6 @@ export const SCHEME: ToolId[] = [
   'terminator',
   'subroutine',
   'display',
-  'frame',
 ];
 
 const PARKABLE_SET = new Set<string>([...NAV_DEFAULTS, ...CREATE_DEFAULTS, ...MORE_DEFAULTS]);

@@ -922,6 +922,7 @@ export function readShape(m: Y.Map<unknown>): ShapeView {
     textAlign: (m.get('textAlign') as ShapeView['textAlign'] | undefined) ?? undefined,
     highlight: m.get('highlight') === true,
     alpha: m.get('alpha') as number | undefined,
+    dash: m.get('dash') === true ? true : undefined,
     src: m.get('src') as string | undefined,
     blob: typeof m.get('blob') === 'string' ? (m.get('blob') as string) : undefined,
     thumb: typeof m.get('thumb') === 'string' ? (m.get('thumb') as string) : undefined,
@@ -1035,6 +1036,7 @@ function createShapeYMap(v: ShapeView): Y.Map<unknown> {
     m.set('page', docPageIndex(v.page, v.pages.length));
   }
   if (v.alpha !== undefined) m.set('alpha', v.alpha);
+  if (v.dash) m.set('dash', true);
   if (v.src) m.set('src', v.src);
   // Media by content hash; bytes live in the blob store, not in the doc.
   if (v.blob) m.set('blob', v.blob);

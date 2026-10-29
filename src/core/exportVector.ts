@@ -357,8 +357,11 @@ export function shapesToSvg(
       for (let i = 0; i < v.points.length; i += 2) {
         d.push(`${i === 0 ? 'M' : 'L'}${v.points[i] + ox} ${v.points[i + 1] + oy}`);
       }
+      const dash = v.dash
+        ? ` stroke-dasharray="${Math.max(2, v.strokeWidth * 1.6)} ${Math.max(2, v.strokeWidth * 1.2)}"`
+        : '';
       parts.push(
-        `<path d="${d.join(' ')}" fill="none" stroke="${esc(exportStroke(v, inkPaper))}" stroke-width="${v.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${opacity}/>`
+        `<path d="${d.join(' ')}" fill="none" stroke="${esc(exportStroke(v, inkPaper))}" stroke-width="${v.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${dash}${opacity}/>`
       );
       continue;
     }

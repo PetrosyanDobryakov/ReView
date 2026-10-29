@@ -20,6 +20,10 @@ export type PeerDraft = {
   stroke: string;
   strokeWidth: number;
   alpha?: number;
+  /** Dashed pen style (peers render the same dash). */
+  dashed?: boolean;
+  /** Laser pointer: never committed, peers fade it out after the tip stops. */
+  laser?: boolean;
 };
 
 /** Live eraser hover preview (awareness only). */

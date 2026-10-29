@@ -1,4 +1,4 @@
-export type PenStyle = 'marker' | 'highlighter';
+export type PenStyle = 'marker' | 'highlighter' | 'dashed' | 'laser';
 
 export interface PenSettings {
   color: string;
@@ -106,7 +106,7 @@ function restore(): void {
       const p = bag.pen as Record<string, unknown>;
       if (typeof p.color === 'string') settings.pen.color = p.color;
       if (typeof p.size === 'number' && p.size > 0 && p.size < 200) settings.pen.size = p.size;
-      if (p.style === 'marker' || p.style === 'highlighter') settings.pen.style = p.style;
+      if (p.style === 'marker' || p.style === 'highlighter' || p.style === 'dashed' || p.style === 'laser') settings.pen.style = p.style;
       if (typeof p.smoothing === 'number' && Number.isFinite(p.smoothing)) {
         settings.pen.smoothing = Math.min(100, Math.max(0, Math.round(p.smoothing)));
       }
@@ -224,11 +224,27 @@ export function shapeFillValue(): string {
   return settings.shape.filled ? settings.shape.fill : 'transparent';
 }
 
-export function effectivePen(): { color: string; width: number; alpha: number } {
-  if (settings.pen.style === 'highlighter') {
-    return { color: settings.pen.color, width: settings.pen.size * 4, alpha: 0.3 };
+export function penEffectFor(style: PenStyle, size: number): {
+  color: string;
+  width: number;
+  alpha: number;
+  dash: boolean;
+  laser: boolean;
+} {
+  if (style === 'highlighter') {
+    return { color: settings.pen.color, width: size * 4, alpha: 0.3, dash: false, laser: false };
   }
-  return { color: settings.pen.color, width: settings.pen.size, alpha: 1 };
+  if (style === 'dashed') {
+    return { color: settings.pen.color, width: size, alpha: 1, dash: true, laser: false };
+  }
+  if (style === 'laser') {
+    return { color: settings.pen.color, width: size, alpha: 1, dash: false, laser: true };
+  }
+  return { color: settings.pen.color, width: size, alpha: 1, dash: false, laser: false };
+}
+
+export function effectivePen(): { color: string; width: number; alpha: number; dash: boolean; laser: boolean } {
+  return penEffectFor(settings.pen.style, settings.pen.size);
 }
 
 /** Highlighter strokes store translucent alpha; marker strokes are opaque. */
