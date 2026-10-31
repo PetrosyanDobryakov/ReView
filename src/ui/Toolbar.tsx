@@ -715,7 +715,23 @@ function ReactionsMenu({
     };
     window.addEventListener('resize', onReflow);
     window.addEventListener('scroll', onReflow, true);
+    // Dock the popup bottom to the trigger top (estimate alone floats).
+    const raf = requestAnimationFrame(() => {
+      const el = menuRef.current;
+      const trigger = btnRef.current;
+      if (!el || !trigger) return;
+      const scale =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+      const r = el.getBoundingClientRect();
+      const t = trigger.getBoundingClientRect();
+      const margin = 8 * scale;
+      const gap = 8 * scale;
+      const docked = t.top - gap - r.height;
+      const top = Math.max(margin, docked);
+      setMenuStyle((cur) => (cur ? { left: cur.left, top: top / scale } : cur));
+    });
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('resize', onReflow);
       window.removeEventListener('scroll', onReflow, true);
     };
