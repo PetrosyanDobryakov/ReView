@@ -518,6 +518,46 @@ let updating = false;
 /** Set only when the board route maximized the window (see window_restore). */
 let boardMaximized = false;
 
+/** Our own release installers, and only those — never touch foreign files. */
+const UPDATE_ASSET_RE = /^ReView-.*-win-(x64|arm64)\.exe$/;
+
+/** Installers live in the data folder (`updates/`), not the system temp. */
+function updatesDir() {
+  const dir = path.join(dataDir(), 'updates');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Delete stale installers in `dir`, keeping `keepName` (crash-safe: the
+ *  download below lands as `.part` first, so a half file never survives). */
+function pruneUpdateCache(dir, keepName) {
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name !== keepName && UPDATE_ASSET_RE.test(name)) {
+      try {
+        fs.rmSync(path.join(dir, name), { force: true });
+      } catch {
+        /* locked by a running installer: leave it */
+      }
+    }
+  }
+}
+
+/** One-time cleanup: ≤0.16.58 downloaded every update into the system temp
+ * and never deleted them (gigabytes of `ReView-*-win-x64.exe`). */
+function cleanLegacyUpdateCache() {
+  try {
+    pruneUpdateCache(app.getPath('temp'));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Returns `restarting` (the app quits and comes back), `opened` (an installer is shown) or `latest`. */
 async function installUpdate() {
   const kind = installKind();
@@ -546,9 +586,16 @@ async function installUpdate() {
       setImmediate(() => win?.close());
       return 'restarting';
     }
-    const dir = kind === 'exe' ? app.getPath('temp') : app.getPath('downloads');
+    const dir = kind === 'exe' ? updatesDir() : app.getPath('downloads');
     const file = path.join(dir, asset.name);
-    await download(asset.browser_download_url, file, progress);
+    if (kind === 'exe') {
+      const part = `${file}.part`;
+      await download(asset.browser_download_url, part, progress);
+      fs.renameSync(part, file);
+      pruneUpdateCache(dir, asset.name);
+    } else {
+      await download(asset.browser_download_url, file, progress);
+    }
     if (kind === 'exe') {
       // Silent NSIS install over this copy, then it starts the new version.
       spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
@@ -732,6 +779,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
+    cleanLegacyUpdateCache();
     try {
       if (!(await ensureDataDir())) return;
       registerScheme();

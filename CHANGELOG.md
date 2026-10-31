@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.59
+
+### Reactions popup docks; updates leave the system temp alone
+
+- **Reactions popup docks to the toolbar** like Figures/More (it never
+  got the real-geometry pass — that was the floater).
+- **Update installers live in the data folder now** (`updates/` next to
+  boards): crash-safe `.part` download + stale versions pruned. First
+  boot with this version also sweeps the old `ReView-*-win-x64.exe`
+  pile out of the system temp (pattern-matched, foreign files untouched).
+
 ## 0.16.58
 
 ### Pins fixed, toolbar order, flip/dice motion, livelier stamps, slimmer strip
