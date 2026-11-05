@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.65
+
+### Ink overlay: heavy boards stop repainting under the pen
+
+- Live tool previews (inking stroke, shape drag boxes, arrow drafts,
+  stamp ghost) paint on a dedicated transparent layer above the board.
+  Pointer moves refresh only that layer; the board repaints on commits,
+  camera moves, peers and media — never per mouse move. A 26 MB board
+  no longer starves its own input events mid-stroke.
+
 ## 0.16.64
 
 ### Mouse smoothing cap (the chord was the stabilizer)
