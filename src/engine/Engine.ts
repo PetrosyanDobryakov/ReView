@@ -4989,10 +4989,21 @@ export class Engine {
     }
     try {
       if (this.pointerDown) {
-        const useCoalesced =
-          e.pointerType === 'pen' && typeof e.getCoalescedEvents === 'function';
-        const raw = useCoalesced ? e.getCoalescedEvents() : [];
-        const batch = raw.length > 0 ? raw : [e];
+        // Coalesced samples for EVERY pointer kind (mouse too, not just
+        // stylus): without them fast moves arrive sparse and the line
+        // degrades into straight chords. The live event is always newest —
+        // coalesced lists exclude it, so append (trailing ink otherwise).
+        let batch: PointerEvent[];
+        if (typeof e.getCoalescedEvents === 'function') {
+          try {
+            const raw = e.getCoalescedEvents();
+            batch = raw.length > 0 ? [...raw.slice(-32), e] : [e];
+          } catch {
+            batch = [e];
+          }
+        } else {
+          batch = [e];
+        }
         for (const ce of batch) this.dragTool.onMove(this, this.pointerInfo(ce));
       } else {
         this.tool.onHover(this, this.pointerInfo(e));

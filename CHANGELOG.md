@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.60
+
+### Pen input: coalesced samples for every pointer
+
+- Fast strokes stopped degrading into straight chords: the board now
+  consumes `getCoalescedEvents()` for mouse and touch too (was
+  stylus-only), so dense intermediate samples reach the ink path under
+  load. The live event is appended after the batch — it was previously
+  dropped whenever a batch existed, leaving the ink one event behind.
+
 ## 0.16.59
 
 ### Reactions popup docks; updates leave the system temp alone
