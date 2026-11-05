@@ -12,7 +12,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, net, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -780,6 +780,15 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     cleanLegacyUpdateCache();
+    // Console access for the packaged app: Ctrl+Shift+I toggles DevTools.
+    try {
+      globalShortcut.register('CommandOrControl+Shift+I', () => {
+        const target = BrowserWindow.getFocusedWindow() || win;
+        if (target) target.webContents.toggleDevTools();
+      });
+    } catch {
+      /* ignore */
+    }
     try {
       if (!(await ensureDataDir())) return;
       registerScheme();
@@ -794,6 +803,13 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', stopHost);
+  app.on('will-quit', () => {
+    try {
+      globalShortcut.unregisterAll();
+    } catch {
+      /* ignore */
+    }
+    stopHost();
+  });
   process.on('exit', stopHost);
 }
