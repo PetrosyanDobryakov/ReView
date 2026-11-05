@@ -89,6 +89,13 @@ export interface PointerInfo {
 export abstract class Tool {
   abstract readonly id: ToolId;
   cursor = 'crosshair';
+  /**
+   * True when a pointer drag with this tool changes nothing on the board
+   * itself (live preview paints on the ink overlay): pen strokes, shape
+   * drag-creation, arrow drafts, stamp ghosts. Lets heavy boards skip the
+   * full repaint under the pointer.
+   */
+  readonly inkPreviewOnly: boolean = false;
   onHover(_engine: Engine, _p: PointerInfo): void {}
   onDown(_engine: Engine, _p: PointerInfo): void {}
   onMove(_engine: Engine, _p: PointerInfo): void {}
@@ -1248,6 +1255,7 @@ try {
 export class PenTool extends Tool {
   readonly id = 'pen';
   cursor = 'crosshair';
+  override readonly inkPreviewOnly = true;
   private pts: number[] = [];
   private pressures: number[] = [];
   private last: { x: number; y: number } | null = null;
@@ -1575,6 +1583,7 @@ export function snapStraightEnd(x0: number, y0: number, x1: number, y1: number):
 
 abstract class BoxTool extends Tool {
   abstract readonly shapeType: 'rect' | 'ellipse' | 'sticky' | 'graph' | 'calculator' | 'diamond' | 'frame' | 'triangle' | 'parallelogram' | 'hexagon' | 'cylinder' | 'terminator' | 'subroutine' | 'display' | 'table' | 'flashcard' | 'die' | 'star' | 'pentagon' | 'octagon' | 'cross' | 'comment';
+  override readonly inkPreviewOnly = true;
   abstract readonly defaultW: number;
   abstract readonly defaultH: number;
   protected start: { x: number; y: number } | null = null;
@@ -2300,6 +2309,7 @@ export class DisplayTool extends FlowchartTool {
 export class ArrowTool extends Tool {
   readonly id = 'arrow';
   cursor = 'crosshair';
+  override readonly inkPreviewOnly = true;
   private start: { x: number; y: number } | null = null;
   private cur: { x: number; y: number } | null = null;
   private shift = false;
@@ -2328,7 +2338,7 @@ export class ArrowTool extends Tool {
     const draft = {
       type: 'arrow' as const,
       fill: 'transparent',
-      stroke: settings.shape.stroke,
+      stroke: shapeStrokeValue(),
       strokeWidth: settings.shape.strokeWidth,
       arrowHead: settings.shape.arrowHead,
       points: [this.start.x, this.start.y, end.x, end.y],
@@ -2389,6 +2399,7 @@ export class ArrowTool extends Tool {
 export class TextTool extends Tool {
   readonly id = 'text';
   cursor = 'text';
+  override readonly inkPreviewOnly = true;
   private down: { x: number; y: number } | null = null;
 
   onDown(_engine: Engine, p: PointerInfo): void {
@@ -2705,6 +2716,7 @@ export class LassoTool extends Tool {
 export class StampTool extends Tool {
   readonly id = 'stamp';
   cursor = 'crosshair';
+  override readonly inkPreviewOnly = true;
   emoji = '👍';
   private ghost: { x: number; y: number } | null = null;
 

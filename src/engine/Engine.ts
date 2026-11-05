@@ -630,6 +630,11 @@ export class Engine {
    */
   private cursorCanvas: HTMLCanvasElement | null = null;
   private cursorCtx: CanvasRenderingContext2D | null = null;
+  /** Live tool-preview layer (inking, drag boxes, stamp ghost). Repaints per
+   * move so heavy boards don't re-render under the pen. */
+  private inkCanvas: HTMLCanvasElement | null = null;
+  private inkCtx: CanvasRenderingContext2D | null = null;
+  private inkDirty = false;
   private resizer: ResizeObserver;
   private w = 0;
   private h = 0;
@@ -761,6 +766,20 @@ export class Engine {
     this.resizer.observe(canvas);
     try {
       if (typeof document !== 'undefined' && canvas.parentElement) {
+        const ink = document.createElement('canvas');
+        ink.style.position = 'absolute';
+        ink.style.inset = '0';
+        ink.style.width = '100%';
+        ink.style.height = '100%';
+        ink.style.pointerEvents = 'none';
+        ink.style.zIndex = '140';
+        ink.setAttribute('aria-hidden', 'true');
+        canvas.parentElement.appendChild(ink);
+        const ictx = ink.getContext('2d');
+        if (ictx) {
+          this.inkCanvas = ink;
+          this.inkCtx = ictx;
+        }
         const cc = document.createElement('canvas');
         cc.style.position = 'absolute';
         cc.style.inset = '0';
@@ -1192,6 +1211,15 @@ export class Engine {
     }
     this.cursorCanvas = null;
     this.cursorCtx = null;
+    try {
+      if (this.inkCanvas?.parentElement) {
+        this.inkCanvas.parentElement.removeChild(this.inkCanvas);
+      }
+    } catch {
+      /* ignore */
+    }
+    this.inkCanvas = null;
+    this.inkCtx = null;
     for (const [, pend] of this.pendingMedia) {
       try {
         clearTimeout(pend.timer);
@@ -1296,6 +1324,7 @@ export class Engine {
     publishTool(id);
     this.events.onTool?.(id);
     this.dirty = true;
+    this.inkDirty = true;
   }
 
   /**
@@ -4612,6 +4641,10 @@ export class Engine {
     this.dpr = Math.max(1, Math.min(3, raw));
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
+    if (this.inkCanvas) {
+      this.inkCanvas.width = Math.round(this.w * this.dpr);
+      this.inkCanvas.height = Math.round(this.h * this.dpr);
+    }
     if (this.cursorCanvas) {
       this.cursorCanvas.width = Math.round(this.w * this.dpr);
       this.cursorCanvas.height = Math.round(this.h * this.dpr);
@@ -5014,7 +5047,21 @@ export class Engine {
       console.error('[review] pointermove error:', err);
       this.events.onError?.(err instanceof Error ? err.message : String(err));
     }
-    if (this.pointerDown || this.panDrag || this.crop || this.gesture) this.dirty = true;
+    // The ink layer follows every move (stroke preview, drag boxes, ghosts)
+    // even when the board itself has nothing new to paint.
+    this.inkDirty = true;
+    // Preview-only drags (pen, shape creation, arrow drafts) must not
+    // repaint a heavy board under the pointer — the ink overlay carries
+    // them. Never clear: peers/video may have dirtied the board already.
+    const inkOnly =
+      this.pointerDown &&
+      !this.panDrag &&
+      !this.crop &&
+      !this.gesture &&
+      !this.connecting &&
+      !this.editing &&
+      this.dragTool.inkPreviewOnly;
+    if (!inkOnly && (this.pointerDown || this.panDrag || this.crop || this.gesture)) this.dirty = true;
   };
 
   private onPointerUp = (e: PointerEvent): void => {
@@ -5188,6 +5235,7 @@ export class Engine {
       this.lastTap = null;
     }
     this.dirty = true;
+    this.inkDirty = true;
   };
 
   private onWheel = (e: WheelEvent): void => {
@@ -5381,6 +5429,7 @@ export class Engine {
     this.clearStylusEraserOverride();
     this.setCursor(this.toolCursor());
     this.dirty = true;
+    this.inkDirty = true;
   };
 
   /** Drop crop, export pick, connector, and in-progress tool without committing. */
@@ -6084,6 +6133,8 @@ export class Engine {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
+        this.paintInk();
+        this.inkDirty = false;
         perfHook()?.render(performance.now() - t0);
         if (paintPeers && typeof performance !== 'undefined') {
           notePeerRenderDt((performance.now() - t0) / 1000, {
@@ -6095,6 +6146,10 @@ export class Engine {
         }
         // Keep RAF dirty while GIF / playing video need continuous frames.
         if (boardNeedsMediaPaint(this.views.values())) this.dirty = true;
+      } else if (this.inkDirty) {
+        // Inking on a calm board: refresh the ink layer only, never the board.
+        this.paintInk();
+        this.inkDirty = false;
       }
       this.emitStats();
     } catch (err) {
@@ -6269,7 +6324,8 @@ export class Engine {
     this.drawPorts(ctx);
     this.drawDocControls(ctx);
     this.drawConnecting(ctx);
-    this.tool.render(this, ctx);
+    // Live tool preview lives on the ink overlay (paintInk) — never here,
+    // so inking doesn't repaint the board under the pen.
     this.drawPeers(ctx);
     this.paintPeerCursors();
     if (this.crop) this.drawCropOverlay(ctx);
@@ -6496,6 +6552,26 @@ export class Engine {
       }
       this.dirty = true;
     }
+  }
+
+  /**
+   * Live tool preview (inking stroke, drag boxes, stamp ghost) on the ink
+   * overlay above the board. World transform mirrors the main canvas; the
+   * board itself is untouched, so heavy boards don't repaint under the pen.
+   */
+  private paintInk(): void {
+    const ictx = this.inkCtx;
+    if (!ictx || !this.inkCanvas) return;
+    const { dpr, w, h } = this;
+    const { x: cx, y: cy, zoom: z } = this.camera;
+    ictx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ictx.clearRect(0, 0, w, h);
+    ictx.save();
+    ictx.translate(w / 2, h / 2);
+    ictx.scale(z, z);
+    ictx.translate(-cx, -cy);
+    this.tool.render(this, ictx);
+    ictx.restore();
   }
 
   /**
