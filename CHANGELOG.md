@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.64
+
+### Mouse smoothing cap (the chord was the stabilizer)
+
+- Stroke telemetry found it: healthy event flow (46 ms worst gap, no
+  Shift drops) + one fast 159 px flick + smoothing at 100. At maximum
+  strength the One Euro filter trails so far behind a fast move that
+  catch-up cuts straight across the curve — the reported chord.
+- Mouse input now caps effective smoothing at 30 (stylus/touch
+  untouched); the tile hint says so. Mouse users: 0 is the honest raw.
+
 ## 0.16.63
 
 ### Stroke numbers without a console + DevTools hotkey
