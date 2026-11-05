@@ -4993,11 +4993,13 @@ export class Engine {
         // stylus): without them fast moves arrive sparse and the line
         // degrades into straight chords. The live event is always newest —
         // coalesced lists exclude it, so append (trailing ink otherwise).
+        // No cap: a backlog burst is cheap per sample (filter + push +
+        // queue), while dropping its middle bakes a chord into the ink.
         let batch: PointerEvent[];
         if (typeof e.getCoalescedEvents === 'function') {
           try {
             const raw = e.getCoalescedEvents();
-            batch = raw.length > 0 ? [...raw.slice(-32), e] : [e];
+            batch = raw.length > 0 ? [...raw, e] : [e];
           } catch {
             batch = [e];
           }

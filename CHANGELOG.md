@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.62
+
+### Pen input: never drop the middle of a backlog burst
+
+- The 0.16.60 batch capped coalesced backlogs at 32 samples: on
+  high-rate mice any real stall discarded the middle of the burst and
+  baked a straight chord into the ink — exactly the reported shape.
+  The cap is gone (a burst is microseconds per sample); the backlog is
+  consumed whole.
+
 ## 0.16.61
 
 ### Stroke gap telemetry (hunting the chord)
