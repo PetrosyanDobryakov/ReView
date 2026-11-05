@@ -1305,7 +1305,12 @@ export class PenTool extends Tool {
   }
 
   onDown(_engine: Engine, p: PointerInfo): void {
-    this.smoother = createStrokeSmoother(settings.pen.smoothing);
+    // Mouse needs almost no stabilization (a desk is not a hand): cap its
+    // effective strength — at 100 the filter trails so far behind a fast
+    // flick that catch-up cuts straight across the curve (the chord).
+    const raw = settings.pen.smoothing;
+    const eff = p.pointerType === 'mouse' ? Math.min(raw, 30) : raw;
+    this.smoother = createStrokeSmoother(eff);
     const s = this.smoother.push(p.world.x, p.world.y);
     this.pts = [s.x, s.y];
     this.statReset(p.pointerType, p.world);
