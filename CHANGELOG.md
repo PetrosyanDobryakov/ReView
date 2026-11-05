@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.63
+
+### Stroke numbers without a console + DevTools hotkey
+
+- **Settings → System → dev section: «Last stroke» readout** with the
+  previous stroke's input telemetry + a Copy button. No console needed:
+  draw the bad stroke, open settings, copy one line to us.
+- **Desktop: Ctrl+Shift+I toggles DevTools** in the packaged app, so the
+  console exists when we really need it.
+
 ## 0.16.62
 
 ### Pen input: never drop the middle of a backlog burst

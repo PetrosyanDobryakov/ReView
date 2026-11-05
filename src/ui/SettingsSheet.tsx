@@ -46,6 +46,7 @@ import {
   type AppPrefs,
 } from '../core/prefs';
 import type { ToolId } from '../engine/tools';
+import { getLastStrokeStats, type StrokeStats } from '../engine/tools';
 import { Icon, type IconName } from './icons';
 import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t, type MessageKey } from './i18n';
 import { isOrbitPaper } from '../core/orbit';
@@ -108,6 +109,64 @@ function toolBindLabel(locale: LocaleId, id: ToolId): string {
     .replace(/ \(.+\)$/, '')
     .replace(/ [—–-].+$/, '')
     .trim();
+}
+
+/** Last-stroke input telemetry (dev section): what the pen path saw. */
+function StrokeDebug({ locale }: { locale: LocaleId }) {
+  const [stats, setStats] = useState<StrokeStats | null>(() => {
+    try {
+      return getLastStrokeStats();
+    } catch {
+      return null;
+    }
+  });
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      try {
+        setStats(getLastStrokeStats());
+      } catch {
+        /* ignore */
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const text = stats ? JSON.stringify(stats) : t(locale, 'strokeNoData');
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      } catch {
+        /* ignore */
+      }
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <>
+      <p className="sheet-hint">
+        <SwapText text={t(locale, 'strokeDebugHint')} />
+      </p>
+      <p className="sheet-mono sheet-mono-wide" title={text}>
+        {text}
+      </p>
+      <div className="sheet-actions">
+        <button type="button" className="style-btn" onClick={() => void copy()}>
+          {copied ? t(locale, 'strokeCopied') : t(locale, 'strokeCopy')}
+        </button>
+      </div>
+    </>
+  );
 }
 
 function isLightPaper(hex: string): boolean {
@@ -535,6 +594,10 @@ export function SettingsSheet({
                       <SwapText text={t(locale, 'netLogHint')} />
                     </p>
                     <P2pPanel locale={locale} />
+                    <h3>
+                      <SwapText text={t(locale, 'strokeDebug')} />
+                    </h3>
+                    <StrokeDebug locale={locale} />
                     <div className="sheet-actions">
                       <button type="button" className="style-btn" onClick={resetAll}>
                         {resetArmed ? t(locale, 'devResetArm') : t(locale, 'devReset')}
