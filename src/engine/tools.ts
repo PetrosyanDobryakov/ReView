@@ -1220,6 +1220,31 @@ export class PanTool extends Tool {
   render(): void {}
 }
 
+/** Last finished pen stroke telemetry (gaps, jumps, shift drops). */
+export type StrokeStats = {
+  pointer: string;
+  batches: number;
+  kept: number;
+  shiftDrops: number;
+  maxGapMs: number;
+  maxJumpPx: number;
+  smoothing: number;
+  committed: boolean;
+};
+
+let lastStrokeStats: StrokeStats | null = null;
+
+/** Console/hand debugging: what the previous stroke's input looked like. */
+export function getLastStrokeStats(): StrokeStats | null {
+  return lastStrokeStats;
+}
+
+try {
+  (window as unknown as Record<string, unknown>).__reviewStrokeStats = getLastStrokeStats;
+} catch {
+  /* non-browser (tests) */
+}
+
 export class PenTool extends Tool {
   readonly id = 'pen';
   cursor = 'crosshair';
@@ -1232,11 +1257,58 @@ export class PenTool extends Tool {
   private capturePressure = false;
   /** Tablet jitter stabilizer (One Euro), fresh per stroke. */
   private smoother: StrokeSmoother = createStrokeSmoother(0);
+  /** Gap telemetry: batches/calls, kept vertices, worst time/distance jumps. */
+  private statBatches = 0;
+  private statKept = 0;
+  private statShiftDrops = 0;
+  private statMaxGapMs = 0;
+  private statMaxJumpPx = 0;
+  private statLastT = 0;
+  private statLastRaw: { x: number; y: number } | null = null;
+  private statPointer = '';
+  private statCommitted = false;
+
+  private statReset(pointerType: string | undefined, at: { x: number; y: number }): void {
+    this.statBatches = 0;
+    this.statKept = 0;
+    this.statShiftDrops = 0;
+    this.statMaxGapMs = 0;
+    this.statMaxJumpPx = 0;
+    this.statCommitted = false;
+    this.statLastT =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    this.statLastRaw = { ...at };
+    this.statPointer = pointerType ?? '';
+  }
+
+  private statReport(committed: boolean): void {
+    // No stroke happened (tool switch, stray up) — keep previous stats.
+    if (this.statBatches === 0 && this.statKept === 0 && this.statShiftDrops === 0) return;
+    lastStrokeStats = {
+      pointer: this.statPointer,
+      batches: this.statBatches,
+      kept: this.statKept,
+      shiftDrops: this.statShiftDrops,
+      maxGapMs: Math.round(this.statMaxGapMs),
+      maxJumpPx: Math.round(this.statMaxJumpPx),
+      smoothing: settings.pen.smoothing,
+      committed,
+    };
+    // A chord across a semicircle means samples vanished mid-stroke: time
+    // starvation (no dispatch) or distance teleport (no data). Rare enough
+    // to log; paste it to us and we will see which one it was.
+    if (this.statMaxGapMs > 250 || this.statMaxJumpPx > 160) {
+      console.log('[review] stroke gap', lastStrokeStats);
+    }
+  }
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.smoother = createStrokeSmoother(settings.pen.smoothing);
     const s = this.smoother.push(p.world.x, p.world.y);
     this.pts = [s.x, s.y];
+    this.statReset(p.pointerType, p.world);
     this.capturePressure = p.pointerType === 'pen';
     this.pressures = this.capturePressure ? [clampPressure(p.pressure)] : [];
     this.last = p.world;
@@ -1248,8 +1320,24 @@ export class PenTool extends Tool {
 
   onMove(engine: Engine, p: PointerInfo): void {
     if (!this.active) return;
+    this.statBatches += 1;
+    const nowMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    const dt = nowMs - this.statLastT;
+    this.statLastT = nowMs;
+    if (dt > this.statMaxGapMs) this.statMaxGapMs = dt;
+    if (this.statLastRaw) {
+      const jump =
+        Math.hypot(p.world.x - this.statLastRaw.x, p.world.y - this.statLastRaw.y) *
+        engine.camera.zoom;
+      if (jump > this.statMaxJumpPx) this.statMaxJumpPx = jump;
+    }
+    this.statLastRaw = { ...p.world };
     this.shift = p.shift;
     if (this.shift) {
+      this.statShiftDrops += 1;
       this.last = p.world;
       return;
     }
@@ -1258,6 +1346,7 @@ export class PenTool extends Tool {
     const n = this.pts.length;
     if (n >= 2 && Math.hypot(s.x - this.pts[n - 2], s.y - this.pts[n - 1]) < 2 / engine.camera.zoom) return;
     this.pts.push(s.x, s.y);
+    this.statKept += 1;
     if (this.capturePressure) this.pressures.push(clampPressure(p.pressure));
     const pen = effectivePen();
     if (n >= 2) engine.orbitSprinkle(this.pts[n - 2], this.pts[n - 1], s.x, s.y, pen.color);
@@ -1273,6 +1362,14 @@ export class PenTool extends Tool {
   }
 
   onUp(engine: Engine): void {
+    try {
+      this.endStroke(engine);
+    } finally {
+      this.statReport(this.statCommitted);
+    }
+  }
+
+  private endStroke(engine: Engine): void {
     if (!this.active) return;
     this.active = false;
     publishDraft(null);
@@ -1310,6 +1407,7 @@ export class PenTool extends Tool {
       if (guess) {
         const pen = effectivePen();
         if (guess.kind === 'rect' || guess.kind === 'ellipse') {
+          this.statCommitted = true;
           store.addShape({
             type: guess.kind,
             x: guess.x,
@@ -1336,6 +1434,7 @@ export class PenTool extends Tool {
           const minY = Math.min(guess.y0, guess.y1) - pad;
           const maxX = Math.max(guess.x0, guess.x1) + pad;
           const maxY = Math.max(guess.y0, guess.y1) + pad;
+          this.statCommitted = true;
           store.addShape({
             type: 'arrow',
             x: minX,
@@ -1371,6 +1470,7 @@ export class PenTool extends Tool {
     }
     const slice = pressures.slice(0, points.length / 2);
     const hasPressure = pressureVaries(slice, points.length / 2);
+    this.statCommitted = true;
     store.addShape({
       type: 'pen',
       x: minX - pad,
@@ -1392,13 +1492,15 @@ export class PenTool extends Tool {
     store.endGesture();
   }
 
-  cancel(_engine: Engine): void {
+  cancel(engine: Engine): void {
+    void engine;
     this.active = false;
     this.pts = [];
     this.pressures = [];
     this.capturePressure = false;
     this.last = null;
     publishDraft(null);
+    this.statReport(false);
     store.endGesture();
   }
 

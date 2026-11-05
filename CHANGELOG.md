@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.61
+
+### Stroke gap telemetry (hunting the chord)
+
+- Every pen stroke now records input telemetry (pointer kind, batch
+  count, kept vertices, shift drops, worst time/distance jumps). A
+  suspicious gap prints one `[review] stroke gap` line to the console;
+  `__reviewStrokeStats()` in devtools returns the last stroke anytime.
+  No behavior change — this is the instrument that catches the dropped
+  middle of a stroke red-handed.
+
 ## 0.16.60
 
 ### Pen input: coalesced samples for every pointer
