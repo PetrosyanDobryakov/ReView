@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.17.0
+
+### 0.17 line start (P2P mesh hardening + board weight diet)
+
+- New branch line off 0.16.70. Fixes land here, main untouched.
+
 ## 0.16.70
 
 ### Desktop mirror stops freezing input on huge boards
