@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.13
+
+### Relay lanes capped (hot 64 KB, bulk 4 MB)
+
+- The Nostr fallback lanes grew without bound at ~120 KB/s drain. Now
+  the hot lane sheds oldest awareness first (counted in stats) and bulk
+  refuses past 4 MB — the receiver skips the gap, resync heals it.
+
 ## 0.17.12
 
 ### Board weight estimate without stringify

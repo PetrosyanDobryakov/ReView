@@ -135,6 +135,27 @@ function openLink(capture) {
   link.close();
 }
 
+// --- lane caps: hot sheds old awareness, bulk refuses past 4 MB -----------------
+{
+  const sent = [];
+  const link = openLink(sent);
+  for (let i = 0; i < 100; i++) link.send(frame(Frame.Awareness, new Uint8Array(1024)));
+  const st = link.stats();
+  assert.ok(st.queuedHot <= 64 * 1024, 'hot lane capped');
+  assert.ok(st.droppedHot > 0, 'old awareness shed');
+  link.close();
+}
+{
+  const sent = [];
+  const link = openLink(sent);
+  const big = frame(Frame.Sync, new Uint8Array(16 * 1024 - 1));
+  let refused = 0;
+  for (let i = 0; i < 300; i++) if (!link.send(big)) refused++;
+  assert.ok(refused > 0, 'bulk refuses past cap');
+  assert.ok(link.buffered <= 4 * 1024 * 1024 + 16 * 1024, 'bulk bounded');
+  link.close();
+}
+
 // --- bring-to-me summon codec ------------------------------------------------------
 {
   const good = { to: '*', x: 10, y: -20, zoom: 1.5, at: 1700000000000, by: 'host' };

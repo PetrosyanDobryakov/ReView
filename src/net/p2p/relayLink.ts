@@ -36,6 +36,10 @@ const HOT_FRAMES = new Set<number>([
 ]);
 /** Events per second per link, kept under public relays' rate limits. */
 const SEND_INTERVAL_MS = 200;
+/** Hot lane holds liveness only: shed oldest awareness past this. */
+const MAX_HOT_BYTES = 64 * 1024;
+/** Bulk lane cap: past it frames are refused (receiver skips the gap, resync heals). */
+const MAX_BULK_BYTES = 4 * 1024 * 1024;
 const HELLO_EVERY_MS = 2_000;
 const OPEN_TIMEOUT_MS = 40_000;
 /** A missing message is given up on after this long. */
@@ -92,6 +96,7 @@ export class RelayLink implements PeerLink {
   private statHotBytes = 0;
   private statBulkBytes = 0;
   private statSendFailures = 0;
+  private statDroppedHot = 0;
 
   readonly peer: string;
   private readonly sendMsg: (msg: RelayMsg) => boolean;
@@ -120,6 +125,7 @@ export class RelayLink implements PeerLink {
     sendFailures: number;
     queuedHot: number;
     queuedBulk: number;
+    droppedHot: number;
   } {
     return {
       batches: this.statBatches,
@@ -128,6 +134,7 @@ export class RelayLink implements PeerLink {
       sendFailures: this.statSendFailures,
       queuedHot: this.hotBytes,
       queuedBulk: this.bulkBytes,
+      droppedHot: this.statDroppedHot,
     };
   }
 
@@ -135,13 +142,34 @@ export class RelayLink implements PeerLink {
     if (this.state !== 'open') return false;
     // Hot lane first: a big sync behind a cursor must not delay liveness.
     if (frame.length > 0 && HOT_FRAMES.has(frame[0]!)) {
+      this.shedHot(frame.length);
+      if (this.hotBytes + frame.length > MAX_HOT_BYTES) {
+        this.statDroppedHot += 1;
+        return true;
+      }
       this.hot.push(frame);
       this.hotBytes += frame.length;
-    } else {
-      this.bulk.push(frame);
-      this.bulkBytes += frame.length;
+      return true;
     }
+    if (this.bulkBytes + frame.length > MAX_BULK_BYTES) return false;
+    this.bulk.push(frame);
+    this.bulkBytes += frame.length;
     return true;
+  }
+
+  /** Drop oldest queued awareness to make room (liveness is latest-wins). */
+  private shedHot(room: number): void {
+    let over = this.hotBytes + room - MAX_HOT_BYTES;
+    for (let i = 0; i < this.hot.length && over > 0; i++) {
+      const q = this.hot[i]!;
+      if (q.length > 0 && q[0] === Frame.Awareness) {
+        this.hotBytes -= q.length;
+        over -= q.length;
+        this.hot.splice(i, 1);
+        i--;
+        this.statDroppedHot += 1;
+      }
+    }
   }
 
   signal(raw: unknown): void {

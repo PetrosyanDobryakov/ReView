@@ -71,6 +71,7 @@ export type PeerInfo = {
     sendFailures: number;
     queuedHot: number;
     queuedBulk: number;
+    droppedHot: number;
   } | null;
 };
 
