@@ -61,6 +61,8 @@ export type PeerInfo = {
   awareAgeMs: number | null;
   /** Bytes accepted but not yet on the wire (link backpressure). */
   queued: number;
+  /** Awareness frames shed under load; null/0 on links that do not shed. */
+  droppedAwareness: number;
   /** Relay pump counters; null on direct links. */
   relay: {
     batches: number;
@@ -93,6 +95,8 @@ export interface PeerLink {
   readonly bytesOut: number;
   /** Bytes accepted by send() but not yet on the wire (optional; used to pace media). */
   readonly buffered?: number;
+  /** Awareness frames shed under load (optional; WebRTC link only). */
+  readonly droppedAwareness?: number;
   /** ICE candidate types seen so far (host, srflx, prflx, relay), for diagnostics. */
   readonly iceLocal?: ReadonlySet<string>;
   readonly iceRemote?: ReadonlySet<string>;

@@ -7,13 +7,15 @@
  * ignored instead of poisoning the new one.
  */
 
-import { randomPeerId } from './protocol';
+import { Frame, randomPeerId } from './protocol';
 import type { LinkEvents, LinkPath, LinkState, PeerLink } from './types';
 
 const OPEN_TIMEOUT_MS = 20_000;
 const DISCONNECT_GRACE_MS = 8_000;
 const HIGH_WATER = 4 * 1024 * 1024;
 const LOW_WATER = 512 * 1024;
+/** Hard cap on queued (unsent) bytes; beyond it awareness is dropped, rest fails. */
+const MAX_QUEUE_BYTES = 16 * 1024 * 1024;
 
 type SignalMsg =
   | { kind: 'offer'; sid: string; sdp: string }
@@ -53,6 +55,8 @@ export class WebRtcLink implements PeerLink {
   private pendingIce: RTCIceCandidateInit[] = [];
   private queue: Uint8Array[] = [];
   private queuedBytes = 0;
+  /** Queued awareness frames shed under load (idempotent, latest wins). */
+  droppedAwareness = 0;
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -77,11 +81,46 @@ export class WebRtcLink implements PeerLink {
     const dc = this.dc;
     if (this.state !== 'open' || !dc || dc.readyState !== 'open') return false;
     if (this.queue.length || dc.bufferedAmount > HIGH_WATER) {
-      this.queue.push(frame);
-      this.queuedBytes += frame.length;
-      return true;
+      const kept = this.enqueue(frame);
+      // Awareness is idempotent: report it sent even when shed under load.
+      if (frame.length > 0 && frame[0] === Frame.Awareness) return true;
+      return kept;
     }
     return this.write(frame);
+  }
+
+  /**
+   * Queue a frame, shedding the oldest queued awareness first when over the
+   * byte cap (chunks are never shed: dropping one corrupts a whole message).
+   * Returns false when a non-awareness frame had to be refused: the link is
+   * stalled past the cap and keep-everything would OOM. A stalled link trips
+   * the mesh idle watchdog, which closes it and resync heals the gap.
+   */
+  private enqueue(frame: Uint8Array): boolean {
+    // Chunks are never shed from the queue (dropping one corrupts the whole
+    // message), but new ones are still refused past the cap: the receiver's
+    // reassembly TTL drops the stalled message and a later dependent update
+    // triggers a mesh resync that heals the gap.
+    let over = this.queuedBytes + frame.length - MAX_QUEUE_BYTES;
+    if (over > 0) {
+      for (let i = 0; i < this.queue.length && over > 0; i++) {
+        const q = this.queue[i];
+        if (q.length > 0 && q[0] === Frame.Awareness) {
+          this.queuedBytes -= q.length;
+          over -= q.length;
+          this.queue.splice(i, 1);
+          i--;
+          this.droppedAwareness += 1;
+        }
+      }
+    }
+    if (this.queuedBytes + frame.length > MAX_QUEUE_BYTES) {
+      if (frame.length > 0 && frame[0] === Frame.Awareness) this.droppedAwareness += 1;
+      return false;
+    }
+    this.queue.push(frame);
+    this.queuedBytes += frame.length;
+    return true;
   }
 
   signal(raw: unknown): void {
@@ -128,6 +167,7 @@ export class WebRtcLink implements PeerLink {
     this.teardownPc();
     this.queue = [];
     this.queuedBytes = 0;
+    this.droppedAwareness = 0;
     this.on.close(reason);
   }
 

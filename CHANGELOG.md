@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.17.3
+
+### Link send queue cap (16 MB, awareness shed first)
+
+- `WebRtcLink` queue was unbounded: a stalled peer held every frame
+  forever. Now capped at 16 MB — oldest queued awareness drops first
+  (idempotent, latest wins, counted in `droppedAwareness`), queued chunks
+  are never shed, other frames are refused past the cap. The counter is
+  visible in `reviewP2p()` / diagnostics.
+
 ## 0.17.2
 
 ### Blob fetch caps (requester side)

@@ -652,6 +652,7 @@ if (typeof window !== 'undefined') {
         lastDirectError: p.lastDirectError,
         awareAgeMs: p.awareAgeMs,
         queued: p.queued,
+        droppedAwareness: p.droppedAwareness,
         relay: p.relay,
         ice: p.ice,
         hubs: p.hubs,

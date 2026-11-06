@@ -316,6 +316,7 @@ export class Mesh {
       ice: e.link?.iceLocal ? iceOf(e.link) : e.lastIce,
       awareAgeMs: e.lastAwareAt ? Math.max(0, nowSnap - e.lastAwareAt) : null,
       queued: e.link?.buffered ?? 0,
+      droppedAwareness: e.link?.droppedAwareness ?? 0,
       relay: e.link instanceof RelayLink ? e.link.stats() : null,
     }));
     return { room: this.room, self: this.self, enabled: true, webrtc: this.canLink(), hubs, peers };
