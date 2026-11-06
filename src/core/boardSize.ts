@@ -4,19 +4,30 @@ export function boardPersistenceDbName(boardId: string): string {
   return `review-v1-${boardId}`;
 }
 
-function byteLengthOf(value: unknown): number {
+/**
+ * No JSON.stringify: on a 100 MB board the old code allocated a throwaway
+ * copy of every value. Recurse directly; structured-clone data can be
+ * cyclic, so track seen objects.
+ */
+export function byteLengthOf(value: unknown, seen?: WeakSet<object>): number {
   if (value == null) return 0;
   if (typeof value === 'string') return value.length * 2;
   if (typeof value === 'number' || typeof value === 'boolean') return 8;
   if (value instanceof ArrayBuffer) return value.byteLength;
   if (ArrayBuffer.isView(value)) return value.byteLength;
-  if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + byteLengthOf(item), 0);
   if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value).length * 2;
-    } catch {
-      return 64;
+    seen ??= new WeakSet();
+    if (seen.has(value)) return 0;
+    seen.add(value);
+    let sum = 0;
+    if (Array.isArray(value)) {
+      for (const item of value) sum += byteLengthOf(item, seen);
+      return sum;
     }
+    for (const key in value) {
+      sum += key.length * 2 + byteLengthOf((value as Record<string, unknown>)[key], seen);
+    }
+    return sum;
   }
   return 0;
 }

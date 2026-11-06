@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { byteLengthOf } from '../src/core/boardSize.ts';
 
 /** Mirror of formatBoardWeight in src/core/boardSize.ts — keep in sync. */
 function formatBoardWeight(bytes, locale) {
@@ -24,3 +25,16 @@ assert.match(formatBoardWeight(2.5 * 1024 * 1024, 'en'), /MB$/);
 assert.match(formatBoardWeight(2048, 'ru'), /KB$/);
 
 console.log('boardSize: all checks passed');
+
+assert.equal(byteLengthOf(null), 0, 'null');
+assert.equal(byteLengthOf('ab'), 4, 'string utf16');
+assert.equal(byteLengthOf(1.5), 8, 'number');
+assert.equal(byteLengthOf(true), 8, 'boolean');
+assert.equal(byteLengthOf(new Uint8Array(10)), 10, 'typed array bytes');
+assert.equal(byteLengthOf([1, 'ab']), 12, 'array sums');
+assert.equal(byteLengthOf({ a: 'xy', n: 1 }), 2 + 4 + 2 + 8, 'object keys + values');
+assert.equal(byteLengthOf({ o: { s: 'z' } }), 2 + (2 + 2), 'nested object');
+const cyc = { v: 1 };
+cyc.self = cyc;
+assert.equal(byteLengthOf(cyc), 2 + 8 + 8, 'cycle counted once');
+console.log('byteLengthOf: all checks passed');

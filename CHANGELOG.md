@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.12
+
+### Board weight estimate without stringify
+
+- `byteLengthOf` serialized every IDB value to count bytes — a full
+  throwaway copy of the board per Home visit. Now it recurses directly
+  (cycle-safe), and the test pins the real function, not a mirror.
+
 ## 0.17.11
 
 ### Media prefetch: visible page first
