@@ -47,6 +47,23 @@ import {
 } from '../core/prefs';
 import type { ToolId } from '../engine/tools';
 import { getLastStrokeStats, type StrokeStats } from '../engine/tools';
+import { getLastLoopStats, type LoopStats } from '../engine/Engine';
+
+/** GPU renderer string (SwiftShader = software rendering = jank everywhere). */
+function gpuRenderer(): string {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2') ?? c.getContext('webgl');
+    if (!gl || typeof (gl as WebGLRenderingContext).getParameter !== 'function') return 'no-webgl';
+    const g = gl as WebGLRenderingContext;
+    const ext = g.getExtension('WEBGL_debug_renderer_info');
+    const param = ext ? ext.UNMASKED_RENDERER_WEBGL : g.RENDERER;
+    const r = g.getParameter(param);
+    return String(r ?? 'unknown');
+  } catch {
+    return 'unknown';
+  }
+}
 import { Icon, type IconName } from './icons';
 import { BG_PRESETS, CHROME_LABEL, ORBIT_PAPER, modKey, pickerPaperPresets, t, type MessageKey } from './i18n';
 import { isOrbitPaper } from '../core/orbit';
@@ -120,6 +137,8 @@ function StrokeDebug({ locale }: { locale: LocaleId }) {
       return null;
     }
   });
+  const [loop, setLoop] = useState<LoopStats | null>(null);
+  const [gpu] = useState(() => gpuRenderer());
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -128,10 +147,17 @@ function StrokeDebug({ locale }: { locale: LocaleId }) {
       } catch {
         /* ignore */
       }
+      try {
+        setLoop(getLastLoopStats());
+      } catch {
+        /* ignore */
+      }
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const text = stats ? JSON.stringify(stats) : t(locale, 'strokeNoData');
+  const strokeText = stats ? JSON.stringify(stats) : t(locale, 'strokeNoData');
+  const loopText = `loop ${JSON.stringify(loop)} gpu ${gpu}`;
+  const text = `${strokeText}\n${loopText}`;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -157,8 +183,11 @@ function StrokeDebug({ locale }: { locale: LocaleId }) {
       <p className="sheet-hint">
         <SwapText text={t(locale, 'strokeDebugHint')} />
       </p>
-      <p className="sheet-mono sheet-mono-wide" title={text}>
-        {text}
+      <p className="sheet-mono sheet-mono-wide" title={strokeText}>
+        {strokeText}
+      </p>
+      <p className="sheet-mono sheet-mono-wide" title={loopText}>
+        {loopText}
       </p>
       <div className="sheet-actions">
         <button type="button" className="style-btn" onClick={() => void copy()}>

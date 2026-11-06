@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.16.67
+
+### MiniMap on a diet + frame/GPU diagnostics
+
+- **MiniMap thumbnails at 10 Hz max** (was a full board scan + rect
+  per shape every frame) with a cached context — stops a constant
+  main-thread churn, brutal on heavy boards.
+- **Dev readout gains the loop line**: fps, paint avg/max ms, GPU
+  renderer string (SwiftShader = software rendering) and stroke
+  duration/rate. Copy sends both lines.
+
 ## 0.16.66
 
 ### Revert: ink overlay out (back to 0.16.64 behavior)
