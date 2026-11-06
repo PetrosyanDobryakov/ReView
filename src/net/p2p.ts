@@ -179,7 +179,7 @@ class P2pClient {
     if (this.mesh !== mesh || gen !== this.hubGen) return;
     this.noHub = specs.length === 0;
     mesh.setHubs(specs);
-    void refreshTurn(specs.map((s) => s.url));
+    void refreshTurn(specs);
     this.emitStatus();
   }
 

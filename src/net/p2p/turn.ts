@@ -8,6 +8,7 @@
  */
 
 import { readPrefs } from '../../core/prefs';
+import type { HubSpec } from './mesh';
 
 const STORE_KEY = 'review-turn';
 /** Stop using credentials this long before they expire (a link may outlive the fetch). */
@@ -76,10 +77,17 @@ export function adoptTurn(raw: unknown): boolean {
 
 let inFlight: Promise<void> | null = null;
 
-/** Ask the given hubs (ws/wss bases) for credentials unless ours are still good. */
-export function refreshTurn(hubs: string[]): Promise<void> {
+/**
+ * Ask trusted hubs for credentials unless ours are still good. Only `self`
+ * (our own host) and `preset` (build-time / default relays) are asked:
+ * `custom` and `invite` hubs are someone else's server, and a /turn fetch
+ * would hand it our origin IP for nothing (only our own hub mints anyway).
+ */
+export function refreshTurn(specs: HubSpec[]): Promise<void> {
   if (!turnEnabled() || currentTurn() || inFlight) return inFlight ?? Promise.resolve();
-  const bases = hubs
+  const bases = specs
+    .filter((s) => s.source === 'self' || s.source === 'preset')
+    .map((s) => s.url)
     .filter((u) => /^wss?:\/\//.test(u))
     .filter((u) => !/^wss?:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(u))
     .map((u) => u.replace(/^ws/, 'http'));

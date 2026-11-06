@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.17.9
+
+### TURN credentials only from trusted hubs
+
+- `/turn` fetches went to every known hub, including `custom` and
+  invite (`#hub=`) servers — handing a stranger our origin IP for
+  credentials only our own hub mints. Now only `self` + `preset`.
+  Peers without a trusted hub still get grants over signaling.
+
 ## 0.17.8
 
 ### Small UI honesty: undo depth, stamp binds, H hint
