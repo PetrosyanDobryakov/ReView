@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.16.68
+
+### Media scan once per frame (was twice)
+
+- The animated-media scan walks every view; it ran twice per frame.
+  Now once. Small win on heavy boards, free on all.
+
 ## 0.16.67
 
 ### MiniMap on a diet + frame/GPU diagnostics

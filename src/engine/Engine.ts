@@ -6115,7 +6115,9 @@ export class Engine {
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
       // Orbit ambience (stars, nebula, vignette) lives in the OrbitSpace shader,
       // so an idle Orbit board never repaints on a timer.
-      if (moved || this.dirty || this.peersAnimating || this.orbitFx.alive || boardNeedsMediaPaint(this.views.values())) {
+      // Media scan runs once per frame (not twice) — it walks every view.
+      const needsMediaPaint = boardNeedsMediaPaint(this.views.values());
+      if (moved || this.dirty || this.peersAnimating || this.orbitFx.alive || needsMediaPaint) {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
@@ -6134,7 +6136,7 @@ export class Engine {
           });
         }
         // Keep RAF dirty while GIF / playing video need continuous frames.
-        if (boardNeedsMediaPaint(this.views.values())) this.dirty = true;
+        if (needsMediaPaint) this.dirty = true;
       }
       this.emitStats();
     } catch (err) {
