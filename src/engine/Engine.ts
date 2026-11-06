@@ -549,6 +549,10 @@ export class Engine {
   private loopPaintCount = 0;
   private loopPaintTotal = 0;
   private loopPaintMax = 0;
+  /** Animated-media scan (walks every view) runs at most this often, not per frame. */
+  private mediaPaintAt = 0;
+  private mediaPaintNeeds = false;
+  private static readonly MEDIA_SCAN_MS = 250;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -6149,8 +6153,14 @@ export class Engine {
         Math.abs(this.camera.zoom - this.lastCam.z) > 0.00001;
       // Orbit ambience (stars, nebula, vignette) lives in the OrbitSpace shader,
       // so an idle Orbit board never repaints on a timer.
-      // Media scan runs once per frame (not twice) — it walks every view.
-      const needsMediaPaint = boardNeedsMediaPaint(this.views.values());
+      // Media scan walks every view — throttle it; GIF/video keep-alive
+      // tolerates a quarter-second staleness either way.
+      let needsMediaPaint = this.mediaPaintNeeds;
+      if (t - this.mediaPaintAt >= Engine.MEDIA_SCAN_MS) {
+        this.mediaPaintAt = t;
+        needsMediaPaint = this.views.size > 0 && boardNeedsMediaPaint(this.views.values());
+        this.mediaPaintNeeds = needsMediaPaint;
+      }
       if (moved || this.dirty || this.peersAnimating || this.orbitFx.alive || needsMediaPaint) {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;

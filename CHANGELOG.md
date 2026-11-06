@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.14
+
+### Animated-media scan 4 Hz instead of every frame
+
+- The per-frame loop walked every view to ask "is a GIF/video playing".
+  Now cached with a 250 ms TTL — same keep-alive, ~15x fewer scans.
+
 ## 0.17.13
 
 ### Relay lanes capped (hot 64 KB, bulk 4 MB)
