@@ -1230,6 +1230,8 @@ export type StrokeStats = {
   maxJumpPx: number;
   smoothing: number;
   committed: boolean;
+  durationMs: number;
+  ratePerSec: number;
 };
 
 let lastStrokeStats: StrokeStats | null = null;
@@ -1264,6 +1266,7 @@ export class PenTool extends Tool {
   private statMaxGapMs = 0;
   private statMaxJumpPx = 0;
   private statLastT = 0;
+  private statT0 = 0;
   private statLastRaw: { x: number; y: number } | null = null;
   private statPointer = '';
   private statCommitted = false;
@@ -1275,6 +1278,11 @@ export class PenTool extends Tool {
     this.statMaxGapMs = 0;
     this.statMaxJumpPx = 0;
     this.statCommitted = false;
+    const nowMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    this.statT0 = nowMs;
     this.statLastT =
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
@@ -1286,6 +1294,11 @@ export class PenTool extends Tool {
   private statReport(committed: boolean): void {
     // No stroke happened (tool switch, stray up) — keep previous stats.
     if (this.statBatches === 0 && this.statKept === 0 && this.statShiftDrops === 0) return;
+    const nowMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    const durationMs = Math.max(1, Math.round(nowMs - this.statT0));
     lastStrokeStats = {
       pointer: this.statPointer,
       batches: this.statBatches,
@@ -1295,6 +1308,8 @@ export class PenTool extends Tool {
       maxJumpPx: Math.round(this.statMaxJumpPx),
       smoothing: settings.pen.smoothing,
       committed,
+      durationMs,
+      ratePerSec: Math.round((this.statBatches * 1000) / durationMs),
     };
     // A chord across a semicircle means samples vanished mid-stroke: time
     // starvation (no dispatch) or distance teleport (no data). Rare enough

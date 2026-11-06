@@ -420,6 +420,20 @@ function toolBindExplicitlyCleared(tool: ToolId, binds: Record<ToolId, string>):
 
 const PAPER_MS = 280;
 
+/** Rolling render-loop health (fps + paint cost), sampled per second. */
+export type LoopStats = {
+  fps: number;
+  paintAvgMs: number;
+  paintMaxMs: number;
+};
+
+let lastLoopStats: LoopStats | null = null;
+
+/** Loop health for diagnostics (dev readout). Null before the first second. */
+export function getLastLoopStats(): LoopStats | null {
+  return lastLoopStats;
+}
+
 function parseHex(color: string): [number, number, number] | null {
   const raw = color.trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
@@ -495,6 +509,12 @@ export class Engine {
   private dieAnims = new Map<string, number>();
   /** Current rAF timestamp for paint-time animation. */
   private frameNow = 0;
+  /** Loop health counters (snapshotted to lastLoopStats every second). */
+  private loopFrames = 0;
+  private loopWindowStart = 0;
+  private loopPaintCount = 0;
+  private loopPaintTotal = 0;
+  private loopPaintMax = 0;
   /** Last edited cell per table (row/col ops + active-cell outline target it). */
   private tableActive = new Map<string, { r: number; c: number }>();
 
@@ -6065,6 +6085,21 @@ export class Engine {
       this.lastT = t;
       this.frameDt = dt;
       this.frameNow = t;
+      this.loopFrames += 1;
+      if (!this.loopWindowStart) this.loopWindowStart = t;
+      if (t - this.loopWindowStart >= 1000) {
+        const span = t - this.loopWindowStart;
+        lastLoopStats = {
+          fps: Math.round((this.loopFrames * 1000) / Math.max(1, span)),
+          paintAvgMs: Math.round((this.loopPaintTotal / Math.max(1, this.loopPaintCount)) * 10) / 10,
+          paintMaxMs: Math.round(this.loopPaintMax * 10) / 10,
+        };
+        this.loopFrames = 0;
+        this.loopPaintCount = 0;
+        this.loopPaintTotal = 0;
+        this.loopPaintMax = 0;
+        this.loopWindowStart = t;
+      }
       // Pan / wheel input can arrive many times per frame (1000 Hz mice,
       // smooth wheels); bounding the board once per frame is enough.
       if (this.clampPending) {
@@ -6084,7 +6119,12 @@ export class Engine {
         const paintPeers = this.peersAnimating;
         const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
         this.render();
-        perfHook()?.render(performance.now() - t0);
+        const t1 = typeof performance !== 'undefined' ? performance.now() : t0;
+        const pdt = t1 - t0;
+        this.loopPaintCount += 1;
+        this.loopPaintTotal += pdt;
+        if (pdt > this.loopPaintMax) this.loopPaintMax = pdt;
+        perfHook()?.render(pdt);
         if (paintPeers && typeof performance !== 'undefined') {
           notePeerRenderDt((performance.now() - t0) / 1000, {
             peersAnimating: paintPeers,

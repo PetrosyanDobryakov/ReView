@@ -36,17 +36,24 @@ export function MiniMap({ engine, locale }: { engine: Engine; locale: LocaleId }
   useEffect(() => {
     if (!open) return;
     let raf = 0;
+    let last = 0;
     let accent = '#7c8cff';
     try {
       accent = getComputedStyle(document.documentElement).getPropertyValue('--chrome-accent').trim() || accent;
     } catch {
       /* ignore */
     }
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d') ?? null;
     const tick = () => {
       raf = requestAnimationFrame(tick);
+      // Thumbnails don't need display rate: 10 Hz max (was every frame —
+      // a full board scan + rect per shape, brutal on heavy boards).
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now - last < 100) return;
+      last = now;
       try {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (!canvas || !ctx) return;
         const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
         const W = MAP_W;
         const H = MAP_H;
@@ -54,8 +61,6 @@ export function MiniMap({ engine, locale }: { engine: Engine; locale: LocaleId }
           canvas.width = Math.round(W * dpr);
           canvas.height = Math.round(H * dpr);
         }
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
         const content = engine.contentBox();
