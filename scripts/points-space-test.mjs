@@ -6,6 +6,9 @@ import {
   downsamplePolyline,
   toLocalPoints,
   toWorldPoints,
+  simplifyStroke,
+  quantizePoints,
+  PEN_MAX_VERTICES,
   beginWriteGesture,
   configureWriteGate,
   closeWriteGate,
@@ -122,6 +125,45 @@ resetWriteGate();
   const snapAt = body.indexOf('const compact = new Y.Doc');
   assert.ok(flushAt >= 0, 'compactBoard calls closeWriteGate');
   assert.ok(snapAt > flushAt, 'closeWriteGate runs before the compact snapshot');
+}
+
+// Commit-time simplify: straight lines collapse, zigzags survive, first+last kept.
+{
+  const line = [];
+  for (let i = 0; i <= 100; i++) line.push(i, i * 0.5);
+  const s = simplifyStroke(line, 1.25);
+  assert.deepEqual(s.keep, [0, 100], 'collinear run keeps endpoints only');
+  assert.equal(s.points.length, 4, 'collinear run is 2 vertices');
+
+  const zig = [0, 0, 10, 50, 20, 0, 30, 50];
+  const z = simplifyStroke(zig, 1.25);
+  assert.equal(z.keep.length, 4, 'zigzag keeps every vertex');
+  assert.deepEqual(z.points, zig, 'zigzag bytes unchanged');
+
+  const two = [5, 5, 9, 9];
+  assert.deepEqual(simplifyStroke(two, 1.25).keep, [0, 1], '2-point stroke kept');
+  assert.deepEqual(simplifyStroke([], 1.25).keep, [], 'empty stroke kept empty');
+
+  // Pressures stay aligned through the keep mask.
+  const pts = [0, 0, 1, 0.1, 2, 0, 3, 0.1, 4, 0];
+  const pr = [0.1, 0.2, 0.3, 0.4, 0.5];
+  const r = simplifyStroke(pts, 1.25);
+  assert.deepEqual(
+    r.keep.map((i) => pr[i]),
+    [0.1, 0.5],
+    'pressures follow surviving vertices',
+  );
+
+  // Vertex cap keeps first+last.
+  const big = [];
+  for (let i = 0; i < 5000; i++) big.push(i, (i % 2) * 10);
+  const c = simplifyStroke(big, 0.01, 100);
+  assert.ok(c.keep.length <= 100, 'vertex cap enforced');
+  assert.equal(c.keep[0], 0, 'cap keeps first');
+  assert.equal(c.keep[c.keep.length - 1], 4999, 'cap keeps last');
+  assert.equal(PEN_MAX_VERTICES, 4000, 'default pen cap');
+
+  assert.deepEqual(quantizePoints([0.04, 0.06, 1.05, -0.06]), [0, 0.1, 1.1, -0.1], '0.1 grid');
 }
 
 console.log('points-space + writeGate: ok');

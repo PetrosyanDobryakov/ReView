@@ -10,7 +10,7 @@ export {
   rotatedAabb,
   unrotatedSizeMatchingAabb,
 } from '../src/core/transform';
-export { downsamplePolyline, toLocalPoints, toWorldPoints } from '../src/core/pointsSpace';
+export { downsamplePolyline, toLocalPoints, toWorldPoints, simplifyStroke, quantizePoints, PEN_MAX_VERTICES } from '../src/core/pointsSpace';
 export {
   beginWriteGesture,
   configureWriteGate,

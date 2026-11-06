@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.17.4
+
+### Pen strokes go on a diet at commit (RDP + 0.1 grid + 4k cap)
+
+- Strokes stored every raw vertex as float64 (a Yjs tombstone each,
+  forever). Now commit runs RDP simplify with a zoom-adaptive epsilon,
+  rounds to a 0.1 grid and caps at 4000 vertices. Pressures stay aligned
+  through the keep mask and quantize to uint8 steps. Zigzags and 2-point
+  lines are untouched; straight runs collapse to endpoints.
+
 ## 0.17.3
 
 ### Link send queue cap (16 MB, awareness shed first)

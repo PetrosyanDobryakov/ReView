@@ -11,6 +11,7 @@ import { ORBIT_DRAW } from '../core/orbitDraw';
 import { drawOrbitEraser, drawOrbitLasso, drawOrbitMarquee } from './orbitField';
 import { effectivePen, RECT_CORNER_RADIUS, settings, shapeFillValue, shapeStrokeValue } from '../core/settings';
 import { createStrokeSmoother, type StrokeSmoother } from '../core/strokeSmooth';
+import { simplifyStroke, quantizePoints } from '../core/pointsSpace';
 import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
@@ -1477,19 +1478,27 @@ export class PenTool extends Tool {
       }
     }
 
+    // Commit-time diet: RDP simplify (zoom-adaptive epsilon) + 0.1 grid
+    // quantize + vertex cap. Keeps source indices so pressures stay aligned
+    // with the surviving vertices.
+    const { points: simpPoints, keep } = simplifyStroke(points, Math.max(0.5, 1.25 / engine.camera.zoom));
+    const commitPoints = quantizePoints(simpPoints);
+    const commitPressures = this.capturePressure
+      ? keep.map((i) => pressures[i] ?? 0.5).map((p) => Math.round(p * 255) / 255)
+      : [];
     const pad = pen.width / 2 + 2;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (let i = 0; i < points.length; i += 2) {
-      minX = Math.min(minX, points[i]);
-      maxX = Math.max(maxX, points[i]);
-      minY = Math.min(minY, points[i + 1]);
-      maxY = Math.max(maxY, points[i + 1]);
+    for (let i = 0; i < commitPoints.length; i += 2) {
+      minX = Math.min(minX, commitPoints[i]);
+      maxX = Math.max(maxX, commitPoints[i]);
+      minY = Math.min(minY, commitPoints[i + 1]);
+      maxY = Math.max(maxY, commitPoints[i + 1]);
     }
-    const slice = pressures.slice(0, points.length / 2);
-    const hasPressure = pressureVaries(slice, points.length / 2);
+    const slice = commitPressures.slice(0, commitPoints.length / 2);
+    const hasPressure = pressureVaries(slice, commitPoints.length / 2);
     this.statCommitted = true;
     store.addShape({
       type: 'pen',
@@ -1502,7 +1511,7 @@ export class PenTool extends Tool {
       strokeWidth: pen.width,
       alpha: pen.alpha,
       ...(pen.dash ? { dash: true } : {}),
-      points,
+      points: commitPoints,
       pressures: hasPressure ? slice : undefined,
     });
     this.pts = [];
