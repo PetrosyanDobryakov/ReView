@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.69
+
+### Always-on jank counter (naming the 300 ms blackouts)
+
+- A `longtask` observer now counts main-thread blocks session-wide
+  (no debug flag needed) and the dev readout shows
+  `jank {longtasks, maxMs}` next to the loop line — so the next
+  input blackout arrives with its attribution attached.
+
 ## 0.16.68
 
 ### Media scan once per frame (was twice)

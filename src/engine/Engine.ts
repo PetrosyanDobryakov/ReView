@@ -434,6 +434,40 @@ export function getLastLoopStats(): LoopStats | null {
   return lastLoopStats;
 }
 
+/**
+ * Main-thread blocks (>=50 ms tasks): GC pauses, layout storms, giant
+ * uploads. Always on (observer fires only on anomalies) — the readout
+ * needs it exactly when input mysteriously vanishes for 300 ms.
+ */
+export type JankStats = { longtasks: number; maxMs: number };
+
+const jankStats: JankStats = { longtasks: 0, maxMs: 0 };
+
+try {
+  if (typeof PerformanceObserver !== 'undefined') {
+    const observer = new PerformanceObserver((list) => {
+      try {
+        for (const entry of list.getEntries()) {
+          const d = entry.duration;
+          if (d < 50) continue;
+          jankStats.longtasks += 1;
+          if (d > jankStats.maxMs) jankStats.maxMs = Math.round(d);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+    observer.observe({ type: 'longtask', buffered: true } as PerformanceObserverInit);
+  }
+} catch {
+  /* Safari / older engines may lack longtask */
+}
+
+/** Jank counters for diagnostics (dev readout). */
+export function getJankStats(): JankStats {
+  return { ...jankStats };
+}
+
 function parseHex(color: string): [number, number, number] | null {
   const raw = color.trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
