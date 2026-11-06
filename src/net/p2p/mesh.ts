@@ -77,6 +77,10 @@ const BLOB_PACE_BYTES = 256 * 1024;
 const BLOB_IDLE_MS = 15_000;
 /** Outstanding requests a peer may queue with us; extra ones are answered "miss". */
 const BLOB_SERVE_QUEUE = 256;
+/** Concurrent outbound blob requests; extra ones fail fast instead of holding buffers. */
+const MAX_BLOB_REQS = 8;
+/** Concurrent fetchBlob runs across hashes; extra ones resolve null. */
+const MAX_BLOB_FETCHES = 16;
 
 /** Origin for awareness removals the mesh does locally; never re-broadcast. */
 const LOCAL_DROP = Symbol('mesh-drop');
@@ -152,10 +156,30 @@ type BlobRequest = {
   entry: Entry;
   buf: Uint8Array | null;
   got: number;
+  /** Received byte spans, merged; got counts unique bytes only. */
+  spans: Array<{ s: number; e: number }>;
   mime: string;
   timer: ReturnType<typeof setTimeout> | null;
   done: (result: BlobBytes | null) => void;
 };
+
+/** Merge [s,e) into spans, return newly covered byte count. */
+function spanAdd(spans: Array<{ s: number; e: number }>, s: number, e: number): number {
+  let fresh = e - s;
+  let at = 0;
+  while (at < spans.length && spans[at].e < s) at++;
+  let ns = s;
+  let ne = e;
+  while (at < spans.length && spans[at].s <= ne) {
+    const cur = spans[at];
+    fresh -= Math.max(0, Math.min(cur.e, e) - Math.max(cur.s, s));
+    ns = Math.min(ns, cur.s);
+    ne = Math.max(ne, cur.e);
+    spans.splice(at, 1);
+  }
+  spans.splice(at, 0, { s: ns, e: ne });
+  return Math.max(0, fresh);
+}
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
@@ -703,6 +727,7 @@ export class Mesh {
   fetchBlob(hash: string): Promise<BlobBytes | null> {
     const inflight = this.blobFetches.get(hash);
     if (inflight) return inflight;
+    if (this.blobFetches.size >= MAX_BLOB_FETCHES) return Promise.resolve(null);
     const run = async (): Promise<BlobBytes | null> => {
       const tried = new Set<string>();
       while (!this.destroyed) {
@@ -723,6 +748,10 @@ export class Mesh {
 
   private requestBlob(e: Entry, hash: string): Promise<BlobBytes | null> {
     return new Promise((resolve) => {
+      if (this.blobReqs.size >= MAX_BLOB_REQS) {
+        resolve(null);
+        return;
+      }
       this.blobSeq = (this.blobSeq + 1) >>> 0;
       const req = this.blobSeq;
       const msg = encodeBlobWant(req, hash);
@@ -734,6 +763,7 @@ export class Mesh {
         entry: e,
         buf: null,
         got: 0,
+        spans: [],
         mime: '',
         timer: null,
         done: (result) => {
@@ -761,7 +791,7 @@ export class Mesh {
       return;
     }
     r.buf.set(part.bytes, part.offset);
-    r.got += part.bytes.length;
+    r.got += spanAdd(r.spans, part.offset, part.offset + part.bytes.length);
     if (r.timer) clearTimeout(r.timer);
     r.timer = setTimeout(() => r.done(null), BLOB_IDLE_MS);
     if (r.got >= part.total) r.done({ bytes: r.buf, mime: r.mime });

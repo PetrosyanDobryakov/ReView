@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.2
+
+### Blob fetch caps (requester side)
+
+- Max 8 concurrent blob requests and 16 concurrent fetches; extras fail
+  fast instead of holding 64 MB buffers. Received bytes counted once
+  (overlap-merged spans), so junk duplicates cannot trigger early done.
+
 ## 0.17.1
 
 ### Reassembler caps (one peer cannot hold unbounded memory)
