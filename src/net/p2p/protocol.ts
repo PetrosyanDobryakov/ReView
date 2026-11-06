@@ -75,11 +75,44 @@ export function split(message: Uint8Array, msgId: number): Uint8Array[] {
   return parts;
 }
 
-type Pending = { total: number; got: number; parts: Uint8Array[]; size: number };
+type Pending = { total: number; got: number; parts: Uint8Array[]; size: number; at: number };
+
+/** Cap open reassemblies so one peer cannot hold unbounded memory. */
+export const MAX_PENDING_MSG = 32;
+/** Cap bytes held across open reassemblies (chunk bodies only). */
+export const MAX_PENDING_BYTES = 64 * 1024 * 1024;
+/** Drop a reassembly that stalls this long. */
+export const PENDING_TTL_MS = 30_000;
 
 /** Per-link reassembly. Chunks arrive in order (ordered channel) but we do not rely on it. */
 export class Reassembler {
   private readonly pending = new Map<number, Pending>();
+  private pendingBytes = 0;
+  private drops = 0;
+
+  /** Dropped reassemblies (caps, TTL, bad headers). */
+  dropped(): number {
+    return this.drops;
+  }
+
+  private evictOldest(): void {
+    const first = this.pending.keys().next();
+    if (first.done) return;
+    const p = this.pending.get(first.value);
+    if (p) this.pendingBytes -= p.size;
+    this.pending.delete(first.value);
+    this.drops += 1;
+  }
+
+  private sweepExpired(now: number): void {
+    for (const [id, p] of this.pending) {
+      if (now - p.at > PENDING_TTL_MS) {
+        this.pendingBytes -= p.size;
+        this.pending.delete(id);
+        this.drops += 1;
+      }
+    }
+  }
 
   /** Returns a complete framed message, or null while chunks are outstanding. */
   push(data: Uint8Array): Uint8Array | null {
@@ -92,11 +125,26 @@ export class Reassembler {
     const total = view.getUint32(9);
     if (total === 0 || index >= total || total * CHUNK_BODY > MAX_MESSAGE + CHUNK_BODY) {
       this.pending.delete(id);
+      this.drops += 1;
       return null;
     }
+    this.sweepExpired(Date.now());
     let p = this.pending.get(id);
     if (!p || p.total !== total) {
-      p = { total, got: 0, parts: new Array(total), size: 0 };
+      if (p) this.pendingBytes -= p.size;
+      // Reserve room: evict oldest until the new message fits or nothing is left.
+      const estimate = total * CHUNK_BODY;
+      while (
+        this.pending.size > 0 &&
+        (this.pending.size >= MAX_PENDING_MSG || this.pendingBytes + estimate > MAX_PENDING_BYTES)
+      ) {
+        this.evictOldest();
+      }
+      if (this.pending.size >= MAX_PENDING_MSG || this.pendingBytes + estimate > MAX_PENDING_BYTES) {
+        this.drops += 1;
+        return null;
+      }
+      p = { total, got: 0, parts: new Array(total), size: 0, at: Date.now() };
       this.pending.set(id, p);
     }
     if (!p.parts[index]) {
@@ -106,6 +154,7 @@ export class Reassembler {
       p.size += body.length;
     }
     if (p.got < p.total) return null;
+    this.pendingBytes -= p.size;
     this.pending.delete(id);
     const out = new Uint8Array(p.size);
     let off = 0;
@@ -118,6 +167,7 @@ export class Reassembler {
 
   clear(): void {
     this.pending.clear();
+    this.pendingBytes = 0;
   }
 }
 

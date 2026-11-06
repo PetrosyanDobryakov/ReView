@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.1
+
+### Reassembler caps (one peer cannot hold unbounded memory)
+
+- `Reassembler` now caps open reassemblies (32 msgs, 64 MB, 30 s TTL,
+  oldest evicted first) with a `dropped()` counter. Roundtrip unchanged.
+
 ## 0.17.0
 
 ### 0.17 line start (P2P mesh hardening + board weight diet)
