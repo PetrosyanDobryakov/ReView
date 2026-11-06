@@ -47,7 +47,7 @@ import {
 } from '../core/prefs';
 import type { ToolId } from '../engine/tools';
 import { getLastStrokeStats, type StrokeStats } from '../engine/tools';
-import { getLastLoopStats, type LoopStats } from '../engine/Engine';
+import { getJankStats, getLastLoopStats, type JankStats, type LoopStats } from '../engine/Engine';
 
 /** GPU renderer string (SwiftShader = software rendering = jank everywhere). */
 function gpuRenderer(): string {
@@ -138,6 +138,7 @@ function StrokeDebug({ locale }: { locale: LocaleId }) {
     }
   });
   const [loop, setLoop] = useState<LoopStats | null>(null);
+  const [jank, setJank] = useState<JankStats | null>(null);
   const [gpu] = useState(() => gpuRenderer());
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -152,11 +153,16 @@ function StrokeDebug({ locale }: { locale: LocaleId }) {
       } catch {
         /* ignore */
       }
+      try {
+        setJank(getJankStats());
+      } catch {
+        /* ignore */
+      }
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
   const strokeText = stats ? JSON.stringify(stats) : t(locale, 'strokeNoData');
-  const loopText = `loop ${JSON.stringify(loop)} gpu ${gpu}`;
+  const loopText = `loop ${JSON.stringify(loop)} jank ${JSON.stringify(jank)} gpu ${gpu}`;
   const text = `${strokeText}\n${loopText}`;
   const copy = async () => {
     try {
