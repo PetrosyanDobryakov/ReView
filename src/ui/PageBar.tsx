@@ -15,7 +15,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number } | null>(null);
   const [pages, setPages] = useState<string[]>(() => store.listPages());
   const [cur, setCur] = useState<string>(() => store.currentPageId());
-  const [peerPages, setPeerPages] = useState<Set<string>>(() => new Set());
+  const [peerNames, setPeerNames] = useState<Map<string, string[]>>(() => new Map());
 
   useEffect(
     () =>
@@ -28,16 +28,23 @@ export function PageBar({ locale }: { locale: LocaleId }) {
 
   useEffect(
     () => {
-      let pageKey = '';
+      let rosterKey = '';
       return onPeers((peers) => {
-        const pages: string[] = [];
-        for (const p of peers) if (p.page) pages.push(p.page);
-        pages.sort();
-        const next = pages.join('\0');
+        const byPage = new Map<string, string[]>();
+        for (const p of peers) {
+          if (!p.page || !p.name) continue;
+          const list = byPage.get(p.page) ?? [];
+          if (!list.includes(p.name)) list.push(p.name);
+          byPage.set(p.page, list);
+        }
+        const next = [...byPage.entries()]
+          .map(([pg, names]) => `${pg}:${[...names].sort().join(',')}`)
+          .sort()
+          .join('\0');
         // Cursor xy churn must not setState — that reconciled PageBar every packet.
-        if (next === pageKey) return;
-        pageKey = next;
-        setPeerPages(new Set(pages));
+        if (next === rosterKey) return;
+        rosterKey = next;
+        setPeerNames(byPage);
       });
     },
     []
@@ -97,7 +104,8 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   }, [open, close]);
 
   const label = `${idx + 1} / ${pages.length}`;
-  const hasPeerElsewhere = [...peerPages].some((p) => p !== cur);
+  const elsewhereNames = [...peerNames.entries()].filter(([pg]) => pg !== cur).flatMap(([, names]) => names);
+  const hasPeerElsewhere = elsewhereNames.length > 0;
 
   const menu =
     open && menuStyle
@@ -118,7 +126,8 @@ export function PageBar({ locale }: { locale: LocaleId }) {
             <ul className="pages-menu-list" role="listbox" aria-label={t(locale, 'pages')}>
               {pages.map((id, i) => {
                 const active = id === cur;
-                const hasPeer = peerPages.has(id) && id !== cur;
+                const names = id !== cur ? (peerNames.get(id) ?? []) : [];
+                const hasPeer = names.length > 0;
                 return (
                   <li key={id}>
                     <button
@@ -134,7 +143,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
                       <span className="pages-menu-item-label">
                         {t(locale, 'page')} {i + 1}
                       </span>
-                      {hasPeer ? <span className="pages-peer-dot" aria-hidden="true" /> : null}
+                      {hasPeer ? <span className="pages-peer-dot" aria-hidden="true" title={names.join(', ')} /> : null}
                       {active ? <Icon name="check" size={14} /> : null}
                     </button>
                   </li>
@@ -186,7 +195,7 @@ export function PageBar({ locale }: { locale: LocaleId }) {
         <Icon name="more" size={16} />
         <span className="pages-trigger-label">{label}</span>
         <Icon name="chevronDown" size={14} />
-        {hasPeerElsewhere ? <span className="pages-trigger-dot" aria-hidden="true" /> : null}
+        {hasPeerElsewhere ? <span className="pages-trigger-dot" aria-hidden="true" title={elsewhereNames.join(', ')} /> : null}
       </button>
       {menu}
     </div>

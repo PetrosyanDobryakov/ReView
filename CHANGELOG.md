@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.10
+
+### Page dots name names
+
+- The PageBar peer dots (menu + trigger) now carry peer names in the
+  tooltip, so "someone is on another page" says who.
+
 ## 0.17.9
 
 ### TURN credentials only from trusted hubs
