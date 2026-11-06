@@ -432,9 +432,11 @@ class P2pClient {
     this.write('viewing', viewing);
   }
   sendCursor(pos: CursorPos | null): void {
-    this.lastCursor = pos;
-    this.hotAwareness.queue({ cursor: pos });
-    if (!pos) this.hotAwareness.flushNow();
+    const q = pos ? { x: Math.round(pos.x * 2) / 2, y: Math.round(pos.y * 2) / 2 } : null;
+    if ((q?.x ?? null) === (this.lastCursor?.x ?? null) && (q?.y ?? null) === (this.lastCursor?.y ?? null)) return;
+    this.lastCursor = q;
+    this.hotAwareness.queue({ cursor: q });
+    if (!q) this.hotAwareness.flushNow();
   }
   /**
    * Live stroke preview (awareness only, never the doc). The full point array
@@ -487,7 +489,9 @@ class P2pClient {
   }
 
   private write(field: string, value: unknown): void {
-    try { this.awareness?.setLocalStateField(field, value); } catch {}
+    // Route every field through the batcher: direct setLocalStateField calls
+    // each emit (and broadcast) an awareness update of their own.
+    try { this.hotAwareness.queue({ [field]: value }); } catch {}
   }
 
   private bind(aw: Awareness): void {

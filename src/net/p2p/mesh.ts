@@ -28,6 +28,7 @@ import { isRelayMsg, RelayLink, type RelayMsg } from './relayLink';
 import {
   Frame,
   PEER_PROTO,
+  MAX_AWARENESS,
   MAX_BLOB,
   Reassembler,
   bytesToHex,
@@ -650,6 +651,10 @@ export class Mesh {
         return;
       }
       case Frame.Awareness: {
+        if (body.length > MAX_AWARENESS) {
+          this.opts.log?.('oversize awareness dropped', { peer: e.peer, bytes: body.length });
+          return;
+        }
         const nowAware = Date.now();
         if (e.lastAwareAt !== 0 && nowAware - e.lastAwareAt > 10_000) {
           this.opts.log?.('awareness resumed', {

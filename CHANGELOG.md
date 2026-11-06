@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.17.6
+
+### One awareness path: batch everything, quantize cursors, cap inbound
+
+- `tool`/`page`/`focus`/`user`/`viewing` wrote straight to awareness
+  (one broadcast each); now all go through the 20 Hz batcher.
+- Cursors quantize to 0.5 px and skip unchanged positions.
+- Inbound awareness over 64 KB is dropped instead of applied.
+
 ## 0.17.5
 
 ### Undo depth cap + bounded media element caches

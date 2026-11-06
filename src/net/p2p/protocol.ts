@@ -205,6 +205,8 @@ export function decodeHello(body: Uint8Array): Hello | null {
 
 /** Largest media blob a peer will accept (the app caps a file at 32 MB). */
 export const MAX_BLOB = 64 * 1024 * 1024;
+/** Largest awareness update applied from a peer; bigger ones are dropped. */
+export const MAX_AWARENESS = 64 * 1024;
 
 const HEX_RE = /^[0-9a-f]{64}$/;
 
