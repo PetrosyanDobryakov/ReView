@@ -7,9 +7,17 @@
 
 import * as Y from 'yjs';
 import { getBoard, importBoardMeta, type BoardMeta } from './boards';
+import { isWriteGestureActive } from './writeGate';
 import { isDesktop, listBoardFiles, loadBoardFile, saveBoardFile } from '../net/p2p/desktop';
 
 const SAVE_DEBOUNCE_MS = 1_500;
+/** Full-doc encodes block the thread for seconds on huge boards — back off. */
+const SAVE_MIN_INTERVAL_BIG_MS = 60_000;
+const SAVE_MIN_INTERVAL_MID_MS = 15_000;
+const SAVE_BIG_BYTES = 50_000_000;
+const SAVE_MID_BYTES = 10_000_000;
+/** While a stroke/drag is open, defer (input blackouts are the worst kind). */
+const SAVE_GESTURE_RETRY_MS = 2_000;
 
 /** Pending-save flushers of open mirrors (one per open board). */
 const flushers = new Set<() => Promise<void>>();
@@ -60,26 +68,55 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let dirty = false;
+  /** Estimated doc bytes (last encode + increments since) for the interval. */
+  let lastSavedBytes = 0;
+  let lastSavedAt = 0;
+  let pendingBytes = 0;
+
+  const intervalFor = (est: number): number =>
+    est > SAVE_BIG_BYTES
+      ? SAVE_MIN_INTERVAL_BIG_MS
+      : est > SAVE_MID_BYTES
+        ? SAVE_MIN_INTERVAL_MID_MS
+        : SAVE_DEBOUNCE_MS;
 
   let inFlight: Promise<unknown> = Promise.resolve();
-  const save = (): Promise<unknown> => {
+  const save = (force = false): Promise<unknown> => {
     timer = null;
     if (!dirty) return inFlight;
+    if (!force) {
+      if (isWriteGestureActive()) {
+        // Mid-stroke/drag: retry shortly, never encode under the pointer.
+        if (!timer) timer = setTimeout(() => void save(), SAVE_GESTURE_RETRY_MS);
+        return inFlight;
+      }
+      const now = Date.now();
+      const wait = intervalFor(lastSavedBytes + pendingBytes) - (now - lastSavedAt);
+      if (wait > 0) {
+        if (!timer) timer = setTimeout(() => void save(), wait);
+        return inFlight;
+      }
+    }
     dirty = false;
+    pendingBytes = 0;
     const meta = getBoard(boardId) ?? null;
+    // The block: full encode on the main thread (seconds on 100 MB+ docs).
     const bytes = Y.encodeStateAsUpdate(doc);
+    lastSavedAt = Date.now();
+    lastSavedBytes = bytes.length;
     inFlight = inFlight.then(() => saveBoardFile(boardId, JSON.stringify(meta), bytes));
     return inFlight;
   };
   const flush = async () => {
     if (timer) clearTimeout(timer);
-    await save();
+    await save(true);
   };
   flushers.add(flush);
-  const onUpdate = () => {
+  const onUpdate = (update?: Uint8Array): void => {
     if (stopped) return;
     dirty = true;
-    if (!timer) timer = setTimeout(save, SAVE_DEBOUNCE_MS);
+    if (update && update.length) pendingBytes += update.length;
+    if (!timer) timer = setTimeout(() => void save(), SAVE_DEBOUNCE_MS);
   };
   const onHide = () => {
     void flush();
