@@ -3485,6 +3485,51 @@ function resolveBlobPaintSrc(v: ShapeView): string {
 const imageCache = new Map<string, HTMLImageElement>();
 const imageListeners = new Set<(src: string) => void>();
 
+/**
+ * Media element caches keyed by full src strings (data: URLs are megabytes).
+ * Unbounded Maps pin every decoded element forever; cap them with
+ * oldest-first eviction. Hits refresh recency so on-screen media survives.
+ */
+const IMAGE_CACHE_MAX = 64;
+const VIDEO_CACHE_MAX = 8;
+const AUDIO_CACHE_MAX = 16;
+
+function cacheGet<K, V>(cache: Map<K, V>, key: K): V | undefined {
+  const hit = cache.get(key);
+  if (hit !== undefined) {
+    cache.delete(key);
+    cache.set(key, hit);
+  }
+  return hit;
+}
+
+function cachePut<K, V>(cache: Map<K, V>, key: K, value: V, max: number, dispose?: (value: V) => void): void {
+  if (cache.has(key)) cache.delete(key);
+  while (cache.size >= max) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    const k = oldest.value;
+    const v = cache.get(k);
+    cache.delete(k);
+    try {
+      if (v !== undefined) dispose?.(v);
+    } catch {
+      /* ignore */
+    }
+  }
+  cache.set(key, value);
+}
+
+function unloadMedia(el: HTMLMediaElement): void {
+  try {
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  } catch {
+    /* ignore */
+  }
+}
+
 export function onImageLoad(cb: (src: string) => void): () => void {
   imageListeners.add(cb);
   return () => {
@@ -3494,7 +3539,7 @@ export function onImageLoad(cb: (src: string) => void): () => void {
 
 export function getImage(src: string): HTMLImageElement | null {
   if (!src.startsWith('data:image/') && !src.startsWith('blob:')) return null;
-  const hit = imageCache.get(src);
+  const hit = cacheGet(imageCache, src);
   if (hit) return hit;
   const img = new Image();
   img.onload = () => {
@@ -3504,7 +3549,7 @@ export function getImage(src: string): HTMLImageElement | null {
     imageCache.delete(src);
   };
   img.src = src;
-  imageCache.set(src, img);
+  cachePut(imageCache, src, img, IMAGE_CACHE_MAX);
   return img;
 }
 
@@ -3524,7 +3569,7 @@ export function onVideoLoad(cb: (src: string) => void): () => void {
 
 export function getVideo(src: string): HTMLVideoElement | null {
   if (!src.startsWith('data:video/') && !src.startsWith('blob:')) return null;
-  const hit = videoCache.get(src);
+  const hit = cacheGet(videoCache, src);
   if (hit) return hit;
   const video = document.createElement('video');
   video.muted = true;
@@ -3540,7 +3585,7 @@ export function getVideo(src: string): HTMLVideoElement | null {
     videoCache.delete(src);
   });
   video.src = src;
-  videoCache.set(src, video);
+  cachePut(videoCache, src, video, VIDEO_CACHE_MAX, unloadMedia);
   return video;
 }
 
@@ -3597,7 +3642,7 @@ export function onAudioLoad(cb: (src: string) => void): () => void {
 /** Shared per-src audio element (mirrors the video cache). One plays at a time. */
 export function getAudio(src: string): HTMLAudioElement | null {
   if (!src.startsWith('data:audio/') && !src.startsWith('blob:')) return null;
-  const hit = audioCache.get(src);
+  const hit = cacheGet(audioCache, src);
   if (hit) return hit;
   const audio = document.createElement('audio');
   audio.preload = 'metadata';
@@ -3609,7 +3654,7 @@ export function getAudio(src: string): HTMLAudioElement | null {
     audioCache.delete(src);
   });
   audio.src = src;
-  audioCache.set(src, audio);
+  cachePut(audioCache, src, audio, AUDIO_CACHE_MAX, unloadMedia);
   return audio;
 }
 

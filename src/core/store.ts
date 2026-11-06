@@ -59,6 +59,26 @@ export let undoManager = new Y.UndoManager([board, order, pages], {
   trackedOrigins: new Set([LOCAL_ORIGIN]),
   captureTimeout: 200,
 });
+/**
+ * Undo depth. This Yjs build has no undoStackSize option, and an unbounded
+ * stack pins every version of huge point arrays in memory. Trimmed oldest
+ * first at each gesture end; dropping old items never affects newer undo.
+ */
+export const UNDO_DEPTH = 100;
+
+function capUndoStack(): void {
+  try {
+    const um = undoManager as unknown as { undoStack?: unknown[]; redoStack?: unknown[] };
+    if (Array.isArray(um.undoStack) && um.undoStack.length > UNDO_DEPTH) {
+      um.undoStack.splice(0, um.undoStack.length - UNDO_DEPTH);
+    }
+    if (Array.isArray(um.redoStack) && um.redoStack.length > UNDO_DEPTH) {
+      um.redoStack.splice(0, um.redoStack.length - UNDO_DEPTH);
+    }
+  } catch {
+    /* best effort */
+  }
+}
 export let persistence: IndexeddbPersistence | null = null;
 
 let lastDocLog = 0;
@@ -887,6 +907,7 @@ export function beginGesture(): void {
 export function endGesture(): void {
   endWriteGesture();
   undoManager.stopCapturing();
+  capUndoStack();
 }
 
 export function readShape(m: Y.Map<unknown>): ShapeView {

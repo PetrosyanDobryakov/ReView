@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.17.5
+
+### Undo depth cap + bounded media element caches
+
+- `Y.UndoManager` has no stack-size option here, so trim oldest-first to
+  100 steps at each gesture end (newest undo verified unaffected).
+- `imageCache`/`videoCache`/`audioCache` were unbounded Maps keyed by
+  full src strings. Now LRU-capped (64 images / 8 videos / 16 audio) with
+  hits refreshing recency, so on-screen media survives eviction.
+
 ## 0.17.4
 
 ### Pen strokes go on a diet at commit (RDP + 0.1 grid + 4k cap)
