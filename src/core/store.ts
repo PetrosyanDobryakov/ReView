@@ -229,6 +229,46 @@ function scheduleMediaPrefetch(delay = MEDIA_PREFETCH_DELAY_MS): void {
   }, delay);
 }
 
+function hashStringsOf(value: unknown): string[] {
+  if (typeof value === 'string') return value ? [value] : [];
+  const toArray = (value as { toArray?: unknown }).toArray;
+  if (typeof toArray !== 'function') return [];
+  try {
+    const arr = (toArray as () => unknown).call(value);
+    if (Array.isArray(arr)) return arr.filter((s): s is string => typeof s === 'string' && !!s);
+  } catch {
+    /* unreadable shape */
+  }
+  return [];
+}
+
+/**
+ * Board hashes, active page first: after a join or page switch the visible
+ * media arrives before the rest (durability still wants the full copy, but
+ * the user should not wait behind off-screen gigabytes).
+ */
+function orderedBoardHashes(): string[] {
+  const active: string[] = [];
+  const rest: string[] = [];
+  const seen = new Set<string>();
+  for (const [key, m] of board.entries()) {
+    const list = isOnActivePage(key) ? active : rest;
+    try {
+      for (const field of ['blob', 'thumb', 'pageBlobs', 'pageThumbs'] as const) {
+        for (const h of hashStringsOf(m.get(field))) {
+          if (!seen.has(h)) {
+            seen.add(h);
+            list.push(h);
+          }
+        }
+      }
+    } catch {
+      /* skip shape */
+    }
+  }
+  return [...active, ...rest];
+}
+
 async function runMediaPrefetch(): Promise<void> {
   const boardId = currentBoardId;
   if (!boardId) return;
@@ -238,7 +278,7 @@ async function runMediaPrefetch(): Promise<void> {
   }
   mediaPrefetchBusy = true;
   try {
-    const hashes = collectBlobHashes(board.entries()).filter((h) => !mediaHave.has(h));
+    const hashes = orderedBoardHashes().filter((h) => !mediaHave.has(h));
     if (!hashes.length) return;
     const got = await prefetchBlobs(hashes, { isCurrent: () => currentBoardId === boardId, have: mediaHave });
     if (got) netLog.info('media prefetched from peers', () => ({ boardId, got, wanted: hashes.length }));
@@ -1678,6 +1718,8 @@ export function setCurrentPage(id: string): void {
     /* ignore */
   }
   emitActivePage();
+  // The newly visible page may reference media we never fetched.
+  scheduleMediaPrefetch();
 }
 
 export function addPage(): void {

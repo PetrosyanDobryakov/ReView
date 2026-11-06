@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.11
+
+### Media prefetch: visible page first
+
+- Prefetch pulled the whole board's hashes in board order; now the
+  active page's media goes first and page switches re-trigger it, so
+  visible images arrive before off-screen gigabytes.
+
 ## 0.17.10
 
 ### Page dots name names
