@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.8
+
+### Small UI honesty: undo depth, stamp binds, H hint
+
+- Undo/redo buttons show stack depth in the tooltip.
+- `stamp` is bindable in Settings → Binds (was missing from the list).
+- Gestures list gains redo and the H (hide interface) hint.
+
 ## 0.17.7
 
 ### Resync debounce + retry jitter (no more Step1 fan-outs)

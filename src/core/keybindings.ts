@@ -36,6 +36,7 @@ export const BIND_TOOL_ORDER: ToolId[] = [
   'octagon',
   'cross',
   'comment',
+  'stamp',
 ];
 
 const DEFAULT_TOOL_BINDS: ToolBinds = {

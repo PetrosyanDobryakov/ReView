@@ -247,6 +247,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
   const [settingsFocus, setSettingsFocus] = useState<'connection' | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [redoDepth, setRedoDepth] = useState(0);
   const boardMeta = getBoard(boardId);
   const [boardTitle, setBoardTitle] = useState(() => {
     const m = getBoard(boardId);
@@ -752,6 +754,8 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     const syncUndo = () => {
       setCanUndo(curUndo.undoStack.length > 0);
       setCanRedo(curUndo.redoStack.length > 0);
+      setUndoDepth(curUndo.undoStack.length);
+      setRedoDepth(curUndo.redoStack.length);
     };
     const unbindChrome = () => {
       if (!chromeBound) return;
@@ -1326,7 +1330,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             type="button"
             className="icon-btn"
             data-keep-edit
-            title={t(locale, 'undo')}
+            title={t(locale, 'undo') + (undoDepth > 0 ? ` (${undoDepth})` : '')}
             aria-label={t(locale, 'undo')}
             disabled={!canUndo || Boolean(editTarget || editGraph || editCalc)}
             onClick={() => {
@@ -1341,7 +1345,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
             type="button"
             className="icon-btn"
             data-keep-edit
-            title={t(locale, 'redo')}
+            title={t(locale, 'redo') + (redoDepth > 0 ? ` (${redoDepth})` : '')}
             aria-label={t(locale, 'redo')}
             disabled={!canRedo || Boolean(editTarget || editGraph || editCalc)}
             onClick={() => {

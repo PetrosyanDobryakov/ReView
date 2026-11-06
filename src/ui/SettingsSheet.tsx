@@ -752,6 +752,12 @@ export function SettingsSheet({
                     {modKey()}+Z <span>{t(locale, 'undo').replace(/ \(.+\)$/, '')}</span>
                   </li>
                   <li>
+                    {modKey()}+Y <span>{t(locale, 'redo').replace(/ \(.+\)$/, '')}</span>
+                  </li>
+                  <li>
+                    H <span>{t(locale, 'showUi')}</span>
+                  </li>
+                  <li>
                     {modKey()}+D <span>{t(locale, 'ctxDuplicate')}</span>
                   </li>
                 </ul>
