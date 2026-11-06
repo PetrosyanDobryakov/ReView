@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.16.70
+
+### Desktop mirror stops freezing input on huge boards
+
+- The file mirror encoded the FULL doc 1.5 s after every edit — seconds
+  of main-thread block on 100 MB+ boards, mid-stroke included. Now the
+  cadence scales with size (60 s past 50 MB, 15 s past 10 MB) and saves
+  never fire inside an open gesture (retried after). Page-hide flush
+  unchanged, so durability is the same.
+
 ## 0.16.69
 
 ### Always-on jank counter (naming the 300 ms blackouts)
