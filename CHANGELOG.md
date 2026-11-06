@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.16.66
+
+### Revert: ink overlay out (back to 0.16.64 behavior)
+
+- Sync/join instability pointed at the 0.16.65 ink layer, so it is
+  reverted while we investigate. All stroke fixes stay
+  (coalesced input, gap telemetry, mouse smoothing cap).
+
 ## 0.16.65
 
 ### Ink overlay: heavy boards stop repainting under the pen
