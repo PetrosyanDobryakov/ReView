@@ -495,6 +495,18 @@ const HANDLE_POS: Record<HandleId, [number, number]> = {
   w: [0, 0.5],
 };
 
+/** Raster export soft-cap: browsers throw / OOM past ~16k on a side. */
+export const EXPORT_MAX_SIDE = 8192;
+export const EXPORT_MAX_AREA = 64_000_000;
+
+/** True when a raster export of this box at this scale would exceed the cap. */
+export function exceedsExportCap(box: ShapeBox, scale: number): boolean {
+  const pad = 4;
+  const width = Math.max(1, Math.round((box.w + pad * 2) * scale));
+  const height = Math.max(1, Math.round((box.h + pad * 2) * scale));
+  return width > EXPORT_MAX_SIDE || height > EXPORT_MAX_SIDE || width * height > EXPORT_MAX_AREA;
+}
+
 export class Engine {
   readonly camera = new Camera();
   readonly grid = new Grid();
@@ -1119,7 +1131,7 @@ export class Engine {
     const width = Math.max(1, Math.round(exportBox.w * opts.scale));
     const height = Math.max(1, Math.round(exportBox.h * opts.scale));
     // Soft-cap huge canvases — browsers throw / OOM past ~16k on a side.
-    if (width > 8192 || height > 8192 || width * height > 64_000_000) return null;
+    if (exceedsExportCap(box, opts.scale)) return null;
     try {
       const canvas = document.createElement('canvas');
       canvas.width = width;

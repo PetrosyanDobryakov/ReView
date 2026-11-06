@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Engine } from '../engine/Engine';
+import { exceedsExportCap } from '../engine/Engine';
 import type { ShapeBox } from '../core/shapes';
 import { viewPaperBg } from '../core/store';
 import { exportDownloadEnabled } from '../core/exportVector';
@@ -47,6 +48,9 @@ export function ExportDialog({
   const [exportError, setExportError] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
 
+  const failKey = (forBox: ShapeBox | null): 'exportTooLarge' | 'exportFailed' =>
+    forBox && format !== 'svg' && exceedsExportCap(forBox, scale) ? 'exportTooLarge' : 'exportFailed';
+
   const box: ShapeBox | null = useMemo(() => {
     if (source === 'region') return rect;
     if (source === 'selection') return engine.selectionExportBounds();
@@ -90,7 +94,7 @@ export function ExportDialog({
           setPreviewFormat(null);
           setFileSize(null);
           setDims(null);
-          setExportError(t(locale, 'exportFailed'));
+          setExportError(t(locale, failKey(box)));
           return;
         }
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -108,7 +112,7 @@ export function ExportDialog({
           setPreviewFormat(null);
           setFileSize(null);
           setDims(null);
-          setExportError(t(locale, 'exportFailed'));
+          setExportError(t(locale, failKey(box)));
         }
       }
     }, 250);

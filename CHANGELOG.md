@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.15
+
+### Export says why it failed (too large vs failed)
+
+- Every export failure said the same line. Now oversize raster areas
+  (past the 8192 px / 64 Mpx canvas cap) say "too large — lower scale
+  or smaller region"; the cap lives in one shared helper.
+
 ## 0.17.14
 
 ### Animated-media scan 4 Hz instead of every frame
