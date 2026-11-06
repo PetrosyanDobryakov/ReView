@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.17.7
+
+### Resync debounce + retry jitter (no more Step1 fan-outs)
+
+- Link drops arrive in bursts; resync asks now coalesce into one
+  Step1 round per 750 ms (+jitter) instead of one fan-out per event.
+- Link retry backoff gains up to 1 s jitter so N tabs stop
+  re-offering in lockstep after a hub flap.
+
 ## 0.17.6
 
 ### One awareness path: batch everything, quantize cursors, cap inbound

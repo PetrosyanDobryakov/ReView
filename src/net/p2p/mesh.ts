@@ -69,6 +69,11 @@ const RELAY_FANOUT = 2;
 
 /** Minimum gap between resyncs asked for because an update arrived with missing parents. */
 const PENDING_RESYNC_MS = 2_000;
+/** Resync asks are debounced this long (+jitter): drops arrive in bursts. */
+const RESYNC_DEBOUNCE_MS = 750;
+const RESYNC_JITTER_MS = 250;
+/** Retry backoff jitter so N tabs do not re-offer in lockstep. */
+const RETRY_JITTER_MS = 1_000;
 
 /** Media is sent in slices of this size... */
 const BLOB_SLICE = 64 * 1024;
@@ -195,6 +200,8 @@ export class Mesh {
   private readonly entries = new Map<string, Entry>();
   private msgSeq = 0;
   private lastPendingResync = 0;
+  private resyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly resyncSkips = new Set<Entry>();
   private blobSeq = 0;
   private readonly blobReqs = new Map<number, BlobRequest>();
   private readonly blobFetches = new Map<string, Promise<BlobBytes | null>>();
@@ -328,6 +335,9 @@ export class Mesh {
     this.destroyed = true;
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
+    if (this.resyncTimer) clearTimeout(this.resyncTimer);
+    this.resyncTimer = null;
+    this.resyncSkips.clear();
     this.doc.off('update', this.onDocUpdate);
     this.awareness.off('update', this.onAwarenessUpdate);
     // Tell direct peers we are gone so cursors vanish now, not after 30s.
@@ -600,7 +610,9 @@ export class Mesh {
       this.changed();
       return;
     }
-    const delay = Math.min(RETRY_BASE_MS * 2 ** Math.max(0, e.attempts - 1), RETRY_MAX_MS);
+    const delay =
+      Math.min(RETRY_BASE_MS * 2 ** Math.max(0, e.attempts - 1), RETRY_MAX_MS) +
+      Math.random() * RETRY_JITTER_MS;
     e.retryTimer = setTimeout(() => {
       e.retryTimer = null;
       if (this.entries.get(e.peer) === e) this.ensureLink(e);
@@ -898,9 +910,27 @@ export class Mesh {
    * in flight on it is lost, so survivors compare notes whenever a link goes.
    */
   private resync(skip: Entry | null): void {
+    // Drops arrive in bursts (one peer leaving closes N links at once);
+    // coalesce them into one Step1 round instead of a fan-out per event.
+    if (skip) {
+      this.resyncSkips.add(skip);
+    } else {
+      this.resyncSkips.clear();
+    }
+    if (this.resyncTimer || this.destroyed) return;
+    this.resyncTimer = setTimeout(() => {
+      this.resyncTimer = null;
+      if (this.destroyed) return;
+      const skips = new Set(this.resyncSkips);
+      this.resyncSkips.clear();
+      this.resyncNow(skips);
+    }, RESYNC_DEBOUNCE_MS + Math.random() * RESYNC_JITTER_MS);
+  }
+
+  private resyncNow(skips: Set<Entry>): void {
     let msg: Uint8Array | null = null;
     for (const e of this.entries.values()) {
-      if (e === skip || e.link?.state !== 'open') continue;
+      if (skips.has(e) || e.link?.state !== 'open') continue;
       if (!msg) {
         const enc = encoding.createEncoder();
         syncProtocol.writeSyncStep1(enc, this.doc);
