@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.22
+
+### TURN grants only over trusted hubs
+
+- Peer-shared TURN credentials rode the first open hub — including a
+  stranger's invite/custom hub, which would see the live credential in
+  plaintext signaling. Now `self`/`preset` only, with a unit case.
+
 ## 0.17.21
 
 ### Mesh unit tests without cargo (fake hub + memory links)

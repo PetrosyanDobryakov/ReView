@@ -403,9 +403,11 @@ export class Mesh {
     const e = this.entry(peer);
     e.hubs.add(hub);
     if (fresh) this.evt('seen', peer, { hub });
-    // A peer that cannot reach a hub with `/turn` can still relay through ours.
+    // A peer that cannot reach a hub with `/turn` can still relay through ours —
+    // but only over a hub we trust: the grant carries a live credential and a
+    // stranger's invite/custom hub would see it in plaintext signaling JSON.
     const grant = fresh ? this.opts.turn?.current() : null;
-    if (grant) this.sendSignal(e, { kind: 'turn', grant });
+    if (grant) this.sendTrusted(e, { kind: 'turn', grant });
     this.ensureLink(e);
     this.changed();
   }
@@ -539,6 +541,19 @@ export class Mesh {
     const ordered = [...e.hubs].map((u) => this.hubs.get(u)).filter((h): h is SignalHub => !!h);
     ordered.sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open'));
     for (const h of ordered) if (h.send(e.peer, data)) return;
+  }
+
+  /** Sensitive payloads (credentials) ride only self/preset hubs, open first. */
+  private sendTrusted(e: Entry, data: unknown): void {
+    const hubs = [...e.hubs].map((u) => this.hubs.get(u)).filter((h): h is SignalHub => !!h);
+    hubs.sort((a, b) => {
+      const trust = (h: SignalHub) => (h.source === 'self' || h.source === 'preset' ? 0 : 1);
+      return trust(a) - trust(b) || Number(b.state === 'open') - Number(a.state === 'open');
+    });
+    for (const h of hubs) {
+      if (h.source !== 'self' && h.source !== 'preset') continue;
+      if (h.send(e.peer, data)) return;
+    }
   }
 
   /** Relay-link traffic goes only through Nostr relays, never through a hub of ours. */

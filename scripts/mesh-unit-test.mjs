@@ -332,6 +332,23 @@ try {
     c2.mesh.destroy();
     console.log('mesh-unit: burst drops converge ok');
   }
+  // TURN grant rides trusted hubs to fresh peers.
+  {
+    const net = linkNet();
+    const grant = { hello: 'turn-grant' };
+    const adopted = [];
+    const a = peer('peer-aaaa', net, 'review-unit5', {
+      turn: { current: () => grant, adopt: () => false },
+    });
+    const b = peer('peer-bbbb', net, 'review-unit5', {
+      turn: { current: () => null, adopt: (g) => (adopted.push(g), true) },
+    });
+    await waitFor(() => adopted.length > 0, 'grant shared');
+    assert.deepEqual(adopted[0], grant, 'grant arrives intact');
+    a.mesh.destroy();
+    b.mesh.destroy();
+    console.log('mesh-unit: turn grant ok');
+  }
 } finally {
   for (const m of meshes) {
     try {
