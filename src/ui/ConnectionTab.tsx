@@ -554,6 +554,21 @@ export function ConnectionTab({
                           {bytes(p.bytesIn)} / {bytes(p.bytesOut)}
                         </span>
                       ) : null}
+                      {p.queued > 0 ? (
+                        <span>
+                          {bytes(p.queued)} {t(locale, 'p2pQueued')}
+                        </span>
+                      ) : null}
+                      {p.droppedAwareness > 0 ? (
+                        <span>
+                          {p.droppedAwareness} {t(locale, 'p2pDropped')}
+                        </span>
+                      ) : null}
+                      {p.relay && p.relay.queuedHot + p.relay.queuedBulk > 0 ? (
+                        <span>
+                          {bytes(p.relay.queuedHot + p.relay.queuedBulk)} {t(locale, 'p2pQueued')}
+                        </span>
+                      ) : null}
                       {p.attempts > 1 && p.state !== 'open' ? <span>#{p.attempts}</span> : null}
                       {p.state !== 'open' && p.lastError ? <span className="p2p-warn">{p.lastError}</span> : null}
                       {p.lastDirectError ? <span className="p2p-warn">direct: {p.lastDirectError}</span> : null}

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.25
+
+### Queue pressure visible in peer details
+
+- The backpressure counters shipped in 0.17.3/0.17.13 were
+  diagnostics-only. Peer details now show queued bytes, dropped
+  awareness and relay backlog when nonzero (all three locales).
+
 ## 0.17.24
 
 ### Quieter mesh: neighbors gossip only on change + faster arrow sweep
