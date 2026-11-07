@@ -170,7 +170,7 @@ type BlobRequest = {
 };
 
 /** Merge [s,e) into spans, return newly covered byte count. */
-function spanAdd(spans: Array<{ s: number; e: number }>, s: number, e: number): number {
+export function spanAdd(spans: Array<{ s: number; e: number }>, s: number, e: number): number {
   let fresh = e - s;
   let at = 0;
   while (at < spans.length && spans[at].e < s) at++;

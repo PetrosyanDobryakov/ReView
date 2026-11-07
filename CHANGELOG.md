@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.17.21
+
+### Mesh unit tests without cargo (fake hub + memory links)
+
+- `p2p-test` needs a Rust build; nothing verified the mesh here. New
+  `mesh-unit-test` (fake signaling hub, in-memory links) pins reassembly
+  caps, span accounting, queue caps, sync, awareness cap, blob failover
+  and post-burst convergence. Wired into `npm test`.
+
 ## 0.17.20
 
 ### One read per patch, not two
