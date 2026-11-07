@@ -4632,6 +4632,26 @@ export class Engine {
     this.detachShape(key);
     const cb = (ev: Y.YMapEvent<unknown>) => {
       const old = this.views.get(key);
+      // Move fast path: drags patch only x/y at pointer rate — patch the
+      // cached view in place instead of re-reading (and copying) the whole
+      // shape, points arrays included, on every flush.
+      const changed = ev?.keysChanged;
+      if (old && changed && changed.size > 0) {
+        let moveOnly = true;
+        changed.forEach((k) => {
+          if (k !== 'x' && k !== 'y') moveOnly = false;
+        });
+        if (moveOnly) {
+          const nx = m.get('x');
+          const ny = m.get('y');
+          if (typeof nx === 'number') old.x = nx;
+          if (typeof ny === 'number') old.y = ny;
+          this.grid.upsert(key, this.spatialBox(old));
+          this.followMediaState(key, old);
+          this.dirty = true;
+          return;
+        }
+      }
       const v = this.migrateLegacyAudio(key, { ...store.readShape(m), id: key });
       const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
       // Card flip / dice roll: (re)start the local animation on any change,
@@ -4648,7 +4668,6 @@ export class Engine {
       this.dirty = true;
       if (!this.selection.has(key)) return;
       let styleish = false;
-      const changed = ev?.keysChanged;
       if (!changed || changed.size === 0) {
         styleish = true;
       } else {

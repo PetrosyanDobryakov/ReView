@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.19
+
+### Drags skip full shape re-reads
+
+- Every pointer-rate x/y patch re-read the whole shape (copying point
+  arrays) in the engine observer. Moves now patch the cached view in
+  place — same pixels, no per-flush array copies.
+
 ## 0.17.18
 
 ### Home skips weight scans for session-only boards
