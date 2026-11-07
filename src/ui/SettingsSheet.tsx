@@ -949,10 +949,10 @@ export function SettingsSheet({
                       }
                     }}
                   >
-                    {locale === 'ru' ? 'Конвертировать существующие (ч/б ↔)' : locale === 'zh' ? '转换现有墨迹' : 'Convert existing ink (b/w)'}
+                    {t(locale, 'adaptInkConvert')}
                   </button>
                   <p className="sheet-hint">
-                    <SwapText text={locale === 'ru' ? 'Одноразово: чёрный на тёмной → белый, белый на светлой → чёрный. Остальные цвета не трогает.' : locale === 'zh' ? '一次性：深底黑变白，浅底白变黑。其他颜色不变。' : 'One-time: black on dark → white, white on light → black. Other colors unchanged.'} />
+                    <SwapText text={t(locale, 'adaptInkHint')} />
                   </p>
                   <button
                     type="button"

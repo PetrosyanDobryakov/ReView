@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.23
+
+### Ink-convert strings move into the dictionary
+
+- The adapt-ink button and hint were hardcoded ternaries outside i18n.
+  Now `adaptInkConvert` in all three locales, hint reuses `adaptInkHint`.
+
 ## 0.17.22
 
 ### TURN grants only over trusted hubs
