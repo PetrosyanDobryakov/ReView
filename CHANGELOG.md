@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.20
+
+### One read per patch, not two
+
+- Every shape patch ran `readShape` twice: once in the board-level
+  observer, once in the per-shape observer (same transaction). The
+  board level now skips updates the shape observer already covers.
+
 ## 0.17.19
 
 ### Drags skip full shape re-reads

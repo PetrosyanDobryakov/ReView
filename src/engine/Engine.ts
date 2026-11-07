@@ -4587,6 +4587,11 @@ export class Engine {
       } else if (store.isOnActivePage(key)) {
         const m = store.board.get(key);
         if (m) {
+          // Updates are already handled by the per-shape observer from
+          // attachShape (same transaction) — re-reading here did every
+          // patch twice. Only adds / re-attaches go through the full path.
+          const obs = this.shapeObs.get(key);
+          if (change.action === 'update' && obs && obs.m === m && this.views.has(key)) return;
           const v = this.migrateLegacyAudio(key, { ...store.readShape(m), id: key });
           this.views.set(key, v);
           this.grid.upsert(key, this.spatialBox(v));
