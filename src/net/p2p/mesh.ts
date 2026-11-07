@@ -973,8 +973,16 @@ export class Mesh {
     }
   }
 
+  private lastAnnounced = '';
+
   private announceNeighbors(): void {
     const open = [...this.entries.values()].filter((e) => e.link?.state === 'open').map((e) => e.peer);
+    open.sort();
+    const key = open.join('\0');
+    // Called on every link/hub event; the set rarely changes — skip the
+    // encode + N sends when it didn't.
+    if (key === this.lastAnnounced) return;
+    this.lastAnnounced = key;
     const msg = frame(NEIGHBORS as Frame, utf8.encode(JSON.stringify(open)));
     for (const e of this.entries.values()) this.sendTo(e, msg);
   }

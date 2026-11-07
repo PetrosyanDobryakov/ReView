@@ -4604,9 +4604,10 @@ export class Engine {
       }
     });
     if (deleted.length) {
+      const gone = new Set(deleted);
       const toDelete: string[] = [];
       for (const [aid, av] of this.views) {
-        if (av.type === 'arrow' && ((av.fromId && deleted.includes(av.fromId)) || (av.toId && deleted.includes(av.toId!)))) toDelete.push(aid);
+        if (av.type === 'arrow' && ((av.fromId && gone.has(av.fromId)) || (av.toId && gone.has(av.toId!)))) toDelete.push(aid);
       }
       if (toDelete.length) store.removeShapes(toDelete);
     }

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.24
+
+### Quieter mesh: neighbors gossip only on change + faster arrow sweep
+
+- `announceNeighbors` fired on every link/hub event; now skipped when
+  the open set is unchanged. Mass-delete arrow sweep uses a Set.
+
 ## 0.17.23
 
 ### Ink-convert strings move into the dictionary
