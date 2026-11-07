@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.17.17
+
+### Wire media-roles-test into npm test
+
+- The test existed and passed but never ran in the suite. One line.
+
 ## 0.17.16
 
 ### One copy helper for all three UIs
