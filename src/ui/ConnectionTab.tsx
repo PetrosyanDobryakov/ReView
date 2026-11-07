@@ -34,6 +34,7 @@ import {
   type SyncStatus,
 } from '../net';
 import { t, type MessageKey } from './i18n';
+import { copyText } from '../core/pointerEnv';
 import { SlideTrack } from './SlideTrack';
 import { SwapText } from './SwapText';
 
@@ -105,32 +106,6 @@ function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-async function copy(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function copyFallback(text: string): Promise<boolean> {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -261,7 +236,7 @@ export function ConnectionTab({
       null,
       1,
     );
-    if ((await copy(text)) || (await copyFallback(text))) {
+    if (await copyText(text)) {
       setDiagCopied(true);
       window.setTimeout(() => setDiagCopied(false), 2000);
     }
@@ -280,7 +255,7 @@ export function ConnectionTab({
     }
     try {
       const { url } = await resolveInviteBoardUrl(boardId);
-      if (url && ((await copy(url)) || (await copyFallback(url)))) {
+      if (url && (await copyText(url))) {
         flashInvite(true);
         return;
       }
@@ -290,7 +265,7 @@ export function ConnectionTab({
     try {
       const info = await fetchLanAddresses();
       const host = inviteHostname(info.addresses);
-      if (host && ((await copy(lanBoardUrl(boardId, host, info.port))) || (await copyFallback(lanBoardUrl(boardId, host, info.port))))) {
+      if (host && (await copyText(lanBoardUrl(boardId, host, info.port)))) {
         flashInvite(true);
         return;
       }
@@ -306,7 +281,7 @@ export function ConnectionTab({
       flashInvite(false);
       return;
     }
-    flashInvite((await copy(appInviteUrl(boardId))) || (await copyFallback(appInviteUrl(boardId))));
+    flashInvite(await copyText(appInviteUrl(boardId)));
   };
 
   const kick = (peer: string) => {

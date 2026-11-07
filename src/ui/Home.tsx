@@ -26,6 +26,7 @@ import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
 import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_V2_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
+import { copyText } from '../core/pointerEnv';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
 import { isOrbitPaper } from '../core/orbit';
@@ -232,24 +233,6 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const dismissNotice = useCallback((n: Notice) => {
     setNotices((list) => list.filter((x) => x.id !== n.id));
   }, []);
-  const copyTextFallback = async (text: string): Promise<boolean> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {}
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      ta.remove();
-      if (ok) return true;
-    } catch {}
-    return false;
-  };
   const handleCopyLink = async (id: string) => {
     let url = `${window.location.origin}${boardUrl(id)}`;
     if (isDesktop()) url = appInviteUrl(id);
@@ -259,7 +242,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     } catch {
       /* keep origin URL */
     }
-    const ok = await copyTextFallback(url);
+    const ok = await copyText(url);
     if (ok) showCopyToast(t(locale, 'membersInviteCopied'));
     else showCopyToast(t(locale, 'membersInviteFail'));
   };

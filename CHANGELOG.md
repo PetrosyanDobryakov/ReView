@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.16
+
+### One copy helper for all three UIs
+
+- Members, Connection and Home each carried their own clipboard +
+  textarea fallback copy. Now a single `copyText` in `pointerEnv`
+  (-40 lines, same behavior everywhere).
+
 ## 0.17.15
 
 ### Export says why it failed (too large vs failed)
