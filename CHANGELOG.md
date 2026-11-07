@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.18
+
+### Home skips weight scans for session-only boards
+
+- Every Home visit probed IndexedDB for every board — session-only
+  (remote, unsaved) boards hold nothing local, yet each miss could cost
+  up to a second of open() timeouts. Now skipped by storage kind.
+
 ## 0.17.17
 
 ### Wire media-roles-test into npm test

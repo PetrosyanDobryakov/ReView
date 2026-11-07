@@ -169,6 +169,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     try {
       const entries = await Promise.all(
         list.map(async (b) => {
+          // Session-only boards hold nothing locally — skip the IDB probe
+          // (each miss costs up to a second of open() timeouts).
+          if (boardStorageKind(b) !== 'onDevice') return [b.id, 0] as const;
           try {
             const bytes = await estimateBoardBytes(b.id);
             return [b.id, bytes] as const;
