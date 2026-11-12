@@ -29,6 +29,8 @@ import {
   measureMixedLine,
   arrowHitPolyline,
   setPaintZoom,
+  mediaLodForScreenPx,
+  type MediaPaintLod,
   boardNeedsMediaPaint,
   toggleVideoPlayback,
   toggleAudioPlayback,
@@ -3749,10 +3751,11 @@ export class Engine {
     textColor: string,
     paperBg: string,
     hideText: boolean,
-    hideCell: { row: number; col: number } | undefined
+    hideCell: { row: number; col: number } | undefined,
+    mediaLod?: MediaPaintLod
   ): void {
     const now = this.frameNow;
-    const draw = (view: ShapeView): void => drawShape(ctx, view, textColor, paperBg, hideText, hideCell);
+    const draw = (view: ShapeView): void => drawShape(ctx, view, textColor, paperBg, hideText, hideCell, false, mediaLod);
     if (this.reduceMotion) {
       this.flipAnims.delete(v.id);
       this.dieAnims.delete(v.id);
@@ -6326,6 +6329,12 @@ export class Engine {
     }
     const zInv = 1 / this.camera.zoom;
     const draw = (v: ShapeView) => {
+      // Media LOD follows the same screen-size rule as the fetch warmer:
+      // thumbnails for tiny-on-screen shapes, full bytes otherwise.
+      const mediaLod =
+        v.type === 'image' || v.type === 'video' || v.type === 'doc'
+          ? mediaLodForScreenPx(Math.max(v.w, v.h) * this.camera.zoom)
+          : undefined;
       // Stage 2 read path: warm blob bytes for the LOD resolution this view needs.
       if (v.type === 'image' || v.type === 'video' || v.type === 'audio' || v.type === 'doc') {
         const screenPx = Math.max(v.w, v.h) * this.camera.zoom;
@@ -6367,13 +6376,13 @@ export class Engine {
       if (wholeErase && orbitPaper) {
         ctx.save();
         ctx.globalAlpha = 0.28;
-        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
+        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell, false, mediaLod);
         ctx.restore();
         withShapeRotation(ctx, v, () => drawOrbitEraseMark(ctx, v, zInv));
       } else if (wholeErase) {
         ctx.save();
         ctx.globalAlpha = 0.32;
-        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell);
+        drawShape(ctx, v, theme.text, paperBg, hideText, hideCell, false, mediaLod);
         ctx.restore();
         ctx.save();
         ctx.strokeStyle = '#c96a62';
@@ -6386,7 +6395,7 @@ export class Engine {
         });
         ctx.restore();
       } else {
-        this.paintShapeFx(ctx, v, theme.text, paperBg, hideText, hideCell);
+        this.paintShapeFx(ctx, v, theme.text, paperBg, hideText, hideCell, mediaLod);
       }
     };
     // Paint in stacking order without scanning the whole board order when most

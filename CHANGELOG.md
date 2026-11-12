@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 0.17.30
+
+### Paint thumbnails when shapes are tiny + cache text layout
+
+- Photos, videos and PDF pages painted full-res even at 30 px on
+  screen. Render now passes a media LOD (same rule as the fetch
+  warmer); exports still use full bytes.
+- Text laid out twice per line per frame (regex + measureText +
+  formula lookups). Line layouts are now cached by font + size + text.
+
 ## 0.17.29
 
 ### Stop encoding the doc on the interaction path

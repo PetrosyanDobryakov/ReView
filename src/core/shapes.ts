@@ -1,5 +1,5 @@
 import { formulaImage, renderFormula } from './formula';
-import { ensureBlobUrl, resolvedBlobUrl, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
+import { ensureBlobUrl, resolvedBlobUrl, selectBlobKind, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
@@ -2029,8 +2029,37 @@ export function layoutMixedLine(ctx: CanvasRenderingContext2D, text: string, fon
 
 export function measureMixedLine(ctx: CanvasRenderingContext2D, text: string, fontSize: number): number {
   let total = 0;
-  for (const run of layoutMixedLine(ctx, text, fontSize)) total += run.w;
+  for (const run of layoutMixedLineCached(ctx, text, fontSize)) total += run.w;
   return total;
+}
+
+/**
+ * Per-line layout cache: measure + draw used to re-run the regex, several
+ * measureText calls, formula lookups and run allocations for every line on
+ * every frame. Keyed by font + size + text (ctx.font is set before both
+ * uses); LRU-capped, hits refresh recency.
+ */
+const lineLayoutCache = new Map<string, TextRun[]>();
+const LINE_LAYOUT_CACHE_MAX = 2048;
+
+export function layoutMixedLineCached(ctx: CanvasRenderingContext2D, text: string, fontSize: number): TextRun[] {
+  const key = `${ctx.font}\0${fontSize}\0${text}`;
+  const hit = lineLayoutCache.get(key);
+  if (hit) {
+    lineLayoutCache.delete(key);
+    lineLayoutCache.set(key, hit);
+    return hit;
+  }
+  const runs = layoutMixedLine(ctx, text, fontSize);
+  if (lineLayoutCache.size >= LINE_LAYOUT_CACHE_MAX) {
+    let drop = (LINE_LAYOUT_CACHE_MAX / 4) | 0;
+    for (const k of lineLayoutCache.keys()) {
+      lineLayoutCache.delete(k);
+      if (--drop <= 0) break;
+    }
+  }
+  lineLayoutCache.set(key, runs);
+  return runs;
 }
 
 function drawMixedLine(
@@ -2042,7 +2071,7 @@ function drawMixedLine(
   size: number,
   deco?: { color: string; underline?: boolean; strike?: boolean }
 ): void {
-  const runs = layoutMixedLine(ctx, line, size);
+  const runs = layoutMixedLineCached(ctx, line, size);
   const centerY = lineY + lineHeight / 2;
   let cursor = x;
   for (const run of runs) {
@@ -2084,11 +2113,13 @@ export function drawShape(
   /** Table only: hide just this cell's text (the overlay covers it while editing). */
   hideCell?: { row: number; col: number },
   /** When true, caller already applied `withShapeRotation` — avoids recursion. */
-  skipRotation = false
+  skipRotation = false,
+  /** Media LOD: 'thumb' paints the thumbnail when the shape is tiny on screen. */
+  mediaLod?: MediaPaintLod
 ): void {
   if (!skipRotation && shapeRotation(v) && v.type !== 'pen' && v.type !== 'arrow') {
     withShapeRotation(ctx, v, () =>
-      drawShape(ctx, v, textColor, boardBg, hideText, hideCell, true)
+      drawShape(ctx, v, textColor, boardBg, hideText, hideCell, true, mediaLod)
     );
     return;
   }
@@ -2096,13 +2127,13 @@ export function drawShape(
   // multiplies the ambient alpha here, so opacity works for all types.
   const ambient = v.type === 'pen' ? 1 : (v.alpha ?? 1);
   if (!(ambient < 1)) {
-    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell);
+    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell, mediaLod);
     return;
   }
   ctx.save();
   ctx.globalAlpha = ctx.globalAlpha * ambient;
   try {
-    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell);
+    drawShapeBody(ctx, v, textColor, boardBg, hideText, hideCell, mediaLod);
   } finally {
     ctx.restore();
   }
@@ -2115,7 +2146,8 @@ function drawShapeBody(
   textColor: string,
   boardBg: string,
   hideText: boolean,
-  hideCell: { row: number; col: number } | undefined
+  hideCell: { row: number; col: number } | undefined,
+  mediaLod?: MediaPaintLod
 ): void {
   switch (v.type) {
     case 'rect': {
@@ -2590,7 +2622,7 @@ function drawShapeBody(
       break;
     case 'image': {
       // Stage 2 read path: resolved blob wins, legacy `src` paints meanwhile.
-      const img = getImage(resolveBlobPaintSrc(v));
+      const img = getImage(resolveBlobPaintSrc(v, mediaLod));
       if (img && img.complete && img.naturalWidth > 0) {
         if (imageHasCrop(v)) {
           const f = cropFractions(v);
@@ -2613,7 +2645,7 @@ function drawShapeBody(
     }
     case 'video': {
       // Stage 2 read path: resolved blob wins, legacy `src` paints meanwhile.
-      const vid = getVideo(resolveBlobPaintSrc(v));
+      const vid = getVideo(resolveBlobPaintSrc(v, mediaLod));
       const ready = vid && vid.readyState >= 2 && vid.videoWidth > 0;
       if (ready && vid) {
         ctx.drawImage(vid, v.x, v.y, v.w, v.h);
@@ -2642,8 +2674,11 @@ function drawShapeBody(
       const pageBlob = v.pageBlobs?.[idx];
       const pageThumb = v.pageThumbs?.[idx];
       const blobSrc = pageBlob ? resolvedBlobUrl(pageBlob) : null;
-      const thumbSrc = !blobSrc && pageThumb ? resolvedBlobUrl(pageThumb) : null;
-      const img = getImage(selectDocPaintSrc(src, blobSrc, thumbSrc));
+      const thumbSrc = pageThumb ? resolvedBlobUrl(pageThumb) : null;
+      const img =
+        mediaLod === 'thumb'
+          ? getImage(thumbSrc ?? blobSrc ?? src)
+          : getImage(selectDocPaintSrc(src, blobSrc, thumbSrc));
       if (img && img.complete && img.naturalWidth > 0) {
         ctx.drawImage(img, v.x, v.y, v.w, v.h);
       } else {
@@ -3477,14 +3512,23 @@ function niceStep(raw: number): number {
   return nice * pow;
 }
 
+/** Media LOD for paint: full at/above this size on screen, thumb under it. `undefined` = legacy full-first (export). */
+export type MediaPaintLod = 'full' | 'thumb' | undefined;
+
+export function mediaLodForScreenPx(screenPx: number): MediaPaintLod {
+  return selectBlobKind(screenPx) === 'full' ? undefined : 'thumb';
+}
 /**
  * Paint source for a single-src media view (Stage 2 read path).
  * A resolved blob URL wins (full, else thumb); otherwise the legacy `src`
  * paints while bytes load in the background (see `warmVisibleBlobMedia`).
+ * Pass lod 'thumb' when the shape is tiny on screen: drawing a 1600px
+ * decode to 30 screen px every frame is pure upload/scale cost.
  */
-function resolveBlobPaintSrc(v: ShapeView): string {
+function resolveBlobPaintSrc(v: ShapeView, lod?: MediaPaintLod): string {
   const full = v.blob ? resolvedBlobUrl(v.blob) : null;
-  const thumb = !full && v.thumb ? resolvedBlobUrl(v.thumb) : null;
+  const thumb = v.thumb ? resolvedBlobUrl(v.thumb) : null;
+  if (lod === 'thumb') return thumb ?? full ?? v.src ?? '';
   return selectPaintSrc(v.src, full, thumb);
 }
 
