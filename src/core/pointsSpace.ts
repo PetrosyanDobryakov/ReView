@@ -37,6 +37,8 @@ export function toWorldPoints(points: number[], originX: number, originY: number
  * indices so pressures stay aligned.
  */
 export const PEN_MAX_VERTICES = 4000;
+/** RDP input is stride-capped past this many vertices (worst case is quadratic). */
+export const RDP_PRE_MAX = 6000;
 
 export function simplifyStroke(
   points: number[],
@@ -45,23 +47,41 @@ export function simplifyStroke(
 ): { points: number[]; keep: number[] } {
   const n = points.length / 2;
   if (n === 0) return { points: [], keep: [] };
-  const keepMask = new Array<boolean>(n).fill(false);
+  // RDP is quadratic in the worst case — stride huge inputs down first so a
+  // marathon stroke cannot hitch pointerup. Indices always map to `points`
+  // so pressures stay aligned.
+  let base: number[] | null = null;
+  let work = points;
+  let m = n;
+  if (n > RDP_PRE_MAX) {
+    const stride = Math.ceil((n - 1) / (RDP_PRE_MAX - 1));
+    base = [0];
+    for (let i = stride; i < n - 1; i += stride) base.push(i);
+    base.push(n - 1);
+    work = new Array<number>(base.length * 2);
+    for (let k = 0; k < base.length; k++) {
+      work[k * 2] = points[base[k] * 2];
+      work[k * 2 + 1] = points[base[k] * 2 + 1];
+    }
+    m = base.length;
+  }
+  const keepMask = new Array<boolean>(m).fill(false);
   keepMask[0] = true;
-  keepMask[n - 1] = true;
+  keepMask[m - 1] = true;
   const eps2 = epsilon * epsilon;
-  const stack: Array<[number, number]> = n > 2 ? [[0, n - 1]] : [];
+  const stack: Array<[number, number]> = m > 2 ? [[0, m - 1]] : [];
   while (stack.length) {
     const [a, b] = stack.pop()!;
-    const ax = points[a * 2];
-    const ay = points[a * 2 + 1];
-    const dx = points[b * 2] - ax;
-    const dy = points[b * 2 + 1] - ay;
+    const ax = work[a * 2];
+    const ay = work[a * 2 + 1];
+    const dx = work[b * 2] - ax;
+    const dy = work[b * 2 + 1] - ay;
     const len2 = dx * dx + dy * dy;
     let dmax = 0;
     let idx = -1;
     for (let i = a + 1; i < b; i++) {
-      const px = points[i * 2] - ax;
-      const py = points[i * 2 + 1] - ay;
+      const px = work[i * 2] - ax;
+      const py = work[i * 2 + 1] - ay;
       let d2: number;
       if (len2 === 0) {
         d2 = px * px + py * py;
@@ -82,7 +102,7 @@ export function simplifyStroke(
     }
   }
   let indices: number[] = [];
-  for (let i = 0; i < n; i++) if (keepMask[i]) indices.push(i);
+  for (let i = 0; i < m; i++) if (keepMask[i]) indices.push(base ? base[i] : i);
   if (indices.length > maxVertices && maxVertices >= 2) {
     const stride = Math.ceil((indices.length - 1) / (maxVertices - 1));
     const capped = indices.filter((_, k) => k % stride === 0);

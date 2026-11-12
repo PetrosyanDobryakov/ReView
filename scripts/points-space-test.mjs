@@ -9,6 +9,7 @@ import {
   simplifyStroke,
   quantizePoints,
   PEN_MAX_VERTICES,
+  RDP_PRE_MAX,
   beginWriteGesture,
   configureWriteGate,
   closeWriteGate,
@@ -164,6 +165,17 @@ resetWriteGate();
   assert.equal(PEN_MAX_VERTICES, 4000, 'default pen cap');
 
   assert.deepEqual(quantizePoints([0.04, 0.06, 1.05, -0.06]), [0, 0.1, 1.1, -0.1], '0.1 grid');
+
+  // Marathon input: pre-strided before RDP, endpoints survive, cap holds.
+  const noisy = [];
+  for (let i = 0; i < 8000; i++) noisy.push(i, (i * 37) % 11);
+  const t0 = Date.now();
+  const huge = simplifyStroke(noisy, 1.25);
+  assert.ok(Date.now() - t0 < 2000, 'marathon simplify stays fast');
+  assert.ok(huge.keep.length <= PEN_MAX_VERTICES, 'cap holds on marathon input');
+  assert.equal(huge.keep[0], 0, 'marathon keeps first');
+  assert.equal(huge.keep[huge.keep.length - 1], 7999, 'marathon keeps last');
+  assert.equal(RDP_PRE_MAX, 6000, 'rdp pre-cap');
 }
 
 console.log('points-space + writeGate: ok');

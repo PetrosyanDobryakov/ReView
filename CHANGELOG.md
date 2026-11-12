@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.28
+
+### RDP can't hitch pointerup anymore
+
+- Simplify ran full RDP (quadratic worst case) on the raw stroke.
+  Inputs past 6000 vertices are stride-thinned first; pressures stay
+  aligned through the index map, cap still holds.
+
 ## 0.17.27
 
 ### Cap formula images + drop a per-frame arrow alloc
