@@ -1,5 +1,7 @@
 # Changelog
 
+> Stable: 0.17.29 (`p2p-desktop-stable` tag) — last known-good for daily use.
+
 ## Unreleased
 
 ## 0.17.29
