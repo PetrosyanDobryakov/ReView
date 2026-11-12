@@ -1845,23 +1845,29 @@ function strokeHalfWidth(base: number, pressure: number): number {
   return Math.max(0.25, (base * (0.35 + 0.65 * pressure)) / 2);
 }
 
-/** Smooth quadratic polyline (constant width). */
-function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: number[], width: number): void {
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(pts[0], pts[1]);
+/** Smooth quadratic polyline (constant width), recorded — not painted. */
+function buildSmoothPath(path: Path2D, pts: number[]): void {
+  path.moveTo(pts[0], pts[1]);
   if (pts.length === 4) {
-    ctx.lineTo(pts[2], pts[3]);
+    path.lineTo(pts[2], pts[3]);
   } else {
     for (let i = 2; i < pts.length - 2; i += 2) {
       const xc = (pts[i] + pts[i + 2]) / 2;
       const yc = (pts[i + 1] + pts[i + 3]) / 2;
-      ctx.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
+      path.quadraticCurveTo(pts[i], pts[i + 1], xc, yc);
     }
     const n = pts.length - 4;
-    ctx.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
+    path.quadraticCurveTo(pts[n], pts[n + 1], pts[n + 2], pts[n + 3]);
   }
-  ctx.stroke();
+}
+
+/** Smooth quadratic polyline (constant width). */
+function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: number[], width: number): void {
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  const path = new Path2D();
+  buildSmoothPath(path, pts);
+  ctx.stroke(path);
 }
 
 /**
@@ -1871,8 +1877,9 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: number[], width: n
 /** Reused ribbon buffer (left edge, then right edge): no per-frame arrays. */
 let ribbonScratch: Float64Array | null = null;
 
-function strokePressureRibbon(
-  ctx: CanvasRenderingContext2D,
+/** Variable-width ribbon outline from stylus pressure, recorded — not painted. */
+function buildRibbonBody(
+  path: Path2D,
   pts: number[],
   width: number,
   pressures: number[]
@@ -1901,24 +1908,45 @@ function strokePressureRibbon(
     buf[j] = x + ty * r;
     buf[j + 1] = y - tx * r;
   }
-  ctx.beginPath();
-  ctx.moveTo(buf[0], buf[1]);
-  for (let i = 1; i < n; i++) ctx.lineTo(buf[i * 2], buf[i * 2 + 1]);
+  path.moveTo(buf[0], buf[1]);
+  for (let i = 1; i < n; i++) path.lineTo(buf[i * 2], buf[i * 2 + 1]);
   const ro = 4 * n;
-  for (let i = n - 1; i >= 0; i--) ctx.lineTo(buf[ro + i * 2], buf[ro + i * 2 + 1]);
-  ctx.closePath();
-  ctx.fill();
-  // Round caps so ends match the smooth constant-width path.
-  ctx.beginPath();
-  ctx.arc(pts[0], pts[1], strokeHalfWidth(width, pressures[0] ?? 0.5), 0, Math.PI * 2);
-  ctx.arc(
+  for (let i = n - 1; i >= 0; i--) path.lineTo(buf[ro + i * 2], buf[ro + i * 2 + 1]);
+  path.closePath();
+}
+
+/** Round end caps (same pixels as the old two-fill sequence, disjoint paths). */
+function buildRibbonCaps(
+  path: Path2D,
+  pts: number[],
+  width: number,
+  pressures: number[]
+): void {
+  const n = pts.length / 2;
+  if (n < 2) return;
+  path.arc(pts[0], pts[1], strokeHalfWidth(width, pressures[0] ?? 0.5), 0, Math.PI * 2);
+  path.arc(
     pts[pts.length - 2],
     pts[pts.length - 1],
     strokeHalfWidth(width, pressures[n - 1] ?? 0.5),
     0,
     Math.PI * 2
   );
-  ctx.fill();
+}
+
+function strokePressureRibbon(
+  ctx: CanvasRenderingContext2D,
+  pts: number[],
+  width: number,
+  pressures: number[]
+): void {
+  if (pts.length / 2 < 2) return;
+  const body = new Path2D();
+  buildRibbonBody(body, pts, width, pressures);
+  ctx.fill(body);
+  const caps = new Path2D();
+  buildRibbonCaps(caps, pts, width, pressures);
+  ctx.fill(caps);
 }
 
 export function drawPenStroke(
@@ -1931,6 +1959,101 @@ export function drawPenStroke(
   dash?: boolean
 ): void {
   paintPenStroke(ctx, pts, width, color, alpha, pressures, dash);
+}
+
+/**
+ * Cached pen geometry: a committed stroke redraws identically every dirty
+ * frame, so record its path once and replay it (rebuilding only when the
+ * point/pressure arrays, width or dash change identity). Dashed strokes
+ * benefit most — dash rasterization is per-frame otherwise. Paint state
+ * (color/alpha/dash pattern) is NOT baked in, only geometry.
+ */
+type PenPathEntry = {
+  pts: number[];
+  pressures: number[] | undefined;
+  width: number;
+  dash: boolean;
+  fill: boolean;
+  body: Path2D;
+  caps: Path2D | null;
+};
+const penPathCache = new Map<string, PenPathEntry>();
+const PEN_PATH_CACHE_MAX = 512;
+
+function penPathFor(
+  id: string,
+  pts: number[],
+  width: number,
+  pressures: number[] | undefined,
+  dash: boolean
+): PenPathEntry {
+  const hit = penPathCache.get(id);
+  if (
+    hit &&
+    hit.pts === pts &&
+    hit.pressures === pressures &&
+    hit.width === width &&
+    hit.dash === dash
+  ) {
+    penPathCache.delete(id);
+    penPathCache.set(id, hit);
+    return hit;
+  }
+  const varies = !dash && pressureVaries(pressures, pts.length / 2);
+  const body = new Path2D();
+  let caps: Path2D | null = null;
+  if (varies) {
+    buildRibbonBody(body, pts, width, pressures!);
+    caps = new Path2D();
+    buildRibbonCaps(caps, pts, width, pressures!);
+  } else {
+    buildSmoothPath(body, pts);
+  }
+  if (dash) {
+    // Dashes ride the stroke path; the pattern itself is set at paint time.
+  }
+  const entry: PenPathEntry = { pts, pressures, width, dash, fill: varies, body, caps };
+  if (penPathCache.has(id)) penPathCache.delete(id);
+  while (penPathCache.size >= PEN_PATH_CACHE_MAX) {
+    const oldest = penPathCache.keys().next();
+    if (oldest.done) break;
+    penPathCache.delete(oldest.value);
+  }
+  penPathCache.set(id, entry);
+  return entry;
+}
+
+/** Same geometry as paintPenStroke, recorded — used only for committed shapes with stable ids. */
+export function drawCachedPenStroke(
+  ctx: CanvasRenderingContext2D,
+  id: string,
+  pts: number[],
+  width: number,
+  color: string,
+  alpha: number,
+  pressures?: number[],
+  dash?: boolean
+): void {
+  if (pts.length === 2 || typeof Path2D !== 'function') {
+    // Single dot: trivial cost, skip the cache. Same when Path2D is
+    // unavailable (Node test stubs) — paint directly instead.
+    paintPenStroke(ctx, pts, width, color, alpha, pressures, dash);
+    return;
+  }
+  const entry = penPathFor(id, pts, width, pressures, !!dash);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = width;
+  if (dash) ctx.setLineDash([Math.max(2, width * 1.6), Math.max(2, width * 1.2)]);
+  if (entry.fill) {
+    ctx.fill(entry.body);
+    if (entry.caps) ctx.fill(entry.caps);
+  } else ctx.stroke(entry.body);
+  ctx.restore();
 }
 
 function paintPenStroke(
@@ -2607,8 +2730,9 @@ function drawShapeBody(
       break;
     }
     case 'pen':
-      drawPenStroke(
+      drawCachedPenStroke(
         ctx,
+        v.id,
         v.points ?? [],
         v.strokeWidth,
         displayInk(v.stroke, boardBg),

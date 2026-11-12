@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 0.17.31
+
+### Cached pen paths (helps dashed strokes most)
+
+- Committed strokes rebuilt their full geometry every dirty frame.
+  Now the Path2D is recorded once per shape version and replayed
+  (same pixels: same commands, same two-fill order for ribbons).
+  Transient previews (drafts, laser, erase) still paint direct.
+
 ## 0.17.30
 
 ### Paint thumbnails when shapes are tiny + cache text layout
