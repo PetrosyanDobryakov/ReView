@@ -3801,7 +3801,7 @@ export function drawArrow(ctx: CanvasRenderingContext2D, v: ShapeView, boardBg?:
   ctx.beginPath();
   ctx.moveTo(curve.start.x, curve.start.y);
   if (curve.kind === 'poly') {
-    for (const p of curve.points.slice(1)) ctx.lineTo(p.x, p.y);
+    for (let i = 1; i < curve.points.length; i++) ctx.lineTo(curve.points[i].x, curve.points[i].y);
   } else if (curve.kind === 'cubic') {
     ctx.bezierCurveTo(
       curve.control1.x,

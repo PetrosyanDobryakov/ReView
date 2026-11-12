@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.27
+
+### Cap formula images + drop a per-frame arrow alloc
+
+- `formulaImage` minted a cache key per zoom step with no cap.
+  Now LRU-capped at 96, hot entries refreshed.
+- Arrow polyline no longer `slice(1)`s a copy every frame.
+
 ## 0.17.26
 
 ### Pressure ribbon without per-frame garbage

@@ -15,6 +15,8 @@ interface CachedSvg extends FormulaMetrics {
 
 const svgCache = new Map<string, CachedSvg>();
 const imgCache = new Map<string, HTMLImageElement>();
+/** Zoom steps mint a key per size — cap it like the other media caches. */
+const IMG_CACHE_MAX = 96;
 const readyListeners = new Set<() => void>();
 
 let mathJaxReady = false;
@@ -104,13 +106,24 @@ export function formulaImage(
   if (!r.valid || !isFinite(w) || !isFinite(h)) return { img: null, w, h };
   const key = `${latex}@${w}x${h}`;
   const hit = imgCache.get(key);
-  if (hit) return { img: hit.complete && hit.naturalWidth > 0 ? hit : null, w, h };
+  if (hit) {
+    // Refresh recency: hot formulas survive eviction.
+    imgCache.delete(key);
+    imgCache.set(key, hit);
+    return { img: hit.complete && hit.naturalWidth > 0 ? hit : null, w, h };
+  }
   const px = r.svg
     .replace(/width="[^"]+"/, `width="${w}"`)
     .replace(/height="[^"]+"/, `height="${h}"`);
   const img = new Image();
   img.onload = () => notifyReady();
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(px);
+  if (imgCache.has(key)) imgCache.delete(key);
+  while (imgCache.size >= IMG_CACHE_MAX) {
+    const oldest = imgCache.keys().next();
+    if (oldest.done) break;
+    imgCache.delete(oldest.value);
+  }
   imgCache.set(key, img);
   return { img: null, w, h };
 }
