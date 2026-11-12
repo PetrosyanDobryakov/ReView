@@ -21,6 +21,8 @@ type LiveFn = (batch: PatchBatch) => void;
 const HEAVY_FLUSH_MS = 16;
 
 let gestureDepth = 0;
+/** Last time a gesture fully closed (for post-gesture quiet periods). */
+let lastGestureEndAt = 0;
 let pendingHeavy = new Map<string, ShapePatch>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let flushToDoc: FlushFn | null = null;
@@ -36,12 +38,29 @@ export function beginWriteGesture(): void {
 }
 
 export function endWriteGesture(): void {
-  gestureDepth = Math.max(0, gestureDepth - 1);
+  if (gestureDepth <= 0) {
+    gestureDepth = 0;
+    flushHeavyNow();
+    return;
+  }
+  gestureDepth -= 1;
+  if (gestureDepth === 0) {
+    try {
+      lastGestureEndAt = Date.now();
+    } catch {
+      lastGestureEndAt = 0;
+    }
+  }
   flushHeavyNow();
 }
 
 export function isWriteGestureActive(): boolean {
   return gestureDepth > 0;
+}
+
+/** Ms timestamp of the last fully-closed gesture (0 = none yet). */
+export function lastGestureEndMs(): number {
+  return lastGestureEndAt;
 }
 
 export function mergeShapePatch(base: ShapePatch, next: ShapePatch): ShapePatch {

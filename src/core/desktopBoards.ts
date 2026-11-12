@@ -7,10 +7,12 @@
 
 import * as Y from 'yjs';
 import { getBoard, importBoardMeta, type BoardMeta } from './boards';
-import { isWriteGestureActive } from './writeGate';
+import { isWriteGestureActive, lastGestureEndMs } from './writeGate';
 import { isDesktop, listBoardFiles, loadBoardFile, saveBoardFile } from '../net/p2p/desktop';
 
 const SAVE_DEBOUNCE_MS = 1_500;
+/** Do not encode right after a gesture: tool switch / copy / zoom land here. */
+const SAVE_POST_GESTURE_GRACE_MS = 8_000;
 /** Full-doc encodes block the thread for seconds on huge boards — back off. */
 const SAVE_MIN_INTERVAL_BIG_MS = 60_000;
 const SAVE_MIN_INTERVAL_MID_MS = 15_000;
@@ -91,6 +93,13 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
         return inFlight;
       }
       const now = Date.now();
+      // Just finished drawing and already switching tools? The encode would
+      // land exactly on the next interaction — wait out the grace period.
+      const sinceGesture = now - lastGestureEndMs();
+      if (lastGestureEndMs() > 0 && sinceGesture < SAVE_POST_GESTURE_GRACE_MS) {
+        if (!timer) timer = setTimeout(() => void save(), SAVE_POST_GESTURE_GRACE_MS - sinceGesture);
+        return inFlight;
+      }
       const wait = intervalFor(lastSavedBytes + pendingBytes) - (now - lastSavedAt);
       if (wait > 0) {
         if (!timer) timer = setTimeout(() => void save(), wait);

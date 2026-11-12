@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.17.29
+
+### Stop encoding the doc on the interaction path
+
+- Auto-compact check ran a full `encodeStateAsUpdate` on every
+  IndexedDB sync. Now a running byte estimate gates it; exact numbers
+  only inside a real compact (which recalibrates the estimate).
+- Desktop mirror waits out 8 s after each gesture — the encode no
+  longer lands on the tool switch / copy / zoom right after drawing.
+- Paste downscales huge photos in halving steps with yields between
+  them instead of one giant blocking draw + encode.
+
 ## 0.17.28
 
 ### RDP can't hitch pointerup anymore

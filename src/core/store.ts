@@ -82,7 +82,20 @@ function capUndoStack(): void {
 export let persistence: IndexeddbPersistence | null = null;
 
 let lastDocLog = 0;
+/**
+ * Running doc-byte estimate: every applied update adds its wire size.
+ * Replaces a full Y.encodeStateAsUpdate on the hot path (the auto-compact
+ * check used to encode the whole doc on every IndexedDB sync). Conservative
+ * (deletes never shrink it); compactBoard recalibrates with exact numbers.
+ */
+let estDocBytes = 0;
+
+/** Approximate live doc bytes without encoding. */
+export function docByteEstimate(): number {
+  return estDocBytes;
+}
 function logDocUpdate(size: number, origin: unknown, tr?: unknown): void {
+  if (typeof size === 'number' && size > 0) estDocBytes += size;
   boardMediaRefs = null;
   // A peer's edit may reference media this device does not hold yet.
   if (origin !== LOCAL_ORIGIN && !(origin instanceof IndexeddbPersistence)) scheduleMediaPrefetch();
@@ -181,7 +194,7 @@ async function maybeAutoCompact(): Promise<void> {
       netLog.info('autoCompact skipped (replicas present)', () => ({ boardId: currentBoardId }));
       return;
     }
-    const before = Y.encodeStateAsUpdate(doc).length;
+    const before = estDocBytes;
     const liveShapes = board.size;
     // thresholds: compact if >4MB total, or empty board with >1MB tombstones
     const should = before > 4 * 1024 * 1024 || (liveShapes === 0 && before > 1 * 1024 * 1024) || (liveShapes < 20 && before > 8 * 1024 * 1024);
@@ -511,6 +524,7 @@ export function initBoard(boardId: string): void {
     doc.destroy();
   } catch {}
   doc = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
+  estDocBytes = 0;
   board = doc.getMap<Y.Map<unknown>>('shapes');
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
@@ -565,6 +579,7 @@ export function leaveBoard(): void {
   pagesObserved = false;
   try { doc.destroy(); } catch {}
   doc = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
+  estDocBytes = 0;
   board = doc.getMap<Y.Map<unknown>>('shapes');
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
@@ -1389,6 +1404,8 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     closeWriteGate();
     try {
       before = Y.encodeStateAsUpdate(doc).length;
+      // Recalibrate the running estimate with the exact number.
+      estDocBytes = before;
     } catch {
       return { before: 0, after: 0, didCompact: false };
     }
@@ -1512,6 +1529,7 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     bumpCurrentBoard();
     emitBoardReady();
     netLog.info('compactBoard done', () => ({ boardId, before, after }));
+    estDocBytes = after;
     return { before, after, didCompact: true };
   } finally {
     compactInFlight = false;

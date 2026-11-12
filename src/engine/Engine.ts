@@ -2685,9 +2685,29 @@ export class Engine {
           sh = Math.max(1, img.naturalHeight);
         } else {
           const maxStore = 1600;
-          const storeScale = Math.min(1, maxStore / Math.max(img.naturalWidth, img.naturalHeight));
-          sw = Math.max(1, Math.round(img.naturalWidth * storeScale));
-          sh = Math.max(1, Math.round(img.naturalHeight * storeScale));
+          // Step down in halves with yields between steps: one giant
+          // drawImage + toDataURL of a phone photo is a single main-thread
+          // block the user feels as a paste freeze. Halving is also sharper.
+          let stepW = Math.max(1, img.naturalWidth);
+          let stepH = Math.max(1, img.naturalHeight);
+          let stepSrc: HTMLCanvasElement | HTMLImageElement = img;
+          while (Math.max(stepW, stepH) / 2 > maxStore) {
+            const hw = Math.max(1, Math.round(stepW / 2));
+            const hh = Math.max(1, Math.round(stepH / 2));
+            const half = document.createElement('canvas');
+            half.width = hw;
+            half.height = hh;
+            const hctx = half.getContext('2d');
+            if (!hctx) break;
+            hctx.drawImage(stepSrc, 0, 0, hw, hh);
+            stepSrc = half;
+            stepW = hw;
+            stepH = hh;
+            await new Promise((r) => setTimeout(r, 0));
+          }
+          const storeScale = Math.min(1, maxStore / Math.max(stepW, stepH));
+          sw = Math.max(1, Math.round(stepW * storeScale));
+          sh = Math.max(1, Math.round(stepH * storeScale));
           const scratch = document.createElement('canvas');
           scratch.width = sw;
           scratch.height = sh;
@@ -2696,7 +2716,8 @@ export class Engine {
             this.events.onError?.(t(locale, 'imageFailed'));
             return;
           }
-          sctx.drawImage(img, 0, 0, sw, sh);
+          sctx.drawImage(stepSrc, 0, 0, sw, sh);
+          await new Promise((r) => setTimeout(r, 0));
           const jpeg = mime === 'image/jpeg' || mime === 'image/jpg';
           src = jpeg ? scratch.toDataURL('image/jpeg', 0.85) : scratch.toDataURL('image/png');
         }
