@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 0.17.32
+
+### Skip unreadable micro-text while zoomed out
+
+- Text, labels and table cells below ~2.5 screen px are sludge
+  anyway: the glyph pass is skipped (fills/selection stay).
+  Exports pin full detail, so output is byte-identical to before.
+
 ## 0.17.31
 
 ### Cached pen paths (helps dashed strokes most)

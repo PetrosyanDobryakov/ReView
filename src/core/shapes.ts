@@ -1250,6 +1250,22 @@ export function getPaintZoom(): number {
   return paintZoom;
 }
 
+/** Run fn with a temporary paint zoom (export paths pin full detail). */
+export function withPaintZoom<T>(zoom: number, fn: () => T): T {
+  const prev = paintZoom;
+  paintZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  try {
+    return fn();
+  } finally {
+    paintZoom = prev;
+  }
+}
+
+/** True when body text at this world line-height is unreadable sludge on screen. */
+export function tinyTextHidden(lineHeightWorld: number): boolean {
+  return lineHeightWorld * paintZoom < 2.5;
+}
+
 /** Cached wrapText results — measureText + wrap dominates when many stickies/labels stay dirty. */
 const wrapTextCache = new Map<string, string[]>();
 const WRAP_TEXT_CACHE_MAX = 2048;
@@ -2683,12 +2699,13 @@ function drawShapeBody(
       if (v.highlight) {
         ctx.fillStyle = TEXT_HIGHLIGHT;
         ctx.beginPath();
-        ctx.roundRect(v.x - 4, v.y - 2, v.w + 8, v.h + 4, 4);
+        ctx.roundRect(v.x - 4, v.y - 2, v.w + 4, v.h + 4, 4);
         ctx.fill();
       }
       if (hideText) break;
-      const ink = displayInk(v.textColor ?? textColor, boardBg);
       const lineHeight = size * TEXT_LINE_HEIGHT;
+      if (tinyTextHidden(lineHeight)) break;
+      const ink = displayInk(v.textColor ?? textColor, boardBg);
       const align = v.textAlign ?? 'left';
       if (v.richHtml && v.richHtml.includes('<')) {
         const spans = parseStoredRich(v.text, v.richHtml, {
@@ -4091,9 +4108,9 @@ function drawTable(
     ctx.lineTo(v.x + v.w, y);
   }
   ctx.stroke();
-  if (!hideText || hideCell) {
-    ctx.fillStyle = ink;
-    ctx.textBaseline = 'top';
+    if ((!hideText || hideCell) && !tinyTextHidden(lineHeight)) {
+      ctx.fillStyle = ink;
+      ctx.textBaseline = 'top';
     for (let r = 0; r < rows; r++) {
       const cellH = rowF[r] * v.h;
       const maxLines = Math.max(1, Math.floor((cellH - padTop * 1.5) / lineHeight));
@@ -4148,6 +4165,10 @@ function drawLabel(ctx: CanvasRenderingContext2D, v: ShapeView, textColor: strin
   const padX = SHAPE_LABEL_PAD_X;
   const maxW = shapeLabelInnerWidth(v.type, v.w);
   const lineHeight = size * LABEL_LINE_HEIGHT;
+  if (tinyTextHidden(lineHeight)) {
+    ctx.restore();
+    return;
+  }
 
   if (v.richHtml && v.richHtml.includes('<')) {
     const estLines = Math.max(1, text.split('\n').length);

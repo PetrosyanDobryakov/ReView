@@ -29,6 +29,7 @@ import {
   measureMixedLine,
   arrowHitPolyline,
   setPaintZoom,
+  withPaintZoom,
   mediaLodForScreenPx,
   type MediaPaintLod,
   boardNeedsMediaPaint,
@@ -1157,7 +1158,8 @@ export class Engine {
       }
       for (const v of this.viewsInBox(box, opts.ids)) {
         try {
-          drawShape(ctx, v, theme.text, paper);
+          // Export is the source of truth: full detail regardless of zoom.
+          withPaintZoom(Number.POSITIVE_INFINITY, () => drawShape(ctx, v, theme.text, paper));
         } catch (err) {
           // ponytail: one bad shape must not kill the whole export
           console.warn('[review] export skipped shape', v.id, v.type, err);
@@ -2284,7 +2286,7 @@ export class Engine {
       const id = ord.get(i);
       if (!set.has(id)) continue;
       const v = this.views.get(id);
-      if (v) drawShape(ctx, v, theme.text, store.viewPaperBg());
+      if (v) withPaintZoom(Number.POSITIVE_INFINITY, () => drawShape(ctx, v, theme.text, store.viewPaperBg()));
     }
     return canvas;
   }
