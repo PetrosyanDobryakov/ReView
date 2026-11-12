@@ -1,5 +1,5 @@
 import { formulaImage, renderFormula } from './formula';
-import { ensureBlobUrl, resolvedBlobUrl, selectBlobKind, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
+import { ensureBlobUrl, onBlobUrlEvict, resolvedBlobUrl, selectBlobKind, selectDocPaintSrc, selectPaintSrc } from './mediaBlobs';
 import { compileGraph } from './graphEval';
 import { readPrefs } from './prefs';
 import { degToRad, shapeRotation, worldToLocal, withShapeRotation, localToWorld } from './transform';
@@ -3684,6 +3684,26 @@ const imageListeners = new Set<(src: string) => void>();
 const IMAGE_CACHE_MAX = 64;
 const VIDEO_CACHE_MAX = 8;
 const AUDIO_CACHE_MAX = 16;
+/** Decoded bitmap budget: count caps don't bound bytes (one 1600px photo is ~10 MB). */
+const IMAGE_BYTES_MAX = 256 * 1024 * 1024;
+const imageBytes = new Map<string, number>();
+let imageBytesTotal = 0;
+
+function trackImageBytes(src: string, bytes: number): void {
+  const prev = imageBytes.get(src) ?? 0;
+  imageBytesTotal = Math.max(0, imageBytesTotal - prev + bytes);
+  imageBytes.delete(src);
+  imageBytes.set(src, bytes);
+  while (imageBytesTotal > IMAGE_BYTES_MAX && imageBytes.size > 1) {
+    const oldest = imageBytes.keys().next();
+    if (oldest.done) break;
+    const k = oldest.value;
+    const b = imageBytes.get(k) ?? 0;
+    imageBytes.delete(k);
+    imageBytesTotal = Math.max(0, imageBytesTotal - b);
+    imageCache.delete(k);
+  }
+}
 
 function cacheGet<K, V>(cache: Map<K, V>, key: K): V | undefined {
   const hit = cache.get(key);
@@ -3731,9 +3751,24 @@ export function onImageLoad(cb: (src: string) => void): () => void {
 export function getImage(src: string): HTMLImageElement | null {
   if (!src.startsWith('data:image/') && !src.startsWith('blob:')) return null;
   const hit = cacheGet(imageCache, src);
-  if (hit) return hit;
+  if (hit) {
+    // Keep byte accounting in the same recency order as the element cache.
+    const known = imageBytes.get(src);
+    if (known !== undefined) {
+      imageBytes.delete(src);
+      imageBytes.set(src, known);
+    }
+    return hit;
+  }
   const img = new Image();
   img.onload = () => {
+    try {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        trackImageBytes(src, img.naturalWidth * img.naturalHeight * 4);
+      }
+    } catch {
+      /* ignore */
+    }
     for (const l of imageListeners) l(src);
   };
   img.onerror = () => {
@@ -3745,7 +3780,53 @@ export function getImage(src: string): HTMLImageElement | null {
 }
 
 export function releaseImage(src: string): void {
-  if (src) imageCache.delete(src);
+  if (src) {
+    imageBytesTotal = Math.max(0, imageBytesTotal - (imageBytes.get(src) ?? 0));
+    imageBytes.delete(src);
+    imageCache.delete(src);
+  }
+}
+
+/**
+ * Drop cached elements for a src (blob URL eviction): decoded bitmaps and
+ * players are freed; visible shapes reload on the next paint. Registered
+ * with the blob resolver so eviction stays coordinated.
+ */
+export function dropCachedMediaForSrc(src: string): void {
+  if (!src) return;
+  imageBytesTotal = Math.max(0, imageBytesTotal - (imageBytes.get(src) ?? 0));
+  imageBytes.delete(src);
+  imageCache.delete(src);
+  const v = videoCache.get(src);
+  if (v) {
+    try {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    } catch {
+      /* ignore */
+    }
+    videoCache.delete(src);
+  }
+  const a = audioCache.get(src);
+  if (a) {
+    try {
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
+    } catch {
+      /* ignore */
+    }
+    audioCache.delete(src);
+  }
+}
+
+try {
+  onBlobUrlEvict((_hash, url) => {
+    dropCachedMediaForSrc(url);
+  });
+} catch {
+  /* resolver unavailable (tests) */
 }
 
 const videoCache = new Map<string, HTMLVideoElement>();

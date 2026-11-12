@@ -2638,7 +2638,7 @@ export class Engine {
   private async mediaFields(src: string): Promise<Partial<ShapeView>> {
     const ref = await ingestDataUrlAsBlob(src);
     if (!ref) return { src };
-    primeBlobUrl(ref.blob, src);
+    primeBlobUrl(ref.blob, src, ref.bytes);
     return { blob: ref.blob, thumb: ref.thumb, mime: ref.mime, bytes: ref.bytes };
   }
 
@@ -2648,7 +2648,7 @@ export class Engine {
     for (const page of pages) {
       const ref = await ingestDataUrlAsBlob(page);
       if (!ref) return { pages };
-      primeBlobUrl(ref.blob, page);
+      primeBlobUrl(ref.blob, page, ref.bytes);
       pageBlobs.push(ref.blob);
       pageThumbs.push(ref.thumb);
     }

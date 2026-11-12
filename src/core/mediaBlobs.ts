@@ -367,8 +367,89 @@ export async function prefetchBlobs(
  */
 
 const resolvedUrls = new Map<string, string>();
+const resolvedSizes = new Map<string, number>();
+let resolvedBytes = 0;
+/** Cap pinned blob bytes: every resolved URL pins its bytes in RAM until revoked. */
+export const RESOLVER_BYTES_MAX = 192 * 1024 * 1024;
 const inflight = new Map<string, Promise<string | null>>();
 const negativeUntil = new Map<string, number>();
+
+type BlobEvictListener = (hash: string, url: string) => void;
+const evictListeners = new Set<BlobEvictListener>();
+
+/** Fired before a resolved URL is evicted/revoked (drop cached elements first). */
+export function onBlobUrlEvict(cb: BlobEvictListener): () => void {
+  evictListeners.add(cb);
+  return () => {
+    evictListeners.delete(cb);
+  };
+}
+
+function forgetResolved(hash: string, url: string): void {
+  resolvedUrls.delete(hash);
+  const size = resolvedSizes.get(hash) ?? 0;
+  resolvedSizes.delete(hash);
+  resolvedBytes = Math.max(0, resolvedBytes - size);
+  for (const l of [...evictListeners]) {
+    try {
+      l(hash, url);
+    } catch {
+      /* listener error */
+    }
+  }
+  try {
+    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function trackResolved(hash: string, url: string, bytes: number): void {
+  const prev = resolvedUrls.get(hash);
+  if (prev !== undefined) {
+    resolvedBytes = Math.max(0, resolvedBytes - (resolvedSizes.get(hash) ?? 0));
+    resolvedUrls.delete(hash);
+    resolvedSizes.delete(hash);
+    // Same hash re-resolved (dataURL prime, then blob URL): drop the old URL.
+    if (prev !== url) {
+      for (const l of [...evictListeners]) {
+        try {
+          l(hash, prev);
+        } catch {
+          /* listener error */
+        }
+      }
+      forgetResolvedUrl(prev);
+    }
+  }
+  resolvedUrls.set(hash, url);
+  resolvedSizes.set(hash, Math.max(0, bytes | 0));
+  resolvedBytes += Math.max(0, bytes | 0);
+  while (resolvedBytes > RESOLVER_BYTES_MAX && resolvedUrls.size > 1) {
+    const oldest = resolvedUrls.keys().next();
+    if (oldest.done) break;
+    const k = oldest.value;
+    const u = resolvedUrls.get(k);
+    if (u === undefined) {
+      resolvedUrls.delete(k);
+      resolvedSizes.delete(k);
+      continue;
+    }
+    forgetResolved(k, u);
+  }
+}
+
+function forgetResolvedUrl(url: string): void {
+  try {
+    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 /** How long a store miss suppresses retries (ms). */
 export const BLOB_NEGATIVE_TTL_MS = 30_000;
@@ -384,8 +465,9 @@ export function setRemoteBlobFetcher(fn: RemoteBlobFetch | null): void {
 }
 
 /** Seed the resolver with a URL we already hold for these bytes (fresh inserts paint at once). */
-export function primeBlobUrl(hash: string, url: string): void {
-  if (!resolvedUrls.has(hash)) resolvedUrls.set(hash, url);
+export function primeBlobUrl(hash: string, url: string, bytes = 0): void {
+  if (!hash || !url) return;
+  trackResolved(hash, url, bytes);
 }
 
 /** Forget recent misses (a new peer may have them). */
@@ -418,7 +500,17 @@ export async function loadBlob(hash: string, store?: BlobStore): Promise<{ bytes
 
 /** Sync cache read for paint. Null = not loaded (yet or at all). */
 export function resolvedBlobUrl(hash: string): string | null {
-  return resolvedUrls.get(hash) ?? null;
+  const hit = resolvedUrls.get(hash);
+  if (hit === undefined) return null;
+  // LRU refresh: visible media survives eviction.
+  resolvedUrls.delete(hash);
+  resolvedUrls.set(hash, hit);
+  const size = resolvedSizes.get(hash);
+  if (size !== undefined) {
+    resolvedSizes.delete(hash);
+    resolvedSizes.set(hash, size);
+  }
+  return hit;
 }
 
 /** Background load of one blob into an object URL. Never throws. */
@@ -442,7 +534,7 @@ export function ensureBlobUrl(hash: string, store?: BlobStore): Promise<string |
         negativeUntil.set(hash, Date.now() + BLOB_NEGATIVE_TTL_MS);
         return null;
       }
-      resolvedUrls.set(hash, url);
+      trackResolved(hash, url, row.bytes.length);
       for (const l of [...resolvedListeners]) {
         try {
           l(hash);
@@ -466,14 +558,7 @@ export function ensureBlobUrl(hash: string, store?: BlobStore): Promise<string |
 export function releaseResolvedBlobUrl(hash: string): boolean {
   const url = resolvedUrls.get(hash);
   if (!url) return false;
-  resolvedUrls.delete(hash);
-  try {
-    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-      URL.revokeObjectURL(url);
-    }
-  } catch {
-    /* ignore */
-  }
+  forgetResolved(hash, url);
   return true;
 }
 
@@ -487,6 +572,8 @@ export function __clearBlobResolverForTests(): void {
     }
   }
   resolvedUrls.clear();
+  resolvedSizes.clear();
+  resolvedBytes = 0;
   inflight.clear();
   negativeUntil.clear();
 }

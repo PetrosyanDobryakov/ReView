@@ -27,6 +27,8 @@ import {
   selectDocPaintSrc,
   selectPaintSrc,
   warmVisibleBlobMedia,
+  primeBlobUrl,
+  RESOLVER_BYTES_MAX,
 } from '../src/core/mediaBlobs.ts';
 import {
   AUDIO_MAX_BYTES,
@@ -394,6 +396,29 @@ assert.equal(selectDocPaintSrc(undefined, null, null), '');
     assert.equal(await prefetchBlobs([missing], { isCurrent: () => false, store }), 0);
   } finally {
     setRemoteBlobFetcher(null);
+    __clearBlobResolverForTests();
+  }
+}
+
+// Resolver byte budget: oldest URLs evicted past the cap, newest kept.
+{
+  __clearBlobResolverForTests();
+  try {
+    const MB = 1024 * 1024;
+    assert.ok(RESOLVER_BYTES_MAX >= 64 * MB, 'budget is sane');
+    const h = (c) => c.repeat(64);
+    const u = (c) => `blob:fake-${c}`;
+    const third = Math.floor(RESOLVER_BYTES_MAX / 3) + MB;
+    primeBlobUrl(h('a'), u('a'), third);
+    primeBlobUrl(h('b'), u('b'), third);
+    // NOTE: no reads before the third prime — reads refresh recency.
+    primeBlobUrl(h('c'), u('c'), third);
+    assert.equal(resolvedBlobUrl(h('a')), null, 'oldest evicted past cap');
+    assert.equal(resolvedBlobUrl(h('b')), u('b'), 'recent kept');
+    assert.equal(resolvedBlobUrl(h('c')), u('c'), 'new kept');
+    assert.equal(releaseResolvedBlobUrl(h('b')), true);
+    assert.equal(resolvedBlobUrl(h('b')), null, 'explicit release drops');
+  } finally {
     __clearBlobResolverForTests();
   }
 }

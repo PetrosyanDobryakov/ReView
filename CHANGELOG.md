@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 0.17.33
+
+### Cap pinned media bytes (the slow-leak fix)
+
+- Every resolved blob URL pinned its bytes in RAM forever
+  (`releaseResolvedBlobUrl` was never wired up). Now the resolver
+  holds max 192 MB LRU with coordinated eviction (cached elements
+  drop first, then the URL is revoked), and decoded images are
+  budgeted at 256 MB on top of the count cap.
+
 ## 0.17.32
 
 ### Skip unreadable micro-text while zoomed out
