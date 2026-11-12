@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.26
+
+### Pressure ribbon without per-frame garbage
+
+- Every pressure stroke allocated 4 arrays + N pushes per frame.
+  Now a reused scratch buffer (and `sqrt` instead of `hypot`).
+
 ## 0.17.25
 
 ### Queue pressure visible in peer details

@@ -1868,6 +1868,9 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: number[], width: n
  * Variable-width ribbon from stylus pressure.
  * Filled outline + end caps — avoids the faceted look of per-segment lineTo strokes.
  */
+/** Reused ribbon buffer (left edge, then right edge): no per-frame arrays. */
+let ribbonScratch: Float64Array | null = null;
+
 function strokePressureRibbon(
   ctx: CanvasRenderingContext2D,
   pts: number[],
@@ -1876,30 +1879,33 @@ function strokePressureRibbon(
 ): void {
   const n = pts.length / 2;
   if (n < 2) return;
-  const leftX: number[] = [];
-  const leftY: number[] = [];
-  const rightX: number[] = [];
-  const rightY: number[] = [];
+  const need = n * 4;
+  if (!ribbonScratch || ribbonScratch.length < need) {
+    ribbonScratch = new Float64Array(Math.max(64, need * 2));
+  }
+  const buf = ribbonScratch;
   for (let i = 0; i < n; i++) {
     const x = pts[i * 2];
     const y = pts[i * 2 + 1];
     const r = strokeHalfWidth(width, pressures[i] ?? 0.5);
     const i0 = Math.max(0, i - 1);
     const i1 = Math.min(n - 1, i + 1);
-    let tx = pts[i1 * 2] - pts[i0 * 2];
-    let ty = pts[i1 * 2 + 1] - pts[i0 * 2 + 1];
-    const len = Math.hypot(tx, ty) || 1;
-    tx /= len;
-    ty /= len;
-    leftX.push(x - ty * r);
-    leftY.push(y + tx * r);
-    rightX.push(x + ty * r);
-    rightY.push(y - tx * r);
+    const tx0 = pts[i1 * 2] - pts[i0 * 2];
+    const ty0 = pts[i1 * 2 + 1] - pts[i0 * 2 + 1];
+    const len = Math.sqrt(tx0 * tx0 + ty0 * ty0) || 1;
+    const tx = tx0 / len;
+    const ty = ty0 / len;
+    buf[i * 2] = x - ty * r;
+    buf[i * 2 + 1] = y + tx * r;
+    const j = (2 * n + i) * 2;
+    buf[j] = x + ty * r;
+    buf[j + 1] = y - tx * r;
   }
   ctx.beginPath();
-  ctx.moveTo(leftX[0], leftY[0]);
-  for (let i = 1; i < n; i++) ctx.lineTo(leftX[i], leftY[i]);
-  for (let i = n - 1; i >= 0; i--) ctx.lineTo(rightX[i], rightY[i]);
+  ctx.moveTo(buf[0], buf[1]);
+  for (let i = 1; i < n; i++) ctx.lineTo(buf[i * 2], buf[i * 2 + 1]);
+  const ro = 4 * n;
+  for (let i = n - 1; i >= 0; i--) ctx.lineTo(buf[ro + i * 2], buf[ro + i * 2 + 1]);
   ctx.closePath();
   ctx.fill();
   // Round caps so ends match the smooth constant-width path.
