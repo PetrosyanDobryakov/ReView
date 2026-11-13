@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 0.17.37
+
+### Roll-forward to the 0.17.35 line (0.17.36 reverted)
+
+- 0.17.36 (worker snapshots) broke boards, so it is out. This
+  release is byte-identical in behavior to 0.17.35 with a higher
+  number, so the in-app updater (which only moves forward) brings
+  everyone back onto the good line.
+
 ## 0.17.35
 
 ### Mirror save paced by its own cost
