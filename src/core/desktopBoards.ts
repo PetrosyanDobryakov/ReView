@@ -96,6 +96,10 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
   let lastSavedBytes = 0;
   let lastSavedAt = 0;
   let pendingBytes = 0;
+  /** Last full-encode cost: pace the next save so the duty cycle stays sane. */
+  let lastEncodeMs = 0;
+  /** Never let pacing delay a save past this (durability still matters). */
+  const SAVE_MAX_INTERVAL_MS = 10 * 60_000;
 
   const intervalFor = (est: number): number =>
     est > SAVE_BIG_BYTES
@@ -133,7 +137,11 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
         if (!timer) timer = setTimeout(() => void save(), SAVE_HIDDEN_RETRY_MS);
         return inFlight;
       }
-      const wait = intervalFor(lastSavedBytes + pendingBytes) - (now - lastSavedAt);
+      const base = intervalFor(lastSavedBytes + pendingBytes);
+      // A 2.5 s encode every 15 s is a 17% frozen app. Pace by measured
+      // cost instead: at most ~5% of wall time spent encoding.
+      const paced = Math.min(SAVE_MAX_INTERVAL_MS, Math.max(base, lastEncodeMs * 20));
+      const wait = paced - (now - lastSavedAt);
       if (wait > 0) {
         if (!timer) timer = setTimeout(() => void save(), wait);
         return inFlight;
@@ -143,7 +151,10 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
     pendingBytes = 0;
     const meta = getBoard(boardId) ?? null;
     // The block: full encode on the main thread (seconds on 100 MB+ docs).
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const bytes = Y.encodeStateAsUpdate(doc);
+    const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
     lastSavedAt = Date.now();
     lastSavedBytes = bytes.length;
     inFlight = inFlight.then(() => saveBoardFile(boardId, JSON.stringify(meta), bytes));

@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 0.17.35
+
+### Mirror save paced by its own cost
+
+- A 2.5 s encode every 15 s is a 17% frozen app. The next save is
+  now scheduled from the measured encode time (at most ~5% duty
+  cycle, hard cap 10 min), so huge boards stop freezing on a timer.
+
 ## 0.17.34
 
 ### Mirror encode waits for quiet (no more freeze after a move)
