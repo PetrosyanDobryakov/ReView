@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 0.17.36
+
+### Mirror encode moves off the main thread
+
+- Full Yjs snapshots ran on the UI thread (seconds of pegged CPU on
+  huge boards — the freeze after moving a photo). Now a worker keeps
+  a second doc copy fed with every update and encodes there; the app
+  only writes the bytes. Sync encode remains for close/flush and as
+  fallback, compact hands its bytes over directly.
+
 ## 0.17.35
 
 ### Mirror save paced by its own cost

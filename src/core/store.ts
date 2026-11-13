@@ -1454,8 +1454,10 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     cOrder.push(order.toArray());
     cPages.push(pages.toArray());
     let after = 0;
+    let afterUpdate: Uint8Array | null = null;
     try {
-      after = Y.encodeStateAsUpdate(compact).length;
+      afterUpdate = Y.encodeStateAsUpdate(compact);
+      after = afterUpdate.length;
     } catch {
       compact.destroy();
       return { before, after: before, didCompact: false };
@@ -1506,7 +1508,8 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     if (persistLocally) {
       persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
       // Overwrite the desktop board file with the compact doc; never merge the bloated file back.
-      stopDesktopMirror = attachDesktopMirror(doc, boardId, { load: false });
+      // Hand the exact bytes to the mirror worker so its replica matches the new doc.
+      stopDesktopMirror = attachDesktopMirror(doc, boardId, { load: false, seed: afterUpdate ?? undefined });
       try {
         await withIdbTimeout(
           (persistence as unknown as { whenSynced: Promise<void> }).whenSynced,

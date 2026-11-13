@@ -27,6 +27,8 @@ const SAVE_GESTURE_RETRY_MS = 2_000;
 const SAVE_QUIET_MS = 10_000;
 /** Hidden tabs defer (the live tab's IDB is the store; pagehide flush covers close). */
 const SAVE_HIDDEN_RETRY_MS = 30_000;
+/** Give up waiting for a worker snapshot after this long (then encode synchronously). */
+const MIRROR_WORKER_TIMEOUT_MS = 120_000;
 
 /** Last user interaction (pointer/key/wheel), for keeping encodes off the input path. */
 let lastInteractAt = 0;
@@ -85,9 +87,19 @@ export async function restoreDesktopBoards(): Promise<number> {
 
 /**
  * Merge the disk copy into `doc` once, then keep the file in step with edits.
+ * Full snapshots are encoded in a Web Worker (a second doc copy fed with
+ * every applied update), so the main thread never blocks on
+ * Y.encodeStateAsUpdate. `seed` replays a known-good snapshot into a fresh
+ * worker (used after compaction swaps the live doc). Falls back to a sync
+ * encode when workers are unavailable. pagehide flushes always encode
+ * synchronously: the app is closing, nothing left to disturb.
  * Returns a stop function that writes any pending change first.
  */
-export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: boolean } = {}): () => void {
+export function attachDesktopMirror(
+  doc: Y.Doc,
+  boardId: string,
+  opts: { load?: boolean; seed?: Uint8Array } = {}
+): () => void {
   if (!isDesktop()) return () => {};
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -109,7 +121,154 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
         : SAVE_DEBOUNCE_MS;
 
   let inFlight: Promise<unknown> = Promise.resolve();
-  const save = (force = false): Promise<unknown> => {
+
+  // --- Worker snapshots (encode off the main thread) ---
+  type WorkerOut =
+    | { t: 'ready' }
+    | { t: 'snapshot'; token: number; buf: ArrayBuffer }
+    | { t: 'error'; token: number; message: string };
+  let worker: Worker | null = null;
+  let workerFailed = false;
+  let snapToken = 0;
+  const snapWaiters = new Map<number, { resolve: (b: Uint8Array) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  /** True once the worker has seen real content (else a snapshot would be empty). */
+  let workerFed = false;
+
+  function killWorker(markFailed: boolean): void {
+    const w = worker;
+    worker = null;
+    if (markFailed) workerFailed = true;
+    if (w) {
+      try {
+        w.terminate();
+      } catch {
+        /* ignore */
+      }
+    }
+    for (const [, w8] of snapWaiters) {
+      try {
+        clearTimeout(w8.timer);
+      } catch {
+        /* ignore */
+      }
+      try {
+        w8.reject(new Error('mirror worker gone'));
+      } catch {
+        /* ignore */
+      }
+    }
+    snapWaiters.clear();
+  }
+
+  function feedWorker(update: Uint8Array): void {
+    // No outbox: if there is no live worker the update is simply not tracked;
+    // the next save falls back to a sync encode, which covers everything.
+    const w = worker;
+    if (!w || workerFailed) return;
+    try {
+      // Structured clone (not transfer): the same buffer is still needed by
+      // sync/persist handlers running after this one.
+      w.postMessage({ t: 'update', buf: update.slice() });
+      workerFed = true;
+    } catch {
+      killWorker(true);
+    }
+  }
+
+  function ensureWorker(seed?: Uint8Array): Worker | null {
+    if (worker || workerFailed || stopped) return worker;
+    let w: Worker;
+    try {
+      w = new Worker(new URL('./desktopMirrorWorker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      workerFailed = true;
+      return null;
+    }
+    w.onmessage = (ev: MessageEvent) => {
+      const m = ev.data as WorkerOut | null;
+      if (!m || typeof m !== 'object') return;
+      if (m.t === 'ready' || worker !== w) return;
+      if (m.t === 'snapshot') {
+        const w8 = snapWaiters.get(m.token);
+        if (!w8) return;
+        snapWaiters.delete(m.token);
+        try {
+          clearTimeout(w8.timer);
+        } catch {
+          /* ignore */
+        }
+        w8.resolve(new Uint8Array(m.buf));
+        return;
+      }
+      if (m.t === 'error') {
+        const w8 = snapWaiters.get(m.token);
+        if (!w8) return;
+        snapWaiters.delete(m.token);
+        try {
+          clearTimeout(w8.timer);
+        } catch {
+          /* ignore */
+        }
+        w8.reject(new Error(m.message || 'mirror worker failed'));
+      }
+    };
+    w.onerror = () => {
+      if (worker === w) killWorker(true);
+    };
+    worker = w;
+    if (seed && seed.length) {
+      // Fresh worker, known-good state: seed first, later updates follow in order.
+      try {
+        const copy = seed.slice();
+        w.postMessage({ t: 'seed', buf: copy.buffer }, [copy.buffer]);
+        workerFed = true;
+      } catch {
+        killWorker(true);
+        return null;
+      }
+    }
+    return w;
+  }
+
+  function requestWorkerSnapshot(): Promise<Uint8Array> {
+    const w = ensureWorker();
+    // Never snapshot an unfed worker: it would return an empty doc and the
+    // backup file would be wiped. The caller falls back to a sync encode.
+    if (!w || !workerFed) return Promise.reject(new Error('mirror worker has no content yet'));
+    const token = (snapToken = (snapToken + 1) >>> 0);
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        snapWaiters.delete(token);
+        reject(new Error('mirror worker timeout'));
+      }, MIRROR_WORKER_TIMEOUT_MS);
+      snapWaiters.set(token, { resolve, reject, timer });
+      try {
+        w.postMessage({ t: 'snapshot', token });
+      } catch (err) {
+        snapWaiters.delete(token);
+        try {
+          clearTimeout(timer);
+        } catch {
+          /* ignore */
+        }
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  }
+
+  /** Seed the live worker from a fresh full snapshot (post-compact hand-off). */
+  function seedWorkerFromMain(full: Uint8Array): void {
+    const w = worker;
+    if (!w || workerFailed || stopped) return;
+    try {
+      const copy = full.slice();
+      w.postMessage({ t: 'seed', buf: copy.buffer }, [copy.buffer]);
+      workerFed = true;
+    } catch {
+      killWorker(true);
+    }
+  }
+  const save = (force = false, syncEncode = false): Promise<unknown> => {
     timer = null;
     if (!dirty) return inFlight;
     if (!force) {
@@ -150,29 +309,66 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
     dirty = false;
     pendingBytes = 0;
     const meta = getBoard(boardId) ?? null;
-    // The block: full encode on the main thread (seconds on 100 MB+ docs).
+    const metaJson = JSON.stringify(meta);
+    if (syncEncode) {
+      // pagehide/close and worker outages: durability first, freeze accepted
+      // (nothing left to disturb — the app is going away).
+      const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const bytes = Y.encodeStateAsUpdate(doc);
+      const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
+      lastSavedAt = Date.now();
+      lastSavedBytes = bytes.length;
+      seedWorkerFromMain(bytes);
+      inFlight = inFlight.then(() => saveBoardFile(boardId, metaJson, bytes));
+      return inFlight;
+    }
+    inFlight = inFlight.then(() => writeSnapshot(metaJson));
+    return inFlight;
+  };
+
+  /** Snapshot via the worker; falls back to a sync encode + reseed on failure. */
+  async function writeSnapshot(metaJson: string): Promise<void> {
+    try {
+      const bytes = await requestWorkerSnapshot();
+      if (!bytes.length) throw new Error('empty snapshot');
+      // Encoded off-thread: don't pace future saves on main-thread cost.
+      lastEncodeMs = 0;
+      lastSavedAt = Date.now();
+      lastSavedBytes = bytes.length;
+      await saveBoardFile(boardId, metaJson, bytes);
+      return;
+    } catch {
+      // Worker missing/failed/timed out: one sync encode now (durability),
+      // and the worker is rebuilt from those bytes for next time.
+    }
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const bytes = Y.encodeStateAsUpdate(doc);
     const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
     lastSavedAt = Date.now();
     lastSavedBytes = bytes.length;
-    inFlight = inFlight.then(() => saveBoardFile(boardId, JSON.stringify(meta), bytes));
-    return inFlight;
-  };
-  const flush = async () => {
+    seedWorkerFromMain(bytes);
+    await saveBoardFile(boardId, metaJson, bytes);
+  }
+  const flush = async (sync: boolean) => {
     if (timer) clearTimeout(timer);
-    await save(true);
+    await save(true, sync);
   };
-  flushers.add(flush);
+  const flushAll = () => flush(true);
+  flushers.add(flushAll);
   const onUpdate = (update?: Uint8Array): void => {
     if (stopped) return;
     dirty = true;
-    if (update && update.length) pendingBytes += update.length;
+    if (update && update.length) {
+      pendingBytes += update.length;
+      feedWorker(update);
+    }
     if (!timer) timer = setTimeout(() => void save(), SAVE_DEBOUNCE_MS);
   };
   const onHide = () => {
-    void flush();
+    // Closing: sync encode, nothing left to disturb.
+    void flush(true);
   };
 
   if (opts.load !== false) void loadBoardFile(boardId).then((bytes) => {
@@ -185,15 +381,36 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
   });
   doc.on('update', onUpdate);
   window.addEventListener('pagehide', onHide);
+  // Start the worker now so it converges from the first update; pass the
+  // post-compact snapshot when the live doc already has content.
+  if (opts.seed && opts.seed.length) {
+    if (ensureWorker()) seedWorkerFromMain(opts.seed);
+  } else {
+    ensureWorker();
+  }
   // First snapshot so a board that only lives in IndexedDB gets its file too.
   onUpdate();
 
   return () => {
     if (stopped) return;
     stopped = true;
-    flushers.delete(flush);
+    flushers.delete(flushAll);
     doc.off('update', onUpdate);
     window.removeEventListener('pagehide', onHide);
-    void flush();
+    // Board switch, not close: async worker write is fine, then terminate.
+    const w = worker;
+    worker = null;
+    void inFlight
+      .then(() => save(true, false))
+      .catch(() => {})
+      .then(() => {
+        if (w) {
+          try {
+            w.terminate();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
   };
 }
