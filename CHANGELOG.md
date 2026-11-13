@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 0.17.42
+
+### Board composition diagnostics (console)
+
+- `await __reviewBoardStats()` on an open board reports shape/point
+  counts, doc bytes, a dry-run compact size (tombstone weight), the
+  biggest point arrays, and whether auto-compact is latched off by past
+  collaborators. Explicit call only — the dry-run can stall a huge
+  board for a minute. No behavior change.
+
 ## 0.17.41
 
 ### Huge boards survive (worker capped by size)

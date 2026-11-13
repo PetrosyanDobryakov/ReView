@@ -15,6 +15,7 @@ import {
   boardHadRemoteCollaborators,
   compactSavesEnough,
   hasOtherLocalReplicas,
+  lastRemotePeerAt,
   noteDistinctRemote,
   remotePeerRecentlySeen,
   startReplicaHeartbeat,
@@ -1553,6 +1554,72 @@ if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__maybeAutoCompact = maybeAutoCompact;
   // Live shape count for console checks and the P2P end-to-end script.
   (window as unknown as Record<string, unknown>).__reviewShapeCount = () => board.size;
+  /**
+   * Board composition for console diagnosis (heavy boards): shape and point
+   * counts, doc bytes, a dry-run compact size (tombstone weight), and whether
+   * auto-compact is latched off by past collaborators. Explicit call only —
+   * the dry-run encodes twice and can stall a huge board for a minute.
+   * Usage: `await __reviewBoardStats()`.
+   */
+  (window as unknown as Record<string, unknown>).__reviewBoardStats = async () => {
+    if (!currentBoardId) return { error: 'no board open' };
+    let shapes = 0;
+    let points = 0;
+    const big: Array<{ id: string; type: unknown; points: number }> = [];
+    for (const [key, m] of board.entries()) {
+      shapes += 1;
+      try {
+        const shape = m as Y.Map<unknown>;
+        const p = shape.get('points');
+        const n = p instanceof Y.Array ? p.length : 0;
+        points += n;
+        if (n >= 2000) big.push({ id: key, type: shape.get('type'), points: n });
+      } catch {
+        /* unreadable shape */
+      }
+    }
+    big.sort((a, b) => b.points - a.points);
+    const docBytes = Y.encodeStateAsUpdate(doc).length;
+    let compactBytes = -1;
+    try {
+      const probe = new Y.Doc({ gc: false } as unknown as Record<string, unknown>);
+      const cBoard = probe.getMap<Y.Map<unknown>>('shapes');
+      for (const [key, m] of board.entries()) {
+        const src = m as Y.Map<unknown>;
+        const nm = new Y.Map<unknown>();
+        for (const [k, v] of src.entries()) {
+          if (v instanceof Y.Array) {
+            const arr = new Y.Array<unknown>();
+            arr.insert(0, v.toArray() as unknown[]);
+            nm.set(k, arr);
+          } else if (v instanceof Y.Map) {
+            const sub = new Y.Map<unknown>();
+            for (const [sk, sv] of (v as Y.Map<unknown>).entries()) sub.set(sk, sv);
+            nm.set(k, sub);
+          } else {
+            nm.set(k, v as unknown);
+          }
+        }
+        cBoard.set(key, nm);
+      }
+      for (const [k, v] of meta.entries()) (probe.getMap('meta') as Y.Map<unknown>).set(k, v);
+      compactBytes = Y.encodeStateAsUpdate(probe).length;
+      probe.destroy();
+    } catch {
+      compactBytes = -1;
+    }
+    return {
+      boardId: currentBoardId,
+      shapes,
+      points,
+      docBytes,
+      compactBytes,
+      wouldSave: compactBytes >= 0 ? docBytes - compactBytes : null,
+      bigShapes: big.slice(0, 20),
+      compactLatched: boardHadRemoteCollaborators(currentBoardId),
+      lastPeerAt: lastRemotePeerAt(currentBoardId),
+    };
+  };
   // Media check for the end-to-end script: refs in the doc, inline copies, bytes held here.
   (window as unknown as Record<string, unknown>).__reviewMedia = async () => {
     const hashes = collectBlobHashes(board.entries());
