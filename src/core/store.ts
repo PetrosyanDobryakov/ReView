@@ -146,7 +146,10 @@ let stopDesktopMirror: () => void = () => {};
 function attachPersistence(boardId: string): void {
   persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
   stopDesktopMirror();
-  stopDesktopMirror = attachDesktopMirror(doc, boardId);
+  // The mirror worker is exact only from an empty doc (or a seed): a board
+  // attached with content and no seed takes one sync encode at first save.
+  const hasContent = board.size > 0 || order.length > 0 || meta.size > 0;
+  stopDesktopMirror = attachDesktopMirror(doc, boardId, { hasContent });
   const onSynced = () => {
     ensurePages();
     syncActivePageFromStorage();
@@ -1454,8 +1457,10 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     cOrder.push(order.toArray());
     cPages.push(pages.toArray());
     let after = 0;
+    let afterBytes: Uint8Array | null = null;
     try {
-      after = Y.encodeStateAsUpdate(compact).length;
+      afterBytes = Y.encodeStateAsUpdate(compact);
+      after = afterBytes.length;
     } catch {
       compact.destroy();
       return { before, after: before, didCompact: false };
@@ -1506,7 +1511,14 @@ export async function compactBoard(): Promise<{ before: number; after: number; d
     if (persistLocally) {
       persistence = new IndexeddbPersistence(boardPersistenceKey(boardId), doc);
       // Overwrite the desktop board file with the compact doc; never merge the bloated file back.
-      stopDesktopMirror = attachDesktopMirror(doc, boardId, { load: false });
+      // The worker is seeded with the compact bytes, and saveNow writes them
+      // off-thread — no main-thread encode, prompt shrunken file.
+      stopDesktopMirror = attachDesktopMirror(doc, boardId, {
+        load: false,
+        seed: afterBytes ?? undefined,
+        hasContent: true,
+        saveNow: true,
+      });
       try {
         await withIdbTimeout(
           (persistence as unknown as { whenSynced: Promise<void> }).whenSynced,

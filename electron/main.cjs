@@ -292,11 +292,11 @@ function blobPath(hash) {
   return path.join(dir, hash);
 }
 
-/** Temp file + rename so a crash never leaves half a board. */
-function writeAtomic(file, bytes) {
+/** Temp file + rename so a crash never leaves half a board. Async: sync writes of 100 MB+ stall every window. */
+async function writeAtomic(file, bytes) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, bytes);
-  fs.renameSync(tmp, file);
+  await fs.promises.writeFile(tmp, bytes);
+  await fs.promises.rename(tmp, file);
 }
 
 const toBuffer = (data) => (data instanceof Uint8Array ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : null);
@@ -318,19 +318,19 @@ async function hostInfo() {
 const commands = {
   host_info: () => hostInfo(),
 
-  board_save(bytes, headers) {
+  async board_save(bytes, headers) {
     const id = headers?.['x-board-id'];
     const buf = toBuffer(bytes);
     if (!validId(id)) throw new Error('bad board id');
     if (!buf || !buf.length || buf.length > MAX_BOARD_BYTES) throw new Error('bad board size');
     const dir = boardsDir();
-    writeAtomic(path.join(dir, `${id}.review`), buf);
+    await writeAtomic(path.join(dir, `${id}.review`), buf);
     const meta = headers?.['x-board-meta'];
     if (typeof meta === 'string') {
       const json = decodeURIComponent(meta);
       try {
         JSON.parse(json);
-        writeAtomic(path.join(dir, `${id}.json`), json);
+        await writeAtomic(path.join(dir, `${id}.json`), json);
       } catch {
         /* keep the old meta */
       }
@@ -347,22 +347,29 @@ const commands = {
     }
   },
 
-  board_list() {
+  async board_list() {
     const dir = boardsDir();
+    const names = await fs.promises.readdir(dir);
     const out = [];
-    for (const name of fs.readdirSync(dir)) {
-      if (!name.endsWith('.review')) continue;
-      const id = name.slice(0, -'.review'.length);
-      if (!validId(id)) continue;
-      const st = fs.statSync(path.join(dir, name));
-      let meta = null;
-      try {
-        meta = JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8'));
-      } catch {
-        /* no meta */
-      }
-      out.push({ id, savedAt: Math.floor(st.mtimeMs), size: st.size, meta });
-    }
+    await Promise.all(
+      names.map(async (name) => {
+        if (!name.endsWith('.review')) return;
+        const id = name.slice(0, -'.review'.length);
+        if (!validId(id)) return;
+        try {
+          const st = await fs.promises.stat(path.join(dir, name));
+          let meta = null;
+          try {
+            meta = JSON.parse(await fs.promises.readFile(path.join(dir, `${id}.json`), 'utf8'));
+          } catch {
+            /* no meta */
+          }
+          out.push({ id, savedAt: Math.floor(st.mtimeMs), size: st.size, meta });
+        } catch {
+          /* vanished mid-list */
+        }
+      })
+    );
     return out.sort((a, b) => b.savedAt - a.savedAt);
   },
 
@@ -376,7 +383,7 @@ const commands = {
 
   data_dir_change: () => changeDataDir(),
 
-  blob_save(bytes, headers) {
+  async blob_save(bytes, headers) {
     const hash = headers?.['x-blob-hash'];
     const mime = headers?.['x-blob-mime'] ?? '';
     const buf = toBuffer(bytes);
@@ -385,7 +392,13 @@ const commands = {
     }
     if (!buf || !buf.length || buf.length > MAX_BLOB_BYTES) throw new Error('bad blob size');
     const file = blobPath(hash);
-    if (!fs.existsSync(file)) writeAtomic(file, Buffer.concat([Buffer.from(`${mime}\n`), buf]));
+    try {
+      await fs.promises.stat(file);
+      return true;
+    } catch {
+      /* missing — write it */
+    }
+    await writeAtomic(file, Buffer.concat([Buffer.from(`${mime}\n`), buf]));
     return true;
   },
 

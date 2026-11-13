@@ -4,6 +4,29 @@
 
 ## Unreleased
 
+## 0.17.39
+
+### Encode moves off the main thread — for real this time
+
+- Full Yjs snapshots now encode in a Web Worker. The worker doc is an
+  exact mirror (every update is forwarded; Yjs merges are order-free),
+  exact from an empty doc or from an explicit seed. The 0.17.36 bug is
+  understood and closed: that build could snapshot a worker that had
+  never seen the base state, writing a valid-looking stub over a good
+  backup. This build never snapshots an unseeded worker — the one sync
+  encode such a board takes doubles as the seed, and every later save
+  runs off-thread. No timeout death spiral: a slow worker just finishes
+  late; only its death falls back to sync.
+- Docs under 2 MB still encode inline (milliseconds, no round-trip).
+- Compact hands its bytes straight to the worker and rewrites the file
+  promptly, still off-thread.
+- Workers terminate on board switch (no more second doc copy per visit).
+
+### Main process no longer stalls windows on write
+
+- `board_save`/`blob_save`/`board_list` are async in Electron: a
+  100 MB+ atomic write used to block every window for the disk time.
+
 ## 0.17.38
 
 ### Sync heals instead of diverging (guest missed new strokes)
