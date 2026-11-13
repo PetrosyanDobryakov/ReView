@@ -43,7 +43,7 @@ import { NoticeCenter, type Notice } from './Notices';
 import { readChromeTheme, writeChromeTheme, type ChromeThemeId } from '../core/chromeTheme';
 import { writeLocale } from '../core/locale';
 import { loadUser, saveUser } from '../core/user';
-import { APP_BUILD, APP_VERSION, checkAppVersion, RELEASES_URL, type VersionStatus } from '../core/version';
+import { APP_BUILD, APP_VERSION, checkAppVersion, readCachedVersionStatus, RELEASES_URL, type VersionStatus } from '../core/version';
 import { appInviteUrl, canSelfUpdate, installDesktopUpdate, isDesktop, resolveInviteBoardUrl } from '../net';
 import { navigateThemed } from './navTransition';
 
@@ -166,7 +166,7 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [weights, setWeights] = useState<Record<string, number>>(() => readFreshWeightsCache());
   const [weightsReady, setWeightsReady] = useState(() => hasWeightsCache());
   const weightsGen = useRef(0);
-  const [verStatus, setVerStatus] = useState<VersionStatus | null>(null);
+  const [verStatus, setVerStatus] = useState<VersionStatus | null>(() => readCachedVersionStatus());
   /** Desktop self-update: null idle, a number while downloading (0..1, or -1 unknown size). */
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [updateNote, setUpdateNote] = useState<string | null>(null);

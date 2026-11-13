@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 0.17.40
+
+### Update prompt can no longer go blind
+
+- The 12 h version cache from 0.17.38 kept reporting "latest" and hid
+  0.17.39 from everyone. The badge now paints instantly from cache but
+  always revalidates live on every Home visit.
+
 ## 0.17.39
 
 ### Encode moves off the main thread — for real this time

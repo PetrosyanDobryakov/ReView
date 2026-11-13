@@ -54,43 +54,32 @@ export type VersionStatus =
  * - not among published releases (unreleased or newer) → 'dev'
  * - equals the newest release → 'latest'
  *
- * The newest seen release is cached (12 h): Home mounts on every return
- * from a board, and a network round-trip on each mount stalls the update
- * badge and steals startup bandwidth. The cached newest is re-compared
- * against the running version, so updating the app immediately flips the
- * badge without waiting for cache expiry.
+ * Always checks live: a cached 'latest' must never hide a release that
+ * came out after the cache was written (that swallowed the 0.17.39
+ * prompt for everyone on 0.17.38). The cache exists only for instant
+ * first paint — read it with readCachedVersionStatus(), then revalidate.
  */
 const VER_CACHE_KEY = 'review-app-version-check';
 const VER_CACHE_TTL_MS = 12 * 3600_000;
 
-export async function checkAppVersion(): Promise<VersionStatus> {
+/** Last live result, for instant badge paint before revalidation. Null when stale/missing. */
+export function readCachedVersionStatus(): VersionStatus | null {
   try {
     const raw = localStorage.getItem(VER_CACHE_KEY);
-    if (raw) {
-      const cached = JSON.parse(raw) as { at?: unknown; latest?: unknown; url?: unknown };
-      if (
-        typeof cached.at === 'number' &&
-        Date.now() - cached.at < VER_CACHE_TTL_MS &&
-        typeof cached.latest === 'string'
-      ) {
-        const cmp = compareVersions(APP_VERSION, cached.latest);
-        if (cmp < 0) {
-          return {
-            kind: 'outdated',
-            latest: cached.latest,
-            url: typeof cached.url === 'string' && cached.url ? cached.url : RELEASES_URL,
-          };
-        }
-        return cmp === 0 ? { kind: 'latest' } : { kind: 'dev' };
-      }
-    }
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as { at?: unknown; latest?: unknown; url?: unknown };
+    if (typeof cached.at !== 'number' || Date.now() - cached.at >= VER_CACHE_TTL_MS) return null;
+    if (typeof cached.latest !== 'string') return null;
+    const url = typeof cached.url === 'string' && cached.url ? cached.url : RELEASES_URL;
+    const cmp = compareVersions(APP_VERSION, cached.latest);
+    if (cmp < 0) return { kind: 'outdated', latest: cached.latest, url };
+    return cmp === 0 ? { kind: 'latest' } : { kind: 'dev' };
   } catch {
-    /* fall through to live check */
+    return null;
   }
-  return checkAppVersionLive();
 }
 
-async function checkAppVersionLive(): Promise<VersionStatus> {
+export async function checkAppVersion(): Promise<VersionStatus> {
   try {
     const res = await fetch('https://api.github.com/repos/PetrosyanDobryakov/ReView/releases?per_page=100', {
       headers: { Accept: 'application/vnd.github+json' },
