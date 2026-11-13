@@ -20,6 +20,28 @@ const SAVE_BIG_BYTES = 50_000_000;
 const SAVE_MID_BYTES = 10_000_000;
 /** While a stroke/drag is open, defer (input blackouts are the worst kind). */
 const SAVE_GESTURE_RETRY_MS = 2_000;
+/**
+ * Don't encode right after ANY interaction (tool switch, paste, zoom):
+ * the save would land exactly on the next input. Wait for quiet.
+ */
+const SAVE_QUIET_MS = 10_000;
+/** Hidden tabs defer (the live tab's IDB is the store; pagehide flush covers close). */
+const SAVE_HIDDEN_RETRY_MS = 30_000;
+
+/** Last user interaction (pointer/key/wheel), for keeping encodes off the input path. */
+let lastInteractAt = 0;
+if (typeof window !== 'undefined' && isDesktop()) {
+  const noteInteract = () => {
+    lastInteractAt = Date.now();
+  };
+  for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const) {
+    try {
+      window.addEventListener(type, noteInteract, { passive: true, capture: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 /** Pending-save flushers of open mirrors (one per open board). */
 const flushers = new Set<() => Promise<void>>();
@@ -94,10 +116,21 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
       }
       const now = Date.now();
       // Just finished drawing and already switching tools? The encode would
-      // land exactly on the next interaction — wait out the grace period.
+      // land exactly on the next input — wait out the grace period.
       const sinceGesture = now - lastGestureEndMs();
       if (lastGestureEndMs() > 0 && sinceGesture < SAVE_POST_GESTURE_GRACE_MS) {
         if (!timer) timer = setTimeout(() => void save(), SAVE_POST_GESTURE_GRACE_MS - sinceGesture);
+        return inFlight;
+      }
+      // Any interaction at all (tool switch, paste, zoom, select): the encode
+      // is seconds of one pegged core on huge boards — keep it off the input.
+      const sinceInteract = now - lastInteractAt;
+      if (lastInteractAt > 0 && sinceInteract < SAVE_QUIET_MS) {
+        if (!timer) timer = setTimeout(() => void save(), SAVE_QUIET_MS - sinceInteract);
+        return inFlight;
+      }
+      if (typeof document !== 'undefined' && document.hidden) {
+        if (!timer) timer = setTimeout(() => void save(), SAVE_HIDDEN_RETRY_MS);
         return inFlight;
       }
       const wait = intervalFor(lastSavedBytes + pendingBytes) - (now - lastSavedAt);

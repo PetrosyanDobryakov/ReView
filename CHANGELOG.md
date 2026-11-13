@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 0.17.34
+
+### Mirror encode waits for quiet (no more freeze after a move)
+
+- The desktop mirror fired 1.5 s after every change — exactly when
+  the next drag, tool switch or zoom starts. Now it waits 8 s after
+  gestures and 10 s after any input, and hidden tabs defer to the
+  pagehide flush.
+
 ## 0.17.33
 
 ### Cap pinned media bytes (the slow-leak fix)
