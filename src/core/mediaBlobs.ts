@@ -322,11 +322,9 @@ export function collectBlobHashes(shapes: Iterable<[string, ShapeFields]>): stri
 }
 
 /**
- * Pull every listed blob this device lacks, one at a time (peers pace their
- * replies, so this never crowds out live edits). Without servers, a board's
- * media only survives on the devices that hold it, so every member keeps a
- * full copy just as when the bytes lived inside the document. Returns how
- * many blobs were fetched. Never throws.
+ * Pull every listed blob this device lacks. Bounded parallelism (3 lanes):
+ * strictly serial starves a board with hundreds of images behind one slow
+ * peer, while unbounded prefetch crowds out live edits on join. Never throws.
  */
 export async function prefetchBlobs(
   hashes: string[],
@@ -334,23 +332,28 @@ export async function prefetchBlobs(
 ): Promise<number> {
   const store = opts.store ?? mediaBlobStore();
   let fetched = 0;
-  for (const hash of hashes) {
-    if (!opts.isCurrent()) break;
-    if (opts.have?.has(hash)) continue;
-    try {
-      if (await store.has(hash)) {
-        opts.have?.add(hash);
-        continue;
+  let at = 0;
+  const lanes = Array.from({ length: Math.min(3, hashes.length) }, async () => {
+    while (at < hashes.length) {
+      const hash = hashes[at++]!;
+      if (!opts.isCurrent()) break;
+      if (opts.have?.has(hash)) continue;
+      try {
+        if (await store.has(hash)) {
+          opts.have?.add(hash);
+          continue;
+        }
+        if (!remoteFetch) continue;
+        if (await loadBlob(hash, store)) {
+          opts.have?.add(hash);
+          fetched += 1;
+        }
+      } catch {
+        /* next one */
       }
-      if (!remoteFetch) continue;
-      if (await loadBlob(hash, store)) {
-        opts.have?.add(hash);
-        fetched += 1;
-      }
-    } catch {
-      /* next one */
     }
-  }
+  });
+  await Promise.all(lanes);
   return fetched;
 }
 

@@ -23,6 +23,7 @@ import {
   tableCellRect,
   tableGrid,
   hostRiderIds,
+  canHostRiders,
   themeFor,
   intersects,
   normalizeBox,
@@ -1047,6 +1048,8 @@ export class Engine {
     this.boundPageId = store.currentPageId();
     for (const un of this.shapeObs.values()) un.un();
     this.shapeObs.clear();
+    this.arrowsByHost.clear();
+    this.arrowHosts.clear();
     this.views.clear();
     this.grid.rebuild([]);
     this.orderIndexDirty = true;
@@ -1827,15 +1830,16 @@ export class Engine {
 
   updateConnectedArrows(movedIds: Set<string>): void {
     const patches: Array<[string, Partial<ShapeView>]> = [];
-    for (const [id, v] of this.views) {
-      if (v.type !== 'arrow' || !v.fromId || !v.toId) continue;
-      if (!movedIds.has(v.fromId) && !movedIds.has(v.toId)) continue;
-      const from = this.views.get(v.fromId);
-      const to = this.views.get(v.toId);
+    for (const v of this.connectedArrowsOf(movedIds)) {
+      const fromId = v.fromId;
+      const toId = v.toId;
+      if (!fromId || !toId) continue;
+      const from = this.views.get(fromId);
+      const to = this.views.get(toId);
       if (!from || !to) continue;
       const fromPort = (v.fromPort as PortId) || 'e';
       const toPort = (v.toPort as PortId) || 'w';
-      patches.push([id, connectedArrowGeometry(from, to, fromPort, toPort, v)]);
+      patches.push([v.id, connectedArrowGeometry(from, to, fromPort, toPort, v)]);
     }
     if (patches.length) store.patchShapes(patches);
   }
@@ -1875,17 +1879,20 @@ export class Engine {
       moved.add(id);
       patches.push([id, { x: v.x + dx, y: v.y + dy }]);
     }
-    for (const [aid, av] of this.views) {
-      if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
-      if (!moved.has(av.fromId) && !moved.has(av.toId)) continue;
+    for (const av of this.connectedArrowsOf(moved)) {
+      const aid = av.id;
+      const fromId = av.fromId;
+      const toId = av.toId;
+      if (!fromId || !toId) continue;
+      if (!moved.has(fromId) && !moved.has(toId)) continue;
       if (moved.has(aid)) continue;
-      const from = this.views.get(av.fromId);
-      const to = this.views.get(av.toId);
+      const from = this.views.get(fromId);
+      const to = this.views.get(toId);
       if (!from || !to) continue;
-      const fx = moved.has(av.fromId) ? from.x + dx : from.x;
-      const fy = moved.has(av.fromId) ? from.y + dy : from.y;
-      const tx = moved.has(av.toId) ? to.x + dx : to.x;
-      const ty = moved.has(av.toId) ? to.y + dy : to.y;
+      const fx = moved.has(fromId) ? from.x + dx : from.x;
+      const fy = moved.has(fromId) ? from.y + dy : from.y;
+      const tx = moved.has(toId) ? to.x + dx : to.x;
+      const ty = moved.has(toId) ? to.y + dy : to.y;
       const fromBox = { ...from, x: fx, y: fy } as ShapeView;
       const toBox = { ...to, x: tx, y: ty } as ShapeView;
       patches.push([aid, connectedArrowGeometry(fromBox, toBox, (av.fromPort as PortId) || 'e', (av.toPort as PortId) || 'w', av)]);
@@ -1914,13 +1921,28 @@ export class Engine {
     const box = groupBox(movingViews);
     if (!box) return { dx, dy, guides: [] };
     const movedBox: ShapeBox = { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
-    const riderSkip = new Set(this.ridersOfHosts([...originals.keys()]));
+    const threshold = 8 / this.camera.zoom;
+    // Riders move with their hosts, so they can never be snap targets — but
+    // resolving them scans every view per pointermove. Only shapes that can
+    // host riders (media/frames/tables) pay that scan.
+    const riderSkip = [...originals.values()].some((v) => canHostRiders(v.type))
+      ? new Set(this.ridersOfHosts([...originals.keys()]))
+      : new Set<string>();
+    // computeSnap only looks within threshold of the moving edges, so query
+    // the spatial index instead of boxing every view on every pointermove.
+    const probe: ShapeBox = {
+      x: movedBox.x - threshold,
+      y: movedBox.y - threshold,
+      w: movedBox.w + threshold * 2,
+      h: movedBox.h + threshold * 2,
+    };
     const otherBoxes: ShapeBox[] = [];
-    for (const [id, v] of this.views) {
-      if (originals.has(id) || riderSkip.has(id) || !isAlignSnapTarget(v.type)) continue;
+    for (const id of this.grid.query(probe)) {
+      if (originals.has(id) || riderSkip.has(id)) continue;
+      const v = this.views.get(id);
+      if (!v || !isAlignSnapTarget(v.type)) continue;
       otherBoxes.push(visualBox(v));
     }
-    const threshold = 8 / this.camera.zoom;
     const res = computeSnap(movedBox, otherBoxes, threshold);
     // res.dx is delta to add to movedBox to snap, so final dx = dx + res.dx
     return { dx: dx + res.dx, dy: dy + res.dy, guides: res.guides };
@@ -4632,8 +4654,18 @@ export class Engine {
     if (deleted.length) {
       const gone = new Set(deleted);
       const toDelete: string[] = [];
-      for (const [aid, av] of this.views) {
-        if (av.type === 'arrow' && ((av.fromId && gone.has(av.fromId)) || (av.toId && gone.has(av.toId!)))) toDelete.push(aid);
+      const seen = new Set<string>();
+      for (const g of gone) {
+        const set = this.arrowsByHost.get(g);
+        if (!set) continue;
+        for (const aid of set) {
+          if (seen.has(aid)) continue;
+          seen.add(aid);
+          const av = this.views.get(aid);
+          if (av && av.type === 'arrow' && ((av.fromId && gone.has(av.fromId)) || (av.toId && gone.has(av.toId)))) {
+            toDelete.push(aid);
+          }
+        }
       }
       if (toDelete.length) store.removeShapes(toDelete);
     }
@@ -4641,6 +4673,13 @@ export class Engine {
   };
 
   private shapeObs = new Map<string, { un: () => void; m: Y.Map<unknown> }>();
+  /**
+   * Host → connected-arrow index: drags, deletes and re-glues must touch
+   * only arrows glued to moved hosts, not scan every view per pointermove.
+   * Maintained in lockstep with views (attach/detach/live patch/reset).
+   */
+  private arrowsByHost = new Map<string, Set<string>>();
+  private arrowHosts = new Map<string, [string, string]>();
 
   /** Geometry-only keys — updating these must not poke React selection (StyleBar). */
   private static readonly GEOM_KEYS = new Set([
@@ -4659,6 +4698,9 @@ export class Engine {
   ]);
 
   private attachShape(key: string, m: Y.Map<unknown>): void {
+    // Views are set by the caller before attaching; keep the arrow index in
+    // step even on the same-map early return below (hosts may have changed).
+    this.indexArrow(key, this.views.get(key));
     const existing = this.shapeObs.get(key);
     if (existing && existing.m === m) return;
     this.detachShape(key);
@@ -4697,6 +4739,7 @@ export class Engine {
       this.views.set(key, v);
       this.grid.upsert(key, this.spatialBox(v));
       this.followMediaState(key, v);
+      this.indexArrow(key, v);
       this.dirty = true;
       if (!this.selection.has(key)) return;
       let styleish = false;
@@ -4714,11 +4757,55 @@ export class Engine {
   }
 
   private detachShape(key: string): void {
+    this.indexArrow(key, undefined);
     const existing = this.shapeObs.get(key);
     if (existing) {
       existing.un();
       this.shapeObs.delete(key);
     }
+  }
+
+  /** Keep the host→arrow index in step with views (exact: same membership). */
+  private indexArrow(key: string, v: ShapeView | undefined): void {
+    const prev = this.arrowHosts.get(key);
+    if (prev) {
+      for (const h of prev) {
+        const s = this.arrowsByHost.get(h);
+        if (s) {
+          s.delete(key);
+          if (!s.size) this.arrowsByHost.delete(h);
+        }
+      }
+      this.arrowHosts.delete(key);
+    }
+    if (v && v.type === 'arrow' && v.fromId && v.toId) {
+      this.arrowHosts.set(key, [v.fromId, v.toId]);
+      for (const h of [v.fromId, v.toId]) {
+        let s = this.arrowsByHost.get(h);
+        if (!s) {
+          s = new Set();
+          this.arrowsByHost.set(h, s);
+        }
+        s.add(key);
+      }
+    }
+  }
+
+  /** Connected arrows glued to any of these hosts (deduped). */
+  connectedArrowsOf(hostIds: Set<string>): ShapeView[] {
+    const out: ShapeView[] = [];
+    const seen = new Set<string>();
+    for (const h of hostIds) {
+      const set = this.arrowsByHost.get(h);
+      if (!set) continue;
+      for (const aid of set) {
+        if (seen.has(aid)) continue;
+        seen.add(aid);
+        const av = this.views.get(aid);
+        if (av && av.type === 'arrow' && av.fromId && av.toId) out.push(av);
+      }
+    }
+    return out;
   }
 
   private resize = (): void => {

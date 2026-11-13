@@ -113,11 +113,24 @@ async function databaseExists(name: string): Promise<boolean> {
   });
 }
 
+/** One IndexedDB listing shared by a whole weighing pass (null = unavailable). */
+export async function listBoardDbNames(): Promise<Set<string> | null> {
+  if (typeof indexedDB === 'undefined') return null;
+  if (typeof indexedDB.databases !== 'function') return null;
+  try {
+    const dbs = await indexedDB.databases.call(indexedDB);
+    return new Set(dbs.map((d) => d.name).filter((n): n is string => typeof n === 'string'));
+  } catch {
+    return null;
+  }
+}
+
 /** Returns approximate byte size of the board's IndexedDB, or 0 if missing. */
-export async function estimateBoardBytes(boardId: string): Promise<number> {
+export async function estimateBoardBytes(boardId: string, known?: Set<string> | null): Promise<number> {
   if (typeof indexedDB === 'undefined') return 0;
   const name = boardPersistenceDbName(boardId);
-  const exists = await databaseExists(name);
+  // A shared listing avoids one open() probe (up to ~1.2 s fallback) per board.
+  const exists = known ? known.has(name) : await databaseExists(name);
   if (!exists) return 0;
 
   const openAndSum = (): Promise<number> =>

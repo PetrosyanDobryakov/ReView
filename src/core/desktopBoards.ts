@@ -34,7 +34,9 @@ if (typeof window !== 'undefined' && isDesktop()) {
   const noteInteract = () => {
     lastInteractAt = Date.now();
   };
-  for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const) {
+  // pointermove included: a long pan/draw is one continuous interaction, and
+  // the encode must not land mid-gesture just because the button stayed down.
+  for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const) {
     try {
       window.addEventListener(type, noteInteract, { passive: true, capture: true });
     } catch {
@@ -165,8 +167,11 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
     await save(true);
   };
   flushers.add(flush);
-  const onUpdate = (update?: Uint8Array): void => {
+  const onUpdate = (update?: Uint8Array, origin?: unknown): void => {
     if (stopped) return;
+    // The disk-file merge below re-applies our own bytes: persisting them
+    // back is a wasted full encode + write on every open.
+    if (origin === 'desktop-file') return;
     dirty = true;
     if (update && update.length) pendingBytes += update.length;
     if (!timer) timer = setTimeout(() => void save(), SAVE_DEBOUNCE_MS);
@@ -176,7 +181,14 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
   };
 
   if (opts.load !== false) void loadBoardFile(boardId).then((bytes) => {
-    if (stopped || !bytes || bytes.length === 0) return;
+    if (stopped || !bytes || bytes.length === 0) {
+      if (!stopped && (!bytes || bytes.length === 0)) {
+        // No file yet: this board only lives in IndexedDB, so seed one save.
+        // (Boards WITH a file must not pay a guaranteed full encode on open.)
+        onUpdate();
+      }
+      return;
+    }
     try {
       Y.applyUpdate(doc, bytes, 'desktop-file');
     } catch (e) {
@@ -185,8 +197,6 @@ export function attachDesktopMirror(doc: Y.Doc, boardId: string, opts: { load?: 
   });
   doc.on('update', onUpdate);
   window.addEventListener('pagehide', onHide);
-  // First snapshot so a board that only lives in IndexedDB gets its file too.
-  onUpdate();
 
   return () => {
     if (stopped) return;

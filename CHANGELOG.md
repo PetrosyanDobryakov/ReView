@@ -4,6 +4,39 @@
 
 ## Unreleased
 
+## 0.17.38
+
+### Sync heals instead of diverging (guest missed new strokes)
+
+- Silent loss was structural: full queues refused Sync chunks, the
+  reassembler evicted whole messages, relay links skipped gaps — and
+  nothing ever re-asked on a healthy link. Now every open link gets a
+  state-vector ask every 10 s (anti-entropy), reassembler drops trigger
+  an immediate targeted ask, and bad frames still run the missing-parent
+  check. Worst case is seconds of staleness, never permanent divergence.
+- Blob serving stops on a full queue (lets the requester fail over)
+  and BlobWant fail-fast skips the 15 s idle wait on refused links.
+
+### Startup and board open
+
+- Home no longer weighs every board on mount: cached sizes paint
+  instantly, background refresh runs idle with 2 lanes and one shared
+  DB listing. Version check cached 12 h. First paint no longer waits
+  for the disk restore (Home refreshes on arrival).
+- Opening a board with a file no longer pays a guaranteed full-doc
+  encode; only boards without a file seed one save. The disk-file merge
+  no longer re-dirties the mirror.
+- Media prefetch runs 3 lanes instead of strictly serial.
+
+### Drag path
+
+- Snap candidates come from the spatial index (was: box every view per
+  pointermove); rider resolution skipped unless a host type moves.
+- Connected arrows kept in a host index: drags and deletes touch only
+  glued arrows, not every view.
+- Mirror quiet window now covers pointermove, so long pans/draws no
+  longer schedule an encode mid-gesture.
+
 ## 0.17.37
 
 ### Roll-forward to the 0.17.35 line (0.17.36 reverted)

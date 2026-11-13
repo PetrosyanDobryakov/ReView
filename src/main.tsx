@@ -12,7 +12,7 @@ import { migrateLegacyOrbitPaper } from './core/orbit';
 import { clearAllPeerDisplays } from './core/peerDisplay';
 import { t } from './ui/i18n';
 import { leaveBoard } from './core/store';
-import { getBoard, ensureBoardWithId } from './core/boards';
+import { getBoard, ensureBoardWithId, notifyBoardsChanged } from './core/boards';
 import { bootNetLog } from './net/log';
 import { restoreDesktopBoards } from './core/desktopBoards';
 import { OrbitSpace } from './ui/OrbitSpace';
@@ -151,5 +151,11 @@ function render(): void {
 }
 
 // Desktop: boards on disk that this webview origin has not seen yet go back on Home first.
-// In a browser this resolves immediately.
-void restoreDesktopBoards().catch(() => 0).finally(render);
+// In a browser this resolves immediately. Paint first, merge afterwards — the
+// disk probe must not gate first render; Home refreshes on the event below.
+render();
+void restoreDesktopBoards()
+  .then((added) => {
+    if (added > 0) notifyBoardsChanged();
+  })
+  .catch(() => {});

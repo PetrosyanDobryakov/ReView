@@ -678,15 +678,18 @@ export class SelectTool extends Tool {
         patches.push([id, { x: o.x + dx, y: o.y + dy }]);
       }
       const movedIds = movingHosts;
-      for (const [aid, av] of engine.views) {
-        if (av.type !== 'arrow' || !av.fromId || !av.toId) continue;
-        if (!movedIds.has(av.fromId) && !movedIds.has(av.toId)) continue;
+      for (const av of engine.connectedArrowsOf(movedIds)) {
+        const aid = av.id;
+        const fromId = av.fromId;
+        const toId = av.toId;
+        if (!fromId || !toId) continue;
+        if (!movedIds.has(fromId) && !movedIds.has(toId)) continue;
         if (movedIds.has(aid)) continue;
-        const from = engine.views.get(av.fromId);
-        const to = engine.views.get(av.toId);
+        const from = engine.views.get(fromId);
+        const to = engine.views.get(toId);
         if (!from || !to) continue;
-        const fromOrig = this.originals.get(av.fromId) ?? this.stuck.get(av.fromId);
-        const toOrig = this.originals.get(av.toId) ?? this.stuck.get(av.toId);
+        const fromOrig = this.originals.get(fromId) ?? this.stuck.get(fromId);
+        const toOrig = this.originals.get(toId) ?? this.stuck.get(toId);
         const fx = fromOrig ? fromOrig.x + dx : from.x;
         const fy = fromOrig ? fromOrig.y + dy : from.y;
         const tx = toOrig ? toOrig.x + dx : to.x;

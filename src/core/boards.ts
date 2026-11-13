@@ -403,3 +403,22 @@ export function listRecentBoards(): BoardMeta[] {
     return [];
   }
 }
+
+/** Same-tab board-registry change broadcast (disk restore, background sync). */
+export function notifyBoardsChanged(): void {
+  try {
+    window.dispatchEvent(new Event('review-boards-changed'));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Run `cb` whenever the board registry changes in this tab. */
+export function onBoardsChanged(cb: () => void): () => void {
+  try {
+    window.addEventListener('review-boards-changed', cb);
+    return () => window.removeEventListener('review-boards-changed', cb);
+  } catch {
+    return () => {};
+  }
+}

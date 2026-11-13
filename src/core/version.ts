@@ -53,8 +53,44 @@ export type VersionStatus =
  * - older than the newest release → 'outdated'
  * - not among published releases (unreleased or newer) → 'dev'
  * - equals the newest release → 'latest'
+ *
+ * The newest seen release is cached (12 h): Home mounts on every return
+ * from a board, and a network round-trip on each mount stalls the update
+ * badge and steals startup bandwidth. The cached newest is re-compared
+ * against the running version, so updating the app immediately flips the
+ * badge without waiting for cache expiry.
  */
+const VER_CACHE_KEY = 'review-app-version-check';
+const VER_CACHE_TTL_MS = 12 * 3600_000;
+
 export async function checkAppVersion(): Promise<VersionStatus> {
+  try {
+    const raw = localStorage.getItem(VER_CACHE_KEY);
+    if (raw) {
+      const cached = JSON.parse(raw) as { at?: unknown; latest?: unknown; url?: unknown };
+      if (
+        typeof cached.at === 'number' &&
+        Date.now() - cached.at < VER_CACHE_TTL_MS &&
+        typeof cached.latest === 'string'
+      ) {
+        const cmp = compareVersions(APP_VERSION, cached.latest);
+        if (cmp < 0) {
+          return {
+            kind: 'outdated',
+            latest: cached.latest,
+            url: typeof cached.url === 'string' && cached.url ? cached.url : RELEASES_URL,
+          };
+        }
+        return cmp === 0 ? { kind: 'latest' } : { kind: 'dev' };
+      }
+    }
+  } catch {
+    /* fall through to live check */
+  }
+  return checkAppVersionLive();
+}
+
+async function checkAppVersionLive(): Promise<VersionStatus> {
   try {
     const res = await fetch('https://api.github.com/repos/PetrosyanDobryakov/ReView/releases?per_page=100', {
       headers: { Accept: 'application/vnd.github+json' },
@@ -67,6 +103,11 @@ export async function checkAppVersion(): Promise<VersionStatus> {
     let newest = 0;
     for (let i = 1; i < versions.length; i++) if (compareVersions(versions[i]!, versions[newest]!) > 0) newest = i;
     const latest = versions[newest]!;
+    try {
+      localStorage.setItem(VER_CACHE_KEY, JSON.stringify({ at: Date.now(), latest, url: ours[newest]!.html_url ?? RELEASES_URL }));
+    } catch {
+      /* cache is best-effort */
+    }
     if (compareVersions(APP_VERSION, latest) < 0) {
       return { kind: 'outdated', latest, url: ours[newest]!.html_url ?? RELEASES_URL };
     }

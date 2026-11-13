@@ -20,9 +20,10 @@ import {
   setFavTeam,
   isOwnBoard,
   boardStorageKind,
+  onBoardsChanged,
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
-import { estimateBoardBytes, formatBoardWeight } from '../core/boardSize';
+import { estimateBoardBytes, formatBoardWeight, listBoardDbNames } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
 import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_V2_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
@@ -70,6 +71,48 @@ function relativeTime(ts: number, localeTag: string): string {
     /* fall through */
   }
   return new Date(ts).toLocaleDateString(localeTag);
+}
+
+/** Board weights cache: instant paint, refreshed in the background (6 h TTL). */
+const WEIGHTS_CACHE_KEY = 'review-board-weights-v1';
+const WEIGHTS_TTL_MS = 6 * 3600_000;
+
+type WeightsCache = Record<string, { bytes: number; at: number }>;
+
+function readWeightsCache(): WeightsCache {
+  try {
+    const raw = localStorage.getItem(WEIGHTS_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: WeightsCache = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (
+        v &&
+        typeof v === 'object' &&
+        typeof (v as { bytes?: unknown }).bytes === 'number' &&
+        typeof (v as { at?: unknown }).at === 'number'
+      ) {
+        out[k] = { bytes: (v as { bytes: number }).bytes, at: (v as { at: number }).at };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function readFreshWeightsCache(): Record<string, number> {
+  const cache = readWeightsCache();
+  const now = Date.now();
+  const out: Record<string, number> = {};
+  for (const [id, e] of Object.entries(cache)) {
+    if (now - e.at < WEIGHTS_TTL_MS) out[id] = e.bytes;
+  }
+  return out;
+}
+
+function hasWeightsCache(): boolean {
+  return Object.keys(readFreshWeightsCache()).length > 0;
 }
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
@@ -120,8 +163,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   const [favMenu, setFavMenu] = useState<{ x: number; y: number; teamId: string } | null>(null);
   const [joinLink, setJoinLink] = useState('');
   const [saveRemote, setSaveRemote] = useState(() => readPrefs().saveRemoteBoards);
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [weightsReady, setWeightsReady] = useState(false);
+  const [weights, setWeights] = useState<Record<string, number>>(() => readFreshWeightsCache());
+  const [weightsReady, setWeightsReady] = useState(() => hasWeightsCache());
   const weightsGen = useRef(0);
   const [verStatus, setVerStatus] = useState<VersionStatus | null>(null);
   /** Desktop self-update: null idle, a number while downloading (0..1, or -1 unknown size). */
@@ -166,24 +209,72 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
 
   const refreshWeights = useCallback(async (list: BoardMeta[]) => {
     const gen = ++weightsGen.current;
-    try {
-      const entries = await Promise.all(
-        list.map(async (b) => {
-          // Session-only boards hold nothing locally — skip the IDB probe
-          // (each miss costs up to a second of open() timeouts).
-          if (boardStorageKind(b) !== 'onDevice') return [b.id, 0] as const;
-          try {
-            const bytes = await estimateBoardBytes(b.id);
-            return [b.id, bytes] as const;
-          } catch {
-            return [b.id, 0] as const;
+    // Defer past first paint: weighing walks whole IndexedDBs on the main
+    // thread, and a fresh/empty board must not pay for the whole library.
+    await new Promise<void>((resolve) => {
+      try {
+        const ric = (
+          window as unknown as {
+            requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
           }
-        })
-      );
+        ).requestIdleCallback;
+        if (typeof ric === 'function') {
+          ric.call(window, () => resolve(), { timeout: 2000 });
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      setTimeout(resolve, 350);
+    });
+    if (gen !== weightsGen.current) return;
+    try {
+      const now = Date.now();
+      const cache = readWeightsCache();
+      const fresh = (id: string): number | undefined => {
+        const e = cache[id];
+        return e && now - e.at < WEIGHTS_TTL_MS ? e.bytes : undefined;
+      };
+      // One DB listing for the whole pass: per-board open() probes cost up
+      // to ~1.2 s each when IndexedDB is wedged.
+      const known = await listBoardDbNames();
+      const queue = list.filter((b) => boardStorageKind(b) === 'onDevice' && fresh(b.id) === undefined);
+      const probed: Record<string, number> = {};
+      // Bounded concurrency: each probe walks a whole DB, N at once contend.
+      const lanes = Array.from({ length: Math.min(2, queue.length) }, async () => {
+        while (queue.length) {
+          const b = queue.shift();
+          if (!b || gen !== weightsGen.current) return;
+          try {
+            probed[b.id] = await estimateBoardBytes(b.id, known ?? undefined);
+          } catch {
+            probed[b.id] = 0;
+          }
+        }
+      });
+      await Promise.all(lanes);
       if (gen !== weightsGen.current) return;
       const next: Record<string, number> = {};
-      for (const [id, bytes] of entries) next[id] = bytes;
+      for (const b of list) {
+        if (boardStorageKind(b) !== 'onDevice') {
+          next[b.id] = 0;
+          continue;
+        }
+        const f = fresh(b.id);
+        next[b.id] = f !== undefined ? f : (probed[b.id] ?? 0);
+      }
       setWeights(next);
+      // Persist the fresh probes (pruned to listed boards) for instant paint
+      // next visit; merges with the cache so refreshes stay incremental.
+      try {
+        const ids = new Set(list.map((b) => b.id));
+        const stamp = Date.now();
+        for (const id of Object.keys(cache)) if (!ids.has(id)) delete cache[id];
+        for (const [id, bytes] of Object.entries(probed)) cache[id] = { bytes, at: stamp };
+        localStorage.setItem(WEIGHTS_CACHE_KEY, JSON.stringify(cache));
+      } catch {
+        /* cache is best-effort */
+      }
     } catch {
       // keep previous weights on unexpected failure
     } finally {
@@ -208,6 +299,9 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
   }, [boards, refreshWeights]);
 
   useEffect(() => onPrefsChange((p) => setSaveRemote(p.saveRemoteBoards)), []);
+
+  // Disk restore (and background registry changes) lands after first paint.
+  useEffect(() => onBoardsChanged(refresh), [refresh]);
 
   // ponytail: 'recent' is a pseudo-team — same board list, own + guest boards in visit order.
   const filtered =

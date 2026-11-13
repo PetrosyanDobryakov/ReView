@@ -69,6 +69,16 @@ const RELAY_FANOUT = 2;
 
 /** Minimum gap between resyncs asked for because an update arrived with missing parents. */
 const PENDING_RESYNC_MS = 2_000;
+/**
+ * Every open link gets a state-vector ask this often (anti-entropy). Sync
+ * chunks refused by a full link queue, evicted reassemblies and relay gap
+ * skips used to be lost forever on an otherwise healthy link; now the worst
+ * case is one quiet period of staleness. Step1 is clocks only, so this is
+ * a few hundred bytes per peer per period.
+ */
+const ANTI_ENTROPY_MS = 10_000;
+/** Minimum gap between targeted heal Step1s to one peer (drop-triggered). */
+const HEAL_MIN_MS = 2_000;
 /** Resync asks are debounced this long (+jitter): drops arrive in bursts. */
 const RESYNC_DEBOUNCE_MS = 750;
 const RESYNC_JITTER_MS = 250;
@@ -140,6 +150,10 @@ type Entry = {
   rtt: number | null;
   pingSeq: number;
   lastHeard: number;
+  /** Next anti-entropy Step1 is due after this (jittered at open). */
+  lastEntropyAt: number;
+  /** Last drop-triggered heal Step1 to this peer (debounce). */
+  lastHealAt: number;
   /** Media requests from this peer waiting to be served, in order. */
   serveQueue: Array<{ req: number; hash: string }>;
   serving: boolean;
@@ -202,6 +216,8 @@ export class Mesh {
   private lastPendingResync = 0;
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly resyncSkips = new Set<Entry>();
+  /** A resync(null) arrived since the last fire: the round asks everyone. */
+  private resyncAskAll = false;
   private blobSeq = 0;
   private readonly blobReqs = new Map<number, BlobRequest>();
   private readonly blobFetches = new Map<string, Promise<BlobBytes | null>>();
@@ -383,6 +399,8 @@ export class Mesh {
         rtt: null,
         pingSeq: 0,
         lastHeard: 0,
+        lastEntropyAt: 0,
+        lastHealAt: 0,
         serveQueue: [],
         serving: false,
         lastError: null,
@@ -579,6 +597,9 @@ export class Mesh {
     // A relay taking over must not erase why direct died; a direct open clears it.
     if (!(link instanceof RelayLink)) e.lastDirectError = null;
     e.lastHeard = Date.now();
+    // First anti-entropy round lands within one period of the join, so a
+    // lossy join heals even when the open-Step1 below never arrives.
+    e.lastEntropyAt = Date.now() - Math.random() * ANTI_ENTROPY_MS;
     this.opts.log?.('link open', { peer: e.peer });
     this.evt('link open', e.peer, { relayed: link instanceof RelayLink });
     this.sendTo(e, encodeHello({ proto: PEER_PROTO, app: this.opts.appVersion }));
@@ -653,20 +674,26 @@ export class Mesh {
   private onLinkMessage(e: Entry, link: PeerLink, data: Uint8Array): void {
     if (e.link !== link) return;
     e.lastHeard = Date.now();
+    const dropsBefore = e.reasm.dropped();
     const msg = e.reasm.push(data);
+    // The reassembler drops whole Sync messages under load (caps, TTL, bad
+    // headers) with no signal. Ask the sender for what we lack right away
+    // instead of waiting for the periodic round.
+    if (e.reasm.dropped() !== dropsBefore) this.healFrom(e);
     if (!msg || msg.length === 0) return;
     const body = msg.subarray(1);
     switch (msg[0]) {
       case Frame.Sync: {
         const dec = decoding.createDecoder(body);
         const enc = encoding.createEncoder();
+        let ok = true;
         try {
           syncProtocol.readSyncMessage(dec, enc, this.doc, e);
         } catch (err) {
+          ok = false;
           this.opts.log?.('bad sync frame', { peer: e.peer, err: String(err) });
-          return;
         }
-        if (encoding.length(enc) > 0) this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
+        if (ok && encoding.length(enc) > 0) this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
         if (this.doc.store.pendingStructs || this.doc.store.pendingDs) {
           const now = Date.now();
           if (now - this.lastPendingResync > PENDING_RESYNC_MS) {
@@ -808,7 +835,9 @@ export class Mesh {
       };
       r.timer = setTimeout(() => r.done(null), BLOB_IDLE_MS);
       this.blobReqs.set(req, r);
-      this.sendTo(e, msg);
+      // A refused want would otherwise hang until the idle timeout while the
+      // link is saturated: fail over to the next peer right away.
+      if (!this.sendTo(e, msg)) r.done(null);
     });
   }
 
@@ -865,7 +894,9 @@ export class Mesh {
           }
           if (e.link !== link || link.state !== 'open' || this.destroyed) return;
           const bytes = blob.bytes.subarray(offset, offset + BLOB_SLICE);
-          this.sendTo(e, encodeBlobPart({ req, total, offset, mime: blob.mime, bytes }));
+          // Media is the lowest priority: on a full queue stop serving and
+          // let the requester fail over, instead of spinning refused slices.
+          if (!this.sendTo(e, encodeBlobPart({ req, total, offset, mime: blob.mime, bytes }))) return;
         }
       }
     } finally {
@@ -919,6 +950,21 @@ export class Mesh {
   }
 
   /**
+   * Targeted anti-entropy ask: send our state vector to one peer so it
+   * replies with what we lack (Step2) — the fast healer for losses on an
+   * otherwise healthy link (reassembler drops, relay gap skips).
+   */
+  private healFrom(e: Entry): void {
+    if (this.destroyed || e.link?.state !== 'open') return;
+    const now = Date.now();
+    if (now - e.lastHealAt < HEAL_MIN_MS) return;
+    e.lastHealAt = now;
+    const enc = encoding.createEncoder();
+    syncProtocol.writeSyncStep1(enc, this.doc);
+    this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
+  }
+
+  /**
    * Ask every open link (except `skip`) for what we lack: they answer our state
    * vector with a diff. Relay suppression trusts that a peer with a direct link
    * to the source got the update from it; when that link dies, an edit still
@@ -928,16 +974,18 @@ export class Mesh {
     // Drops arrive in bursts (one peer leaving closes N links at once);
     // coalesce them into one Step1 round instead of a fan-out per event.
     if (skip) {
-      this.resyncSkips.add(skip);
+      if (!this.resyncAskAll) this.resyncSkips.add(skip);
     } else {
       this.resyncSkips.clear();
+      this.resyncAskAll = true;
     }
     if (this.resyncTimer || this.destroyed) return;
     this.resyncTimer = setTimeout(() => {
       this.resyncTimer = null;
       if (this.destroyed) return;
-      const skips = new Set(this.resyncSkips);
+      const skips = this.resyncAskAll ? new Set<Entry>() : new Set(this.resyncSkips);
       this.resyncSkips.clear();
+      this.resyncAskAll = false;
       this.resyncNow(skips);
     }, RESYNC_DEBOUNCE_MS + Math.random() * RESYNC_JITTER_MS);
   }
@@ -964,13 +1012,14 @@ export class Mesh {
     }
   }
 
-  private sendTo(e: Entry, message: Uint8Array): void {
+  private sendTo(e: Entry, message: Uint8Array): boolean {
     const link = e.link;
-    if (!link || link.state !== 'open') return;
+    if (!link || link.state !== 'open') return false;
     this.msgSeq = (this.msgSeq + 1) >>> 0;
     for (const part of split(message, this.msgSeq)) {
-      if (!link.send(part)) return;
+      if (!link.send(part)) return false;
     }
+    return true;
   }
 
   private lastAnnounced = '';
@@ -995,6 +1044,14 @@ export class Mesh {
         this.opts.log?.('link silent, closing', { peer: e.peer });
         e.link.close();
         continue;
+      }
+      // Anti-entropy: a state-vector ask every period heals any Sync loss
+      // the fast paths missed (full-queue refusals, relay gap skips).
+      if (now - e.lastEntropyAt >= ANTI_ENTROPY_MS) {
+        e.lastEntropyAt = now;
+        const enc = encoding.createEncoder();
+        syncProtocol.writeSyncStep1(enc, this.doc);
+        this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
       }
       e.pingSeq = (e.pingSeq + 1) >>> 0;
       this.sendTo(e, encodePing(e.pingSeq, performance.now()));

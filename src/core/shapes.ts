@@ -18,6 +18,14 @@ export type ShapeType = 'rect' | 'ellipse' | 'sticky' | 'text' | 'pen' | 'arrow'
 export const MEDIA_HOST_TYPES: ReadonlySet<ShapeType> = new Set(['image', 'video', 'audio', 'doc']);
 
 /**
+ * Types that can carry riders (checked before the O(N) rider scan, which
+ * builds a full id map + scans every shape per host — per pointermove).
+ */
+export function canHostRiders(type: ShapeType): boolean {
+  return type === 'table' || type === 'frame' || MEDIA_HOST_TYPES.has(type);
+}
+
+/**
  * Big tray-like hosts that carry riders (tables, media, frames). A press on an
  * unselected host selects it and starts marquee — moving needs it pre-selected.
  */
