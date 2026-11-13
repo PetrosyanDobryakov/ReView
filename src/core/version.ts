@@ -72,8 +72,12 @@ export function readCachedVersionStatus(): VersionStatus | null {
     if (typeof cached.latest !== 'string') return null;
     const url = typeof cached.url === 'string' && cached.url ? cached.url : RELEASES_URL;
     const cmp = compareVersions(APP_VERSION, cached.latest);
+    // Running newer than the cached newest proves nothing (usually a manual
+    // update past the cached release): showing 'dev' purple for that was
+    // wrong. Stay quiet and let the live check decide.
+    if (cmp > 0) return null;
     if (cmp < 0) return { kind: 'outdated', latest: cached.latest, url };
-    return cmp === 0 ? { kind: 'latest' } : { kind: 'dev' };
+    return { kind: 'latest' };
   } catch {
     return null;
   }

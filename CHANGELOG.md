@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 0.17.41
+
+### Huge boards survive (worker capped by size)
+
+- The worker keeps a second full copy of the doc: on a 141 MB board
+  that OOMs the renderer — dark window, then close. Crashes happened
+  exactly on worker builds (0.17.36, 0.17.39/40), never without it.
+  Now docs over 48 MB never touch the worker (no clone flood at open,
+  no second copy, no giant seed): they keep the paced sync path —
+  brief freezes on save, but the board lives. The worker also dies
+  back down the moment a doc outgrows the cap mid-life.
+- Version badge no longer goes purple after a manual leapfrog update:
+  running newer than the cached newest stays quiet until live check.
+
 ## 0.17.40
 
 ### Update prompt can no longer go blind

@@ -113,8 +113,15 @@ export function attachDesktopMirror(
   let lastEncodeMs = 0;
   /** Never let pacing delay a save past this (durability still matters). */
   const SAVE_MAX_INTERVAL_MS = 10 * 60_000;
-  /** Docs under this encode in milliseconds: skip the worker round-trip. */
+  /** Docs under this encode in milliseconds — skip the worker round-trip. */
   const SMALL_DOC_SYNC_BYTES = 2 * 1024 * 1024;
+  /**
+   * Docs over this never touch the worker: a second full copy of a huge
+   * doc (Yjs heap overhead is several times the wire size) OOMs the
+   * renderer — dark window, then close. They keep the old paced sync
+   * path: brief freezes on save, but the board survives.
+   */
+  const WORKER_MAX_BYTES = 48 * 1024 * 1024;
 
   // ---- worker snapshot encoder (off main thread) -------------------------
   type WorkerOut =
@@ -157,6 +164,15 @@ export function attachDesktopMirror(
   function feedWorker(update: Uint8Array): void {
     const w = worker;
     if (!w || workerFailed || stopped) return;
+    // A doc that outgrew the worker never comes back: drop the worker (and
+    // its partial prefix) instead of clone-flooding it — a 141 MB replay at
+    // open would triple memory before the first save. Unseeding forces the
+    // next eligible save to re-seed from a sync encode.
+    if (lastSavedBytes + pendingBytes > WORKER_MAX_BYTES) {
+      killWorker(false);
+      workerSeeded = false;
+      return;
+    }
     try {
       // Structured clone (not transfer): the same buffer is still needed by
       // sync/persist handlers running after this one.
@@ -202,6 +218,8 @@ export function attachDesktopMirror(
 
   /** Seed from authoritative full bytes (post-compact hand-off, first save). */
   function seedWorker(full: Uint8Array): void {
+    // Oversized docs never use the worker: don't even build it.
+    if (full.length > WORKER_MAX_BYTES) return;
     const w = ensureWorker();
     if (!w) return;
     try {
@@ -283,9 +301,10 @@ export function attachDesktopMirror(
     pendingBytes = 0;
     const meta = getBoard(boardId) ?? null;
     const metaJson = JSON.stringify(meta);
-    // Small docs encode in milliseconds — skip the worker round-trip. The
-    // encode is authoritative, so it doubles as the worker seed for later.
-    if (syncEncode || estBytes < SMALL_DOC_SYNC_BYTES) {
+    // Small docs encode in milliseconds — skip the worker round-trip. Huge
+    // docs skip it too (a second copy OOMs — paced sync freezes instead).
+    // Either encode is authoritative, so it doubles as the worker seed.
+    if (syncEncode || estBytes < SMALL_DOC_SYNC_BYTES || estBytes > WORKER_MAX_BYTES) {
       // pagehide/close and tiny docs: durability first, freeze accepted
       // (nothing left to disturb — or nothing worth disturbing).
       const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
