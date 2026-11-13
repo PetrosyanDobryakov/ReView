@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Engine } from './engine/Engine';
+import { Engine, getLastLoopStats, getJankStats } from './engine/Engine';
 import type { EditTarget, GraphEditTarget, CalculatorEditTarget } from './engine/Engine';
 import type { ToolId } from './engine/tools';
 import type { ShapeView } from './core/shapes';
@@ -44,6 +44,7 @@ import {
   getCurrentBoardId,
   iOwnBoard,
   boardRoles,
+  compactBoard,
 } from './core/store';
 import {
   onSyncStatus,
@@ -54,10 +55,13 @@ import {
   publishPage,
   publishBoardView,
   onSyncLifecycle,
+  hasRemoteCollaborators,
   desktopWindowBoard,
   type SyncStatus,
   type PeerCursor,
 } from './net';
+import { getMirrorStats } from './core/desktopBoards';
+import { formatBoardWeight } from './core/boardSize';
 import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, saveBoardLocally, isBoardPersistedLocally, isOwnBoard, boardUrl, recordBoardVisit } from './core/boards';
@@ -942,6 +946,27 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
     : undefined;
 
   const menuEntries: MenuEntry[] = [];
+  /** Owner-only board squeeze (empty-space menu): drops tombstones the auto
+   * path keeps for long-gone guests. Blocked while anyone else is live. */
+  const runCompactBoard = async () => {
+    if (hasRemoteCollaborators()) {
+      pushToast(t(locale, 'compactBlockedPeers'));
+      return;
+    }
+    pushToast(t(locale, 'compactRunning'));
+    try {
+      const res = await compactBoard();
+      if (res.didCompact) {
+        pushToast(
+          `${t(locale, 'compactDone')}: ${formatBoardWeight(res.before, locale)} → ${formatBoardWeight(res.after, locale)}`
+        );
+      } else {
+        pushToast(t(locale, 'compactNoop'));
+      }
+    } catch {
+      pushToast(t(locale, 'error'));
+    }
+  };
   if (menuView) {
     const e = engine;
     if (menuView.shapeId) {
@@ -1120,6 +1145,14 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       );
     } else {
       menuEntries.push({ label: t(locale, 'ctxPaste'), hint: 'Ctrl+V', run: () => void e?.pasteFromClipboard() });
+      // Board hygiene, owner only: guests compacting would fork the lineage
+      // for everyone (their doc becomes the new base on sync).
+      if (iOwnBoard()) {
+        menuEntries.push({
+          label: t(locale, 'ctxCompact'),
+          run: () => void runCompactBoard(),
+        });
+      }
     }
   }
 
@@ -1700,4 +1733,21 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
       />
     </div>
   );
+}
+
+if (typeof window !== 'undefined') {
+  // Console diagnostics for hitches: render-loop health, longtask counter,
+  // and the last mirror save (worker vs sync, ms, bytes). Usage: after a
+  // freeze, run `__reviewHitches()` and send the numbers.
+  (window as unknown as Record<string, unknown>).__reviewHitches = () => {
+    try {
+      return {
+        loop: getLastLoopStats(),
+        jank: getJankStats(),
+        mirror: getMirrorStats(),
+      };
+    } catch (e) {
+      return { error: String(e) };
+    }
+  };
 }

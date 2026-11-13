@@ -85,6 +85,20 @@ export async function restoreDesktopBoards(): Promise<number> {
   return added;
 }
 
+/** Last mirror save, for the console diagnostics readout. */
+export type MirrorSaveStats = {
+  boardId: string | null;
+  kind: 'worker' | 'sync' | 'sync-fallback' | null;
+  ms: number;
+  bytes: number;
+};
+const mirrorStats: MirrorSaveStats = { boardId: null, kind: null, ms: 0, bytes: 0 };
+
+/** Last mirror save info (console diagnostics, no board data). */
+export function getMirrorStats(): MirrorSaveStats {
+  return { ...mirrorStats };
+}
+
 /**
  * Merge the disk copy into `doc` once, then keep the file in step with edits.
  * Returns a stop function that writes any pending change first.
@@ -93,7 +107,7 @@ export async function restoreDesktopBoards(): Promise<number> {
  * hundred-megabyte boards never block the main thread on save. The worker doc
  * is an exact mirror of the live doc — Yjs updates are commutative, and every
  * post-attach update is forwarded — which holds from an empty doc or from an
- * explicit `seed`. A board attached with pre-existing content and no seed
+ * explicit seed. A board attached with pre-existing content and no seed
  * takes one sync encode first; that encode doubles as the seed.
  */
 export function attachDesktopMirror(
@@ -142,7 +156,14 @@ export function attachDesktopMirror(
   function killWorker(markFailed: boolean): void {
     const w = worker;
     worker = null;
-    if (markFailed) workerFailed = true;
+    if (markFailed) {
+      workerFailed = true;
+      try {
+        console.warn('[review:desktop] mirror worker failed, sync fallback for saves');
+      } catch {
+        /* ignore */
+      }
+    }
     if (w) {
       try {
         w.terminate();
@@ -313,6 +334,10 @@ export function attachDesktopMirror(
       if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
       lastSavedAt = Date.now();
       lastSavedBytes = bytes.length;
+      mirrorStats.boardId = boardId;
+      mirrorStats.kind = 'sync';
+      mirrorStats.ms = t1 - t0;
+      mirrorStats.bytes = bytes.length;
       if (!syncEncode) seedWorker(bytes);
       inFlight = inFlight.then(() => saveBoardFile(boardId, metaJson, bytes));
       return inFlight;
@@ -326,6 +351,10 @@ export function attachDesktopMirror(
       if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
       lastSavedAt = Date.now();
       lastSavedBytes = bytes.length;
+      mirrorStats.boardId = boardId;
+      mirrorStats.kind = 'sync';
+      mirrorStats.ms = t1 - t0;
+      mirrorStats.bytes = bytes.length;
       seedWorker(bytes);
       inFlight = inFlight.then(() => saveBoardFile(boardId, metaJson, bytes));
       return inFlight;
@@ -342,12 +371,18 @@ export function attachDesktopMirror(
   /** Snapshot via the worker; falls back to a sync encode + reseed on failure. */
   async function writeSnapshot(metaJson: string): Promise<void> {
     try {
+      const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const bytes = await requestWorkerSnapshot();
+      const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (!bytes.length) throw new Error('empty snapshot');
       // Encoded off-thread: don't pace future saves on main-thread cost.
       lastEncodeMs = 0;
       lastSavedAt = Date.now();
       lastSavedBytes = bytes.length;
+      mirrorStats.boardId = boardId;
+      mirrorStats.kind = 'worker';
+      mirrorStats.ms = t1 - t0;
+      mirrorStats.bytes = bytes.length;
       await saveBoardFile(boardId, metaJson, bytes);
       return;
     } catch {
@@ -360,6 +395,10 @@ export function attachDesktopMirror(
     if (t1 - t0 > 0) lastEncodeMs = t1 - t0;
     lastSavedAt = Date.now();
     lastSavedBytes = bytes.length;
+    mirrorStats.boardId = boardId;
+    mirrorStats.kind = 'sync-fallback';
+    mirrorStats.ms = t1 - t0;
+    mirrorStats.bytes = bytes.length;
     seedWorker(bytes);
     await saveBoardFile(boardId, metaJson, bytes);
   }

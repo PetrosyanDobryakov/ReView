@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 0.17.43
+
+### Board hygiene UI + hitch diagnostics
+
+- Empty-space menu (owner only): "Compact board" runs the tombstone
+  eviction on demand and toasts the before/after weight. Blocked while
+  guests are live.
+- Guest board menu: "Reset local data" wipes the local copy so the
+  next open re-syncs clean (recovery path after the host compacts).
+- `__reviewHitches()` console readout: render-loop health, longtask
+  counter, and the last mirror save (worker vs sync, ms, bytes).
+- Mirror worker death now warns once in the console instead of
+  silently falling back to sync encodes.
+
 ## 0.17.42
 
 ### Board composition diagnostics (console)

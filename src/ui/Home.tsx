@@ -23,7 +23,7 @@ import {
   onBoardsChanged,
 } from '../core/boards';
 import type { BoardMeta, Team } from '../core/boards';
-import { estimateBoardBytes, formatBoardWeight, listBoardDbNames } from '../core/boardSize';
+import { estimateBoardBytes, formatBoardWeight, listBoardDbNames, deleteBoardDatabase } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
 import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_V2_FILE_BYTES } from '../core/boardShare';
 import { canRenameBoardOnHome } from '../core/boardTitle';
@@ -113,6 +113,20 @@ function readFreshWeightsCache(): Record<string, number> {
 
 function hasWeightsCache(): boolean {
   return Object.keys(readFreshWeightsCache()).length > 0;
+}
+
+/** Drop one board from the weights cache (e.g. after wiping its local data). */
+function dropWeightsCache(id: string): void {
+  try {
+    const raw = localStorage.getItem(WEIGHTS_CACHE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(parsed, id)) return;
+    delete parsed[id];
+    localStorage.setItem(WEIGHTS_CACHE_KEY, JSON.stringify(parsed));
+  } catch {
+    /* cache is best-effort */
+  }
 }
 
 export function Home({ locale: localeProp }: { locale: LocaleId }) {
@@ -374,6 +388,23 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
     refresh();
     if (!ok) {
       window.alert(t(locale, 'deleteBoardFailed'));
+    }
+  };
+
+  /** Guest boards hold only a local cache: wipe it so the next open re-syncs clean. */
+  const handleResetLocalData = async (id: string) => {
+    if (!confirm(t(locale, 'resetLocalDataConfirm'))) return;
+    try {
+      const ok = await deleteBoardDatabase(id);
+      if (!ok) {
+        window.alert(t(locale, 'error'));
+        return;
+      }
+      dropWeightsCache(id);
+      showCopyToast(t(locale, 'resetLocalDataDone'));
+      void refreshWeights(listBoards());
+    } catch {
+      window.alert(t(locale, 'error'));
     }
   };
 
@@ -816,6 +847,8 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                           title: t(locale, 'saveAsMyBoardHint'),
                         })}
                         {menuItem('download', t(locale, 'exportBoard'), () => void handleExportBoard(b.id))}
+                        {!isOwnBoard(b) &&
+                          menuItem('eraser', t(locale, 'resetLocalData'), () => void handleResetLocalData(b.id))}
                         {menuItem(
                           'pen',
                           t(locale, 'rename'),
