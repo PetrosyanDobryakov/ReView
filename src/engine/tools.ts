@@ -134,6 +134,13 @@ export class SelectTool extends Tool {
   private originals = new Map<string, ShapeView>();
   /** annotations riding on a moved image, snapshotted at drag start */
   private stuck = new Map<string, ShapeView>();
+  /**
+   * Snap candidates for the current move gesture, boxed once at the first
+   * move. Guides span the whole board, so per-move spatial filtering missed
+   * far-away targets; the non-moving board is static mid-gesture, so one
+   * full collection per drag is both exact and cheaper.
+   */
+  private snapBoxes: ShapeBox[] | null = null;
   private marquee: ShapeBox | null = null;
   private rotateStartAngle = 0;
   private rotateOrigDeg = 0;
@@ -253,6 +260,7 @@ export class SelectTool extends Tool {
     engine.arrowInsertPreview = null;
     this.originals.clear();
     this.stuck.clear();
+    this.snapBoxes = null;
     store.beginGesture();
     const rotHit = engine.hitRotateHandle(p.screen.x, p.screen.y);
     if (rotHit) {
@@ -653,7 +661,8 @@ export class SelectTool extends Tool {
       let dy = p.world.y - this.start.y;
       let guides: import('../core/align').AlignGuide[] = [];
       if (!p.alt) {
-        const snapped = engine.computeSnapForMove(this.originals, dx, dy);
+        if (!this.snapBoxes) this.snapBoxes = engine.collectSnapBoxes(this.originals);
+        const snapped = engine.computeSnapForMove(this.originals, dx, dy, this.snapBoxes);
         dx = snapped.dx;
         dy = snapped.dy;
         guides = snapped.guides;
@@ -761,6 +770,7 @@ export class SelectTool extends Tool {
     this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
+    this.snapBoxes = null;
     engine.clearSnapGuides();
     store.endGesture();
   }
@@ -844,6 +854,7 @@ export class SelectTool extends Tool {
     this.downSelectedContainer = false;
     this.originals.clear();
     this.stuck.clear();
+    this.snapBoxes = null;
     engine.clearSnapGuides();
     store.endGesture();
   }

@@ -1911,7 +1911,8 @@ export class Engine {
   computeSnapForMove(
     originals: Map<string, ShapeView>,
     dx: number,
-    dy: number
+    dy: number,
+    others?: ShapeBox[]
   ): { dx: number; dy: number; guides: AlignGuide[] } {
     const movingViews: ShapeView[] = [];
     for (const v of originals.values()) {
@@ -1922,30 +1923,51 @@ export class Engine {
     if (!box) return { dx, dy, guides: [] };
     const movedBox: ShapeBox = { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
     const threshold = 8 / this.camera.zoom;
-    // Riders move with their hosts, so they can never be snap targets — but
-    // resolving them scans every view per pointermove. Only shapes that can
-    // host riders (media/frames/tables) pay that scan.
-    const riderSkip = [...originals.values()].some((v) => canHostRiders(v.type))
-      ? new Set(this.ridersOfHosts([...originals.keys()]))
-      : new Set<string>();
-    // computeSnap only looks within threshold of the moving edges, so query
-    // the spatial index instead of boxing every view on every pointermove.
-    const probe: ShapeBox = {
-      x: movedBox.x - threshold,
-      y: movedBox.y - threshold,
-      w: movedBox.w + threshold * 2,
-      h: movedBox.h + threshold * 2,
-    };
-    const otherBoxes: ShapeBox[] = [];
-    for (const id of this.grid.query(probe)) {
-      if (originals.has(id) || riderSkip.has(id)) continue;
-      const v = this.views.get(id);
-      if (!v || !isAlignSnapTarget(v.type)) continue;
-      otherBoxes.push(visualBox(v));
-    }
+    // Guides span the whole board (a photo aligns to another far away in
+    // the same row), so per-move spatial filtering is wrong. The candidate
+    // set is collected once per gesture (collectSnapBoxes) and reused here;
+    // the spatial probe below is only a fallback for direct callers.
+    const otherBoxes = others ?? (() => {
+      const probe: ShapeBox = {
+        x: movedBox.x - threshold,
+        y: movedBox.y - threshold,
+        w: movedBox.w + threshold * 2,
+        h: movedBox.h + threshold * 2,
+      };
+      const out: ShapeBox[] = [];
+      for (const id of this.grid.query(probe)) {
+        if (originals.has(id)) continue;
+        const v = this.views.get(id);
+        if (!v || !isAlignSnapTarget(v.type)) continue;
+        out.push(visualBox(v));
+      }
+      return out;
+    })();
     const res = computeSnap(movedBox, otherBoxes, threshold);
     // res.dx is delta to add to movedBox to snap, so final dx = dx + res.dx
     return { dx: dx + res.dx, dy: dy + res.dy, guides: res.guides };
+  }
+
+  /**
+   * Snap candidates for one drag gesture: every view except the moving
+   * shapes and their riders, boxed once. The non-moving board does not
+   * change mid-gesture, so per-move rescans only re-boxed the same shapes
+   * (pen point arrays included) on every pointermove. A shape added by a
+   * peer mid-drag becomes a target on the next gesture.
+   */
+  collectSnapBoxes(originals: Map<string, ShapeView>): ShapeBox[] {
+    // Riders move with their hosts, so they can never be snap targets — but
+    // resolving them scans every view. Only shapes that can host riders
+    // (media/frames/tables) pay that scan, once per gesture.
+    const riderSkip = [...originals.values()].some((v) => canHostRiders(v.type))
+      ? new Set(this.ridersOfHosts([...originals.keys()]))
+      : new Set<string>();
+    const out: ShapeBox[] = [];
+    for (const [id, v] of this.views) {
+      if (originals.has(id) || riderSkip.has(id) || !isAlignSnapTarget(v.type)) continue;
+      out.push(visualBox(v));
+    }
+    return out;
   }
 
   setSnapGuides(guides: AlignGuide[]): void {
@@ -4700,9 +4722,12 @@ export class Engine {
   private attachShape(key: string, m: Y.Map<unknown>): void {
     // Views are set by the caller before attaching; keep the arrow index in
     // step even on the same-map early return below (hosts may have changed).
-    this.indexArrow(key, this.views.get(key));
+    // Fresh attaches re-index after observing: detachShape wipes the entry.
     const existing = this.shapeObs.get(key);
-    if (existing && existing.m === m) return;
+    if (existing && existing.m === m) {
+      this.indexArrow(key, this.views.get(key));
+      return;
+    }
     this.detachShape(key);
     const cb = (ev: Y.YMapEvent<unknown>) => {
       const old = this.views.get(key);
@@ -4754,6 +4779,7 @@ export class Engine {
     };
     m.observe(cb);
     this.shapeObs.set(key, { un: () => m.unobserve(cb), m });
+    this.indexArrow(key, this.views.get(key));
   }
 
   private detachShape(key: string): void {

@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+## 0.17.45
+
+### Far-away alignment guides are back
+
+- The spatial snap prefilter only saw nearby shapes, so photos stopped
+  aligning to distant ones in the same row. Candidates are now collected
+  once per drag gesture (full board, boxed once) and reused per move:
+  same guides as before, and cheaper than the per-move scan (no
+  re-boxing, pens included). Also fixed the arrow host index missing
+  fresh attaches, which broke connected-arrow updates.
+
 ## 0.17.44
 
 ### Auto-compact by default, manual button when off
