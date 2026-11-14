@@ -62,6 +62,7 @@ import {
 } from './net';
 import { getMirrorStats } from './core/desktopBoards';
 import { formatBoardWeight } from './core/boardSize';
+import { boardHadRemoteCollaborators } from './core/compactGuard';
 import { readPrefs, writePrefs, onPrefsChange } from './core/prefs';
 import { onSettingsChange, settings } from './core/settings';
 import { getBoard, saveBoardLocally, isBoardPersistedLocally, isOwnBoard, boardUrl, recordBoardVisit } from './core/boards';
@@ -960,6 +961,12 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         pushToast(
           `${t(locale, 'compactDone')}: ${formatBoardWeight(res.before, locale)} → ${formatBoardWeight(res.after, locale)}`
         );
+        try {
+          const id = getCurrentBoardId();
+          if (id && boardHadRemoteCollaborators(id)) pushToast(t(locale, 'compactGuestsWarn'));
+        } catch {
+          /* history check is best-effort */
+        }
       } else {
         pushToast(t(locale, 'compactNoop'));
       }
@@ -1645,6 +1652,7 @@ export default function App({ boardId, onBack }: { boardId: string; onBack: () =
         }}
         onGrid={(on) => setMeta({ grid: on })}
         focusSection={settingsFocus}
+        onCompactNow={iOwnBoard() ? () => void runCompactBoard() : null}
         onClose={() => {
           setSettingsOpen(false);
           setSettingsFocus(null);

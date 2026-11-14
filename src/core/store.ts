@@ -37,6 +37,7 @@ import {
   enqueuePatches,
   flushNow as flushWriteGate,
   closeWriteGate,
+  isWriteGestureActive,
   type PatchBatch,
 } from './writeGate';
 
@@ -190,7 +191,13 @@ function compactHasLiveReplica(): boolean {
 async function maybeAutoCompact(): Promise<void> {
   if (!currentBoardId || !persistence || compactInFlight) return;
   try {
-    if (boardHadRemoteCollaborators(currentBoardId)) {
+    // The sticky latch (boards that ever saw a distinct remote) is honored
+    // only when the auto-compact setting is off. With the setting on
+    // (default), solo boards compact anyway: stale guests may show
+    // duplicates until they reset local data (their old lineage merges back
+    // as new items). Live replicas always block — compacting under them
+    // duplicates immediately.
+    if (boardHadRemoteCollaborators(currentBoardId) && !readPrefs().autoCompact) {
       netLog.info('autoCompact skipped (board had remote collaborators)', () => ({ boardId: currentBoardId }));
       return;
     }
@@ -198,6 +205,8 @@ async function maybeAutoCompact(): Promise<void> {
       netLog.info('autoCompact skipped (replicas present)', () => ({ boardId: currentBoardId }));
       return;
     }
+    // Never rebuild mid-gesture: the before/after encodes block the pointer.
+    if (isWriteGestureActive()) return;
     const before = estDocBytes;
     const liveShapes = board.size;
     // thresholds: compact if >4MB total, or empty board with >1MB tombstones
@@ -567,11 +576,44 @@ export function initBoard(boardId: string): void {
     maybeMigrateBoardMedia();
     scheduleMediaPrefetch();
   }
+  startCompactTimer();
+}
+
+/** Re-check bloat every few minutes while a board is open (setting-gated inside). */
+const COMPACT_INTERVAL_MS = 5 * 60_000;
+let compactTimer: ReturnType<typeof setInterval> | null = null;
+
+function startCompactTimer(): void {
+  stopCompactTimer();
+  try {
+    compactTimer = setInterval(() => {
+      try {
+        if (!readPrefs().autoCompact) return;
+      } catch {
+        return;
+      }
+      void maybeAutoCompact().catch(() => {});
+    }, COMPACT_INTERVAL_MS);
+  } catch {
+    /* ignore */
+  }
+}
+
+function stopCompactTimer(): void {
+  if (compactTimer) {
+    try {
+      clearInterval(compactTimer);
+    } catch {
+      /* ignore */
+    }
+    compactTimer = null;
+  }
 }
 
 /** Tear down sync and clear the active board id (tab close / switch board). */
 export function leaveBoard(): void {
   closeWriteGate();
+  stopCompactTimer();
   flushBoardUpdated();
   stopReplicaHeartbeat();
   try { undoManager.clear(); } catch {}

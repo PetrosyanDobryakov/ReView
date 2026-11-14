@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+## 0.17.44
+
+### Auto-compact by default, manual button when off
+
+- New setting "Auto-compact boards" (on by default): bloated boards
+  squeeze themselves on open and every few minutes while solo — even
+  boards that saw guests before (the old latch only applied when the
+  setting is off). Live guests always block it; gestures defer it.
+  Manual compact warns when guests with stale data exist.
+- Settings show a "Compact now" button whenever auto-compact is off
+  (owner, board open). Same action lives in the empty-space menu.
+
 ## 0.17.43
 
 ### Board hygiene UI + hitch diagnostics

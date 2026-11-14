@@ -47,6 +47,14 @@ export interface AppPrefs {
   /** When false, the P2P mesh is torn down and this tab works alone. */
   syncEnabled: boolean;
   /**
+   * When true (default), bloated boards auto-compact: on open and every few
+   * minutes while solo, tombstones are evicted once the doc passes 4 MB.
+   * Boards that ever saw guests stay compacted too — a guest returning with
+   * pre-compact data may show duplicates until it resets its local copy.
+   * Off = never auto-compact (compact manually instead).
+   */
+  autoCompact: boolean;
+  /**
    * Unlock the Orbit chrome skin in Customize. Visual-only alternate world;
    * off by default so Packet stays the everyday look.
    */
@@ -79,6 +87,7 @@ const DEFAULTS: AppPrefs = {
   rotateHandleTop: false,
   smoothPeerCursors: true,
   syncEnabled: true,
+  autoCompact: true,
   orbitUnlocked: false,
   p2pHubs: [],
   p2pIce: null,
@@ -195,6 +204,7 @@ function parsePrefs(raw: unknown): AppPrefs {
     smoothPeerCursors:
       typeof parsed.smoothPeerCursors === 'boolean' ? parsed.smoothPeerCursors : DEFAULTS.smoothPeerCursors,
     syncEnabled: typeof parsed.syncEnabled === 'boolean' ? parsed.syncEnabled : DEFAULTS.syncEnabled,
+    autoCompact: typeof parsed.autoCompact === 'boolean' ? parsed.autoCompact : DEFAULTS.autoCompact,
     orbitUnlocked: typeof parsed.orbitUnlocked === 'boolean' ? parsed.orbitUnlocked : DEFAULTS.orbitUnlocked,
     p2pHubs: normalizeHubList(parsed.p2pHubs),
     p2pIce: Object.prototype.hasOwnProperty.call(parsed, 'p2pIce') ? normalizeIceList(parsed.p2pIce) : DEFAULTS.p2pIce,
@@ -240,6 +250,7 @@ export function writePrefs(patch: Partial<AppPrefs>): AppPrefs {
             : cur.paperBg
           : cur.paperBg,
     syncEnabled: patch.syncEnabled !== undefined ? Boolean(patch.syncEnabled) : cur.syncEnabled,
+    autoCompact: patch.autoCompact !== undefined ? Boolean(patch.autoCompact) : cur.autoCompact,
     orbitUnlocked: patch.orbitUnlocked !== undefined ? Boolean(patch.orbitUnlocked) : cur.orbitUnlocked,
     p2pHubs: patch.p2pHubs !== undefined ? normalizeHubList(patch.p2pHubs) : cur.p2pHubs,
     p2pIce: patch.p2pIce !== undefined ? normalizeIceList(patch.p2pIce) : cur.p2pIce,

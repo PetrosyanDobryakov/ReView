@@ -263,6 +263,7 @@ export function SettingsSheet({
   onBg,
   onGrid,
   onClose,
+  onCompactNow = null,
 }: {
   open: boolean;
   locale: LocaleId;
@@ -281,6 +282,8 @@ export function SettingsSheet({
   onBg: (value: string) => void;
   onGrid: (on: boolean) => void;
   onClose: () => void;
+  /** Manual compact entry (board open, owner): shown when auto-compact is off. */
+  onCompactNow?: (() => void) | null;
 }) {
   const mounted = useExitPresence(open, MOTION.sheetOut);
   const [tab, setTab] = useState<SettingsTab>('customize');
@@ -1098,6 +1101,28 @@ export function SettingsSheet({
                 <p className="sheet-hint">
                   <SwapText text={t(locale, 'toolHoverAnimHint')} />
                 </p>
+                <button
+                  type="button"
+                  className={`sheet-switch${prefs.autoCompact ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={prefs.autoCompact}
+                  onClick={() => patchPrefs({ autoCompact: !prefs.autoCompact })}
+                >
+                  <span>{t(locale, 'autoCompact')}</span>
+                  <span className="switch" aria-hidden="true">
+                    <span className="switch-thumb" />
+                  </span>
+                </button>
+                <p className="sheet-hint">
+                  <SwapText text={t(locale, 'autoCompactHint')} />
+                </p>
+                {!prefs.autoCompact && onCompactNow ? (
+                  <div className="sheet-actions">
+                    <button type="button" className="style-btn" onClick={onCompactNow}>
+                      {t(locale, 'compactNow')}
+                    </button>
+                  </div>
+                ) : null}
               </section>
             </div>
           )}
