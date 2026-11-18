@@ -97,8 +97,16 @@ export function reconcileBoardTitleOnOpen(boardId: string, fallback = 'ReView'):
   }
 
   if (synced) {
+    const syncedName = normalizeBoardTitle(synced, fallback);
+    // Owner renamed from Home (no live doc there): the local record is newer
+    // than the synced title, so push it instead of clobbering it on open.
+    if (mode === 'sync' && normalizeBoardTitle(local.name, fallback) !== syncedName) {
+      const pushed = normalizeBoardTitle(local.name, fallback);
+      setSyncedBoardTitle(pushed);
+      return pushed;
+    }
     mirrorSyncedTitle(boardId, synced);
-    return normalizeBoardTitle(synced, fallback);
+    return syncedName;
   }
 
   if (mode === 'sync') {
@@ -108,6 +116,26 @@ export function reconcileBoardTitleOnOpen(boardId: string, fallback = 'ReView'):
   }
 
   return displayBoardTitle(local, synced, fallback);
+}
+
+/** Home list rename: local record first, then the synced title when allowed.
+ *
+ * Home has no live doc of its own, but the renamed board may still be attached
+ * in the background (leaving a board only pauses it). In that case push the
+ * new name straight into the live Yjs meta so guests see it at once.
+ * Otherwise the next board open pushes it (reconcile prefers the owner's
+ * local name over a stale synced title).
+ */
+export function pushHomeRename(boardId: string, raw: string): void {
+  const before = getBoard(boardId);
+  renameBoard(boardId, raw);
+  const after = getBoard(boardId);
+  if (!after || after.name === before?.name) return;
+  if (getCurrentBoardId() !== boardId) return;
+  if (usesLocalBoardName(after)) return;
+  const ownerId = metaOwnerId();
+  if (!isBoardOwner(ownerId) && !(after.status === 'local' && !ownerId)) return;
+  setSyncedBoardTitle(after.name);
 }
 
 /** Commit a rename from the board header. */

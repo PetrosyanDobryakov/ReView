@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+## 0.17.46
+
+### Home renames reach the other side now
+
+- Renaming a board from the Home list only rewrote the local record — guests
+  never saw it, and opening the board silently reverted it to the stale
+  synced title. Home renames now push into the synced title: instantly when
+  the board is still attached in the background, otherwise on the next open
+  (the open flow prefers the owner's local name over a stale synced title
+  instead of clobbering it). Guest and saved-copy semantics are unchanged.
+
 ## 0.17.45
 
 ### Far-away alignment guides are back

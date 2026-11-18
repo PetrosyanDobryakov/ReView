@@ -5,7 +5,6 @@ import {
   listTeams,
   createBoard,
   deleteBoardData,
-  renameBoard,
   createTeam,
   deleteTeam,
   renameTeam,
@@ -26,7 +25,7 @@ import type { BoardMeta, Team } from '../core/boards';
 import { estimateBoardBytes, formatBoardWeight, listBoardDbNames, deleteBoardDatabase } from '../core/boardSize';
 import { cloneBoard } from '../core/boardClone';
 import { exportBoardFile, importBoardFile, importErrorI18nKey, MAX_V2_FILE_BYTES } from '../core/boardShare';
-import { canRenameBoardOnHome } from '../core/boardTitle';
+import { canRenameBoardOnHome, pushHomeRename } from '../core/boardTitle';
 import { copyText } from '../core/pointerEnv';
 import { persistBoardIfOpen } from '../core/store';
 import { readPrefs, writePrefs, onPrefsChange } from '../core/prefs';
@@ -781,14 +780,14 @@ export function Home({ locale: localeProp }: { locale: LocaleId }) {
                         value={boardName}
                         onChange={(e) => setBoardName(e.target.value)}
                         onBlur={() => {
-                          renameBoard(b.id, boardName);
+                          pushHomeRename(b.id, boardName);
                           setEditingBoard(null);
                           refresh();
                         }}
                         onKeyDown={(e) => {
                           e.stopPropagation();
                           if (e.key === 'Enter') {
-                            renameBoard(b.id, boardName);
+                            pushHomeRename(b.id, boardName);
                             setEditingBoard(null);
                             refresh();
                           }

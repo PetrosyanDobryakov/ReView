@@ -204,3 +204,52 @@ console.log('board-title awareness batch: ok');
   assert.match(meshSrc, /writeVarString\(enc, 'null'\)/, 'destroy announces a null awareness state');
 }
 console.log('board-title mesh awareness: ok');
+
+// --- Home rename reaches guests (owner's local name wins on open) ---
+{
+  const titleSrc = readFileSync(root + '/src/core/boardTitle.ts', 'utf8');
+  assert.match(titleSrc, /export function pushHomeRename/, 'Home rename pushes through boardTitle');
+  assert.match(titleSrc, /getCurrentBoardId\(\) !== boardId\) return/, 'Home push respects the live doc');
+  const homeSrc = readFileSync(root + '/src/ui/Home.tsx', 'utf8');
+  assert.match(homeSrc, /pushHomeRename\(b\.id, boardName\)/, 'Home list rename pushes to sync');
+  assert.doesNotMatch(homeSrc, /renameBoard\(b\.id, boardName\)/, 'Home list no longer renames local-only');
+
+  // Faithful port of the reconcile branch: sync mode + local/synced mismatch
+  // pushes the local (Home-renamed) title instead of pulling the stale one.
+  const norm = (v, fb) => (String(v ?? '').trim().slice(0, 40) || fb);
+  const pushed = [];
+  const reconcile = ({ localName, synced, mode }) => {
+    if (mode === 'local') return norm(localName, 'ReView');
+    if (synced) {
+      const syncedName = norm(synced, 'ReView');
+      if (mode === 'sync' && norm(localName, 'ReView') !== syncedName) {
+        pushed.push(norm(localName, 'ReView'));
+        return norm(localName, 'ReView');
+      }
+      return syncedName;
+    }
+    if (mode === 'sync') {
+      pushed.push(norm(localName, 'ReView'));
+      return norm(localName, 'ReView');
+    }
+    return norm(localName, 'ReView');
+  };
+  assert.equal(
+    reconcile({ localName: 'Home Renamed', synced: 'Old', mode: 'sync' }),
+    'Home Renamed',
+    'owner Home rename wins over stale synced title'
+  );
+  assert.deepEqual(pushed, ['Home Renamed'], 'mismatch pushes the local title');
+  assert.equal(
+    reconcile({ localName: 'Same', synced: 'Same', mode: 'sync' }),
+    'Same',
+    'matching titles take the pull path'
+  );
+  assert.deepEqual(pushed, ['Home Renamed'], 'matching titles push nothing');
+  assert.equal(
+    reconcile({ localName: 'Remote board', synced: 'Owner Title', mode: false }),
+    'Owner Title',
+    'guest still pulls the synced title'
+  );
+}
+console.log('board-title home rename sync: ok');
