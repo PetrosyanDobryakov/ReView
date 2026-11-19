@@ -16,7 +16,7 @@ import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld } from '../core/transform';
+import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld, AngleDwell } from '../core/transform';
 import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
 import { clampCalcSize, CALC_REF_W, CALC_REF_H } from '../core/calcGeometry';
@@ -144,6 +144,8 @@ export class SelectTool extends Tool {
   private marquee: ShapeBox | null = null;
   private rotateStartAngle = 0;
   private rotateOrigDeg = 0;
+  /** Hold-still dwell: 2s on one spot releases the axis magnet for this turn. */
+  private rotateDwell = new AngleDwell();
   /** Dragging an interior table grid divider (resizes columns/rows by fractions). */
   private tableDiv: {
     shapeId: string;
@@ -280,6 +282,7 @@ export class SelectTool extends Tool {
         const c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = 0;
+        this.rotateDwell.reset();
         return;
       }
       const v = engine.views.get(rotHit);
@@ -290,6 +293,7 @@ export class SelectTool extends Tool {
         const c = { x: v.x + v.w / 2, y: v.y + v.h / 2 };
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = shapeRotation(v);
+        this.rotateDwell.reset();
         engine.setSelection([rotHit]);
         return;
       }
@@ -617,43 +621,13 @@ export class SelectTool extends Tool {
       return;
     }
     if (this.mode === 'rotate') {
-      let pivot: { x: number; y: number };
-      let delta: number;
-      if (this.groupOrigBox) {
-        const box = this.groupOrigBox;
-        pivot = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
-        const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
-        delta = snapRotationDeg(((ang - this.rotateStartAngle) * 180) / Math.PI, Boolean(p.shift) || !readPrefs().rotateSnap);
-      } else {
-        const o = [...this.originals.values()][0];
-        if (!o) return;
-        pivot = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
-        const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
-        const deg = snapRotationDeg(
-          this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI,
-          Boolean(p.shift) || !readPrefs().rotateSnap
-        );
-        delta = deg - this.rotateOrigDeg;
-      }
-      const patches: Array<[string, Partial<ShapeView>]> = [];
-      const rotatingHosts = new Set<string>();
-      for (const [id, o] of [...this.originals, ...this.stuck]) {
-        if (o.locked) continue;
-        if (o.type === 'arrow' && o.fromId && o.toId) continue;
-        rotatingHosts.add(id);
-        patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
-      }
-      const unglue: string[] = [];
-      for (const [id, o] of [...this.originals, ...this.stuck]) {
-        if (o.locked || o.type !== 'arrow' || !o.fromId || !o.toId) continue;
-        if (rotatingHosts.has(o.fromId) || rotatingHosts.has(o.toId)) continue;
-        unglue.push(id);
-        rotatingHosts.add(id);
-        patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
-      }
-      if (patches.length) store.patchShapes(patches);
-      for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
-      engine.updateConnectedArrows(rotatingHosts);
+      // Dwelled hold slips the axis magnet for the rest of the turn.
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      const free = Boolean(p.shift) || !readPrefs().rotateSnap || this.rotateDwell.track(p.screen.x, p.screen.y, nowMs);
+      this.applyRotate(engine, p, free);
       return;
     }
     if (this.mode === 'move') {
@@ -720,6 +694,46 @@ export class SelectTool extends Tool {
       this.resize(engine, p);
     }
   }
+  /** Shared rotate math for moves and the release-time settle (dwell may trip with no moves). */
+  private applyRotate(engine: Engine, p: PointerInfo, free: boolean): void {
+    let pivot: { x: number; y: number };
+    let delta: number;
+    if (this.groupOrigBox) {
+      const box = this.groupOrigBox;
+      pivot = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+      const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
+      delta = snapRotationDeg(((ang - this.rotateStartAngle) * 180) / Math.PI, free);
+    } else {
+      const o = [...this.originals.values()][0];
+      if (!o) return;
+      pivot = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+      const ang = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
+      const deg = snapRotationDeg(
+        this.rotateOrigDeg + ((ang - this.rotateStartAngle) * 180) / Math.PI,
+        free
+      );
+      delta = deg - this.rotateOrigDeg;
+    }
+    const patches: Array<[string, Partial<ShapeView>]> = [];
+    const rotatingHosts = new Set<string>();
+    for (const [id, o] of [...this.originals, ...this.stuck]) {
+      if (o.locked) continue;
+      if (o.type === 'arrow' && o.fromId && o.toId) continue;
+      rotatingHosts.add(id);
+      patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
+    }
+    const unglue: string[] = [];
+    for (const [id, o] of [...this.originals, ...this.stuck]) {
+      if (o.locked || o.type !== 'arrow' || !o.fromId || !o.toId) continue;
+      if (rotatingHosts.has(o.fromId) || rotatingHosts.has(o.toId)) continue;
+      unglue.push(id);
+      rotatingHosts.add(id);
+      patches.push([id, bakedArrowGeom(o, rotateShapeAround(o, pivot.x, pivot.y, delta))]);
+    }
+    if (patches.length) store.patchShapes(patches);
+    for (const id of unglue) store.clearShapeKeys(id, ['fromId', 'fromPort', 'toId', 'toPort']);
+    engine.updateConnectedArrows(rotatingHosts);
+  }
   onUp(engine: Engine, p: PointerInfo): void {
     if (this.mode === 'marquee' && this.marquee) {
       if (this.moved > dragThresholdPx()) {
@@ -757,6 +771,15 @@ export class SelectTool extends Tool {
       engine.updateConnectedArrows(new Set([...this.originals.keys(), ...this.stuck.keys()]));
     }
     if (this.mode === 'rotate') {
+      // A still pointer sends no moves: settle the dwell clock on release so
+      // holding 2s then letting go keeps the free angle, not the last snap.
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      if (this.rotateDwell.track(p.screen.x, p.screen.y, nowMs)) {
+        this.applyRotate(engine, p, true);
+      }
       engine.updateConnectedArrows(new Set([...this.originals.keys(), ...this.stuck.keys()]));
     }
     this.mode = 'idle';
@@ -768,6 +791,7 @@ export class SelectTool extends Tool {
     this.tableDiv = null;
     this.tableEdge = null;
     this.downSelectedContainer = false;
+    this.rotateDwell.reset();
     this.originals.clear();
     this.stuck.clear();
     this.snapBoxes = null;
@@ -852,6 +876,7 @@ export class SelectTool extends Tool {
     this.tableDiv = null;
     this.tableEdge = null;
     this.downSelectedContainer = false;
+    this.rotateDwell.reset();
     this.originals.clear();
     this.stuck.clear();
     this.snapBoxes = null;
@@ -1285,6 +1310,9 @@ export class PenTool extends Tool {
   private statLastRaw: { x: number; y: number } | null = null;
   private statPointer = '';
   private statCommitted = false;
+  /** Hold-still dwell: 2s on one spot releases the 45° magnet for this stroke. */
+  private straightDwell = new AngleDwell();
+  private lastScreen = { x: 0, y: 0 };
 
   private statReset(pointerType: string | undefined, at: { x: number; y: number }): void {
     this.statBatches = 0;
@@ -1349,6 +1377,7 @@ export class PenTool extends Tool {
     this.last = p.world;
     this.active = true;
     this.shift = p.shift;
+    this.straightDwell.reset();
     _engine.orbitFx.resetSprinkle();
     store.beginGesture();
   }
@@ -1360,6 +1389,7 @@ export class PenTool extends Tool {
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
         : Date.now();
+    this.straightDwell.track(p.screen.x, p.screen.y, nowMs);
     const dt = nowMs - this.statLastT;
     this.statLastT = nowMs;
     if (dt > this.statMaxGapMs) this.statMaxGapMs = dt;
@@ -1370,6 +1400,7 @@ export class PenTool extends Tool {
       if (jump > this.statMaxJumpPx) this.statMaxJumpPx = jump;
     }
     this.statLastRaw = { ...p.world };
+    this.lastScreen = { ...p.screen };
     this.shift = p.shift;
     if (this.shift) {
       this.statShiftDrops += 1;
@@ -1398,8 +1429,16 @@ export class PenTool extends Tool {
 
   onUp(engine: Engine): void {
     try {
+      // A perfectly still pointer sends no moves, so the dwell clock is
+      // settled here too: holding 2s then letting go lands the free aim.
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      this.straightDwell.track(this.lastScreen.x, this.lastScreen.y, nowMs);
       this.endStroke(engine);
     } finally {
+      this.straightDwell.reset();
       this.statReport(this.statCommitted);
     }
   }
@@ -1542,6 +1581,7 @@ export class PenTool extends Tool {
     this.pressures = [];
     this.capturePressure = false;
     this.last = null;
+    this.straightDwell.reset();
     publishDraft(null);
     this.statReport(false);
     store.endGesture();
@@ -1585,6 +1625,8 @@ export class PenTool extends Tool {
     const ay = this.pts[1];
     const bx = this.last?.x ?? ax;
     const by = this.last?.y ?? ay;
+    // Dwelled hold releases the magnet: the line lands exactly where aimed.
+    if (this.straightDwell.released) return [ax, ay, bx, by];
     const end = snapStraightEnd(ax, ay, bx, by);
     return [ax, ay, end.x, end.y];
   }
@@ -2341,26 +2383,41 @@ export class ArrowTool extends Tool {
   private start: { x: number; y: number } | null = null;
   private cur: { x: number; y: number } | null = null;
   private shift = false;
+  /** Hold-still dwell: 2s on one spot releases the 45° magnet for this line. */
+  private dwell = new AngleDwell();
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.start = p.world;
     this.cur = p.world;
     this.shift = p.shift;
+    this.dwell.reset();
   }
 
   onMove(_engine: Engine, p: PointerInfo): void {
     if (!this.start) return;
     this.cur = p.world;
     this.shift = p.shift;
+    const nowMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    this.dwell.track(p.screen.x, p.screen.y, nowMs);
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
     if (!this.start || !this.cur) return;
     this.shift = p.shift;
+    // Settle the dwell clock on release too: a still pointer sends no moves.
+    const nowMs =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    this.dwell.track(p.screen.x, p.screen.y, nowMs);
     const end = this.snappedEnd();
     if (Math.hypot(end.x - this.start.x, end.y - this.start.y) < 3 / engine.camera.zoom) {
       this.start = null;
       this.cur = null;
+      this.dwell.reset();
       return;
     }
     const draft = {
@@ -2379,11 +2436,13 @@ export class ArrowTool extends Tool {
     store.addShape({ ...draft, ...box });
     this.start = null;
     this.cur = null;
+    this.dwell.reset();
   }
 
   cancel(_engine: Engine): void {
     this.start = null;
     this.cur = null;
+    this.dwell.reset();
   }
 
   render(_engine: Engine, ctx: CanvasRenderingContext2D): void {
@@ -2419,7 +2478,9 @@ export class ArrowTool extends Tool {
 
   private snappedEnd(): { x: number; y: number } {
     if (!this.start || !this.cur) return { x: 0, y: 0 };
-    if (!this.shift) return this.cur;
+    // Hold-shift snaps to 45° steps — unless the pointer dwelled and slipped
+    // the magnet, or shift was never held at all.
+    if (!this.shift || this.dwell.released) return this.cur;
     return snapStraightEnd(this.start.x, this.start.y, this.cur.x, this.cur.y);
   }
 }

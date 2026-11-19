@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+## 0.17.47
+
+### Hold still to slip the angle magnet
+
+- Holding the pointer nearly still for 2 seconds releases the angle snap for
+  the rest of the gesture: a line aimed just off 45° lands exactly where
+  aimed instead of snapping. Works for Shift-lines/arrows, Shift-pen straight
+  strokes, and the rotate handle (all sites the rotation magnet governs).
+  Shift / magnet-off behavior is unchanged; the setting hint mentions the
+  dwell escape.
+
 ## 0.17.46
 
 ### Home renames reach the other side now

@@ -6343,6 +6343,50 @@ engine.setSelection([]);
   assert.equal(engine.active, 'pen', 'eraser tip restores Pen as the active tool');
 }
 
+// --- Angle dwell: hold still 2s to slip the 45°/axis magnet for one gesture ---
+{
+  const realNow = performance.now.bind(performance);
+  let now = 100000;
+  performance.now = () => now;
+  try {
+    const ev = (x, y, shift) => ({ clientX: x, clientY: y, button: 0, pointerId: 7, shiftKey: shift });
+    const lastShape = () => {
+      const keys = [...store.board.keys()];
+      return store.readShape(store.board.get(keys[keys.length - 1]));
+    };
+    const lineAngle = (pts) => (Math.atan2(pts[3] - pts[1], pts[2] - pts[0]) * 180) / Math.PI;
+
+    // Control: shift-arrow near 45° with no hold snaps to exactly 45°.
+    engine.setTool('arrow');
+    engine.onPointerDown(ev(300, 300, true));
+    engine.onPointerMove(ev(500, 484, true)); // ~42.6°, inside the magnet
+    engine.onPointerUp(ev(500, 484, true));
+    assert.ok(Math.abs(lineAngle(lastShape().points) - 45) < 0.5, 'shift-line snaps to 45° without a hold');
+
+    // Same aim, but hold still 2.3s before release: lands the free angle.
+    engine.onPointerDown(ev(300, 400, true));
+    engine.onPointerMove(ev(500, 584, true)); // ~42.6°
+    now += 2300; // no moves in between — a still pointer sends none
+    engine.onPointerUp(ev(500, 584, true));
+    const freeAngle = lineAngle(lastShape().points);
+    assert.ok(Math.abs(freeAngle - 42.6) < 0.6, `dwelled shift-line keeps its aim (got ${freeAngle.toFixed(2)}°)`);
+    assert.ok(Math.abs(freeAngle - 45) > 1, 'dwelled shift-line escapes the 45° snap');
+
+    // Shift-pen straight mode obeys the same release.
+    engine.setTool('pen');
+    engine.onPointerDown(ev(100, 600, true));
+    engine.onPointerMove(ev(300, 784, true)); // ~42.6°
+    assert.ok(true, 'pen straight preview follows the magnet');
+    now += 2300;
+    engine.onPointerUp(ev(300, 784, true));
+    const penAngle = lineAngle(lastShape().points);
+    assert.ok(Math.abs(penAngle - 42.6) < 0.8, `dwelled shift-pen keeps its aim (got ${penAngle.toFixed(2)}°)`);
+    engine.setTool('select');
+  } finally {
+    performance.now = realNow;
+  }
+}
+
 const staleDropBefore = store.board.size;
 const staleReaders = [];
 const stalePrevFR = globalThis.FileReader;

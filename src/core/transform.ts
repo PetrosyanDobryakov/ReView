@@ -41,6 +41,42 @@ export function rotateHandleOnBox(
 /** Degrees from a board axis (0/90/180/270) before the magnet pulls in. */
 export const ROTATE_MAGNET_DEG = 7;
 
+/**
+ * Hold-still to slip out of the angle magnet: keep the pointer within
+ * ANGLE_DWELL_PX screen px for ANGLE_DWELL_MS and the current gesture goes
+ * free (no 45°/axis snap) until release. One-way per gesture — moving on
+ * keeps the free aim instead of re-snapping mid-line.
+ */
+export const ANGLE_DWELL_MS = 2000;
+export const ANGLE_DWELL_PX = 8;
+
+export class AngleDwell {
+  private ax = 0;
+  private ay = 0;
+  private since = 0;
+  private anchored = false;
+  released = false;
+
+  /** Feed screen-space pointer pos + timestamp (performance.now()). */
+  track(sx: number, sy: number, now: number): boolean {
+    if (this.released) return true;
+    if (!this.anchored || Math.hypot(sx - this.ax, sy - this.ay) > ANGLE_DWELL_PX) {
+      this.ax = sx;
+      this.ay = sy;
+      this.since = now;
+      this.anchored = true;
+      return false;
+    }
+    if (now - this.since >= ANGLE_DWELL_MS) this.released = true;
+    return this.released;
+  }
+
+  reset(): void {
+    this.anchored = false;
+    this.released = false;
+  }
+}
+
 const ROTATE_AXES = [0, 90, 180, 270] as const;
 
 /**
