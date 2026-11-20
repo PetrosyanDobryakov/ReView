@@ -4701,6 +4701,22 @@ h3 .swap-text,
 .pages-menu-item-label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-menu-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--chrome-type-label);
+  color: var(--chrome-text);
+  background: var(--chrome-panel-2, rgba(127, 127, 127, 0.14));
+  border: 1px solid var(--chrome-accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  outline: none;
 }
 
 .pages-peer-dot {

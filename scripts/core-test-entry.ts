@@ -12,6 +12,7 @@ export {
   AngleDwell,
   ANGLE_DWELL_MS,
   ANGLE_DWELL_PX,
+  ANGLE_DWELL_RELEASE_PX,
 } from '../src/core/transform';
 export { downsamplePolyline, toLocalPoints, toWorldPoints, simplifyStroke, quantizePoints, PEN_MAX_VERTICES, RDP_PRE_MAX } from '../src/core/pointsSpace';
 export {

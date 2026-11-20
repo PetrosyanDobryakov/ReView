@@ -44,11 +44,14 @@ export const ROTATE_MAGNET_DEG = 7;
 /**
  * Hold-still to slip out of the angle magnet: keep the pointer within
  * ANGLE_DWELL_PX screen px for ANGLE_DWELL_MS and the current gesture goes
- * free (no 45°/axis snap) until release. One-way per gesture — moving on
- * keeps the free aim instead of re-snapping mid-line.
+ * free — the preview jumps to the cursor at once (a timer settles the dwell
+ * even when a perfectly still pointer sends no moves). Moving farther than
+ * ANGLE_DWELL_RELEASE_PX re-arms the magnet, so circling around in a new
+ * area snaps again; holding still there releases again.
  */
 export const ANGLE_DWELL_MS = 2000;
 export const ANGLE_DWELL_PX = 8;
+export const ANGLE_DWELL_RELEASE_PX = 24;
 
 export class AngleDwell {
   private ax = 0;
@@ -59,15 +62,29 @@ export class AngleDwell {
 
   /** Feed screen-space pointer pos + timestamp (performance.now()). */
   track(sx: number, sy: number, now: number): boolean {
-    if (this.released) return true;
-    if (!this.anchored || Math.hypot(sx - this.ax, sy - this.ay) > ANGLE_DWELL_PX) {
+    if (!this.anchored || Math.hypot(sx - this.ax, sy - this.ay) > ANGLE_DWELL_RELEASE_PX) {
       this.ax = sx;
       this.ay = sy;
       this.since = now;
       this.anchored = true;
+      this.released = false;
       return false;
     }
-    if (now - this.since >= ANGLE_DWELL_MS) this.released = true;
+    if (
+      !this.released &&
+      Math.hypot(sx - this.ax, sy - this.ay) <= ANGLE_DWELL_PX &&
+      now - this.since >= ANGLE_DWELL_MS
+    ) {
+      this.released = true;
+    }
+    return this.released;
+  }
+
+  /** Timer path: no moves arrived, so the pointer is by definition on anchor. */
+  expire(now: number): boolean {
+    if (this.anchored && !this.released && now - this.since >= ANGLE_DWELL_MS) {
+      this.released = true;
+    }
     return this.released;
   }
 

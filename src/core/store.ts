@@ -53,6 +53,8 @@ export let board = doc.getMap<Y.Map<unknown>>('shapes');
 export let meta = doc.getMap('meta');
 export let order = doc.getArray<string>('order');
 export let pages = doc.getArray<string>('pages');
+/** Synced page display names (pageId → custom name). Untouched by undo. */
+export let pageNames = doc.getMap<string>('pageNames');
 let pagesObserved = false;
 const pageListeners = new Set<() => void>();
 const pageListListeners = new Set<() => void>();
@@ -542,6 +544,7 @@ export function initBoard(boardId: string): void {
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
   pages = doc.getArray<string>('pages');
+  pageNames = doc.getMap<string>('pageNames');
   doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
   undoManager = new Y.UndoManager([board, order, pages], {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -630,6 +633,7 @@ export function leaveBoard(): void {
   meta = doc.getMap('meta');
   order = doc.getArray<string>('order');
   pages = doc.getArray<string>('pages');
+  pageNames = doc.getMap<string>('pageNames');
   doc.on('update', (u: Uint8Array, o: unknown, _d: unknown, tr: unknown) => logDocUpdate(u.length, o, tr));
   undoManager = new Y.UndoManager([board, order, pages], {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -958,11 +962,28 @@ export function preferredListedPageId(
 
 function syncActivePageFromStorage(): void {
   const list = listPages();
-  activePageId = preferredListedPageId(list, readStoredPageId(), pageHasLiveShapes);
+  const next = preferredListedPageId(list, readStoredPageId(), pageHasLiveShapes);
+  if (next === activePageId) return;
+  activePageId = next;
+  // Silent switch (fresh doc on open, IDB sync landing later): nobody
+  // subscribed yet at init, but late IDB/P2P sync must move PageBar + engine.
+  emitActivePage();
 }
 
 function pageListEmitKey(): string {
-  return listPages().join('\0');
+  return listPages().join('\0') + '\0' + pageNamesEmitKey();
+}
+
+/** Sorted names so a rename emits a page-list update for PageBar. */
+function pageNamesEmitKey(): string {
+  const parts: string[] = [];
+  try {
+    for (const [k, v] of pageNames) parts.push(`${k}=${v}`);
+  } catch {
+    /* doc torn down */
+  }
+  parts.sort();
+  return parts.join('\0');
 }
 
 function pagesEmitKey(): string {
@@ -1727,6 +1748,10 @@ function pagesArray(): Y.Array<string> {
       emitPageList();
       emitActivePage();
     });
+    // Synced page names ride the same page-list update.
+    pageNames.observe(() => {
+      emitPageList();
+    });
     pagesObserved = true;
   }
   return pages;
@@ -1760,7 +1785,10 @@ function healActivePageToList(): void {
     if (raw.length === 0) return;
   }
   if (raw.includes(activePageId)) return;
-  activePageId = preferredListedPageId(raw, null, pageHasLiveShapes);
+  // The opener's stored page wins over list order (re-entry lands where you
+  // left off); otherwise keep a page with live shapes. Never yanks the live
+  // page on remote adds — this only runs when the current id is gone.
+  activePageId = preferredListedPageId(raw, readStoredPageId(), pageHasLiveShapes);
   try {
     localStorage.setItem(pageKey(currentBoardId), activePageId);
   } catch {
@@ -1889,6 +1917,7 @@ export function deletePage(id: string): void {
         doomed.add(key);
       }
     }
+    if (pageNames.has(id)) pageNames.delete(id);
     // ponytail: delete order entries by index ranges, no full rewrite —
     // the update stays O(deleted) instead of O(board) and always fits the wire
     const arr = order.toArray();
@@ -1912,6 +1941,30 @@ export function deletePage(id: string): void {
   emitPageList();
   emitActivePage();
   bumpCurrentBoard();
+}
+
+/** Custom display name for a page (synced). Null = default "Page N". */
+export function pageName(id: string): string | null {
+  try {
+    const raw = pageNames.get(id);
+    if (typeof raw !== 'string') return null;
+    const v = raw.trim().slice(0, 40);
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Rename a page (right-click in the page menu). Empty clears back to default. */
+export function renamePage(id: string, name: string): void {
+  const v = name.trim().slice(0, 40);
+  transact(() => {
+    if (!v) {
+      if (pageNames.has(id)) pageNames.delete(id);
+    } else if (pageNames.get(id) !== v) {
+      pageNames.set(id, v);
+    }
+  });
 }
 
 export function pageOfKey(key: string): string {

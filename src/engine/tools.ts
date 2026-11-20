@@ -16,7 +16,7 @@ import { readPrefs } from '../core/prefs';
 import { readLocale } from '../core/locale';
 import { t } from '../ui/i18n';
 import { recognizeStroke } from '../core/recognize';
-import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld, AngleDwell } from '../core/transform';
+import { degToRad, groupResizeMember, mapShapeThroughHostResize, mapShapeThroughLocalMap, reanchorRotatedResize, rotateShapeAround, shapeRotation, snapRotationDeg, worldToLocal, localToWorld, AngleDwell, ANGLE_DWELL_MS } from '../core/transform';
 import { visualBox } from '../core/align';
 import { publishDraft, publishErasePreview } from '../net';
 import { clampCalcSize, CALC_REF_W, CALC_REF_H } from '../core/calcGeometry';
@@ -146,6 +146,39 @@ export class SelectTool extends Tool {
   private rotateOrigDeg = 0;
   /** Hold-still dwell: 2s on one spot releases the axis magnet for this turn. */
   private rotateDwell = new AngleDwell();
+  /** Fires the release even when a still pointer sends no moves (preview jumps at once). */
+  private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+  private dwellEngine: Engine | null = null;
+  private dwellLastP: PointerInfo | null = null;
+
+  private clearDwellTimer(): void {
+    if (this.dwellTimer !== null) {
+      clearTimeout(this.dwellTimer);
+      this.dwellTimer = null;
+    }
+    this.dwellEngine = null;
+    this.dwellLastP = null;
+  }
+
+  private restartRotateDwellTimer(engine: Engine, p: PointerInfo): void {
+    this.clearDwellTimer();
+    this.dwellEngine = engine;
+    this.dwellLastP = p;
+    this.dwellTimer = setTimeout(() => {
+      this.dwellTimer = null;
+      const eng = this.dwellEngine;
+      const lp = this.dwellLastP;
+      if (!eng || !lp || this.mode !== 'rotate') return;
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      if (this.rotateDwell.expire(nowMs)) {
+        this.applyRotate(eng, lp, true);
+        eng.setDirty();
+      }
+    }, ANGLE_DWELL_MS);
+  }
   /** Dragging an interior table grid divider (resizes columns/rows by fractions). */
   private tableDiv: {
     shapeId: string;
@@ -283,6 +316,7 @@ export class SelectTool extends Tool {
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = 0;
         this.rotateDwell.reset();
+        this.clearDwellTimer();
         return;
       }
       const v = engine.views.get(rotHit);
@@ -294,6 +328,7 @@ export class SelectTool extends Tool {
         this.rotateStartAngle = Math.atan2(p.world.y - c.y, p.world.x - c.x);
         this.rotateOrigDeg = shapeRotation(v);
         this.rotateDwell.reset();
+        this.clearDwellTimer();
         engine.setSelection([rotHit]);
         return;
       }
@@ -628,6 +663,7 @@ export class SelectTool extends Tool {
           : Date.now();
       const free = Boolean(p.shift) || !readPrefs().rotateSnap || this.rotateDwell.track(p.screen.x, p.screen.y, nowMs);
       this.applyRotate(engine, p, free);
+      this.restartRotateDwellTimer(engine, p);
       return;
     }
     if (this.mode === 'move') {
@@ -792,6 +828,7 @@ export class SelectTool extends Tool {
     this.tableEdge = null;
     this.downSelectedContainer = false;
     this.rotateDwell.reset();
+    this.clearDwellTimer();
     this.originals.clear();
     this.stuck.clear();
     this.snapBoxes = null;
@@ -877,6 +914,7 @@ export class SelectTool extends Tool {
     this.tableEdge = null;
     this.downSelectedContainer = false;
     this.rotateDwell.reset();
+    this.clearDwellTimer();
     this.originals.clear();
     this.stuck.clear();
     this.snapBoxes = null;
@@ -1313,6 +1351,30 @@ export class PenTool extends Tool {
   /** Hold-still dwell: 2s on one spot releases the 45° magnet for this stroke. */
   private straightDwell = new AngleDwell();
   private lastScreen = { x: 0, y: 0 };
+  /** Fires the release even when a still pointer sends no moves (preview jumps at once). */
+  private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+  private dwellEngine: Engine | null = null;
+
+  private clearDwellTimer(): void {
+    if (this.dwellTimer !== null) {
+      clearTimeout(this.dwellTimer);
+      this.dwellTimer = null;
+    }
+    this.dwellEngine = null;
+  }
+
+  private restartDwellTimer(engine: Engine): void {
+    this.clearDwellTimer();
+    this.dwellEngine = engine;
+    this.dwellTimer = setTimeout(() => {
+      this.dwellTimer = null;
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      if (this.straightDwell.expire(nowMs)) this.dwellEngine?.setDirty();
+    }, ANGLE_DWELL_MS);
+  }
 
   private statReset(pointerType: string | undefined, at: { x: number; y: number }): void {
     this.statBatches = 0;
@@ -1378,6 +1440,7 @@ export class PenTool extends Tool {
     this.active = true;
     this.shift = p.shift;
     this.straightDwell.reset();
+    this.clearDwellTimer();
     _engine.orbitFx.resetSprinkle();
     store.beginGesture();
   }
@@ -1390,6 +1453,7 @@ export class PenTool extends Tool {
         ? performance.now()
         : Date.now();
     this.straightDwell.track(p.screen.x, p.screen.y, nowMs);
+    this.restartDwellTimer(engine);
     const dt = nowMs - this.statLastT;
     this.statLastT = nowMs;
     if (dt > this.statMaxGapMs) this.statMaxGapMs = dt;
@@ -1439,6 +1503,7 @@ export class PenTool extends Tool {
       this.endStroke(engine);
     } finally {
       this.straightDwell.reset();
+      this.clearDwellTimer();
       this.statReport(this.statCommitted);
     }
   }
@@ -1582,6 +1647,7 @@ export class PenTool extends Tool {
     this.capturePressure = false;
     this.last = null;
     this.straightDwell.reset();
+    this.clearDwellTimer();
     publishDraft(null);
     this.statReport(false);
     store.endGesture();
@@ -2385,15 +2451,40 @@ export class ArrowTool extends Tool {
   private shift = false;
   /** Hold-still dwell: 2s on one spot releases the 45° magnet for this line. */
   private dwell = new AngleDwell();
+  /** Fires the release even when a still pointer sends no moves (preview jumps at once). */
+  private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+  private dwellEngine: Engine | null = null;
+
+  private clearDwellTimer(): void {
+    if (this.dwellTimer !== null) {
+      clearTimeout(this.dwellTimer);
+      this.dwellTimer = null;
+    }
+    this.dwellEngine = null;
+  }
+
+  private restartDwellTimer(engine: Engine): void {
+    this.clearDwellTimer();
+    this.dwellEngine = engine;
+    this.dwellTimer = setTimeout(() => {
+      this.dwellTimer = null;
+      const nowMs =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      if (this.dwell.expire(nowMs)) this.dwellEngine?.setDirty();
+    }, ANGLE_DWELL_MS);
+  }
 
   onDown(_engine: Engine, p: PointerInfo): void {
     this.start = p.world;
     this.cur = p.world;
     this.shift = p.shift;
     this.dwell.reset();
+    this.clearDwellTimer();
   }
 
-  onMove(_engine: Engine, p: PointerInfo): void {
+  onMove(engine: Engine, p: PointerInfo): void {
     if (!this.start) return;
     this.cur = p.world;
     this.shift = p.shift;
@@ -2402,6 +2493,7 @@ export class ArrowTool extends Tool {
         ? performance.now()
         : Date.now();
     this.dwell.track(p.screen.x, p.screen.y, nowMs);
+    this.restartDwellTimer(engine);
   }
 
   onUp(engine: Engine, p: PointerInfo): void {
@@ -2418,6 +2510,7 @@ export class ArrowTool extends Tool {
       this.start = null;
       this.cur = null;
       this.dwell.reset();
+      this.clearDwellTimer();
       return;
     }
     const draft = {
@@ -2437,12 +2530,14 @@ export class ArrowTool extends Tool {
     this.start = null;
     this.cur = null;
     this.dwell.reset();
+    this.clearDwellTimer();
   }
 
   cancel(_engine: Engine): void {
     this.start = null;
     this.cur = null;
     this.dwell.reset();
+    this.clearDwellTimer();
   }
 
   render(_engine: Engine, ctx: CanvasRenderingContext2D): void {

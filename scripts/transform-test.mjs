@@ -12,6 +12,7 @@ import {
   AngleDwell,
   ANGLE_DWELL_MS,
   ANGLE_DWELL_PX,
+  ANGLE_DWELL_RELEASE_PX,
 } from './core-bundle.mjs';
 
 /** Mirror of shapes.mapAlongTableFractions for divider regression (avoid pulling shapes into core-bundle). */
@@ -216,10 +217,11 @@ assert.ok(Math.abs((rode90.w ?? 0) - (grouped90.w ?? 0)) < 1e-6, 'host-resize of
 
 console.log('transform-test: ok');
 
-// --- AngleDwell: hold still ~2s to slip the angle magnet (one-way per gesture) ---
+// --- AngleDwell: hold still 2s to slip the angle magnet; move off to re-arm ---
 {
   assert.equal(ANGLE_DWELL_MS, 2000, 'dwell is two seconds');
   assert.ok(ANGLE_DWELL_PX >= 4 && ANGLE_DWELL_PX <= 12, 'dwell radius tolerates hand tremor');
+  assert.ok(ANGLE_DWELL_RELEASE_PX > ANGLE_DWELL_PX, 're-arm radius has hysteresis');
   const d = new AngleDwell();
   assert.equal(d.released, false, 'fresh dwell holds the magnet');
   assert.equal(d.track(100, 100, 0), false, 'first sample anchors');
@@ -227,14 +229,22 @@ console.log('transform-test: ok');
   assert.equal(d.track(102, 101, 1999), false, 'just under two seconds still snaps');
   assert.equal(d.track(102, 101, 2000), true, 'two seconds still releases');
   assert.equal(d.released, true, 'release flag sticks');
-  assert.equal(d.track(900, 900, 5000), true, 'moving on stays free until gesture end');
+  assert.equal(d.track(110, 108, 5000), true, 'nudging near the anchor stays free');
+  assert.equal(d.track(900, 900, 5100), false, 'moving off re-arms the magnet');
+  assert.equal(d.released, false, 're-armed dwell holds again');
+  assert.equal(d.track(900, 900, 5100 + ANGLE_DWELL_MS - 1), false, 're-armed timer restarts');
+  assert.equal(d.track(900, 900, 5100 + ANGLE_DWELL_MS), true, 'stillness after a move releases again');
   d.reset();
   assert.equal(d.released, false, 'reset re-arms for the next gesture');
-  assert.equal(d.track(0, 0, 6000), false, 're-anchored after reset');
-  const e = new AngleDwell();
-  e.track(50, 50, 0);
-  assert.equal(e.track(50 + ANGLE_DWELL_PX + 1, 50, 100), false, 'leaving the radius re-anchors the timer');
-  assert.equal(e.track(50 + ANGLE_DWELL_PX + 1, 50, 100 + ANGLE_DWELL_MS - 1), false, 're-anchored timer restarts');
-  assert.equal(e.track(50 + ANGLE_DWELL_PX + 1, 50, 100 + ANGLE_DWELL_MS), true, 'stillness after a move releases');
+  // Timer path: a perfectly still pointer sends no moves at all.
+  const t = new AngleDwell();
+  assert.equal(t.track(50, 50, 0), false, 'timer path anchors on the only sample');
+  assert.equal(t.expire(1999), false, 'timer before the deadline changes nothing');
+  assert.equal(t.expire(2000), true, 'timer on the deadline releases with zero moves');
+  const f = new AngleDwell();
+  f.track(50, 50, 0);
+  assert.equal(f.track(50 + ANGLE_DWELL_RELEASE_PX + 1, 50, 100), false, 'leaving the release radius re-arms');
+  assert.equal(f.expire(100 + ANGLE_DWELL_MS - 1), false, 're-armed anchor needs a fresh hold');
+  assert.equal(f.track(50 + ANGLE_DWELL_RELEASE_PX + 1, 50, 100 + ANGLE_DWELL_MS), true, 'fresh hold releases again');
 }
 console.log('transform-test angle dwell: ok');

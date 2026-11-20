@@ -6381,9 +6381,45 @@ engine.setSelection([]);
     engine.onPointerUp(ev(300, 784, true));
     const penAngle = lineAngle(lastShape().points);
     assert.ok(Math.abs(penAngle - 42.6) < 0.8, `dwelled shift-pen keeps its aim (got ${penAngle.toFixed(2)}°)`);
+    // Moving off re-arms the magnet: the same gesture snaps again elsewhere.
+    engine.setTool('arrow');
+    engine.onPointerDown(ev(300, 400, true));
+    engine.onPointerMove(ev(500, 584, true)); // ~42.6°, hold to release
+    now += 2300;
+    engine.onPointerMove(ev(600, 700, true)); // 45° exactly, far from the dwell anchor
+    engine.onPointerUp(ev(600, 700, true));
+    assert.ok(Math.abs(lineAngle(lastShape().points) - 45) < 0.5, 'moving off re-arms the 45° snap');
     engine.setTool('select');
   } finally {
     performance.now = realNow;
+  }
+}
+
+// --- Synced page names (right-click rename) ---
+{
+  const list0 = store.listPages();
+  store.addPage();
+  const list1 = store.listPages();
+  assert.equal(list1.length, list0.length + 1, 'addPage appends one page');
+  const pid = list1[list1.length - 1];
+  assert.equal(store.currentPageId(), pid, 'addPage switches to the new page');
+  let pageEvents = 0;
+  const offPage = store.onPageChange(() => { pageEvents += 1; });
+  try {
+    store.renamePage(pid, '  Sketch  ');
+    assert.equal(store.pageName(pid), 'Sketch', 'rename trims and stores');
+    assert.ok(pageEvents >= 1, 'rename emits a page update for PageBar');
+    store.renamePage(pid, '   ');
+    assert.equal(store.pageName(pid), null, 'empty rename clears back to default');
+    store.renamePage(pid, 'A'.repeat(50));
+    assert.equal(store.pageName(pid)?.length, 40, 'names are capped');
+    assert.equal(store.pageName('nope'), null, 'unknown page has no name');
+    store.renamePage(pid, 'Temp');
+    store.deletePage(pid);
+    assert.equal(store.pageName(pid), null, 'deletePage drops the name');
+    assert.deepEqual(store.listPages(), list0, 'deletePage restores the list');
+  } finally {
+    offPage();
   }
 }
 

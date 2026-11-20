@@ -16,6 +16,8 @@ export function PageBar({ locale }: { locale: LocaleId }) {
   const [pages, setPages] = useState<string[]>(() => store.listPages());
   const [cur, setCur] = useState<string>(() => store.currentPageId());
   const [peerNames, setPeerNames] = useState<Map<string, string[]>>(() => new Map());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   useEffect(
     () =>
@@ -128,24 +130,58 @@ export function PageBar({ locale }: { locale: LocaleId }) {
                 const active = id === cur;
                 const names = id !== cur ? (peerNames.get(id) ?? []) : [];
                 const hasPeer = names.length > 0;
+                const fallback = `${t(locale, 'page')} ${i + 1}`;
+                const custom = store.pageName(id);
+                const commitRename = () => {
+                  store.renamePage(id, editName);
+                  setEditingId(null);
+                };
                 return (
                   <li key={id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      className={`pages-menu-item${active ? ' is-active' : ''}`}
-                      onClick={() => {
-                        store.setCurrentPage(id);
-                        close();
-                      }}
-                    >
-                      <span className="pages-menu-item-label">
-                        {t(locale, 'page')} {i + 1}
-                      </span>
-                      {hasPeer ? <span className="pages-peer-dot" aria-hidden="true" title={names.join(', ')} /> : null}
-                      {active ? <Icon name="check" size={14} /> : null}
-                    </button>
+                    {editingId === id ? (
+                      <div className="pages-menu-item">
+                        <input
+                          autoFocus
+                          className="pages-menu-rename"
+                          value={editName}
+                          maxLength={40}
+                          aria-label={t(locale, 'rename')}
+                          placeholder={fallback}
+                          onFocus={(e) => e.currentTarget.select()}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') commitRename();
+                            if (e.key === 'Escape') setEditingId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onContextMenu={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        className={`pages-menu-item${active ? ' is-active' : ''}`}
+                        title={custom ? `${custom} — ${t(locale, 'renamePageHint')}` : t(locale, 'renamePageHint')}
+                        onClick={() => {
+                          store.setCurrentPage(id);
+                          close();
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditingId(id);
+                          setEditName(custom ?? '');
+                        }}
+                      >
+                        <span className="pages-menu-item-label">{custom ?? fallback}</span>
+                        {hasPeer ? <span className="pages-peer-dot" aria-hidden="true" title={names.join(', ')} /> : null}
+                        {active ? <Icon name="check" size={14} /> : null}
+                      </button>
+                    )}
                   </li>
                 );
               })}

@@ -4,6 +4,21 @@
 
 ## Unreleased
 
+## 0.17.48
+
+### Dwell jumps at once, pages keep their place
+
+- Angle-magnet dwell now jumps the line to the cursor the moment 2 seconds
+  pass — no nudge needed (a timer settles it even when a still pointer sends
+  no moves). Moving off re-arms the magnet, so circling around in a new area
+  snaps again; holding still there releases again.
+- Re-entering a board restores the page you left off (the open was silently
+  falling back to page 1 while the engine kept page 2, which also made
+  page clicks look one step behind). Page switches emit on late sync so the
+  menu, engine and camera never disagree.
+- Pages rename by right-click in the page menu. Names sync to everyone,
+  survive reload, and clear on page delete.
+
 ## 0.17.47
 
 ### Hold still to slip the angle magnet
