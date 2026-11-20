@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.17.49
+
+### Big-board rejoins converge instead of stalling
+
+- After solo work on a huge board (auto-compact rewrites item IDs), a
+  rejoining peer used to trade full-board diffs both ways until the 16 MB
+  send queue jammed shut: cursors trickled through, drawings never arrived,
+  and the board never converged. Now liveness rides a hot lane ahead of bulk
+  sync, duplicate bulk replies are skipped while the backlog drains, the
+  reassembler only times out idle transfers, and the bulk cap matches it
+  (64 MB). Same-shape edits on both sides still resolve per key, as any
+  split-brain merge does.
+
 ## 0.17.48
 
 ### Dwell jumps at once, pages keep their place

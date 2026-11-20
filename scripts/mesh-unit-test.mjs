@@ -70,12 +70,52 @@ import {
     const r = link.send(i % 3 === 0 ? aw() : sy());
     if (i % 3 !== 0 && r === false) syncFalse++;
   }
-  assert.ok(link.buffered - 99_999_999 <= 16 * 1024 * 1024, 'queue bounded');
+  assert.ok(link.buffered - 99_999_999 <= 64 * 1024 * 1024, 'queue bounded');
   assert.ok(link.droppedAwareness > 0, 'old awareness shed');
-  assert.ok(syncFalse > 0, 'bulk refused past cap');
+  assert.ok(syncFalse > 0, 'hot lane refuses past its cap');
   assert.equal(link.send(aw()), true, 'awareness reports sent when shed');
   assert.ok(link instanceof RelayLink === false);
   console.log('mesh-unit: link queue caps ok');
+}
+
+// ---- webrtc lanes: liveness jumps ahead of queued bulk -----------------------
+{
+  const link = new WebRtcLink('peer2', false, [], { open() {}, message() {}, close() {}, signal() {} });
+  link.state = 'open';
+  const written = [];
+  const dc = {
+    readyState: 'open',
+    bufferedAmount: 99_999_999,
+    send: (b) => { written.push(b[0]); },
+    bufferedAmountLowThreshold: 0,
+    onbufferedamountlow: null,
+  };
+  link.dc = dc;
+  const chunk = (id, total) => {
+    const b = new Uint8Array(16_000);
+    b[0] = 0x06; // Frame.Chunk
+    new DataView(b.buffer).setUint32(9, total);
+    new DataView(b.buffer).setUint32(1, id);
+    return b;
+  };
+  // Three bulk chunks queue up behind a clogged channel...
+  for (let i = 0; i < 3; i++) assert.equal(link.send(chunk(i, 5)), true, 'bulk queued');
+  // ...then liveness jumps the line.
+  const aw = new Uint8Array(100);
+  aw[0] = Frame.Awareness;
+  assert.equal(link.send(aw), true, 'awareness queued hot');
+  dc.bufferedAmount = 0;
+  link.drain();
+  assert.deepEqual(written, [Frame.Awareness, 0x06, 0x06, 0x06], 'hot drains before bulk');
+  // Bulk past 64 MB is refused (receiver skips the gap, resync heals).
+  link.dc = { readyState: 'open', bufferedAmount: 99_999_999, send() {}, bufferedAmountLowThreshold: 0 };
+  let refused = 0;
+  for (let i = 0; i < 5000; i++) {
+    if (!link.send(chunk(1000 + i, 5000))) refused++;
+  }
+  assert.ok(refused > 0, 'bulk refused past 64 MB cap');
+  assert.ok(link.buffered - 99_999_999 <= 64 * 1024 * 1024, 'bulk bounded');
+  console.log('mesh-unit: link lanes ok');
 }
 
 // ---- fake signaling hub -------------------------------------------------------
@@ -348,6 +388,90 @@ try {
     a.mesh.destroy();
     b.mesh.destroy();
     console.log('mesh-unit: turn grant ok');
+  }
+  // Big sync replies are skipped while the link reports a backlog, then heal.
+  // The fake link models lanes: small frames always flow, bulk chunks stall.
+  {
+    let clogged = true;
+    const ends = new Map();
+    const key = (a, b2) => `${a}>${b2}`;
+    const isBulkDrop = (data) => {
+      if (!clogged || data.length === 0 || data[0] !== 0x06 || data.length < 13) return false;
+      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      return view.getUint32(9) * (16 * 1024) > 256 * 1024;
+    };
+    const clogNet = (self) => (peer, _initiator, ev) => {
+      const link = {
+        peer,
+        state: 'connecting',
+        path: 'lan',
+        bytesIn: 0,
+        bytesOut: 0,
+        buffered: clogged ? 2 * 1024 * 1024 : 0,
+        ev,
+        send(data) {
+          if (this.state !== 'open' || !this.other) return false;
+          this.bytesOut += data.length;
+          if (isBulkDrop(data)) return true; // accepted, never drains
+          const other = this.other;
+          const copy = data.slice();
+          setTimeout(() => {
+            if (link.state !== 'open' || other.state !== 'open') return;
+            other.bytesIn += copy.length;
+            other.ev.message(copy);
+          }, 0);
+          return true;
+        },
+        signal() {},
+        close() {
+          if (this.state === 'closed') return;
+          this.state = 'closed';
+          ends.delete(key(self, peer));
+          const o = this.other;
+          this.other = null;
+          this.ev.close('closed');
+          if (o) o.close();
+        },
+      };
+      ends.set(key(self, peer), link);
+      const twin = ends.get(key(peer, self));
+      if (twin && twin.state === 'connecting') {
+        link.other = twin;
+        twin.other = link;
+        queueMicrotask(() => {
+          link.state = 'open';
+          twin.state = 'open';
+          twin.ev.open();
+          link.ev.open();
+        });
+      }
+      return link;
+    };
+    const big = 'x'.repeat(600_000);
+    const a = peer('peer-clog-a', clogNet, 'review-unit6');
+    a.doc.getMap('shapes').set('bulk', big);
+    const b = peer('peer-clog-b', clogNet, 'review-unit6');
+    await waitFor(() => a.mesh.openLinks() === 1 && b.mesh.openLinks() === 1, 'clogged links open');
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.equal(b.doc.getMap('shapes').get('bulk'), undefined, 'clogged bulk reply skipped, not converged');
+    assert.ok(
+      a.logs.some(([m]) => m === 'sync reply skipped (backlog)'),
+      'skip logged with backlog numbers'
+    );
+    // Small live traffic still gets through the clog (it waits for the bulk
+    // in Yjs clock order, but it arrives instead of being refused outright).
+    a.doc.getMap('shapes').set('live', 'here');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.ok(b.doc.store.pendingStructs, 'live update arrived, pends on missing bulk');
+    // Rejoin on a healthy link: the whole board lands.
+    clogged = false;
+    b.mesh.destroy();
+    const b2 = peer('peer-clog-b2', clogNet, 'review-unit6');
+    await waitFor(() => b2.doc.getMap('shapes').get('bulk') === big, 'rejoin heals the backlog', 20000);
+    await waitFor(() => b2.doc.getMap('shapes').get('live') === 'here', 'live key present after rejoin');
+    a.mesh.destroy();
+    b2.mesh.destroy();
+    console.log('mesh-unit: clogged bulk skipped then healed ok');
   }
 } finally {
   for (const m of meshes) {

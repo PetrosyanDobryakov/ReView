@@ -81,7 +81,7 @@ type Pending = { total: number; got: number; parts: Uint8Array[]; size: number; 
 export const MAX_PENDING_MSG = 32;
 /** Cap bytes held across open reassemblies (chunk bodies only). */
 export const MAX_PENDING_BYTES = 64 * 1024 * 1024;
-/** Drop a reassembly that stalls this long. */
+/** Drop a reassembly idle this long (progress refreshes the deadline). */
 export const PENDING_TTL_MS = 30_000;
 
 /** Per-link reassembly. Chunks arrive in order (ordered channel) but we do not rely on it. */
@@ -152,6 +152,9 @@ export class Reassembler {
       p.parts[index] = body;
       p.got += 1;
       p.size += body.length;
+      // Chunks keep arriving: only an idle reassembly dies, a slow-but-live
+      // catch-up (tens of MB on a thin link) must not be dropped mid-flight.
+      p.at = Date.now();
     }
     if (p.got < p.total) return null;
     this.pendingBytes -= p.size;

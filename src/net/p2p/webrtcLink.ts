@@ -14,8 +14,29 @@ const OPEN_TIMEOUT_MS = 20_000;
 const DISCONNECT_GRACE_MS = 8_000;
 const HIGH_WATER = 4 * 1024 * 1024;
 const LOW_WATER = 512 * 1024;
-/** Hard cap on queued (unsent) bytes; beyond it awareness is dropped, rest fails. */
-const MAX_QUEUE_BYTES = 16 * 1024 * 1024;
+/**
+ * Cap on queued bulk bytes. Past it bulk frames are refused: the receiver
+ * skips the gap and a later resync heals it. Sized to fit the reassembler's
+ * allowance so one huge catch-up message can still land whole.
+ */
+const MAX_BULK_BYTES = 64 * 1024 * 1024;
+/**
+ * Hot lane holds liveness only (latest-wins awareness, small live updates):
+ * shed oldest awareness past this, refuse the rest. A big sync behind live
+ * traffic must never delay the live feeling.
+ */
+const MAX_HOT_BYTES = 256 * 1024;
+/** Frame types that ride the hot lane when they fit one frame (liveness, not bulk). */
+const HOT_FRAMES = new Set<number>([
+  Frame.Awareness,
+  Frame.Ping,
+  Frame.Pong,
+  Frame.Hello,
+  0x07, // NEIGHBORS (mesh-level gossip, defined in mesh.ts)
+  Frame.Sync, // single-frame live updates only; chunked bulk rides bulk
+  Frame.BlobWant,
+  Frame.BlobMiss,
+]);
 
 type SignalMsg =
   | { kind: 'offer'; sid: string; sdp: string }
@@ -53,8 +74,11 @@ export class WebRtcLink implements PeerLink {
   private sid: string | null = null;
   private remoteSet = false;
   private pendingIce: RTCIceCandidateInit[] = [];
-  private queue: Uint8Array[] = [];
-  private queuedBytes = 0;
+  /** Hot lane (liveness) and bulk lane (chunked sync/media), in FIFO order each. */
+  private hot: Uint8Array[] = [];
+  private bulk: Uint8Array[] = [];
+  private hotBytes = 0;
+  private bulkBytes = 0;
   /** Queued awareness frames shed under load (idempotent, latest wins). */
   droppedAwareness = 0;
   private openTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,53 +98,58 @@ export class WebRtcLink implements PeerLink {
   readonly iceRemote = new Set<string>();
 
   get buffered(): number {
-    return (this.dc?.bufferedAmount ?? 0) + this.queuedBytes;
+    return (this.dc?.bufferedAmount ?? 0) + this.hotBytes + this.bulkBytes;
+  }
+
+  /** Chunked (multi-frame) messages ride bulk; single frames ride hot. */
+  private isHot(frame: Uint8Array): boolean {
+    if (frame.length === 0) return true;
+    if (frame[0] === Frame.Chunk) return false;
+    return HOT_FRAMES.has(frame[0]!);
   }
 
   send(frame: Uint8Array): boolean {
     const dc = this.dc;
     if (this.state !== 'open' || !dc || dc.readyState !== 'open') return false;
-    if (this.queue.length || dc.bufferedAmount > HIGH_WATER) {
-      const kept = this.enqueue(frame);
-      // Awareness is idempotent: report it sent even when shed under load.
-      if (frame.length > 0 && frame[0] === Frame.Awareness) return true;
-      return kept;
+    if (this.isHot(frame)) return this.sendHot(frame);
+    if (!this.hot.length && !this.bulk.length && dc.bufferedAmount <= HIGH_WATER) {
+      return this.write(frame);
     }
-    return this.write(frame);
+    if (this.bulkBytes + frame.length > MAX_BULK_BYTES) return false;
+    this.bulk.push(frame);
+    this.bulkBytes += frame.length;
+    return true;
   }
 
   /**
-   * Queue a frame, shedding the oldest queued awareness first when over the
-   * byte cap (chunks are never shed: dropping one corrupts a whole message).
-   * Returns false when a non-awareness frame had to be refused: the link is
-   * stalled past the cap and keep-everything would OOM. A stalled link trips
-   * the mesh idle watchdog, which closes it and resync heals the gap.
+   * Liveness first: shed the oldest queued awareness when over the hot cap
+   * (dropped cursors are re-sent on the next packet anyway), refuse the rest.
+   * Awareness always reports sent — it is idempotent, latest wins.
    */
-  private enqueue(frame: Uint8Array): boolean {
-    // Chunks are never shed from the queue (dropping one corrupts the whole
-    // message), but new ones are still refused past the cap: the receiver's
-    // reassembly TTL drops the stalled message and a later dependent update
-    // triggers a mesh resync that heals the gap.
-    let over = this.queuedBytes + frame.length - MAX_QUEUE_BYTES;
-    if (over > 0) {
-      for (let i = 0; i < this.queue.length && over > 0; i++) {
-        const q = this.queue[i];
+  private sendHot(frame: Uint8Array): boolean {
+    const dc = this.dc;
+    const isAware = frame.length > 0 && frame[0] === Frame.Awareness;
+    if (this.hot.length || (dc && dc.bufferedAmount > HIGH_WATER)) {
+      let over = this.hotBytes + frame.length - MAX_HOT_BYTES;
+      for (let i = 0; i < this.hot.length && over > 0; i++) {
+        const q = this.hot[i];
         if (q.length > 0 && q[0] === Frame.Awareness) {
-          this.queuedBytes -= q.length;
+          this.hotBytes -= q.length;
           over -= q.length;
-          this.queue.splice(i, 1);
+          this.hot.splice(i, 1);
           i--;
           this.droppedAwareness += 1;
         }
       }
+      if (this.hotBytes + frame.length > MAX_HOT_BYTES) {
+        if (isAware) this.droppedAwareness += 1;
+        return isAware;
+      }
+      this.hot.push(frame);
+      this.hotBytes += frame.length;
+      return true;
     }
-    if (this.queuedBytes + frame.length > MAX_QUEUE_BYTES) {
-      if (frame.length > 0 && frame[0] === Frame.Awareness) this.droppedAwareness += 1;
-      return false;
-    }
-    this.queue.push(frame);
-    this.queuedBytes += frame.length;
-    return true;
+    return this.write(frame);
   }
 
   signal(raw: unknown): void {
@@ -165,8 +194,10 @@ export class WebRtcLink implements PeerLink {
     this.state = state;
     this.clearTimers();
     this.teardownPc();
-    this.queue = [];
-    this.queuedBytes = 0;
+    this.hot = [];
+    this.bulk = [];
+    this.hotBytes = 0;
+    this.bulkBytes = 0;
     this.droppedAwareness = 0;
     this.on.close(reason);
   }
@@ -284,9 +315,15 @@ export class WebRtcLink implements PeerLink {
   private drain(): void {
     const dc = this.dc;
     if (!dc || dc.readyState !== 'open') return;
-    while (this.queue.length && dc.bufferedAmount <= HIGH_WATER) {
-      const next = this.queue.shift()!;
-      this.queuedBytes -= next.length;
+    // Liveness first: a big sync behind a cursor must not delay the live feeling.
+    while (this.hot.length && dc.bufferedAmount <= HIGH_WATER) {
+      const next = this.hot.shift()!;
+      this.hotBytes -= next.length;
+      if (!this.write(next)) return;
+    }
+    while (this.bulk.length && dc.bufferedAmount <= HIGH_WATER) {
+      const next = this.bulk.shift()!;
+      this.bulkBytes -= next.length;
       if (!this.write(next)) return;
     }
   }

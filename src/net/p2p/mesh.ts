@@ -84,6 +84,16 @@ const RESYNC_DEBOUNCE_MS = 750;
 const RESYNC_JITTER_MS = 250;
 /** Retry backoff jitter so N tabs do not re-offer in lockstep. */
 const RETRY_JITTER_MS = 1_000;
+/**
+ * A sync reply bigger than this is bulk: when the link already holds more
+ * than SYNC_BACKLOG_SKIP_BYTES unsent, the reply is skipped instead of
+ * piling another full diff onto the backlog (the queued bulk plus live
+ * hot-lane updates already cover it; the peer re-asks within one
+ * anti-entropy period). Without this, every re-ask regenerates a huge
+ * reply that never fully leaves, and convergence stalls forever.
+ */
+const SYNC_REPLY_SKIP_BYTES = 256 * 1024;
+const SYNC_BACKLOG_SKIP_BYTES = 1 * 1024 * 1024;
 
 /** Media is sent in slices of this size... */
 const BLOB_SLICE = 64 * 1024;
@@ -693,7 +703,21 @@ export class Mesh {
           ok = false;
           this.opts.log?.('bad sync frame', { peer: e.peer, err: String(err) });
         }
-        if (ok && encoding.length(enc) > 0) this.sendTo(e, frame(Frame.Sync, encoding.toUint8Array(enc)));
+        if (ok && encoding.length(enc) > 0) {
+          const reply = encoding.toUint8Array(enc);
+          const backlog = e.link && e.link.state === 'open' ? (e.link.buffered ?? 0) : 0;
+          if (reply.length > SYNC_REPLY_SKIP_BYTES && backlog > SYNC_BACKLOG_SKIP_BYTES) {
+            // The queued bulk already carries this diff (plus live updates ride
+            // the hot lane): piling another full reply on only grows the jam.
+            this.opts.log?.('sync reply skipped (backlog)', {
+              peer: e.peer,
+              reply: reply.length,
+              backlog,
+            });
+          } else {
+            this.sendTo(e, frame(Frame.Sync, reply));
+          }
+        }
         if (this.doc.store.pendingStructs || this.doc.store.pendingDs) {
           const now = Date.now();
           if (now - this.lastPendingResync > PENDING_RESYNC_MS) {

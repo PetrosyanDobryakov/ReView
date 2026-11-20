@@ -195,10 +195,12 @@ async function maybeAutoCompact(): Promise<void> {
   try {
     // The sticky latch (boards that ever saw a distinct remote) is honored
     // only when the auto-compact setting is off. With the setting on
-    // (default), solo boards compact anyway: stale guests may show
-    // duplicates until they reset local data (their old lineage merges back
-    // as new items). Live replicas always block — compacting under them
-    // duplicates immediately.
+    // (default), solo boards compact anyway: the rewrite mints fresh item
+    // IDs, so a stale peer that rejoins asks for (and sends) a full diff.
+    // That catch-up converges through the bulk lanes (live traffic jumps
+    // ahead; duplicate bulk replies are skipped while the backlog drains),
+    // and same-shape edits on both sides resolve per key. Live replicas
+    // always block — compacting under them would fork every live stroke.
     if (boardHadRemoteCollaborators(currentBoardId) && !readPrefs().autoCompact) {
       netLog.info('autoCompact skipped (board had remote collaborators)', () => ({ boardId: currentBoardId }));
       return;
