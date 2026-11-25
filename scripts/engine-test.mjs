@@ -6423,6 +6423,53 @@ engine.setSelection([]);
   }
 }
 
+// --- Rotate-knob triple-click easter egg survives the dblclick tool reset ---
+// (the knob must float over empty board, or activateAtPoint takes a shape
+// branch instead of the empty-space reset this guards against — clear only
+// shapes under the knob, the rest of the suite keeps its fixtures)
+{
+  const knobId = store.addShape({
+    type: 'rect', x: 100, y: 100, w: 120, h: 80,
+    fill: '#ffffff', stroke: '#7c8cff', strokeWidth: 2,
+  });
+  store.flushPendingPatches();
+  engine.setSelection([knobId]);
+  let kx = -1, ky = -1;
+  for (let sweep = 0; sweep < 6 && kx < 0; sweep++) {
+    for (let gx = 0; gx <= 1100 && kx < 0; gx += 10) {
+      for (let gy = 0; gy <= 760; gy += 10) {
+        if (engine.hitRotateHandle(gx, gy)) { kx = gx; ky = gy; break; }
+      }
+    }
+    if (kx < 0) break;
+    const kw = engine.rotateHandleWorldPos(knobId);
+    const under = kw ? engine.hitTest(kw.x, kw.y) : null;
+    if (!under || under === knobId) break;
+    // Clutter from earlier fixtures sits under the knob — drop just it.
+    store.removeShapes([under]);
+    store.flushPendingPatches();
+    kx = -1;
+    ky = -1;
+  }
+  assert.ok(kx >= 0, 'rotate knob hittable');
+  const kw = engine.rotateHandleWorldPos(knobId);
+  assert.ok(kw && engine.hitTest(kw.x, kw.y) === null, 'knob floats over empty board');
+  const tapKnob = () => {
+    engine.onPointerDown({ clientX: kx, clientY: ky, button: 0, pointerId: 21, shiftKey: false });
+    engine.onPointerUp({ clientX: kx, clientY: ky, button: 0, pointerId: 21, shiftKey: false });
+  };
+  const confettiCount = () => engine.confetti.length;
+  const before = confettiCount();
+  tapKnob();
+  tapKnob();
+  assert.ok(engine.selection.has(knobId), 'second knob tap keeps selection (no tool reset)');
+  engine.onDblClick({ clientX: kx, clientY: ky, button: 0 });
+  assert.ok(engine.selection.has(knobId), 'dblclick on the knob does not clear selection');
+  tapKnob();
+  assert.ok(confettiCount() > before, 'triple press fires the confetti cannon');
+  engine.setSelection([]);
+}
+
 const staleDropBefore = store.board.size;
 const staleReaders = [];
 const stalePrevFR = globalThis.FileReader;

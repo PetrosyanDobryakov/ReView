@@ -5483,6 +5483,11 @@ export class Engine {
 
   /** Shared edit entry for dblclick (mouse) and double-tap (touch). */
   private activateAtPoint(p: PointerInfo): void {
+    // The rotate knob is not a shape: double-clicking it must not count as
+    // empty space (that would clear the selection and kill the triple-click
+    // confetti easter egg — the third press would find no knob at all).
+    // The knob has no double-click action; single presses drive it.
+    if (this.hitRotateHandle(p.screen.x, p.screen.y)) return;
     const id = this.hitTest(p.world.x, p.world.y);
     // Empty board: no free-text spawn. Place text with the Text tool only.
     if (!id) {

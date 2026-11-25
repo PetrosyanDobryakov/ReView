@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 0.17.50
+
+### Rotate-knob fireworks work again
+
+- Double-clicking the rotate knob no longer counts as empty space: it kept
+  clearing the selection (the 0.16.32 double-click tool reset), so the third
+  press of the triple-click confetti easter egg never found a knob. The knob
+  now swallows double-clicks; single presses drive it as before.
+
 ## 0.17.49
 
 ### Big-board rejoins converge instead of stalling
